@@ -1,0 +1,90 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ['**.md', 'docs/**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Only for zipalign -P (needs 35.0.0 or newer); AGP itself uses its default build tools.
+  BUILD_TOOLS_VERSION: "37.0.0"
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-provider: basic
+
+      - name: Install Android SDK packages
+        run: |
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          (yes || true) | "$SDKMANAGER" --licenses > /dev/null
+          "$SDKMANAGER" --install "platforms;android-37.0" "build-tools;${BUILD_TOOLS_VERSION}"
+
+      - name: Build debug, unit tests, lint
+        run: ./gradlew assembleDebug testDebugUnitTest lintDebug --continue --stacktrace
+
+      - name: Check 16 KB alignment of the APK and its 64-bit native libraries
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK=app/build/outputs/apk/debug/app-debug.apk
+          "$ANDROID_HOME/build-tools/$BUILD_TOOLS_VERSION/zipalign" -c -P 16 -v 4 "$APK" | grep -E 'lib/(arm64-v8a|x86_64)/|Verification'
+          OBJDUMP="$(ls -d "$ANDROID_HOME"/ndk/*/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-objdump 2>/dev/null | tail -1 || true)"
+          TMP="$(mktemp -d)"
+          unzip -q "$APK" 'lib/arm64-v8a/*' 'lib/x86_64/*' -d "$TMP" 2>/dev/null || true
+          fail=0; count=0
+          while IFS= read -r -d '' so; do
+            count=$((count+1))
+            aligns="$("$OBJDUMP" -p "$so" | awk '$1=="LOAD" {print $NF}')"
+            if grep -qvE '^2\*\*(1[4-9]|[2-9][0-9])$' <<< "$aligns"; then
+              echo "UNALIGNED ${so#"$TMP"/}: $(echo $aligns)"; fail=1
+            else
+              echo "ALIGNED   ${so#"$TMP"/}"
+            fi
+          done < <(find "$TMP" -type f -name '*.so' -print0)
+          echo "Checked $count 64-bit .so file(s)"
+          exit $fail
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v7
+        with:
+          name: app-debug
+          path: app/build/outputs/apk/debug/*.apk
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Upload test and lint reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: reports
+          path: |
+            **/build/reports/
+            **/build/test-results/
+          retention-days: 7
+          if-no-files-found: ignore
