@@ -1,0 +1,25 @@
+# Local research material (not published)
+research/
+
+# Local tools (not published)
+tools/
+
+# Private AI assistant instructions (describe the research setup)
+CLAUDE.md
+CLAUDE.local.md
+
+# Android / Gradle
+.gradle/
+build/
+local.properties
+*.apk
+*.aab
+.idea/
+*.iml
+captures/
+.externalNativeBuild/
+.cxx/
+
+# OS
+Thumbs.db
+.DS_Store
