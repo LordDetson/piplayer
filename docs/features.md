@@ -251,7 +251,8 @@ Size: M (about 4 to 6 weeks).
 - Strings in resources from the first screen, with English and Russian resource sets.
 - Done when a debug build runs on API 30 and 36 emulators and on a 16 KB page-size emulator image, the
   fingerprints of the bundled samples are within the bit-error threshold of desktop fpcalc, TagLib reads the tag
-  fixtures, and at least 30 of the owner's own files return results whose correctness is recorded.
+  fixtures, and the owner's own files return results whose correctness is recorded (planned for 30 files; the owner
+  closed the check at 11, and the larger corpus check stays in M3).
 
 ### M1 Playback core
 

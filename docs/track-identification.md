@@ -1060,8 +1060,14 @@ trash dialog joins the checklist in v1.x.
 
 ### 11.4 Corpus check
 
-- M0: the identification spike on at least 30 real files, with the correctness of each result recorded; the stage 4
+- M0: the identification spike on the owner's real files, with the correctness of each result recorded; the stage 4
   query builder runs on the JVM against a list of real track titles and records the share of correct top results.
+  Planned for 30 files; the owner closed the check at 11 (MP3 with and without tags, AAC and Opus downloads with
+  downloader traces in their names, Cyrillic names, a slowed version). Result on the emulator: AcoustID identified 8
+  of 11 (scores 0.96 to 0.99, each matching the file's tags or name), and the text search found the same recording
+  for 7 of them; the 3 others (a slowed version and two tracks AcoustID does not know) have no correct candidate
+  above 0.50 in either stage. Running these files found two defects, both fixed in M0: 320 kbit/s MP3 files found no
+  decoder (§3.2), and downloader traces stayed in the names (§3.3).
 - M3: 100+ real files (including Russian/Belarusian and rare music, live versions, trimmed files): measure the shares
   of high, medium and not found, the wrong matches in the high band and the wrong-release rate; tune the §4
   thresholds and weights. The high band may hold no more wrong matches than the threshold set by the project owner
