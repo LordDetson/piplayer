@@ -347,7 +347,11 @@ PiPlayer never adds an ID3v1 tag to a file that has none; §7.5 lists the TagLib
 ### 3.3 Stage 4: text search fallback
 
 - Parse the filename (`NN - Artist - Title (Remix)`, `Artist_-_Title`, track-number prefixes, `[bitrate]` noise,
-  etc.). Tag values are used as decoded at stage 0 (§3.1).
+  etc.). Tag values are used as decoded at stage 0 (§3.1). The traces of video downloaders are dropped too (added in
+  M0 after the owner's first files): a video ID in square brackets (`Title [dQw4w9WgXcQ]`) or joined by a hyphen
+  (`Title-dQw4w9WgXcQ`), counted as an ID only when its 11 characters look random (a digit, `_`, `-`, or a capital
+  inside the word); an `audio only` marker (`Title_audio only_[ID]`, `(audio only)`, `- audio only`); a converter
+  site in front (`y2mate.com - Title`); a bitrate at the end without brackets (`Title_128kbps`).
 - Queries, in this order, with Lucene specials escaped and `AND video:false` added to each; variants that need a
   missing value are skipped, and the search stops at the first variant that yields a candidate scoring at least 0.50
   (§4.1):

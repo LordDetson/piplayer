@@ -53,6 +53,39 @@ class FileNameParserTest {
     }
 
     @ParameterizedTest(name = "{0}")
+    @CsvSource(
+        delimiter = '|',
+        nullValues = [""],
+        textBlock = """
+        The Quiet Harbors - Paper Lanterns [dQw4w9WgXcQ].webm                 | The Quiet Harbors | Paper Lanterns              |
+        The Quiet Harbors - Paper Lanterns_audio only_[OlLUtndzw7A].m4a       | The Quiet Harbors | Paper Lanterns              |
+        Paper Lanterns_audio only_[bWAUDnUKQEc].webm                          |                   | Paper Lanterns              |
+        Бумажные фонари_audio only_[ZVbKDcDsLlQ].webm                         |                   | Бумажные фонари             |
+        The Quiet Harbors - Paper Lanterns [a1-b2_c3D4e].opus                 | The Quiet Harbors | Paper Lanterns              |
+        The Quiet Harbors - Paper Lanterns (audio only).mp3                   | The Quiet Harbors | Paper Lanterns              |
+        The Quiet Harbors - Paper Lanterns - audio only.mp3                   | The Quiet Harbors | Paper Lanterns              |
+        The Quiet Harbors - Paper Lanterns (Official Lyric Video).mp3         | The Quiet Harbors | Paper Lanterns              |
+        The Quiet Harbors - Paper Lanterns (Official Visualizer).mp3          | The Quiet Harbors | Paper Lanterns              |
+        The Quiet Harbors - Paper Lanterns [Audio].mp3                        | The Quiet Harbors | Paper Lanterns              |
+        y2mate.com - The Quiet Harbors - Paper Lanterns_128kbps.mp3           | The Quiet Harbors | Paper Lanterns              |
+        ytmp3.cc - The Quiet Harbors - Paper Lanterns.mp3                     | The Quiet Harbors | Paper Lanterns              |
+        SaveFrom.net - Paper Lanterns.mp3                                     |                   | Paper Lanterns              |
+        y2mate.is - The Quiet Harbors - Paper Lanterns.mp3                    | The Quiet Harbors | Paper Lanterns              |
+        [SPOTIFY-DOWNLOADER.COM] The Quiet Harbors - Paper Lanterns.mp3       | The Quiet Harbors | Paper Lanterns              |
+        Paper Lanterns-dQw4w9WgXcQ.mp4                                        |                   | Paper Lanterns              |
+        The Quiet Harbors - Paper Lanterns-OlLUtndzw7A.webm                   | The Quiet Harbors | Paper Lanterns              |
+        The Quiet Harbors - Unbreakable.mp3                                   | The Quiet Harbors | Unbreakable                 |
+        The Quiet Harbors - Paper Lanterns [Unbreakable].mp3                  | The Quiet Harbors | Paper Lanterns [Unbreakable] |
+        The Quiet Harbors - Paper Lanterns [Live in Rio].mp3                  | The Quiet Harbors | Paper Lanterns [Live in Rio] |
+        The Quiet Harbors - Lanterns-Unbreakable.mp3                          | The Quiet Harbors | Lanterns-Unbreakable        |
+        The Quiet Harbors - Paper Lanterns - Unbreakable.mp3                  | The Quiet Harbors | Paper Lanterns - Unbreakable |
+        The Quiet Harbors - Audio Only Heart.mp3                              | The Quiet Harbors | Audio Only Heart            |""",
+    )
+    fun `drops what video downloaders add to a name`(fileName: String, artist: String?, title: String, track: Int?) {
+        assertThat(FileNameParser.parse(fileName)).isEqualTo(ParsedFileName(artist, title, track))
+    }
+
+    @ParameterizedTest(name = "{0}")
     @ValueSource(
         strings = [
             "The Quiet Harbors \u2013 Paper Lanterns.mp3",
@@ -75,6 +108,8 @@ class FileNameParserTest {
             "Новая запись 5.m4a",
             "3f9a1c0b7d2e4f6a8b9c0d1e.mp3",
             "[320kbps].mp3",
+            "[dQw4w9WgXcQ].webm",
+            "y2mate.com - [dQw4w9WgXcQ].mp3",
         ],
     )
     fun `names without a title are unknown`(fileName: String) {
