@@ -15,8 +15,8 @@ import org.junit.Test
 import org.junit.runner.RunWith
 
 /**
- * The own-files check of M0 (TI §11.4): runs the identification spike over every file under the app's external files
- * directory `own-files` (folders included) and writes one JSON line per file to `spike/own-files.jsonl` next to it,
+ * The own-files check of M0 (TI §11.4): runs the identification spike over every file under `own-files` in the app's
+ * private files directory (folders included) and writes one JSON line per file to `spike/own-files.jsonl` next to it,
  * for the owner to mark each result right or wrong. A file that cannot be opened gets a line with its error. It sends
  * tags, file names and fingerprints to AcoustID and MusicBrainz, so it runs only with the instrumentation argument
  * `ownFiles=true`; scripts/run_own_files_spike.sh pushes the files, runs it and pulls the results.
@@ -31,7 +31,7 @@ class OwnFilesSpikeRun {
             InstrumentationRegistry.getArguments().getString("ownFiles") == "true",
         )
         val context = TestFiles.targetContext
-        val root = requireNotNull(context.getExternalFilesDir(null))
+        val root = context.filesDir
         val folder = File(root, "own-files")
         val files = folder.walkTopDown().filter { it.isFile }.sortedBy { it.relativeTo(folder).path }.toList()
         assertThat(files).describedAs("files under ${folder.path}").isNotEmpty()

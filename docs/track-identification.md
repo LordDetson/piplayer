@@ -289,7 +289,10 @@ PiPlayer never adds an ID3v1 tag to a file that has none; §7.5 lists the TagLib
   Xing header, iTunSMPB, MP4 edit list); the Opus decoder drops the pre-skip itself. PCM stored in the container (WAV)
   skips `MediaCodec`, whose pass-through decoder could mislabel 24-bit and float samples as 16-bit. When the container
   gives no maximum sample size, the decoder's input buffers are made 1 MiB, because the default (32 KiB for FLAC) is
-  smaller than the frames of some FLAC files.
+  smaller than the frames of some FLAC files. The bitrate is left out of the format before the decoder is looked up:
+  the lookup checks it against the range a decoder declares, and a 320 kbit/s MP3 whose average the extractor works
+  out a little above 320 kbit/s (from a LAME Info frame) would otherwise find no decoder at all (four of the owner's
+  first eleven files in M0).
 - End of the stream: the stream ends where the extractor has no sample left. Media3 1.11.1's extractor does not end a
   FLAC stream that way (found in M0 on the emulators): past the last frame it hands out that frame again, with the
   same time, while `advance()` keeps reporting more samples, and reading such a repeat fails inside the extractor once

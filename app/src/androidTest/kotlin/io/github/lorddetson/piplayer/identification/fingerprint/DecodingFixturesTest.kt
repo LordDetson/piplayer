@@ -48,6 +48,8 @@ class DecodingFixturesTest(private val fixture: Fixture) {
         @Parameterized.Parameters(name = "{0}")
         fun fixtures() = listOf(
             Fixture("mp3-44100-stereo.mp3", "audio/mpeg", 44_100, 2),
+            // Its average bitrate (worked out a little above 320 kbit/s) is more than the MP3 decoder declares.
+            Fixture("mp3-44100-320k-stereo.mp3", "audio/mpeg", 44_100, 2),
             // One AAC frame is 1024 samples, a long Vorbis block 2048, an Opus packet at most 120 ms.
             Fixture("aac-44100-stereo.m4a", "audio/mp4a-latm", 44_100, 2, endPaddingSeconds = 0.024),
             Fixture("vorbis-48000-mono.ogg", "audio/vorbis", 48_000, 1, endPaddingSeconds = 0.043),

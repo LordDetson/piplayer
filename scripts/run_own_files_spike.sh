@@ -7,6 +7,9 @@
 # fingerprint lookups are skipped. Installing the test APK also prepares the fingerprint test recordings, which needs
 # Python, network access on the first run, and fpcalc 1.6.2 (FPCALC=<path>, or the copy under tools/). Run from the
 # repository root with JAVA_HOME pointing at JDK 17.
+#
+# The files go into the debug app's private storage through run-as: a folder that adb creates under Android/data
+# belongs to the shell user, and the app cannot read it.
 set -euo pipefail
 
 if [ $# -ne 2 ]; then
@@ -16,30 +19,27 @@ fi
 SRC="$1"
 OUT="$2"
 PKG=io.github.lorddetson.piplayer
-DEVICE_DIR="/sdcard/Android/data/$PKG/files"
 
-# Git Bash on Windows rewrites arguments that look like paths; device paths must reach adb as they are, and local
-# paths in Windows form.
+# Git Bash on Windows rewrites arguments that look like paths; the device paths must reach adb as they are.
 export MSYS_NO_PATHCONV=1
-native() { if command -v cygpath > /dev/null; then cygpath -w "$1"; else printf '%s' "$1"; fi; }
 
 LOG="$(mktemp)"
 # The owner's files never stay on the device, whatever happens below.
 cleanup() {
-  adb shell rm -rf "$DEVICE_DIR/own-files" "$DEVICE_DIR/spike" > /dev/null 2>&1 || true
+  adb shell run-as "$PKG" rm -rf files/own-files files/spike > /dev/null 2>&1 || true
   rm -f "$LOG"
 }
 trap cleanup EXIT
 
 ./gradlew :app:installDebug :app:installDebugAndroidTest --console=plain -q
-adb shell rm -rf "$DEVICE_DIR/own-files" "$DEVICE_DIR/spike"
-adb shell mkdir -p "$DEVICE_DIR/own-files"
-adb push "$(native "$SRC")/." "$DEVICE_DIR/own-files/"
+# tar keeps the names (spaces, Cyrillic) and the folders; exec-in passes the bytes through unchanged.
+UNPACK='rm -rf files/own-files files/spike && mkdir -p files/own-files && tar -xf - -C files/own-files'
+tar -cf - -C "$SRC" . | adb exec-in run-as "$PKG" sh -c "$UNPACK"
 adb shell am instrument -w -e ownFiles true -e class "$PKG.spike.OwnFilesSpikeRun" \
   "$PKG.test/androidx.test.runner.AndroidJUnitRunner" > "$LOG" 2>&1 || true
 cat "$LOG"
 # Pulled before the run is judged: a run that stopped part way still leaves the lines it wrote.
-adb pull "$DEVICE_DIR/spike/own-files.jsonl" "$(native "$OUT")" || echo "No results to pull" >&2
+adb exec-out run-as "$PKG" cat files/spike/own-files.jsonl > "$OUT" || echo "No results to pull" >&2
 if ! grep -q 'OK (1 test)' "$LOG"; then
   echo "The run did not finish cleanly; whatever it wrote is in $OUT" >&2
   exit 1

@@ -25,6 +25,8 @@ CHANNELS = {"mono": 1, "stereo": 2, "5.1": 6}
 # name, sample rate, channel layout, encoder arguments; "pipe" fixtures are written to standard output
 FIXTURES = [
     ("mp3-44100-stereo.mp3", 44100, "stereo", ["-c:a", "libmp3lame", "-b:a", "128k"]),
+    # 320k CBR with a LAME Info frame: the extractor works its average bitrate out a little above 320 kbit/s.
+    ("mp3-44100-320k-stereo.mp3", 44100, "stereo", ["-c:a", "libmp3lame", "-b:a", "320k"]),
     ("aac-44100-stereo.m4a", 44100, "stereo", ["-c:a", "aac", "-b:a", "128k"]),
     ("vorbis-48000-mono.ogg", 48000, "mono", ["-c:a", "libvorbis", "-q:a", "4"]),
     ("opus-48000-stereo.opus", 48000, "stereo", ["-c:a", "libopus", "-b:a", "96k"]),

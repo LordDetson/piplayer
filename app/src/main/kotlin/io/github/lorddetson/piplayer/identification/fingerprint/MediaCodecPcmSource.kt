@@ -57,6 +57,9 @@ class MediaCodecPcmSource(private val context: Context, private val fd: FileDesc
                 readPcm(samples, rawPcmFormat(format), consumer)
                 return SourceInfo(mimeType, NO_DECODER, durationUs)
             }
+            // The bitrate means nothing to a decoder, but the lookup checks it against the decoder's declared range: a
+            // 320 kbit/s MP3 whose average the extractor works out at 320 044 bit/s would find no decoder at all.
+            format.removeKey(MediaFormat.KEY_BIT_RATE)
             val name = MediaCodecList(MediaCodecList.REGULAR_CODECS).findDecoderForFormat(format)
                 ?: throw DecodingException.UnsupportedFormat(mimeType)
             // The extractor asks for 24-bit output for 24-bit FLAC; Chromaprint needs 16 bits only.
