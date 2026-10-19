@@ -8,12 +8,13 @@ class UserAgentTest {
 
     @Test
     fun `contains app name, version and contact in the MusicBrainz format`() {
-        assertThat(UserAgent.of("0.1.0")).isEqualTo("PiPlayer/0.1.0 ( https://github.com/LordDetson )")
+        assertThat(UserAgent.of("0.1.0")).isEqualTo("PiPlayer/0.1.0 ( https://github.com/LordDetson/piplayer )")
     }
 
     @Test
     fun `keeps a debug suffix of the version name`() {
-        assertThat(UserAgent.of("0.1.0-debug")).isEqualTo("PiPlayer/0.1.0-debug ( https://github.com/LordDetson )")
+        assertThat(UserAgent.of("0.1.0-debug"))
+            .isEqualTo("PiPlayer/0.1.0-debug ( https://github.com/LordDetson/piplayer )")
     }
 
     @Test

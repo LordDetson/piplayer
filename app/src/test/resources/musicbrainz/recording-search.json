@@ -1,0 +1,105 @@
+{
+  "created": "2026-10-18T12:00:00.000Z",
+  "count": 2,
+  "offset": 0,
+  "recordings": [
+    {
+      "id": "11111111-1111-4111-8111-111111111111",
+      "score": 100,
+      "artist-credit-id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "title": "Paper Lanterns",
+      "length": 214000,
+      "video": null,
+      "artist-credit": [
+        {
+          "name": "The Quiet Harbors",
+          "joinphrase": " feat. ",
+          "artist": {
+            "id": "22222222-2222-4222-8222-222222222222",
+            "name": "The Quiet Harbors",
+            "sort-name": "Quiet Harbors, The",
+            "aliases": [
+              {"name": "Quiet Harbors", "sort-name": "Quiet Harbors", "locale": null, "type": null, "primary": null}
+            ]
+          }
+        },
+        {
+          "name": "Ada Vale",
+          "artist": {"id": "33333333-3333-4333-8333-333333333333", "name": "Ada Vale", "sort-name": "Vale, Ada"}
+        }
+      ],
+      "first-release-date": "2019",
+      "releases": [
+        {
+          "id": "44444444-4444-4444-8444-444444444444",
+          "status-id": "4e304316-386d-3409-af2e-78857eec5cfe",
+          "count": 1,
+          "title": "Harbor Lights",
+          "status": "Official",
+          "date": "2019-05",
+          "country": "XW",
+          "track-count": 11,
+          "release-group": {
+            "id": "55555555-5555-4555-8555-555555555555",
+            "type-id": "f529b476-6e62-324f-b0aa-1f3e33d313fc",
+            "primary-type-id": "f529b476-6e62-324f-b0aa-1f3e33d313fc",
+            "title": "Harbor Lights",
+            "primary-type": "Album"
+          },
+          "media": [
+            {
+              "id": "66666666-6666-4666-8666-666666666666",
+              "position": 1,
+              "format": "Digital Media",
+              "track-count": 11,
+              "track-offset": 2,
+              "track": [
+                {"id": "77777777-7777-4777-8777-777777777777", "number": "3", "title": "Paper Lanterns", "length": 214000}
+              ]
+            }
+          ]
+        },
+        {
+          "id": "44444444-4444-4444-8444-444444444444",
+          "count": 1,
+          "title": "Harbor Lights",
+          "status": "Official",
+          "track-count": 11,
+          "media": [
+            {
+              "position": 1,
+              "track-count": 11,
+              "track-offset": 10,
+              "track": [{"id": "78787878-7878-4878-8878-787878787878", "number": "11", "title": "Paper Lanterns (reprise)"}]
+            }
+          ]
+        },
+        {
+          "id": "88888888-8888-4888-8888-888888888888",
+          "count": 1,
+          "title": "Live at the Pier",
+          "release-group": {
+            "id": "99999999-9999-4999-8999-999999999999",
+            "title": "Live at the Pier",
+            "primary-type": "Album",
+            "secondary-types": ["Live"]
+          },
+          "media": [
+            {"position": 2, "format": "12\" Vinyl", "track-count": 8, "track-offset": 3, "track": [{"id": "abababab-abab-4bab-8bab-abababababab", "number": "B1", "title": "Paper Lanterns"}]}
+          ]
+        }
+      ],
+      "isrcs": ["XXA001900001"]
+    },
+    {
+      "id": "12121212-1212-4212-8212-121212121212",
+      "score": 87,
+      "title": "Paper Lanterns",
+      "video": true,
+      "disambiguation": "music video",
+      "artist-credit": [
+        {"name": "The Quiet Harbors", "artist": {"id": "22222222-2222-4222-8222-222222222222", "name": "The Quiet Harbors"}}
+      ]
+    }
+  ]
+}

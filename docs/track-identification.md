@@ -303,6 +303,17 @@ PiPlayer never adds an ID3v1 tag to a file that has none; §7.5 lists the TagLib
   2. the same without the duration clause (trimmed files, wrong lengths in other sources);
   3. title and artist words with fuzzy matching (`~`), with the duration clause;
   4. `recording:(<title>)` with the duration clause, for files whose artist is missing or doubtful.
+- Tuned in M0 on the owner's 1 476-track list: every word of the song's name is required in the `recording` clause
+  (`+word`), while a version description (also one written without brackets, such as "Song Radio Edit", which is put
+  into brackets before searching and scoring) and a featured artist stay optional. On a 295-track sample this raised
+  the correct top results from 68 % to 72 % and the share of correct ones among candidates scoring at least 0.50 from
+  74 % to 91 %, at the cost of more "not found" results and about 1.7 instead of 1.35 requests per file.
+- Query details checked in M0 against the MusicBrainz search server: words inside `field:(...)` are joined by OR, so
+  the field clauses are joined with `AND`; words are sent in lower case, because upper-case `AND`, `OR` and `NOT` in
+  a title would be read as operators; the fuzzy variant uses normalized words and allows one edit (`~1`) in words of
+  five or more letters; `dur` is in milliseconds, and a duration range leaves out recordings without a length, which
+  variant 2 still finds. Every kind of space counts as a space: stores often put a no-break space between a song's
+  name and its version ("Girlfriend", no-break space, "Radio Edit").
 - `limit=25` for automatic queries, `limit=50` for manual search. The album tag feeds scoring (§4.1), not the query.
   Free text typed by the user goes through `dismax=true`.
 - MusicBrainz's own `score` is never shown as confidence (it is relative and full of ties).
@@ -325,13 +336,17 @@ and penalties below are starting points, tuned in M3.
    artist similarity + 0.2 × duration credit + 0.1 × album/track agreement, capped at 0.85, so text alone never
    reaches the high band.
 3. **Penalties**, applied after the tier score: a duration difference over 30 s multiplies the score by 0.3; a title
-   similarity of at least 0.9 with an artist similarity below 0.5 subtracts 0.3.
+   similarity of at least 0.9 with an artist similarity below 0.5 subtracts 0.3 (only when the file has an artist).
+   Without a duration on either side there is no duration credit and no duration penalty.
 
 Definitions:
 
 - Duration credit: 1 up to a difference of 2 s, falling linearly to 0 at 30 s.
-- Similarity: Levenshtein ratio on strings normalized like search (case, diacritics, ё and е). Bracketed suffixes
-  (remix, live, edit) are compared separately: a suffix on only one side lowers the title similarity by 0.2.
+- Similarity: Levenshtein ratio on strings normalized like search (case, diacritics, ё and е; Cyrillic, kana, Han and
+  Hangul letters are kept whole). Bracketed suffixes at the end of a title (remix, live, edit; ASCII or full-width
+  brackets) are compared separately: a suffix on only one side lowers the title similarity by 0.2, two different
+  suffixes by 0.2 to 0.4. A featured artist or a remaster note in brackets is not a suffix, and brackets earlier in the
+  title belong to the name, as in "(Don't Fear) The Reaper".
 - Album/track agreement: 1 when a release of the candidate matches the album tag (similarity at least 0.9) and the
   track position equals the track number tag, 0.5 when one of the two matches, 0 otherwise or without these tags.
 
@@ -710,8 +725,8 @@ Phases (a) to (c) land in M4a, with accepted results saved in PiPlayer only; pha
   Play Console: declare the foreground service types `mediaPlayback` (playback) and `dataSync` (apply), with their
   justifications.
 - Rate limits (process-wide token bucket per provider, last-request time persisted):
-  - MusicBrainz: one request per ≥ 1.1 s per device; exponential backoff with jitter on 503; pause batch on repeated
-    503.
+  - MusicBrainz: one request per ≥ 1.1 s per device; exponential backoff with jitter on 503, 429, 502 and 504 (§9);
+    pause batch on repeated 503.
   - AcoustID: ≤ 3 req/s documented, but the per-application bucket (~10 req/s) is shared by **all** installs, so
     background batches use ≤ 1 req/s; global backoff on 429 / error 14.
   - Cover Art Archive: no documented limit, but handle 503 with backoff (§5.2).
@@ -732,9 +747,16 @@ Phases (a) to (c) land in M4a, with accepted results saved in PiPlayer only; pha
 
 Rules:
 
-- User-Agent on every request: `PiPlayer/<version> ( https://github.com/<owner>/PiPlayer )`, never the OkHttp
-  default. Each build flavor (GitHub, Google Play) and each fork uses its own AcoustID application key and its own
-  contact URL in the User-Agent.
+- User-Agent on every request: `PiPlayer/<version> ( https://github.com/LordDetson/piplayer )`, never the OkHttp
+  default. Each build flavor (GitHub, Google Play) and each fork uses its own AcoustID application key, and a fork
+  puts its own repository URL in the User-Agent.
+- Rate limits, in detail for MusicBrainz (§8 lists all providers): one limiter per host for the whole process;
+  requests start at least 1.1 s apart, in arrival order. Busy answers (503, 429, 502, 504) and network errors are
+  retried with waits that double from 1 s up to 32 s, each taken at random between half and all of its step, and
+  never sooner than the server's Retry-After (measured from the server's `Date` header; a Retry-After over 120 s ends
+  the retries). Every wait is a pause of the shared limiter, so it holds back every caller, also when the client gives
+  up. A 403 that rejects the User-Agent stops the client. In M0 the limiter keeps its state in memory; persisting the
+  last request time (§8) comes with batches (M4a).
 - Each provider sits behind a `MetadataProvider` interface with policy flags: `commercialAllowed`, `mayPersist`,
   `mayWriteToFile`, `maxDisplayAge`, `requiresSecret`, attribution text and per-item link, own rate limiter.
 - Only CC0 core fields are written into files as text; embedded covers follow §5.2. Attribution in About (M5):
@@ -918,15 +940,15 @@ tests, and a high-band error rate within the threshold of §11.4.
 | M2b | Legacy encodings, per file: "Кино", "Ёжик" and "Би-2" stored as Windows-1251 are decoded as such in automatic mode; "Beyoncé", "Motörhead", "Sigur Rós" and "ÉTÉ" stay ISO-8859-1; ID3v1, encoding-0 ID3v2 frames and RIFF INFO |
 | M2b | "Songs missing information": the reasons of §1 on merged values, including a title from the file name (level 5, or level 4 equal to the display name), the cover rule (embedded, saved, album thumbnail) and the MusicBrainz filter being off by default |
 | M3 | Keep as-is and Skip are remembered by identity and mirrored; a Skip lapses when the tag pass records a new size, modification time or content key; undoing either restores the earlier list state |
-| M3 | Filename parser: a table of real-world names → (artist, title, track number) or "unknown" |
+| M0 | Filename parser: a table of real-world names → (artist, title, track number) or "unknown" |
 | M3 | AcoustID request builder: `meta` is space-separated, `duration` is an integer string rounded to the nearest second, body is gzip-compressed |
 | M3 | Retry later: an empty AcoustID result is retried after 1 hour and once in the next batch, then counts as final; a text-search result of at least 0.50 cancels the retry |
-| M3 | Text query builder: Lucene escaping, the variants of §3.3 in order, skipped variants for missing values, the stop rule and the limits |
+| M0 | Text query builder: Lucene escaping, lower-case terms, the variants of §3.3 in order, skipped variants for missing values, the stop rule and the limits |
 | M3 | PCM conversion: 16-bit, 24-bit, 32-bit and float input, 5.1 downmix; a 9 kHz sine at 44.1 kHz and at 48 kHz comes out at least 40 dB below a 1 kHz sine of the same level (9 kHz would alias to about 2 kHz, inside the band Chromaprint uses) |
 | M3 | Recording scoring (§4.1): identifier tiers, duration credit, the 0.85 cap for text, both penalties, and a score of at least 0.90 with a runner-up gap below 0.10 landing in the medium band |
 | M3 | Release ranking on recorded MusicBrainz JSON fixtures (for example a track with hundreds of same-title recordings, video recordings and compilations): the folder preference, the full type order, Digital Media equal to CD, date order, a recording on two tracks of one release; fixtures stripped of CC BY-NC-SA `tags`/`genres` before committing |
 | M3 | Edition picker: every release of the group is listed; an edition without the identified recording maps the file by position and title or is marked "does not contain this song" |
-| M3 | Rate limiter: never exceeds the configured rate under parallel callers; backoff on 503/429 |
+| M0 | Rate limiter: never exceeds the configured rate under parallel callers; a pause holds back waiting callers; backoff with jitter on 503, 429, 502 and 504; Retry-After honoured; a rejected User-Agent is not retried |
 | M3 | Cover URLs: `http://` → `https://`; a release with a usable front image (`front-500`, `front-1200`, original); a release without one (release group images, marked as another edition); 404 after a redirect; failure TTLs (404: 7 days; 503: 5 minutes, doubling up to 6 hours) |
 | M3 | Cover size rule: a proposed cover whose short side is shorter than the existing cover's starts unticked |
 | M3 | Database-only undo: Apply followed by Undo restores the earlier merged values; stacked decisions (two identifications in a row, an edit on top of an identification) resolve as in §7.1; Undo right after Apply, Keep as-is and Skip; a later file change flags the field per location |

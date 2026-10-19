@@ -4,7 +4,7 @@ package io.github.lorddetson.piplayer.net
 object UserAgent {
 
     /** Contact required by the MusicBrainz rate-limiting rules. */
-    const val CONTACT = "https://github.com/LordDetson"
+    const val CONTACT = "https://github.com/LordDetson/piplayer"
 
     fun of(versionName: String): String {
         require(versionName.isNotBlank() && versionName.none { it.isWhitespace() }) {

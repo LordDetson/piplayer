@@ -1,6 +1,7 @@
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.kotlin.serialization)
 }
 
 android {
@@ -35,7 +36,15 @@ android {
     }
 
     testOptions {
-        unitTests.all { it.useJUnitPlatform() }
+        unitTests.all { test ->
+            test.useJUnitPlatform()
+            // The M0 corpus run sends a private list to MusicBrainz, so it runs only when these are given.
+            listOf(
+                "corpus.file", "corpus.out", "corpus.sample", "corpus.bracketSuffix", "corpus.requireTitleWords",
+            ).forEach { name ->
+                providers.gradleProperty(name).orNull?.let { test.systemProperty(name, it) }
+            }
+        }
     }
 
     lint {
@@ -59,10 +68,17 @@ dependencies {
     debugImplementation(libs.androidx.compose.ui.tooling)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
 
+    implementation(libs.okhttp)
+    implementation(libs.kotlinx.serialization.json)
+    implementation(libs.kotlinx.coroutines.android)
+
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)
     testRuntimeOnly(libs.junit.platform.launcher)
     testImplementation(libs.assertj.core)
+    testImplementation(libs.kotlinx.coroutines.test)
+    testImplementation(libs.okhttp.mockwebserver3)
+    testImplementation(libs.okhttp.mockwebserver3.junit5)
 
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
