@@ -1,13 +1,17 @@
-"""Prepares the recordings of the Chromaprint instrumented tests.
+"""Prepares the recordings of the fingerprint instrumented tests.
 
-For every sample in the manifest the script downloads the recording once into a cache outside the repository, checks
-its size and hashes, decodes the first 120 seconds with ffmpeg into 11025 Hz mono 16-bit PCM and runs the desktop
-fpcalc on that same PCM. The PCM and fpcalc's raw fingerprint become androidTest assets, so the device computes its
-fingerprint from exactly the bytes fpcalc saw.
+For every sample in the manifest the script downloads the recording once into a cache outside the repository and
+checks its size and hashes. Then, by mode:
 
-Usage: python scripts/prepare_fingerprint_samples.py --out <assets dir>
+- "pcm" (nativelib): decodes the first 120 seconds with ffmpeg into 11025 Hz mono 16-bit PCM and runs the desktop
+  fpcalc on that same PCM. The PCM and fpcalc's raw fingerprint become androidTest assets, so the device computes its
+  fingerprint from exactly the bytes fpcalc saw.
+- "files" (app): copies the recordings themselves and runs fpcalc on each file, which decodes and resamples it with
+  FFmpeg. The device decodes the same file with its own decoders and resampler, and the test compares the two.
+
+Usage: python scripts/prepare_fingerprint_samples.py --out <assets dir> [--mode pcm|files]
        [--manifest nativelib/fingerprint-samples.json] [--cache <dir>] [--fpcalc <path>] [--print-sha256]
-Needs ffmpeg on PATH and fpcalc 1.6.2 (FPCALC environment variable, --fpcalc, or the default under tools/).
+Needs ffmpeg on PATH (mode "pcm") and fpcalc 1.6.2 (FPCALC environment variable, --fpcalc, or the default under tools/).
 """
 import argparse
 import hashlib
@@ -45,7 +49,8 @@ def verified(path, sample):
 
 def download(sample, target):
     request = urllib.request.Request(sample["url"], headers={"User-Agent": USER_AGENT})
-    partial = target.with_suffix(target.suffix + ".part")
+    # Two Gradle tasks may download into the same cache at once; each writes its own partial file and renames it.
+    partial = target.with_suffix(f"{target.suffix}.{os.getpid()}.part")
     for attempt in range(1, 4):
         try:
             with urllib.request.urlopen(request, timeout=60) as response, open(partial, "wb") as out:
@@ -73,6 +78,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--manifest", default="nativelib/fingerprint-samples.json", type=pathlib.Path)
     parser.add_argument("--out", required=True, type=pathlib.Path)
+    parser.add_argument("--mode", choices=["pcm", "files"], default="pcm")
     parser.add_argument("--cache", type=pathlib.Path,
                         default=pathlib.Path(os.environ.get("PIPLAYER_SAMPLE_CACHE",
                                                             pathlib.Path.home() / ".cache/piplayer/fingerprint-samples")))
@@ -81,14 +87,16 @@ def main():
     parser.add_argument("--print-sha256", action="store_true", help="print the SHA-256 of each cached recording")
     args = parser.parse_args()
 
-    if shutil.which("ffmpeg") is None:
+    if args.mode == "pcm" and shutil.which("ffmpeg") is None:
         sys.exit("ffmpeg is not on PATH")
     if not args.fpcalc.exists():
         sys.exit(f"fpcalc not found at {args.fpcalc}; set FPCALC or pass --fpcalc")
     samples = json.loads(args.manifest.read_text(encoding="utf-8"))["samples"]
     args.cache.mkdir(parents=True, exist_ok=True)
-    out = args.out / "fingerprints"
-    out.mkdir(parents=True, exist_ok=True)
+    out = args.out / ("fingerprints" if args.mode == "pcm" else "recordings")
+    if out.exists():
+        shutil.rmtree(out)
+    out.mkdir(parents=True)
 
     index = []
     for sample in samples:
@@ -96,16 +104,38 @@ def main():
         source = fetch(sample, args.cache)
         if args.print_sha256:
             print(f"  sha256 {digest(source, 'sha256')}")
-        pcm = out / f"{sample['id']}.pcm"
-        subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-i", str(source), "-t", str(SECONDS),
-                        "-ac", "1", "-ar", str(SAMPLE_RATE), "-c:a", "pcm_s16le", "-f", "s16le", str(pcm)], check=True)
-        result = subprocess.run([str(args.fpcalc), "-format", "s16le", "-rate", str(SAMPLE_RATE), "-channels", "1",
-                                 "-length", "0", "-raw", "-json", str(pcm)], check=True, capture_output=True, text=True)
-        fingerprint = json.loads(result.stdout)
-        (out / f"{sample['id']}.fpcalc.json").write_text(json.dumps(fingerprint), encoding="utf-8")
-        index.append({"id": sample["id"], "pcmBytes": pcm.stat().st_size, "items": len(fingerprint["fingerprint"])})
-        print(f"  {pcm.stat().st_size} bytes of PCM, {len(fingerprint['fingerprint'])} fingerprint items")
+        if args.mode == "pcm":
+            index.append(prepare_pcm(sample, source, out, args.fpcalc))
+        else:
+            index.append(prepare_file(sample, source, out, args.fpcalc))
     (out / "index.json").write_text(json.dumps(index, indent=1), encoding="utf-8")
+
+
+def fpcalc_raw(fpcalc, path, *options):
+    result = subprocess.run([str(fpcalc), *options, "-raw", "-json", str(path)],
+                            check=True, capture_output=True, text=True)
+    return json.loads(result.stdout)
+
+
+def prepare_pcm(sample, source, out, fpcalc):
+    pcm = out / f"{sample['id']}.pcm"
+    subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-i", str(source), "-t", str(SECONDS),
+                    "-ac", "1", "-ar", str(SAMPLE_RATE), "-c:a", "pcm_s16le", "-f", "s16le", str(pcm)], check=True)
+    fingerprint = fpcalc_raw(fpcalc, pcm, "-format", "s16le", "-rate", str(SAMPLE_RATE), "-channels", "1",
+                             "-length", "0")
+    (out / f"{sample['id']}.fpcalc.json").write_text(json.dumps(fingerprint), encoding="utf-8")
+    print(f"  {pcm.stat().st_size} bytes of PCM, {len(fingerprint['fingerprint'])} fingerprint items")
+    return {"id": sample["id"], "pcmBytes": pcm.stat().st_size, "items": len(fingerprint["fingerprint"])}
+
+
+def prepare_file(sample, source, out, fpcalc):
+    target = out / source.name
+    shutil.copyfile(source, target)
+    fingerprint = fpcalc_raw(fpcalc, target, "-length", str(SECONDS))
+    (out / f"{sample['id']}.fpcalc.json").write_text(json.dumps(fingerprint), encoding="utf-8")
+    print(f"  {target.stat().st_size} bytes, {len(fingerprint['fingerprint'])} fingerprint items")
+    return {"id": sample["id"], "file": target.name, "items": len(fingerprint["fingerprint"]),
+            "acoustidTrack": sample["acoustidTrack"], "musicbrainzRecording": sample["musicbrainzRecording"]}
 
 
 if __name__ == "__main__":

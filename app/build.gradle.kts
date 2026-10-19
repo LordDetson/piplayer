@@ -1,7 +1,42 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
+}
+
+/**
+ * The AcoustID application key, from -Pacoustid.apiKey or acoustid.apiKey in local.properties (never in git); empty
+ * when neither is set, and then the spike skips the lookup.
+ */
+val acoustIdApiKey: String = providers.gradleProperty("acoustid.apiKey")
+    .orElse(
+        providers.fileContents(rootProject.layout.projectDirectory.file("local.properties")).asText.map { text ->
+            Properties().apply { load(text.reader()) }.getProperty("acoustid.apiKey", "")
+        },
+    )
+    .orElse("")
+    .get()
+    .trim()
+// Checked so that the value can go into generated Java source as it is; the message never repeats the key.
+require(acoustIdApiKey.matches(Regex("[A-Za-z0-9]*"))) { "acoustid.apiKey may contain only letters and digits" }
+
+val prepareRecordings = tasks.register<PrepareFingerprintSamples>("prepareRecordings") {
+    manifest = rootProject.layout.projectDirectory.file("nativelib/fingerprint-samples.json")
+    script = rootProject.layout.projectDirectory.file("scripts/prepare_fingerprint_samples.py")
+    mode = "files"
+    fpcalc = fpcalcBinary()
+    workingDirectory = rootProject.layout.projectDirectory
+    python = providers.gradleProperty("piplayer.python")
+        .orElse(if (System.getProperty("os.name").startsWith("Windows")) "python" else "python3")
+}
+
+androidComponents {
+    onVariants { variant ->
+        variant.androidTest?.sources?.assets
+            ?.addGeneratedSourceDirectory(prepareRecordings, PrepareFingerprintSamples::outputDir)
+    }
 }
 
 android {
@@ -24,6 +59,10 @@ android {
     }
 
     buildTypes {
+        debug {
+            // Only the debug identification spike looks fingerprints up in M0.
+            buildConfigField("String", "ACOUSTID_API_KEY", "\"$acoustIdApiKey\"")
+        }
         release {
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
@@ -64,6 +103,7 @@ dependencies {
     implementation(libs.androidx.core)
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.lifecycle.runtime.compose)
+    implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.profileinstaller)
 
     implementation(platform(libs.androidx.compose.bom))
@@ -77,6 +117,7 @@ dependencies {
     implementation(libs.okhttp)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.kotlinx.coroutines.android)
+    implementation(libs.media3.inspector)
 
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)

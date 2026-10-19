@@ -1,0 +1,57 @@
+{
+  "results": [
+    {
+      "id": "6f1c1f4e-3b0d-4c8e-9a52-1d2e3f405162",
+      "recordings": [
+        {
+          "artists": [
+            {"id": "a1b2c3d4-0000-4000-8000-000000000001", "joinphrase": " feat. ", "name": "The Quiet Harbors"},
+            {"id": "a1b2c3d4-0000-4000-8000-000000000002", "name": "Mira Vale"}
+          ],
+          "duration": 214.4,
+          "id": "b0e4d1f2-1111-4111-8111-000000000001",
+          "isrcs": ["XXA001900003"],
+          "releasegroups": [
+            {
+              "id": "c0ffee00-2222-4222-8222-000000000001",
+              "releases": [
+                {
+                  "country": "XW",
+                  "date": {"day": 1, "month": 3, "year": 2019},
+                  "id": "d00d0000-3333-4333-8333-000000000001",
+                  "medium_count": 1,
+                  "track_count": 11
+                }
+              ],
+              "title": "Harbor Lights",
+              "type": "Album"
+            },
+            {
+              "id": "c0ffee00-2222-4222-8222-000000000002",
+              "releases": [{"id": "d00d0000-3333-4333-8333-000000000002", "date": {"year": 2018}}],
+              "secondarytypes": ["Compilation"],
+              "title": "Quiet Songs",
+              "type": "Album"
+            }
+          ],
+          "title": "Paper Lanterns"
+        },
+        {
+          "artists": [{"id": "a1b2c3d4-0000-4000-8000-000000000001", "name": "The Quiet Harbors"}],
+          "duration": 251,
+          "id": "b0e4d1f2-1111-4111-8111-000000000002",
+          "title": "Paper Lanterns (live)"
+        },
+        {
+          "id": "b0e4d1f2-1111-4111-8111-000000000003"
+        }
+      ],
+      "score": 0.97
+    },
+    {
+      "id": "7a2b3c4d-5e6f-4071-8293-a4b5c6d7e8f9",
+      "score": 0.41
+    }
+  ],
+  "status": "ok"
+}

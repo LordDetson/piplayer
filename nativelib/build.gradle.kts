@@ -1,46 +1,5 @@
-import javax.inject.Inject
-
 plugins {
     alias(libs.plugins.android.library)
-}
-
-/**
- * Downloads the fingerprint test recordings (once, into a cache outside the repository) and turns them into PCM and
- * fpcalc references for the instrumented tests. Needs Python, ffmpeg and fpcalc; only androidTest builds run it.
- */
-abstract class PrepareFingerprintSamples : DefaultTask() {
-    @get:InputFile
-    @get:PathSensitive(PathSensitivity.RELATIVE)
-    abstract val manifest: RegularFileProperty
-
-    @get:InputFile
-    @get:PathSensitive(PathSensitivity.RELATIVE)
-    abstract val script: RegularFileProperty
-
-    @get:Internal
-    abstract val workingDirectory: DirectoryProperty
-
-    /** "python" on Windows, "python3" elsewhere; -Ppiplayer.python=... picks another interpreter. */
-    @get:Input
-    abstract val python: Property<String>
-
-    @get:OutputDirectory
-    abstract val outputDir: DirectoryProperty
-
-    @get:Inject
-    abstract val execOperations: ExecOperations
-
-    @TaskAction
-    fun prepare() {
-        execOperations.exec {
-            workingDir(workingDirectory)
-            commandLine(
-                python.get(), "-I", script.get().asFile.path,
-                "--manifest", manifest.get().asFile.path,
-                "--out", outputDir.get().asFile.path,
-            )
-        }
-    }
 }
 
 /** Puts the licence texts of the bundled native code into the APK under assets/licenses. */
@@ -69,6 +28,8 @@ abstract class CopyLicenseAssets : DefaultTask() {
 val prepareFingerprintSamples = tasks.register<PrepareFingerprintSamples>("prepareFingerprintSamples") {
     manifest = layout.projectDirectory.file("fingerprint-samples.json")
     script = rootProject.layout.projectDirectory.file("scripts/prepare_fingerprint_samples.py")
+    mode = "pcm"
+    fpcalc = fpcalcBinary()
     workingDirectory = rootProject.layout.projectDirectory
     python = providers.gradleProperty("piplayer.python")
         .orElse(if (System.getProperty("os.name").startsWith("Windows")) "python" else "python3")
@@ -84,6 +45,8 @@ val copyLicenseAssets = tasks.register<CopyLicenseAssets>("copyLicenseAssets") {
         "kissfft-COPYING" to root.file("third_party/chromaprint/src/3rdparty/kissfft/COPYING"),
         "kissfft-BSD-3-Clause" to root.file("third_party/chromaprint/src/3rdparty/kissfft/LICENSES/BSD-3-Clause"),
         "libc++-LICENSE.txt" to layout.projectDirectory.file("licenses/libc++-LICENSE.txt"),
+        "speexdsp-COPYING" to root.file("third_party/speexdsp/COPYING"),
+        "speexdsp-resampler-NOTICE.txt" to layout.projectDirectory.file("licenses/speexdsp-resampler-NOTICE.txt"),
     )
     names = licenses.mapValues { (_, file) -> file.asFile.path }
     sources.from(licenses.values)

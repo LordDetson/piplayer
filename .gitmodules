@@ -4,3 +4,6 @@
 [submodule "third_party/chromaprint"]
 	path = third_party/chromaprint
 	url = https://github.com/acoustid/chromaprint.git
+[submodule "third_party/speexdsp"]
+	path = third_party/speexdsp
+	url = https://github.com/xiph/speexdsp.git

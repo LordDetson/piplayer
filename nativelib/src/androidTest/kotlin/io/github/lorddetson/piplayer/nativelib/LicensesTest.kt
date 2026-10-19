@@ -22,11 +22,23 @@ class LicensesTest {
             "kissfft-COPYING",
             "kissfft-BSD-3-Clause",
             "libc++-LICENSE.txt",
+            "speexdsp-COPYING",
+            "speexdsp-resampler-NOTICE.txt",
         )
         assertThat(assets.list("licenses")).contains(*expected.toTypedArray())
         expected.forEach { name ->
             val text = assets.open("licenses/$name").bufferedReader().readText()
             assertThat(text).describedAs(name).isNotBlank()
+        }
+    }
+
+    @Test
+    fun theSpeexdspNoticeCarriesTheWholeLicenceOfEachCompiledFile() {
+        val notice = assets.open("licenses/speexdsp-resampler-NOTICE.txt").bufferedReader().readText()
+        val files = listOf("libspeexdsp/resample.c", "include/speex/speex_resampler.h", "libspeexdsp/arch.h")
+        files.forEach { file ->
+            val section = notice.substringAfter("===== $file =====").substringBefore("=====")
+            assertThat(section).describedAs(file).contains("Copyright", "Redistributions in binary form", "SUCH DAMAGE")
         }
     }
 }

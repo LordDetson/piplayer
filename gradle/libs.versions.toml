@@ -15,6 +15,7 @@ espressoCore = "3.7.0"
 okhttp = "5.5.0"
 kotlinxSerialization = "1.11.0"
 kotlinxCoroutines = "1.11.0"
+media3 = "1.11.1"
 
 [libraries]
 # Root buildscript classpath: lifts the Kotlin Gradle plugin bundled with AGP 9.4 (2.2.10) to the catalog's version.
@@ -23,6 +24,7 @@ kotlin-gradle-plugin = { module = "org.jetbrains.kotlin:kotlin-gradle-plugin", v
 androidx-core = { module = "androidx.core:core", version.ref = "androidxCore" }
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "activityCompose" }
 androidx-lifecycle-runtime-compose = { module = "androidx.lifecycle:lifecycle-runtime-compose", version.ref = "lifecycle" }
+androidx-lifecycle-viewmodel-compose = { module = "androidx.lifecycle:lifecycle-viewmodel-compose", version.ref = "lifecycle" }
 androidx-profileinstaller = { module = "androidx.profileinstaller:profileinstaller", version.ref = "profileinstaller" }
 
 androidx-compose-bom = { module = "androidx.compose:compose-bom", version.ref = "composeBom" }
@@ -50,6 +52,8 @@ okhttp-mockwebserver3-junit5 = { module = "com.squareup.okhttp3:mockwebserver3-j
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinxSerialization" }
 kotlinx-coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "kotlinxCoroutines" }
 kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "kotlinxCoroutines" }
+# MediaExtractorCompat; since Media3 1.11 it lives in media3-inspector, which brings media3-exoplayer along.
+media3-inspector = { module = "androidx.media3:media3-inspector", version.ref = "media3" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

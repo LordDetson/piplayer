@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Debug builds only: the M0 identification spike. -->
+<resources>
+    <string name="spike_open">Identify a file</string>
+    <string name="spike_title">Identification spike</string>
+    <string name="spike_explanation">Pick an audio file. PiPlayer reads its tags, fingerprints the first two minutes and lists the raw candidates from AcoustID and from the MusicBrainz text search.</string>
+    <string name="spike_no_key">No AcoustID key in this build: add acoustid.apiKey to local.properties. The fingerprint lookup is skipped.</string>
+    <string name="spike_choose_file">Choose a file</string>
+    <string name="spike_close">Close</string>
+    <string name="spike_copy_report">Copy report</string>
+    <string name="spike_failed">Failed: %1$s</string>
+    <string name="spike_stage_reading_tags">Reading tags…</string>
+    <string name="spike_stage_fingerprinting">Computing the fingerprint…</string>
+    <string name="spike_stage_acoustid">Looking the fingerprint up in AcoustID…</string>
+    <string name="spike_stage_text_search">Searching MusicBrainz…</string>
+</resources>

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="spike_open">Распознать файл</string>
+    <string name="spike_title">Пробное распознавание</string>
+    <string name="spike_explanation">Выберите аудиофайл. PiPlayer прочитает теги, вычислит отпечаток первых двух минут и покажет найденных кандидатов из AcoustID и текстового поиска MusicBrainz без обработки.</string>
+    <string name="spike_no_key">В этой сборке нет ключа AcoustID: добавьте acoustid.apiKey в local.properties. Поиск по отпечатку пропускается.</string>
+    <string name="spike_choose_file">Выбрать файл</string>
+    <string name="spike_close">Закрыть</string>
+    <string name="spike_copy_report">Скопировать отчёт</string>
+    <string name="spike_failed">Ошибка: %1$s</string>
+    <string name="spike_stage_reading_tags">Чтение тегов…</string>
+    <string name="spike_stage_fingerprinting">Вычисление отпечатка…</string>
+    <string name="spike_stage_acoustid">Поиск отпечатка в AcoustID…</string>
+    <string name="spike_stage_text_search">Поиск в MusicBrainz…</string>
+</resources>

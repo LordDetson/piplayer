@@ -32,6 +32,16 @@ under `third_party/`, pinned to the release tags named below.
 - Copyright 2003-2010 Mark Borgerding. All rights reserved.
 - License: BSD 3-Clause (`third_party/chromaprint/src/3rdparty/kissfft/COPYING`).
 
+## speexdsp 1.2.1 (resampler only)
+
+- Source: https://gitlab.xiph.org/xiph/speexdsp (mirror https://github.com/xiph/speexdsp), tag `SpeexDSP-1.2.1`
+  (submodule `third_party/speexdsp`). PiPlayer compiles only `libspeexdsp/resample.c` with its headers `arch.h` and
+  `speex_resampler.h`, unmodified, and links it statically into PiPlayer's JNI library.
+- Copyright 2007-2008 Jean-Marc Valin, 2008 Thorvald Natvig (resample.c), 2003 and 2007 Jean-Marc Valin (headers);
+  the repository's other copyright holders are listed in its `COPYING`.
+- License: BSD 3-Clause. The repository's `COPYING` and the notices of the three files used
+  (`nativelib/licenses/speexdsp-resampler-NOTICE.txt`) ship in the app.
+
 ## LLVM libc++ and libc++abi
 
 - Shipped as `libc++_shared.so` from the Android NDK 30.0.16248370, because several native libraries share the C++

@@ -1,7 +1,9 @@
-# Native code of PiPlayer: TagLib (tags) and Chromaprint (fingerprints) behind one JNI library.
+# Native code of PiPlayer: TagLib (tags), Chromaprint (fingerprints) and the resampler of speexdsp behind one JNI
+# library.
 #
 # libtag.so stays a separate shared library: we use TagLib under its LGPL-2.1 option. Chromaprint is MIT (with the
-# BSD-3 KissFFT) once its FFmpeg-derived resampler is left out, so it is linked statically into libpiplayer_jni.so.
+# BSD-3 KissFFT) once its FFmpeg-derived resampler is left out, and speexdsp is BSD-3, so both are linked statically
+# into libpiplayer_jni.so.
 # Several shared libraries share C++ types, so Gradle passes ANDROID_STL=c++_shared.
 cmake_minimum_required(VERSION 3.22...3.31)
 project(piplayer_native LANGUAGES C CXX)
@@ -11,7 +13,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 set(THIRD_PARTY "${CMAKE_CURRENT_SOURCE_DIR}/../../../../third_party")
 if(NOT EXISTS "${THIRD_PARTY}/taglib/3rdparty/utfcpp/source/utf8.h"
-   OR NOT EXISTS "${THIRD_PARTY}/chromaprint/src/chromaprint.h")
+   OR NOT EXISTS "${THIRD_PARTY}/chromaprint/src/chromaprint.h"
+   OR NOT EXISTS "${THIRD_PARTY}/speexdsp/libspeexdsp/resample.c")
   message(FATAL_ERROR "Submodules missing: run 'git submodule update --init --recursive'")
 endif()
 
@@ -60,6 +63,23 @@ target_compile_definitions(chromaprint
   PUBLIC CHROMAPRINT_NODLL
   PRIVATE HAVE_CONFIG_H _USE_MATH_DEFINES __STDC_LIMIT_MACROS __STDC_CONSTANT_MACROS)
 set_target_properties(chromaprint PROPERTIES POSITION_INDEPENDENT_CODE ON)
+# Optimized in debug builds too (Gradle builds them with -O0): fingerprinting two minutes of audio is a hot loop, and
+# nobody steps through third-party code. A later -O wins over the build type's flag.
+target_compile_options(chromaprint PRIVATE -O2)
+
+# --- speexdsp 1.2.1 resampler, our own target ---------------------------------------------------------------------
+# Only resample.c, built standalone (OUTSIDE_SPEEX) with float samples; its symbols get the prefix "piplayer_".
+set(SPEEXDSP "${THIRD_PARTY}/speexdsp")
+add_library(speex_resampler STATIC "${SPEEXDSP}/libspeexdsp/resample.c")
+target_include_directories(speex_resampler PUBLIC "${SPEEXDSP}/include/speex")
+# The JNI code includes the same header, so it needs the same macros. RESAMPLE_FULL_SINC_TABLE is left out: at an
+# unusual input rate (44056 Hz, for example) the full table would take tens of megabytes.
+target_compile_definitions(speex_resampler PUBLIC OUTSIDE_SPEEX RANDOM_PREFIX=piplayer FLOATING_POINT)
+# No SIMD: the plain C path is the reference. No fused multiply-add on arm64 only, so the filter arithmetic is the same
+# on both ABIs (the sinc table still comes from each device's libm, so results may differ in the last bits).
+target_compile_options(speex_resampler PRIVATE -O2 -ffp-contract=off)
+target_link_libraries(speex_resampler PRIVATE m)
+set_target_properties(speex_resampler PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 # --- JNI ----------------------------------------------------------------------------------------------------------
 add_library(piplayer_jni SHARED
@@ -67,13 +87,14 @@ add_library(piplayer_jni SHARED
   fd_stream.cpp
   taglib_jni.cpp
   chromaprint_jni.cpp
+  resampler_jni.cpp
 )
 # TagLib's 'tag' target publishes no build-tree include directories; take its own list and the generated config.
 target_include_directories(piplayer_jni SYSTEM PRIVATE
   "${THIRD_PARTY}/taglib/taglib"
   "$<TARGET_PROPERTY:tag,INCLUDE_DIRECTORIES>"
   "${CMAKE_BINARY_DIR}/taglib")
-target_link_libraries(piplayer_jni PRIVATE tag chromaprint log)
+target_link_libraries(piplayer_jni PRIVATE tag chromaprint speex_resampler log)
 # Only JNI_OnLoad is exported; natives are registered there.
 target_link_options(piplayer_jni PRIVATE
   "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/exports.map" "-Wl,--no-undefined")
