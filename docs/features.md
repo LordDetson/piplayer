@@ -246,7 +246,11 @@ Size: M (about 4 to 6 weeks).
 - Text-search check in the same spike: the stage 4 query builder runs on the JVM against the owner's 1 476-track
   liked list (no device needed), and the share of correct top results is recorded (TI §3.3).
 - Room spike on API 30: search over normalized columns with LIKE on a generated 20 000-row table; FTS4 only if
-  that is too slow.
+  that is too slow. Done with Room 3.0.3: instr() per word over one normalized search column, through an index on
+  (title key, search text), answers every search-as-you-type query within 13 to 33 ms (95th percentile, two emulator
+  runs) on the API 30 emulator; LIKE takes 38 to 96 ms there, because the platform's LIKE goes through ICU. No
+  full-text index and no bundled SQLite. To be measured again on the slowest phone in M2a; if it is too slow there,
+  the fallback is the bundled SQLite with an FTS5 trigram index, since FTS4 cannot find the middle of a word.
 - CI: build, JVM tests, lint, a check that only the intended components are exported.
 - Strings in resources from the first screen, with English and Russian resource sets.
 - Done when a debug build runs on API 30 and 36 emulators and on a 16 KB page-size emulator image, the

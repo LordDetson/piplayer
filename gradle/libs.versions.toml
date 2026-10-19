@@ -16,6 +16,10 @@ okhttp = "5.5.0"
 kotlinxSerialization = "1.11.0"
 kotlinxCoroutines = "1.11.0"
 media3 = "1.11.1"
+ksp = "2.3.12"
+room3 = "3.0.3"
+# The version room3-runtime 3.0.3 itself depends on.
+androidxSqlite = "2.7.1"
 
 [libraries]
 # Root buildscript classpath: lifts the Kotlin Gradle plugin bundled with AGP 9.4 (2.2.10) to the catalog's version.
@@ -54,10 +58,15 @@ kotlinx-coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutine
 kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "kotlinxCoroutines" }
 # MediaExtractorCompat; since Media3 1.11 it lives in media3-inspector, which brings media3-exoplayer along.
 media3-inspector = { module = "androidx.media3:media3-inspector", version.ref = "media3" }
+room3-runtime = { module = "androidx.room3:room3-runtime", version.ref = "room3" }
+room3-compiler = { module = "androidx.room3:room3-compiler", version.ref = "room3" }
+androidx-sqlite-bundled = { module = "androidx.sqlite:sqlite-bundled", version.ref = "androidxSqlite" }
+androidx-sqlite-framework = { module = "androidx.sqlite:sqlite-framework", version.ref = "androidxSqlite" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
 android-library = { id = "com.android.library", version.ref = "agp" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
 kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
+ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
 # Not applied: org.jetbrains.kotlin.android (AGP 9 has built-in Kotlin support).

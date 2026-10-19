@@ -4,6 +4,7 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
+    alias(libs.plugins.ksp)
 }
 
 /**
@@ -134,4 +135,9 @@ dependencies {
     androidTestImplementation(libs.androidx.test.ext.junit)
     androidTestImplementation(libs.androidx.test.espresso.core)
     androidTestImplementation(libs.assertj.core)
+    // The M0 Room spike (library search) lives in the instrumented tests only; the library schema comes with M2a.
+    androidTestImplementation(libs.room3.runtime)
+    androidTestImplementation(libs.androidx.sqlite.framework)
+    androidTestImplementation(libs.androidx.sqlite.bundled)
+    kspAndroidTest(libs.room3.compiler)
 }

@@ -882,7 +882,13 @@ made live in the user database.
   mirrored album favorite and the result of the album's thumbnail probe (§1).
 - `track_display(track_id, <merged values>, <normalized search columns>, missing_info_reasons,
   missing_info_decision, favorite, play_count, last_played_at, badge_state)`: merged values (§7.1) and the mirrored
-  user fields, for lists, sorting, smart lists and search. `missing_info_reasons` is the set of §1 reasons, written by
+  user fields, for lists, sorting, smart lists and search. Search (M0 spike): one `search_text` column holds the
+  title, artists, album, composer, genre and file name, each normalized like §4.1 and joined by spaces; a query is
+  normalized the same way and split into words (no repeats, longest first, at most 8), and every word must occur in
+  the text, tested with `instr()` (on the platform's SQLite, LIKE goes through ICU and is two to three times slower).
+  An index on (`title_key`, `search_text`) lets a search walk the titles in order and stop at the first page of 50.
+  Known gaps for M2a: letters without a decomposition (ø, ł, đ, æ, œ, ß, ı) and halfwidth kana are not folded yet,
+  and a name typed without its punctuation ("acdc" for "AC/DC") is not found. `missing_info_reasons` is the set of §1 reasons, written by
   the precedence resolver; `missing_info_decision` is none, keep_as_is or skipped.
 - `fingerprint(content_key, fingerprint, acoustid_id, decoder_path, computed_at)`: a cache for identification and
   re-attachment, kept by content key, so the fingerprint of a file that left the media index stays available for
