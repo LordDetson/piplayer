@@ -16,6 +16,9 @@ concurrency:
 env:
   # Only for zipalign -P (needs 35.0.0 or newer); AGP itself uses its default build tools.
   BUILD_TOOLS_VERSION: "37.0.0"
+  # Must equal android.ndkVersion and the cmake version in nativelib/build.gradle.kts.
+  NDK_VERSION: "30.0.16248370"
+  CMAKE_VERSION: "3.31.6"
 
 jobs:
   build:
@@ -43,10 +46,16 @@ jobs:
         run: |
           SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
           (yes || true) | "$SDKMANAGER" --licenses > /dev/null
-          "$SDKMANAGER" --install "platforms;android-37.0" "build-tools;${BUILD_TOOLS_VERSION}"
+          "$SDKMANAGER" --install "platforms;android-37.0" "build-tools;${BUILD_TOOLS_VERSION}" \
+            "ndk;${NDK_VERSION}" "cmake;${CMAKE_VERSION}"
 
+      # Instrumented tests run on emulators locally; CI at least compiles them. Compiling does not need the
+      # downloaded fingerprint recordings, which only the androidTest asset merge asks for.
       - name: Build debug, unit tests, lint
-        run: ./gradlew assembleDebug testDebugUnitTest lintDebug --continue --stacktrace
+        run: >-
+          ./gradlew assembleDebug testDebugUnitTest lintDebug
+          :app:compileDebugAndroidTestKotlin :nativelib:compileDebugAndroidTestKotlin
+          --continue --stacktrace
 
       - name: Check 16 KB alignment of the APK and its 64-bit native libraries
         shell: bash
@@ -54,10 +63,19 @@ jobs:
           set -euo pipefail
           APK=app/build/outputs/apk/debug/app-debug.apk
           "$ANDROID_HOME/build-tools/$BUILD_TOOLS_VERSION/zipalign" -c -P 16 -v 4 "$APK" | grep -E 'lib/(arm64-v8a|x86_64)/|Verification'
-          OBJDUMP="$(ls -d "$ANDROID_HOME"/ndk/*/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-objdump 2>/dev/null | tail -1 || true)"
+          OBJDUMP="$ANDROID_HOME/ndk/$NDK_VERSION/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-objdump"
           TMP="$(mktemp -d)"
           unzip -q "$APK" 'lib/arm64-v8a/*' 'lib/x86_64/*' -d "$TMP" 2>/dev/null || true
           fail=0; count=0
+          for abi in arm64-v8a x86_64; do
+            for lib in libpiplayer_jni.so libtag.so libc++_shared.so; do
+              [ -f "$TMP/lib/$abi/$lib" ] || { echo "MISSING   lib/$abi/$lib"; fail=1; }
+            done
+          done
+          # Our native code exists only for these ABIs; any other lib/ folder would let 32-bit devices install the app.
+          for abi in $(unzip -Z1 "$APK" | grep '^lib/' | cut -d/ -f2 | sort -u); do
+            case "$abi" in arm64-v8a|x86_64) ;; *) echo "UNEXPECTED ABI lib/$abi"; fail=1 ;; esac
+          done
           while IFS= read -r -d '' so; do
             count=$((count+1))
             aligns="$("$OBJDUMP" -p "$so" | awk '$1=="LOAD" {print $NF}')"

@@ -22,3 +22,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "PiPlayer"
 include(":app")
+include(":nativelib")

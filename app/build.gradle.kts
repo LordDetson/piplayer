@@ -16,6 +16,11 @@ android {
         versionCode = 1
         versionName = "0.1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        ndk {
+            // The native code (TagLib, Chromaprint) is built for these only; without the filter the APK would also
+            // claim 32-bit ABIs through other libraries' .so files and crash there.
+            abiFilters += setOf("arm64-v8a", "x86_64")
+        }
     }
 
     buildTypes {
@@ -55,6 +60,7 @@ android {
 }
 
 dependencies {
+    implementation(project(":nativelib"))
     implementation(libs.androidx.core)
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.lifecycle.runtime.compose)

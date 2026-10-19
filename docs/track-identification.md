@@ -277,10 +277,14 @@ PiPlayer never adds an ID3v1 tag to a file that has none; §7.5 lists the TagLib
   channels to mono, resample to 11 025 Hz with an anti-aliasing low-pass filter in front of the rate conversion
   (Media3 `SonicAudioProcessor` on its own does not filter), convert to 16-bit, feed Chromaprint, stop after 120 s of
   audio. With its internal resampler off and no FFmpeg, Chromaprint cannot resample, so it is fed 11 025 Hz mono
-  16-bit PCM (verify in the M0 spike). Fixtures cover 44.1 kHz, 48 kHz, 96 kHz/24-bit and 5.1 sources (§11.2).
+  16-bit PCM (checked in M0: any other rate is refused at start). Fixtures cover 44.1 kHz, 48 kHz, 96 kHz/24-bit and
+  5.1 sources (§11.2).
 - Chromaprint 1.6.2+ (≥ 1.6.1 is required: older versions drop partial frames between `feed` calls), built from
-  source with our own CMake list, KissFFT, no FFmpeg, `USE_INTERNAL_AVRESAMPLE=OFF` (MIT + BSD-3 build).
-  16 KB page alignment, NDK r28+.
+  source with our own CMake list, KissFFT, no FFmpeg, `USE_INTERNAL_AVRESAMPLE=OFF` (MIT + BSD-3 build), linked
+  statically into the JNI library; TagLib stays a separate `libtag.so` (LGPL), with `c++_shared` for both. 16 KB
+  page alignment, NDK r28+ (M0 uses NDK 30, which aligns by default). Checked in M0: on byte-identical PCM the
+  Android build gives the same raw fingerprint as the desktop fpcalc 1.6.2, bit for bit, on four recordings of
+  different formats and sample rates.
 - Lookup: gzip-compressed form POST to `https://api.acoustid.org/v2/lookup` with
   `client=<app key>`, `duration=<exact duration (§3.1) rounded to the nearest second, as an integer string>`,
   `fingerprint=<compressed>`, `meta=recordings releasegroups releases tracks isrcs compress` (**space-separated**: a
@@ -1010,10 +1014,10 @@ trash dialog joins the checklist in v1.x.
 
 | # | Decision | Status |
 |---|----------|--------|
-| D1 | PiPlayer license | **Decided 2026-10-18: GPL-3.0-or-later.** TagLib is taken under its LGPL-2.1 option (its MPL-1.1 option is GPL-incompatible); Chromaprint and the native libraries ship as separate `.so`. Donations go through an external link, so no proprietary billing library is linked |
+| D1 | PiPlayer license | **Decided 2026-10-18: GPL-3.0-or-later.** TagLib is taken under its LGPL-2.1 option (its MPL-1.1 option is GPL-incompatible); it ships unmodified as the separate shared library `libtag.so`, while Chromaprint (MIT) and its KissFFT (BSD-3) are linked statically into PiPlayer's JNI library; the licence texts ship in the app. Donations go through an external link, so no proprietary billing library is linked |
 | D2 | Monetization (donations?) | **Decided 2026-10-18: donations only through an external link, no in-app payments and no Google Play Billing.** The app stays free with no ads or paid features; mention this when contacting AcoustID and MetaBrainz. Before the Play release (M5), check that Google Play's payments policy allows the donation link in the Play build |
 | D3 | minSdk | **Decided 2026-10-18: minSdk 30**, designed to be lowered to 26 later (see §7.4), but only once the folder-grant write implementation exists (v1.x). minSdk can only be lowered painlessly; raising it strands users |
-| D4 | Tag engine | **Decided 2026-10-18:** own thin JNI over TagLib 2.3.2 with partial updates, ID3v2 version control and picture writing (§7.5), with an existing open-source Kotlin binding of TagLib as the reference for fd ownership and native error handling; built and checked in the M0 native spike, which confirms or revises this decision |
+| D4 | Tag engine | **Decided 2026-10-18:** own thin JNI over TagLib 2.3.2 with partial updates, ID3v2 version control and picture writing (§7.5), with an existing open-source Kotlin binding of TagLib as the reference for fd ownership and native error handling; built and checked in the M0 native spike, which confirms or revises this decision. **Confirmed in M0:** TagLib reads every fixture format through a read-only stream over the caller's file descriptor, which it never closes (on Android 11+ closing a descriptor owned by a `ParcelFileDescriptor` aborts the process) |
 | D5 | Fingerprint data | **Decided 2026-10-18:** nothing is submitted in 1.0; an optional "contribute to AcoustID" with the user's own user key comes later |
 | D6 | Database files | **Decided 2026-10-18:** two files, `library.db` (rebuildable, excluded from backup) and `user.db` (backed up whole), fixed before the M2a schema (§10) |
 | D7 | Tag writing path in 1.0 | **Decided 2026-10-18:** MediaStore write requests only, one consent per apply where the platform accepts the whole selection, otherwise as few as possible (§8); the write-access interface exists from day one, its folder-grant implementation follows in v1.x (§7.3, §7.4) |

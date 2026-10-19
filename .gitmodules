@@ -1,0 +1,6 @@
+[submodule "third_party/taglib"]
+	path = third_party/taglib
+	url = https://github.com/taglib/taglib.git
+[submodule "third_party/chromaprint"]
+	path = third_party/chromaprint
+	url = https://github.com/acoustid/chromaprint.git
