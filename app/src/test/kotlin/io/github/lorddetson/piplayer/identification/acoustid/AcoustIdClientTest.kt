@@ -12,11 +12,13 @@ import kotlin.coroutines.CoroutineContext
 import kotlin.random.Random
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Runnable
 import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.testTimeSource
 import mockwebserver3.MockResponse
@@ -180,6 +182,24 @@ class AcoustIdClientTest {
         server.enqueue(ok())
         client().lookup(fingerprint, 214_400)
         assertThat(testScheduler.currentTime).isGreaterThanOrEqualTo(7_000)
+    }
+
+    @Test
+    fun `after giving up on a long Retry-After, later lookups fail at once until the pause is over`() = runTest {
+        server.enqueue(MockResponse.Builder().code(503).addHeader("Retry-After", "300").build())
+        server.enqueue(ok())
+        val client = client()
+        val first = runCatching { client.lookup(fingerprint, 214_400) }.exceptionOrNull()
+        assertThat(first).isInstanceOf(AcoustIdException.Unavailable::class.java)
+
+        val second = runCatching { client.lookup(fingerprint, 214_400) }.exceptionOrNull()
+        assertThat(second).isInstanceOf(AcoustIdException.Paused::class.java)
+        assertThat(second!!.message).contains("300 s").doesNotContain(key)
+        assertThat(server.requestCount).isEqualTo(1)
+
+        advanceTimeBy(300.seconds)
+        client.lookup(fingerprint, 214_400)
+        assertThat(server.requestCount).isEqualTo(2)
     }
 
     @Test

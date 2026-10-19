@@ -5,8 +5,10 @@ import io.github.lorddetson.piplayer.net.RateLimiter
 import io.github.lorddetson.piplayer.net.RetryAfter
 import io.github.lorddetson.piplayer.net.RetryPolicy
 import io.github.lorddetson.piplayer.net.RetryingCaller
+import io.github.lorddetson.piplayer.net.wholeSecondsUp
 import java.io.IOException
 import java.time.Clock
+import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
@@ -32,6 +34,10 @@ sealed class AcoustIdException(message: String, cause: Throwable? = null) : IOEx
     /** The service stayed busy or unreachable through every retry. */
     class Unavailable(val attempts: Int, cause: Throwable?) :
         AcoustIdException("AcoustID unavailable after $attempts attempts", cause)
+
+    /** The service asked to wait longer than a call waits; no request was sent. */
+    class Paused(val remaining: Duration) :
+        AcoustIdException("AcoustID asked to wait another ${remaining.wholeSecondsUp()} s; no request was sent")
 
     /** An error answer in AcoustID's own format that a retry would not change, such as an invalid fingerprint (3). */
     class Service(val code: Int, val httpCode: Int, message: String) :
@@ -86,6 +92,7 @@ class AcoustIdClient(
         return caller.execute(
             request = request,
             giveUp = { attempts, cause -> AcoustIdException.Unavailable(attempts, cause) },
+            paused = { remaining -> AcoustIdException.Paused(remaining) },
             handle = ::classify,
         )
     }

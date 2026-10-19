@@ -24,8 +24,10 @@ sealed interface CallOutcome<out T> {
 /**
  * Sends the requests of one service through the [limiter] of its host and retries busy answers and network errors as
  * [retryPolicy] allows (TI §9). Every wait is a pause of the shared limiter, so it holds back every caller and not
- * only the one that was turned away; that holds when the client gives up too, for at most [maxGiveUpPause]. Answers
- * are read on [ioDispatcher], so a client can be called from any thread.
+ * only the one that was turned away; that holds when the client gives up too, for at most [maxGiveUpPause]. A call
+ * that would have to wait longer than a retry ever waits (the policy's `longestWait`: a Retry-After of up to 120 s
+ * plus its jitter) sends nothing and fails at once with the error from `paused`; the pause stays for everyone. Answers are read on
+ * [ioDispatcher], so a client can be called from any thread.
  */
 class RetryingCaller(
     private val http: OkHttpClient,
@@ -37,17 +39,23 @@ class RetryingCaller(
 
     /**
      * Sends [request] until [handle] makes a success or a failure of an answer; a network error counts as busy. When
-     * no retry is left, the error from [giveUp] is thrown.
+     * no retry is left, the error from [giveUp] is thrown; when the limiter is paused for too long, the one from
+     * [paused].
      */
     suspend fun <T> execute(
         request: Request,
         giveUp: (attempts: Int, cause: Throwable) -> IOException,
+        paused: (remaining: Duration) -> IOException,
         handle: (Response) -> CallOutcome<T>,
     ): T {
         var attempt = 0
         while (true) {
             attempt++
-            limiter.acquire()
+            try {
+                limiter.acquire(maxWait = retryPolicy.longestWait)
+            } catch (e: RateLimitPauseException) {
+                throw paused(e.remaining)
+            }
             val outcome = try {
                 http.newCall(request).await().use { response -> withContext(ioDispatcher) { handle(response) } }
             } catch (e: IOException) {

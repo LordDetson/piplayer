@@ -11,11 +11,13 @@ import kotlin.coroutines.CoroutineContext
 import kotlin.random.Random
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Runnable
 import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.testTimeSource
 import mockwebserver3.MockResponse
@@ -108,14 +110,32 @@ class MusicBrainzClientTest {
     }
 
     @Test
-    fun `giving up still holds back the next request for the server's Retry-After`() = runTest {
+    fun `after giving up on a long Retry-After, later calls fail at once until the pause is over`() = runTest {
         server.enqueue(MockResponse.Builder().code(503).addHeader("Retry-After", "300").build())
         server.enqueue(ok())
         val client = client()
-        val error = runCatching { client.searchRecordings(query, 25) }.exceptionOrNull()
-        assertThat(error).isInstanceOf(MusicBrainzException.Unavailable::class.java)
+        val first = runCatching { client.searchRecordings(query, 25) }.exceptionOrNull()
+        assertThat(first).isInstanceOf(MusicBrainzException.Unavailable::class.java)
+
+        // The pause is longer than any wait a retry takes (120 s), so the next call does not wait it out.
+        val second = runCatching { client.searchRecordings(query, 25) }.exceptionOrNull()
+        assertThat(second).isInstanceOf(MusicBrainzException.Paused::class.java)
+        assertThat(second!!.message).contains("300 s")
+        assertThat(server.requestCount).isEqualTo(1)
+        assertThat(testScheduler.currentTime).isLessThan(1_000)
+
+        advanceTimeBy(300.seconds)
         client.searchRecordings(query, 25)
-        assertThat(testScheduler.currentTime).isGreaterThanOrEqualTo(300_000)
+        assertThat(server.requestCount).isEqualTo(2)
+    }
+
+    @Test
+    fun `a Retry-After of 120 s is still waited for, with its jitter`() = runTest {
+        server.enqueue(MockResponse.Builder().code(503).addHeader("Retry-After", "120").build())
+        server.enqueue(ok())
+        val response = client().searchRecordings(query, 25)
+        assertThat(response.recordings).hasSize(2)
+        assertThat(testScheduler.currentTime).isGreaterThanOrEqualTo(120_000)
     }
 
     @Test

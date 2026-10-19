@@ -22,6 +22,9 @@ class RetryPolicy(
     private val random: Random = Random.Default,
 ) {
 
+    /** The longest wait before a retry: a Retry-After of [maxRetryAfter] plus its jitter, or the backoff cap. */
+    val longestWait: Duration get() = maxOf(maxDelay, maxRetryAfter + RETRY_AFTER_JITTER)
+
     /**
      * The wait before retry number [retry] (1 for the first retry), or null when no retry is left or the server asks
      * for a wait longer than [maxRetryAfter]. A Retry-After of zero is ignored.
@@ -32,7 +35,15 @@ class RetryPolicy(
         if (retryAfter != null && retryAfter > maxRetryAfter) return null
         val step = minOf(maxDelay, baseDelay * (1L shl minOf(retry - 1, 30)).toDouble())
         val jittered = step * (0.5 + 0.5 * random.nextDouble())
-        return if (retryAfter != null && retryAfter >= jittered) retryAfter + 1.seconds * random.nextDouble() else jittered
+        return if (retryAfter != null && retryAfter >= jittered) {
+            retryAfter + RETRY_AFTER_JITTER * random.nextDouble()
+        } else {
+            jittered
+        }
+    }
+
+    private companion object {
+        val RETRY_AFTER_JITTER = 1.seconds
     }
 }
 

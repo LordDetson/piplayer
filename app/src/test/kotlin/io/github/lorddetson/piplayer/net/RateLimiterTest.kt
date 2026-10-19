@@ -74,6 +74,44 @@ class RateLimiterTest {
     }
 
     @Test
+    fun `a caller that would wait longer than it allows fails at once, and the pause stays`() = runTest {
+        val limiter = limiter()
+        limiter.pause(300.seconds)
+
+        val error = runCatching { limiter.acquire(maxWait = 120.seconds) }.exceptionOrNull()
+
+        assertThat(error).isInstanceOf(RateLimitPauseException::class.java)
+        assertThat((error as RateLimitPauseException).remaining).isEqualTo(300.seconds)
+        assertThat(testScheduler.currentTime).isZero()
+        // Without a limit the next caller waits the pause out.
+        limiter.acquire()
+        assertThat(testScheduler.currentTime).isEqualTo(300_000)
+    }
+
+    @Test
+    fun `a caller already waiting fails when a long pause begins`() = runTest {
+        val limiter = limiter()
+        limiter.acquire()
+        var error: Throwable? = null
+        launch { error = runCatching { limiter.acquire(maxWait = 120.seconds) }.exceptionOrNull() }
+        runCurrent()
+
+        limiter.pause(300.seconds)
+        testScheduler.advanceUntilIdle()
+
+        assertThat(error).isInstanceOf(RateLimitPauseException::class.java)
+        assertThat(testScheduler.currentTime).isEqualTo(1_100)
+    }
+
+    @Test
+    fun `a wait within the limit is taken as usual`() = runTest {
+        val limiter = limiter()
+        limiter.pause(120.seconds)
+        limiter.acquire(maxWait = 120.seconds)
+        assertThat(testScheduler.currentTime).isEqualTo(120_000)
+    }
+
+    @Test
     fun `a pause shorter than the remaining interval does not shorten it`() = runTest {
         val limiter = limiter()
         limiter.acquire()

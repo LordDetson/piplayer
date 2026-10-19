@@ -5,8 +5,10 @@ import io.github.lorddetson.piplayer.net.RateLimiter
 import io.github.lorddetson.piplayer.net.RetryAfter
 import io.github.lorddetson.piplayer.net.RetryPolicy
 import io.github.lorddetson.piplayer.net.RetryingCaller
+import io.github.lorddetson.piplayer.net.wholeSecondsUp
 import java.io.IOException
 import java.time.Clock
+import kotlin.time.Duration
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import okhttp3.HttpUrl
@@ -24,6 +26,10 @@ sealed class MusicBrainzException(message: String, cause: Throwable? = null) : I
     /** The server stayed busy or unreachable through every retry. */
     class Unavailable(val attempts: Int, cause: Throwable?) :
         MusicBrainzException("MusicBrainz unavailable after $attempts attempts", cause)
+
+    /** The service asked to wait longer than a call waits; no request was sent. */
+    class Paused(val remaining: Duration) :
+        MusicBrainzException("MusicBrainz asked to wait another ${remaining.wholeSecondsUp()} s; no request was sent")
 
     /** Any other error status, which a retry would not change. */
     class Http(val code: Int) : MusicBrainzException("MusicBrainz answered HTTP $code")
@@ -58,6 +64,7 @@ class MusicBrainzClient(
     private suspend fun <T> get(url: HttpUrl, parse: (String) -> T): T = caller.execute(
         request = Request.Builder().url(url).get().build(),
         giveUp = { attempts, cause -> MusicBrainzException.Unavailable(attempts, cause) },
+        paused = { remaining -> MusicBrainzException.Paused(remaining) },
     ) { response -> classify(response, parse) }
 
     private fun <T> classify(response: Response, parse: (String) -> T): CallOutcome<T> {

@@ -806,7 +806,9 @@ Rules:
   retried with waits that double from 1 s up to 32 s, each taken at random between half and all of its step, and
   never sooner than the server's Retry-After (measured from the server's `Date` header; a Retry-After over 120 s ends
   the retries). Every wait is a pause of the shared limiter, so it holds back every caller, also when the client gives
-  up. A 403 that rejects the User-Agent stops the client. In M0 the limiter keeps its state in memory; persisting the
+  up (for at most 1 hour). A call that would have to wait longer than a retry ever waits (a Retry-After of 120 s plus
+  its jitter of up to 1 s) sends nothing and fails at once with how long the service asked to wait; this also ends a
+  call that was already waiting when such a pause began. A 403 that rejects the User-Agent stops the client. In M0 the limiter keeps its state in memory; persisting the
   last request time (§8) comes with batches (M4a).
 - Each provider sits behind a `MetadataProvider` interface with policy flags: `commercialAllowed`, `mayPersist`,
   `mayWriteToFile`, `maxDisplayAge`, `requiresSecret`, attribution text and per-item link, own rate limiter.
@@ -999,7 +1001,7 @@ tests, and a high-band error rate within the threshold of §11.4.
 | M3 | Recording scoring (§4.1): identifier tiers, duration credit, the 0.85 cap for text, both penalties, and a score of at least 0.90 with a runner-up gap below 0.10 landing in the medium band |
 | M3 | Release ranking on recorded MusicBrainz JSON fixtures (for example a track with hundreds of same-title recordings, video recordings and compilations): the folder preference, the full type order, Digital Media equal to CD, date order, a recording on two tracks of one release; fixtures stripped of CC BY-NC-SA `tags`/`genres` before committing |
 | M3 | Edition picker: every release of the group is listed; an edition without the identified recording maps the file by position and title or is marked "does not contain this song" |
-| M0 | Rate limiter: never exceeds the configured rate under parallel callers; a pause holds back waiting callers; backoff with jitter on 503, 429, 502 and 504; Retry-After honoured; a rejected User-Agent is not retried |
+| M0 | Rate limiter: never exceeds the configured rate under parallel callers; a pause holds back waiting callers; backoff with jitter on 503, 429, 502 and 504; Retry-After honoured; a rejected User-Agent is not retried; after giving up on a Retry-After over 120 s, later calls fail at once without a request until the pause is over |
 | M3 | Cover URLs: `http://` → `https://`; a release with a usable front image (`front-500`, `front-1200`, original); a release without one (release group images, marked as another edition); 404 after a redirect; failure TTLs (404: 7 days; 503: 5 minutes, doubling up to 6 hours) |
 | M3 | Cover size rule: a proposed cover whose short side is shorter than the existing cover's starts unticked |
 | M3 | Database-only undo: Apply followed by Undo restores the earlier merged values; stacked decisions (two identifications in a row, an edit on top of an identification) resolve as in §7.1; Undo right after Apply, Keep as-is and Skip; a later file change flags the field per location |
