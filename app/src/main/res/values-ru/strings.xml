@@ -1,5 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="main_placeholder">Здесь появится ваша музыкальная библиотека.</string>
     <string name="playback_channel_name">Воспроизведение</string>
+    <string name="songs_permission_explanation">PiPlayer нужен доступ к вашей музыке, чтобы показать и воспроизвести её.</string>
+    <string name="songs_allow_access">Разрешить доступ</string>
+    <string name="songs_denied_explanation">Доступ к музыке для PiPlayer выключен. Включите его в настройках приложения, чтобы увидеть песни.</string>
+    <string name="songs_open_settings">Открыть настройки</string>
+    <string name="songs_try_again">Попробовать снова</string>
+    <string name="songs_empty">На устройстве не найдено музыки.</string>
+    <string name="songs_unknown_artist">Неизвестный исполнитель</string>
+    <string name="songs_play">Воспроизвести</string>
+    <plurals name="playback_stopped_failures">
+        <item quantity="one">Воспроизведение остановлено: подряд не удалось воспроизвести %1$d песню.</item>
+        <item quantity="few">Воспроизведение остановлено: подряд не удалось воспроизвести %1$d песни.</item>
+        <item quantity="many">Воспроизведение остановлено: подряд не удалось воспроизвести %1$d песен.</item>
+        <item quantity="other">Воспроизведение остановлено: подряд не удалось воспроизвести %1$d песни.</item>
+    </plurals>
+    <string name="playback_stopped_device">Воспроизведение остановлено из-за сбоя на устройстве.</string>
 </resources>

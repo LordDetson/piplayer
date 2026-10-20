@@ -5,6 +5,8 @@ import android.net.Uri
 import android.os.ParcelFileDescriptor
 import android.os.Process
 import androidx.media3.common.MediaItem
+import androidx.media3.common.MediaMetadata
+import androidx.media3.common.Player
 import androidx.media3.session.MediaBrowser
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
@@ -62,9 +64,26 @@ object PlaybackTesting {
     }
 
     /** A controller connected to the playback service the way the app connects. */
-    fun connectController(): MediaController {
-        val future = onMain { MediaController.Builder(TestFiles.targetContext, token()).buildAsync() }
+    fun connectController(listener: MediaController.Listener? = null): MediaController {
+        val future = onMain {
+            MediaController.Builder(TestFiles.targetContext, token())
+                .apply { listener?.let(::setListener) }
+                .buildAsync()
+        }
         return future.get(10, TimeUnit.SECONDS)
+    }
+
+    /** The media item the song list sends for a tap (docs/playback.md §2.3). */
+    fun compactItem(request: QueueRequest, title: String? = null): MediaItem = MediaItem.Builder()
+        .setMediaId(request.mediaId)
+        .setMediaMetadata(MediaMetadata.Builder().setTitle(title).build())
+        .build()
+
+    /** Taps a song of the list. */
+    fun MediaController.tap(request: QueueRequest, title: String? = null) = onMain {
+        setMediaItem(compactItem(request, title))
+        prepare()
+        play()
     }
 
     /** A browser connected to the playback service's library. */
@@ -73,8 +92,13 @@ object PlaybackTesting {
         return future.get(10, TimeUnit.SECONDS)
     }
 
-    /** Stops playback, empties the queue and disconnects, so that the service can stop. */
+    /**
+     * Stops playback, empties the queue, leaves repeat and shuffle off and disconnects: the service's player outlives the
+     * test.
+     */
     fun MediaController.stopAndRelease() = onMain {
+        repeatMode = Player.REPEAT_MODE_OFF
+        shuffleModeEnabled = false
         stop()
         clearMediaItems()
         release()

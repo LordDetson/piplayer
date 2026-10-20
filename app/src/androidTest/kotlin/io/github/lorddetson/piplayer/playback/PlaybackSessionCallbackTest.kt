@@ -1,10 +1,13 @@
 package io.github.lorddetson.piplayer.playback
 
+import android.content.pm.PackageManager
 import android.os.Bundle
 import android.os.Process
 import androidx.annotation.OptIn
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaLibraryInfo
+import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
@@ -12,8 +15,11 @@ import androidx.media3.session.MediaController
 import androidx.media3.session.MediaLibraryService.MediaLibrarySession
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSession.ConnectionResult
+import androidx.media3.session.MediaSession.MediaItemsWithStartPosition
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.github.lorddetson.piplayer.TestFiles
+import io.github.lorddetson.piplayer.library.songs.AudioPermission
+import io.github.lorddetson.piplayer.library.songs.SongList
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.LONG_FIXTURE
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.fileItem
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.onMain
@@ -22,7 +28,9 @@ import java.util.concurrent.TimeUnit
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.After
+import org.junit.Assume.assumeTrue
 import org.junit.Before
+import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 
@@ -35,7 +43,10 @@ import org.junit.runner.RunWith
 class PlaybackSessionCallbackTest {
 
     private val context = TestFiles.targetContext
-    private val callback = PlaybackSessionCallback(context.packageName)
+    private val callback = PlaybackSessionCallback(context)
+
+    @get:Rule
+    val songs = SongSourceRule()
     private lateinit var session: MediaLibrarySession
 
     private val piPlayer = controller(context.packageName, Process.myUid(), trusted = true)
@@ -70,6 +81,7 @@ class PlaybackSessionCallbackTest {
         val player = session.player
         session.release()
         player.release()
+        callback.release()
     }
 
     @Test
@@ -86,7 +98,7 @@ class PlaybackSessionCallbackTest {
     }
 
     @Test
-    fun otherAppsControlPlaybackButCannotChangeHowThePlayerIsSetUp() {
+    fun otherAppsControlPlaybackButCannotChangeHowThePlayerIsSetUpOrReadTheQueue() {
         val result = onMain { callback.onConnect(session, otherApp) }
 
         assertThat(result.isAccepted).isTrue()
@@ -95,9 +107,13 @@ class PlaybackSessionCallbackTest {
         for (command in setupCommands) {
             assertThat(commands.contains(command)).describedAs("command $command").isFalse()
         }
+        // The queue is the user's music library: an app without access to music does not get to read it.
+        assertThat(commands.contains(Player.COMMAND_GET_TIMELINE)).isFalse()
         val playbackCommands = ConnectionResult.DEFAULT_PLAYER_COMMANDS.buildUpon().removeAll(*setupCommands.toIntArray())
+            .remove(Player.COMMAND_GET_TIMELINE)
             .build()
         assertThat(commands).isEqualTo(playbackCommands)
+        assertThat(commands.contains(Player.COMMAND_GET_CURRENT_MEDIA_ITEM)).isTrue()
         val control = listOf(
             Player.COMMAND_PLAY_PAUSE, Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM, Player.COMMAND_SEEK_TO_NEXT,
             Player.COMMAND_SET_DEVICE_VOLUME_WITH_FLAGS,
@@ -148,6 +164,172 @@ class PlaybackSessionCallbackTest {
             assertThatThrownBy { added.get(5, TimeUnit.SECONDS) }.describedAs(controller.packageName)
                 .hasCauseInstanceOf(UnsupportedOperationException::class.java)
         }
+    }
+
+    @Test
+    fun theNotificationsControllerGetsEveryCommandButTheQueue() {
+        val result = onMain { callback.onConnect(session, notification) }
+
+        assertThat(result.isAccepted).isTrue()
+        val commands = result.availablePlayerCommands
+        assertThat(commands.contains(Player.COMMAND_GET_TIMELINE)).isFalse()
+        assertThat(commands).isEqualTo(
+            ConnectionResult.DEFAULT_PLAYER_COMMANDS.buildUpon().remove(Player.COMMAND_GET_TIMELINE).build(),
+        )
+    }
+
+    @Test
+    fun aCompactRequestExpandsIntoTheWholeListFromTheTappedSong() {
+        songs.songs = listOf(
+            SongSourceRule.song(30, "Charlie"), SongSourceRule.song(10, "alpha"), SongSourceRule.song(20, "Bravo"),
+        )
+        val request = QueueRequest(startSongId = 20, startRow = 1)
+
+        val result = setItems(piPlayer, request)
+
+        assertThat(result.mediaItems.map { it.mediaId }).containsExactly("10", "20", "30")
+        assertThat(result.startIndex).isEqualTo(1)
+        assertThat(result.startPositionMs).isEqualTo(C.TIME_UNSET)
+        val bravo = result.mediaItems[1]
+        val song = songs.songs.single { it.id == 20L }
+        assertThat(bravo.localConfiguration?.uri.toString()).isEqualTo(song.uri)
+        assertThat(bravo.mediaMetadata.title.toString()).isEqualTo("Bravo")
+        assertThat(bravo.mediaMetadata.artist.toString()).isEqualTo(song.artist)
+        assertThat(bravo.mediaMetadata.albumTitle.toString()).isEqualTo(song.album)
+        assertThat(bravo.mediaMetadata.durationMs).isEqualTo(song.durationMs)
+        assertThat(bravo.mediaMetadata.mediaType).isEqualTo(MediaMetadata.MEDIA_TYPE_MUSIC)
+        assertThat(bravo.mediaMetadata.isPlayable).isTrue()
+        // Nothing for other apps to read from the published items beyond what the notification shows.
+        assertThat(bravo.requestMetadata).isEqualTo(MediaItem.RequestMetadata.EMPTY)
+    }
+
+    @Test
+    fun aTappedSongThatIsGoneLeavesTheQueueStartingAtItsRow() {
+        songs.songs = listOf(SongSourceRule.song(1, "A"), SongSourceRule.song(2, "B"), SongSourceRule.song(3, "C"))
+
+        val result = setItems(piPlayer, QueueRequest(startSongId = 99, startRow = 2))
+
+        assertThat(result.mediaItems).hasSize(3)
+        assertThat(result.startIndex).isEqualTo(2)
+    }
+
+    @Test
+    fun theSystemMayAskForTheList() {
+        songs.songs = listOf(SongSourceRule.song(1, "A"), SongSourceRule.song(2, "B"))
+
+        val result = setItems(systemUi, QueueRequest(startSongId = 2, startRow = 1))
+
+        assertThat(result.mediaItems.map { it.mediaId }).containsExactly("1", "2")
+        assertThat(result.startIndex).isEqualTo(1)
+    }
+
+    @Test
+    fun appsWithoutAccessToMusicCannotAskForTheList() {
+        songs.songs = listOf(SongSourceRule.song(1, "A"), SongSourceRule.song(2, "B"))
+        val request = MediaItem.Builder().setMediaId(QueueRequest(startSongId = 2, startRow = 1).mediaId).build()
+
+        // Media3 hands the notification's controller in place of one that says it is the system UI.
+        for (controller in listOf(otherApp, notification)) {
+            val result = onMain { callback.onSetMediaItems(session, controller, listOf(request), C.INDEX_UNSET, 0) }
+
+            assertThatThrownBy { result.get(5, TimeUnit.SECONDS) }.describedAs(controller.toString())
+                .hasCauseInstanceOf(UnsupportedOperationException::class.java)
+        }
+        assertThat(songs.reads).isZero()
+    }
+
+    @Test
+    fun anAppThatMayReadMusicItselfMayAskForTheList() {
+        val shell = controller("com.android.shell", Process.SHELL_UID, trusted = false)
+        assumeTrue(
+            "the shell may read music here",
+            context.checkPermission(AudioPermission.name, -1, Process.SHELL_UID) == PackageManager.PERMISSION_GRANTED,
+        )
+        songs.songs = listOf(SongSourceRule.song(1, "A"), SongSourceRule.song(2, "B"))
+
+        assertThat(onMain { callback.onConnect(session, shell) }.availablePlayerCommands
+            .contains(Player.COMMAND_GET_TIMELINE)).isTrue()
+        assertThat(setItems(shell, QueueRequest(startSongId = 2, startRow = 1)).mediaItems).hasSize(2)
+    }
+
+    @Test
+    fun theNameOfAnAppThatMayReadMusicIsNotEnough() {
+        // The permission belongs to the caller's uid; a package name can be claimed by anyone.
+        val impostor = controller("com.android.shell", Process.myUid() + 1, trusted = false)
+        songs.songs = listOf(SongSourceRule.song(1, "A"))
+        val request = MediaItem.Builder().setMediaId(QueueRequest(startSongId = 1, startRow = 0).mediaId).build()
+
+        assertThat(onMain { callback.onConnect(session, impostor) }.availablePlayerCommands
+            .contains(Player.COMMAND_GET_TIMELINE)).isFalse()
+        val result = onMain { callback.onSetMediaItems(session, impostor, listOf(request), C.INDEX_UNSET, 0) }
+        assertThatThrownBy { result.get(5, TimeUnit.SECONDS) }
+            .hasCauseInstanceOf(UnsupportedOperationException::class.java)
+    }
+
+    @Test
+    fun theListShownOnScreenIsNotReadAgainForATap() {
+        songs.songs = listOf(SongSourceRule.song(1, "A"), SongSourceRule.song(2, "B"))
+        SongList.load(context)
+        val before = songs.reads
+
+        setItems(piPlayer, QueueRequest(startSongId = 2, startRow = 1))
+
+        assertThat(songs.reads).isEqualTo(before)
+    }
+
+    @Test
+    fun aTappedSongMissingFromTheListMakesItReadAgain() {
+        songs.songs = listOf(SongSourceRule.song(1, "A"))
+        SongList.load(context)
+        songs.songs = listOf(SongSourceRule.song(1, "A"), SongSourceRule.song(2, "B"))
+        val before = songs.reads
+
+        val result = setItems(piPlayer, QueueRequest(startSongId = 2, startRow = 1))
+
+        assertThat(songs.reads).isEqualTo(before + 1)
+        assertThat(result.mediaItems.map { it.mediaId }).containsExactly("1", "2")
+        assertThat(result.startIndex).isEqualTo(1)
+    }
+
+    @Test
+    fun aListThatCannotBeReadIsRefused() {
+        songs.failure = SecurityException("No access to music")
+        val request = MediaItem.Builder().setMediaId(QueueRequest(startSongId = 1, startRow = 0).mediaId).build()
+
+        val result = onMain { callback.onSetMediaItems(session, piPlayer, listOf(request), C.INDEX_UNSET, 0) }
+
+        assertThatThrownBy { result.get(5, TimeUnit.SECONDS) }.hasCauseInstanceOf(SecurityException::class.java)
+    }
+
+    @Test
+    fun anEmptyListCannotBePlayed() {
+        songs.songs = emptyList()
+        val request = MediaItem.Builder().setMediaId(QueueRequest(startSongId = 1, startRow = 0).mediaId).build()
+
+        val result = onMain { callback.onSetMediaItems(session, piPlayer, listOf(request), C.INDEX_UNSET, C.TIME_UNSET) }
+
+        assertThatThrownBy { result.get(5, TimeUnit.SECONDS) }.isInstanceOf(ExecutionException::class.java)
+            .hasCauseInstanceOf(UnsupportedOperationException::class.java)
+    }
+
+    @Test
+    fun setRequestsWithFilesFollowTheSameRulesAsAdds() {
+        val items = listOf(fileItem(LONG_FIXTURE))
+
+        val fromPiPlayer = onMain { callback.onSetMediaItems(session, piPlayer, items, 0, 0) }.get(5, TimeUnit.SECONDS)
+        assertThat(fromPiPlayer.mediaItems).isEqualTo(items)
+
+        for (controller in listOf(otherApp, notification)) {
+            val set = onMain { callback.onSetMediaItems(session, controller, items, 0, 0) }
+            assertThatThrownBy { set.get(5, TimeUnit.SECONDS) }.describedAs(controller.toString())
+                .hasCauseInstanceOf(UnsupportedOperationException::class.java)
+        }
+    }
+
+    private fun setItems(controller: MediaSession.ControllerInfo, request: QueueRequest): MediaItemsWithStartPosition {
+        val item = MediaItem.Builder().setMediaId(request.mediaId).build()
+        return onMain { callback.onSetMediaItems(session, controller, listOf(item), C.INDEX_UNSET, C.TIME_UNSET) }
+            .get(10, TimeUnit.SECONDS)
     }
 
     private fun controller(packageName: String, uid: Int, trusted: Boolean, hints: Bundle = Bundle.EMPTY) =

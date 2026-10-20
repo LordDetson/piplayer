@@ -1,7 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name" translatable="false">PiPlayer</string>
-    <string name="main_placeholder">Your music library will appear here.</string>
     <!-- The name of the media notification's channel in the system settings. -->
     <string name="playback_channel_name">Playback</string>
+    <string name="songs_permission_explanation">PiPlayer needs access to your music to list and play it.</string>
+    <string name="songs_allow_access">Allow access</string>
+    <string name="songs_denied_explanation">Access to music is turned off for PiPlayer. Turn it on in the app\'s settings to list your songs.</string>
+    <string name="songs_open_settings">Open settings</string>
+    <string name="songs_try_again">Try again</string>
+    <string name="songs_empty">No music found on this device.</string>
+    <string name="songs_unknown_artist">Unknown artist</string>
+    <!-- What tapping a song does, for accessibility services. -->
+    <string name="songs_play">Play</string>
+    <!-- Shown when the queue stops because songs could not be played (docs/playback.md §2.4). -->
+    <plurals name="playback_stopped_failures">
+        <item quantity="one">Playback stopped: %1$d song in a row could not be played.</item>
+        <item quantity="other">Playback stopped: %1$d songs in a row could not be played.</item>
+    </plurals>
+    <string name="playback_stopped_device">Playback stopped because of a problem with the device.</string>
 </resources>

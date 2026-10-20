@@ -3,6 +3,8 @@
 Containers the decoding fixtures do not cover, each a 2 s tone of 1 kHz: raw AAC (ADTS), AMR narrowband and
 wideband (raw and in 3GP), Opus in WebM and Vorbis in Matroska. They must play to the end.
 
+A tagged MP3 (title, artist and album in ID3v2.3, Cyrillic included) for the media index tests.
+
 Seek fixtures: 12 one-second segments, segment k a tone of 400 + 100 * k Hz at half scale, and white noise added to
 the last 6, so that a variable-bitrate encoder spends about three times more bits on the second half. A seek to the
 middle of segment k must play that tone. MP3 comes three ways: variable bitrate with a Xing header and its table of
@@ -65,6 +67,15 @@ def encode_tone(target, rate, layout, encoder):
     ffmpeg(["-f", "lavfi", "-i", tone, *common_output_arguments(rate), *encoder, str(target)])
 
 
+def encode_tagged(target):
+    """A 2 s tone of 1 kHz with ID3v2.3 tags."""
+    tone = "aevalsrc=exprs='0.5*sin(2*PI*1000*t)|0.5*sin(2*PI*1000*t)':channel_layout=stereo:sample_rate=44100:duration=2"
+    ffmpeg(["-f", "lavfi", "-i", tone, "-ar", "44100", "-map_metadata", "-1", "-fflags", "+bitexact",
+            "-flags:a", "+bitexact", "-c:a", "libmp3lame", "-b:a", "128k", "-id3v2_version", "3",
+            "-metadata", "title=Ёжик в тумане", "-metadata", "artist=PiPlayer Fixtures", "-metadata", "album=Тесты",
+            "-f", "mp3", str(target)])
+
+
 def encode_segments(target, rate, layout, encoder):
     """The seek signal: one tone per second, noise over the second half."""
     tones = "+".join(
@@ -114,6 +125,7 @@ def main():
     for name, rate, layout, encoder in SEEK_FIXTURES:
         encode_segments(OUT / name, rate, layout, encoder)
     remove_xing_table(OUT / "seek-mp3-vbr-xing.mp3", OUT / "seek-mp3-vbr-xing-without-toc.mp3")
+    encode_tagged(OUT / "tagged-44100-stereo.mp3")
     for path in sorted(OUT.iterdir()):
         print(f"{path.name}: {path.stat().st_size} bytes")
 

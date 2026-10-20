@@ -5,8 +5,10 @@ import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.exoplayer.source.MediaSource
+import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import androidx.media3.extractor.DefaultExtractorsFactory
 import androidx.media3.extractor.ExtractorsFactory
 import androidx.media3.extractor.mp3.Mp3Extractor
@@ -16,13 +18,20 @@ import androidx.media3.extractor.mp3.Mp3Extractor
 object PlaybackPlayer {
 
     fun builder(context: Context): ExoPlayer.Builder =
-        ExoPlayer.Builder(context, PlaybackRenderers(context), DefaultMediaSourceFactory(context, extractors()))
+        ExoPlayer.Builder(context, PlaybackRenderers(context), mediaSources(context))
             .setAudioAttributes(
                 AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MUSIC).build(),
                 /* handleAudioFocus= */ true,
             )
             .setHandleAudioBecomingNoisy(true)
             .setWakeMode(C.WAKE_MODE_LOCAL)
+
+    /**
+     * Every item is a local file, so each goes straight to a progressive source: the default factory would first work
+     * out the kind of stream of each of up to 20 000 items on the main thread (docs/playback.md §2.3).
+     */
+    internal fun mediaSources(context: Context): MediaSource.Factory =
+        ProgressiveMediaSource.Factory(DefaultDataSource.Factory(context), extractors())
 
     /**
      * Raw AAC seeks by its average frame size and raw AMR in one mode by the size of its first frame; both need the

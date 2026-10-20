@@ -1,25 +1,22 @@
 package io.github.lorddetson.piplayer.debug
 
 import android.app.Application
-import android.content.ComponentName
 import android.content.Intent
 import android.net.Uri
 import android.provider.OpenableColumns
-import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
-import androidx.media3.session.SessionToken
-import io.github.lorddetson.piplayer.playback.PlaybackService
+import io.github.lorddetson.piplayer.playback.PlaybackConnection
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 /**
  * Debug builds (M1 step 1): plays a picked file through the playback service with a controller, the way the app will
- * (docs/playback.md §1.6). Goes away when the song list arrives.
+ * (docs/playback.md §1.6). Stays until open-with arrives (M1 step 5).
  */
 class DebugPlaybackViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -34,10 +31,7 @@ class DebugPlaybackViewModel(application: Application) : AndroidViewModel(applic
         override fun onEvents(player: Player, events: Player.Events) = update(player)
     }
 
-    private val controllerFuture = MediaController.Builder(
-        application,
-        SessionToken(application, ComponentName(application, PlaybackService::class.java)),
-    ).buildAsync()
+    private val connection = PlaybackConnection(application)
 
     init {
         whenConnected {
@@ -77,16 +71,10 @@ class DebugPlaybackViewModel(application: Application) : AndroidViewModel(applic
     }
 
     override fun onCleared() {
-        MediaController.releaseFuture(controllerFuture)
+        connection.release()
     }
 
-    /** Runs [block] on the main thread once the controller is connected; drops it if the connection failed. */
-    private fun whenConnected(block: MediaController.() -> Unit) {
-        controllerFuture.addListener(
-            { runCatching { controllerFuture.get() }.getOrNull()?.block() },
-            ContextCompat.getMainExecutor(getApplication()),
-        )
-    }
+    private fun whenConnected(block: MediaController.() -> Unit) = connection.whenConnected(block)
 
     private fun update(player: Player) {
         val error = player.playerError
