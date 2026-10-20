@@ -25,6 +25,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.lorddetson.piplayer.R
 import io.github.lorddetson.piplayer.library.songs.Song
+import io.github.lorddetson.piplayer.ui.formatDuration
 
 /** What the song list shows (docs/playback.md §2.1, §2.2). */
 sealed interface SongsState {
@@ -109,12 +110,4 @@ private fun SongRow(song: Song, onClick: () -> Unit) {
             onClick = onClick,
         ),
     )
-}
-
-/** m:ss, or h:mm:ss from an hour on; "--:--" when the length is unknown. */
-internal fun formatDuration(durationMs: Long?): String {
-    if (durationMs == null) return "--:--"
-    val seconds = durationMs / 1000
-    val (hours, minutes, rest) = Triple(seconds / 3600, seconds / 60 % 60, seconds % 60)
-    return if (hours > 0) "%d:%02d:%02d".format(hours, minutes, rest) else "%d:%02d".format(minutes, rest)
 }

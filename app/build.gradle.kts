@@ -121,6 +121,9 @@ dependencies {
     implementation(libs.media3.inspector)
     implementation(libs.media3.exoplayer)
     implementation(libs.media3.session)
+    implementation(libs.media3.ui.compose)
+    implementation(libs.androidx.navigation3.runtime)
+    implementation(libs.androidx.navigation3.ui)
 
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)

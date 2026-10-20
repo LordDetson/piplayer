@@ -5,6 +5,11 @@ wideband (raw and in 3GP), Opus in WebM and Vorbis in Matroska. They must play t
 
 A tagged MP3 (title, artist and album in ID3v2.3, Cyrillic included) for the media index tests.
 
+Cover fixtures, each a 2 s tone of 1 kHz with an embedded picture (docs/playback.md §3.4): a 64x64 front cover of one
+color (0x3D5AFE) as an ID3 APIC frame in MP3, a PICTURE block in FLAC, a METADATA_BLOCK_PICTURE comment in Ogg Vorbis
+and Opus (the Ogg muxer takes no picture streams, so the block is built here) and covr in MP4; and two files with a 32x32
+back cover (0xFF0000) as well, before and after the front one, where the front cover must win.
+
 Seek fixtures: 12 one-second segments, segment k a tone of 400 + 100 * k Hz at half scale, and white noise added to
 the last 6, so that a variable-bitrate encoder spends about three times more bits on the second half. A seek to the
 middle of segment k must play that tone. MP3 comes three ways: variable bitrate with a Xing header and its table of
@@ -17,8 +22,10 @@ the tests (app/src/androidTest/.../playback/); keep them in step.
 
 Run from the repository root: python scripts/generate_playback_fixtures.py
 """
+import base64
 import pathlib
 import shutil
+import struct
 import subprocess
 import sys
 
@@ -44,6 +51,25 @@ SEEK_FIXTURES = [
      ["-c:a", "libmp3lame", "-b:a", "128k", "-write_xing", "0", "-f", "mp3"]),
     ("seek-aac-adts.aac", 44100, "stereo", ["-c:a", "aac", "-b:a", "64k", "-f", "adts"]),
     ("seek-amr-nb.amr", 8000, "mono", ["-c:a", "libopencore_amrnb", "-b:a", "12.2k", "-f", "amr"]),
+]
+
+FRONT_COVER = ("0x3D5AFE", 64, 3, "Cover (front)")
+BACK_COVER = ("0xFF0000", 32, 4, "Cover (back)")
+
+# name, pictures in file order, encoder and muxer arguments; MP3, FLAC and MP4 take the pictures as attached streams.
+COVER_FIXTURES = [
+    ("cover-front.mp3", [FRONT_COVER], ["-c:a", "libmp3lame", "-b:a", "128k", "-id3v2_version", "3", "-f", "mp3"]),
+    ("cover-front.flac", [FRONT_COVER], ["-c:a", "flac", "-f", "flac"]),
+    ("cover-front.m4a", [FRONT_COVER], ["-c:a", "aac", "-b:a", "128k", "-f", "ipod"]),
+    ("cover-back-then-front.mp3", [BACK_COVER, FRONT_COVER],
+     ["-c:a", "libmp3lame", "-b:a", "128k", "-id3v2_version", "3", "-f", "mp3"]),
+    ("cover-front-then-back.flac", [FRONT_COVER, BACK_COVER], ["-c:a", "flac", "-f", "flac"]),
+]
+
+# name, encoder and muxer arguments; the front cover goes into a METADATA_BLOCK_PICTURE comment.
+OGG_COVER_FIXTURES = [
+    ("cover-front.opus", ["-c:a", "libopus", "-b:a", "96k", "-f", "opus"]),
+    ("cover-front.ogg", ["-c:a", "libvorbis", "-q:a", "4", "-f", "ogg"]),
 ]
 
 MP3_BITRATES_KBPS = [0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320]
@@ -89,6 +115,52 @@ def encode_segments(target, rate, layout, encoder):
             *common_output_arguments(rate), *encoder, str(target)])
 
 
+def cover_png(directory, picture):
+    """A one-color square PNG for [picture], made in RGB so that no conversion from YUV rounds the color."""
+    color, size, _, _ = picture
+    target = directory / f"{color}-{size}.png"
+    ffmpeg(["-f", "lavfi", "-i", f"color=c={color}:s={size}x{size},format=rgb24", "-frames:v", "1",
+            "-fflags", "+bitexact", "-flags:v", "+bitexact", str(target)])
+    return target
+
+
+def tone_input():
+    return ["-f", "lavfi", "-i",
+            "aevalsrc=exprs='0.5*sin(2*PI*1000*t)|0.5*sin(2*PI*1000*t)':channel_layout=stereo:sample_rate=44100:duration=2"]
+
+
+def encode_with_pictures(target, pictures, encoder, directory):
+    """A 2 s tone with [pictures] attached as cover streams, each with its picture type."""
+    arguments = tone_input()
+    for picture in pictures:
+        arguments += ["-i", str(cover_png(directory, picture))]
+    arguments += ["-map", "0:a"]
+    for index in range(len(pictures)):
+        arguments += ["-map", f"{index + 1}:v"]
+    arguments += ["-c:v", "copy", "-disposition:v", "attached_pic"]
+    for index, (_, _, _, comment) in enumerate(pictures):
+        arguments += [f"-metadata:s:v:{index}", f"comment={comment}"]
+    arguments += ["-map_metadata", "-1", "-fflags", "+bitexact", "-flags:a", "+bitexact", *encoder, str(target)]
+    ffmpeg(arguments)
+
+
+def flac_picture_block(png, picture):
+    """The body of a FLAC PICTURE block for [png], as METADATA_BLOCK_PICTURE carries it."""
+    _, size, picture_type, _ = picture
+    data = png.read_bytes()
+    mime = b"image/png"
+    return (struct.pack(">II", picture_type, len(mime)) + mime + struct.pack(">I", 0)
+            + struct.pack(">IIIII", size, size, 24, 0, len(data)) + data)
+
+
+def encode_ogg_with_cover(target, encoder, directory):
+    """A 2 s tone with the front cover in a METADATA_BLOCK_PICTURE comment."""
+    block = flac_picture_block(cover_png(directory, FRONT_COVER), FRONT_COVER)
+    ffmpeg([*tone_input(), "-map_metadata", "-1", "-metadata",
+            "METADATA_BLOCK_PICTURE=" + base64.b64encode(block).decode("ascii"), "-fflags", "+bitexact",
+            "-flags:a", "+bitexact", *encoder, str(target)])
+
+
 def mp3_frame_size(header):
     """The size of an MPEG-1 Layer III frame from its 4-byte header."""
     if header[0] != 0xFF or header[1] & 0xFE != 0xFA:
@@ -126,6 +198,15 @@ def main():
         encode_segments(OUT / name, rate, layout, encoder)
     remove_xing_table(OUT / "seek-mp3-vbr-xing.mp3", OUT / "seek-mp3-vbr-xing-without-toc.mp3")
     encode_tagged(OUT / "tagged-44100-stereo.mp3")
+    pictures = OUT / "pictures"
+    pictures.mkdir(exist_ok=True)
+    try:
+        for name, cover, encoder in COVER_FIXTURES:
+            encode_with_pictures(OUT / name, cover, encoder, pictures)
+        for name, encoder in OGG_COVER_FIXTURES:
+            encode_ogg_with_cover(OUT / name, encoder, pictures)
+    finally:
+        shutil.rmtree(pictures)
     for path in sorted(OUT.iterdir()):
         print(f"{path.name}: {path.stat().st_size} bytes")
 

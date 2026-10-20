@@ -16,4 +16,37 @@
         <item quantity="other">Воспроизведение остановлено: подряд не удалось воспроизвести %1$d песни.</item>
     </plurals>
     <string name="playback_stopped_device">Воспроизведение остановлено из-за сбоя на устройстве.</string>
+    <string name="playback_shuffle_on">Перемешивание вкл.</string>
+    <string name="playback_shuffle_off">Перемешивание выкл.</string>
+    <string name="playback_repeat_off">Повтор выкл.</string>
+    <string name="playback_repeat_all">Повтор всех</string>
+    <string name="playback_repeat_one">Повтор одной</string>
+
+    <string name="player_now_playing">Сейчас играет</string>
+    <string name="player_open_now_playing">Открыть «Сейчас играет»</string>
+    <string name="player_close_now_playing">Закрыть «Сейчас играет»</string>
+    <string name="player_play">Воспроизвести</string>
+    <string name="player_pause">Пауза</string>
+    <string name="player_previous">Предыдущая</string>
+    <string name="player_next">Следующая</string>
+    <string name="player_shuffle">Перемешивание</string>
+    <string name="player_repeat">Повтор</string>
+    <string name="player_change_repeat_mode">Сменить режим повтора</string>
+    <string name="player_state_on">Вкл.</string>
+    <string name="player_state_off">Выкл.</string>
+    <string name="player_repeat_state_all">Все</string>
+    <string name="player_repeat_state_one">Одна</string>
+    <string name="player_position">Позиция воспроизведения</string>
+    <string name="player_position_state">%1$s из %2$s</string>
+    <string name="format_bits">%1$d бит</string>
+    <string name="format_bits_float">%1$d бит float</string>
+    <string name="format_kbps">%1$d кбит/с</string>
+    <string name="format_khz">%1$s кГц</string>
+    <string name="format_mono">моно</string>
+    <plurals name="format_channels">
+        <item quantity="one">%1$d канал</item>
+        <item quantity="few">%1$d канала</item>
+        <item quantity="many">%1$d каналов</item>
+        <item quantity="other">%1$d канала</item>
+    </plurals>
 </resources>

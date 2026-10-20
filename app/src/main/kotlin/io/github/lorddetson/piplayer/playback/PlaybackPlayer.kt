@@ -17,6 +17,9 @@ import androidx.media3.extractor.mp3.Mp3Extractor
 @OptIn(UnstableApi::class)
 object PlaybackPlayer {
 
+    /** Previous goes back to the start of the song after this much of it, otherwise to the previous song (§3.6). */
+    const val MAX_SEEK_TO_PREVIOUS_MS = 3_000L
+
     fun builder(context: Context): ExoPlayer.Builder =
         ExoPlayer.Builder(context, PlaybackRenderers(context), mediaSources(context))
             .setAudioAttributes(
@@ -25,6 +28,7 @@ object PlaybackPlayer {
             )
             .setHandleAudioBecomingNoisy(true)
             .setWakeMode(C.WAKE_MODE_LOCAL)
+            .setMaxSeekToPreviousPositionMs(MAX_SEEK_TO_PREVIOUS_MS)
 
     /**
      * Every item is a local file, so each goes straight to a progressive source: the default factory would first work

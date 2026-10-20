@@ -10,14 +10,8 @@ import android.net.Uri
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.layout.Box
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.app.ActivityCompat
@@ -28,16 +22,21 @@ import androidx.lifecycle.compose.LifecycleStartEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.lorddetson.piplayer.library.songs.AudioPermission
+import io.github.lorddetson.piplayer.library.songs.Song
 
 /**
  * The song list with its permission handling (docs/playback.md §2.2): it asks only on a tap, checks again whenever it
- * resumes, and offers the app's settings once the system no longer shows its dialog.
+ * resumes, and offers the app's settings once the system no longer shows its dialog. A tap on a song goes to
+ * [onSongClick] with its row.
  */
 @Composable
-fun SongsScreen(modifier: Modifier = Modifier, viewModel: SongsViewModel = viewModel()) {
+fun SongsScreen(
+    onSongClick: (row: Int, song: Song) -> Unit,
+    modifier: Modifier = Modifier,
+    viewModel: SongsViewModel = viewModel(),
+) {
     val context = LocalContext.current
     val state by viewModel.state.collectAsStateWithLifecycle()
-    val snackbar = remember { SnackbarHostState() }
 
     val request = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         viewModel.onPermission(granted, context.deniedForGood(granted))
@@ -52,19 +51,14 @@ fun SongsScreen(modifier: Modifier = Modifier, viewModel: SongsViewModel = viewM
         viewModel.onPermission(granted, context.deniedForGood(granted))
         onPauseOrDispose { }
     }
-    LaunchedEffect(viewModel) {
-        viewModel.messages.collect { snackbar.showSnackbar(it) }
-    }
 
-    Box(modifier) {
-        SongsContent(
-            state = state,
-            onAllowAccess = { request.launch(AudioPermission.name) },
-            onOpenSettings = { context.openAppSettings() },
-            onSongClick = viewModel::play,
-        )
-        SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter))
-    }
+    SongsContent(
+        state = state,
+        onAllowAccess = { request.launch(AudioPermission.name) },
+        onOpenSettings = { context.openAppSettings() },
+        onSongClick = onSongClick,
+        modifier = modifier,
+    )
 }
 
 private const val PREFERENCES = "songs"

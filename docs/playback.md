@@ -238,3 +238,154 @@ Instrumented tests on the API 30, 36 and 37 emulators, the playback ones also on
 
 By hand on the phone: the first-use dialog, the list of the owner's own music, the notification and Bluetooth with a
 large queue, and a song from an SD card if there is one.
+
+## 3. Now Playing and mini player (M1 step 3)
+
+### 3.1 Screens
+
+- Two screens: the song list and Now Playing. While the queue holds a song, the list shows the mini player at its
+  bottom; tapping the mini player opens Now Playing over the whole window. Back (the system button, the back gesture,
+  or the collapse button at the top of Now Playing) returns to the list. Back on the list leaves the app with the
+  system's back-to-home animation: PiPlayer handles back only while Now Playing is open.
+- The screens are entries of a Navigation 3 back stack, which is kept across rotation and process death. Now Playing
+  slides up when it opens and down when it closes.
+- Predictive back: from Android 14 the back gesture moves Now Playing down with the finger and shows the list behind
+  it; letting go returns to the list, cancelling keeps Now Playing. The manifest opts in with
+  `enableOnBackInvokedCallback`, because targetSdk 36 makes predictive back the default only on Android 16. Android 13
+  delivers back only once the gesture ends, and Android 11 and 12 have classic back.
+- The song list is a screen of its own, so it reads the media index again each time Now Playing closes (§2.1); the
+  library of M2a keeps its own index.
+- Edge-to-edge: both screens draw behind the status and navigation bars and display cutouts. The list keeps its rows
+  clear of the bars; the mini player's background reaches the bottom edge of the window while its content sits above
+  the navigation bar. Now Playing keeps its content inside the safe drawing area, and the seek bar out of the side
+  areas where the system takes the back gesture.
+- One controller of the playback service serves the whole activity: the list, the mini player and Now Playing.
+  Messages of the playback service (§2.4) show as a snackbar on either screen.
+
+### 3.2 Mini player
+
+- A bar with the cover thumbnail, the title and the artist (one line each) and a play/pause button. A thin line along
+  its top edge shows how far the current song has played.
+- It shows while the queue holds a song, also when playback is paused or stopped by an error, and hides when the queue
+  is empty.
+- Tapping the bar opens Now Playing; play/pause is a control of its own.
+
+### 3.3 Now Playing
+
+- From the top: a collapse button, the cover (square, as wide as the window allows), the title, the artist, the album,
+  the format line (§3.5), the seek bar with the elapsed time on its left and the remaining time ("-m:ss") on its right,
+  then shuffle, previous, play/pause, next and repeat.
+- Title, artist and album are those of the queue item, that is of the media index (§2.3); the cover comes from the
+  file (§3.4). No artist shows "Unknown artist", as in the list; no album shows nothing. An unknown length shows
+  "--:--" and the seek bar cannot be moved.
+- The seek bar follows playback smoothly. Dragging it shows the new position and seeks when the finger lifts.
+- The content scrolls when it does not fit, in landscape or at large font scales; adaptive layouts come in M5.
+
+### 3.4 Cover
+
+- M1 shows the cover embedded in the file, as Media3 reads it: ID3 APIC frames in MP3 (and in raw AAC, where the
+  cover appears only once playback starts), FLAC PICTURE blocks, `METADATA_BLOCK_PICTURE` comments in Ogg Vorbis and
+  Opus, and `covr` in MP4. A front cover wins over other pictures; a file without a front cover shows its last picture.
+  Covers in Matroska and WebM are not read. Folder images and the cover resolver come in M2a.
+- Queue items still carry no artwork (§2.3): the cover reaches the screens and the system only through the metadata of
+  the current song.
+- The app decodes the cover once per song, off the main thread, scaled down to the shorter side of the screen at most.
+  The mini player shows the same picture smaller.
+- A song without a cover, or with one that cannot be decoded, shows a neutral placeholder with a music note. A new song
+  never shows the previous song's cover: the placeholder stands in until its own cover is read.
+- The system gets the current song's title, artist, album and cover through the session: the notification, the lock
+  screen, the system media controls, Bluetooth devices that support cover art, watches and cars. Media3's own loader
+  scales the cover to the platform's limit for them.
+
+### 3.5 Format line
+
+- What the player knows of the current song's audio track, joined by " · ": the codec; the bit depth for lossless
+  formats, or the average bitrate for lossy ones; the sample rate; the channel layout when it is not stereo.
+  Examples: "FLAC · 24 bit · 96 kHz", "MP3 · 320 kbit/s · 44.1 kHz", "AAC · 128 kbit/s · 44.1 kHz", "Opus · 48 kHz",
+  "WAV · 32 bit float · 44.1 kHz · mono", "FLAC · 16 bit · 48 kHz · 5.1".
+- Codec names: FLAC, ALAC, WAV (PCM), A-law and μ-law (in WAV, counted as lossy), MP3 (and MP1, MP2), AAC with HE-AAC and HE-AAC v2 told
+  by their profile, Vorbis, Opus, AMR-NB, AMR-WB; any other codec shows its media type.
+- The bit depth comes from the decoder's input format; FLAC depths that format cannot name (12 or 20 bit) come from
+  the file's STREAMINFO. The bitrate is the average that the file states or Media3 works out (an MP3 header or its
+  first frame, the sample table of an MP4, the nominal bitrate of Vorbis), rounded to whole kbit/s. Formats without one
+  (Opus, raw AAC, FLAC) show none. Nothing in an MP3 tells constant from variable bitrate, so neither is named. The
+  average counts the encoder's delay and padding in: a 2 s MP3 at 320 kbit/s shows 326, a song of minutes 320.
+- Units and numbers follow the app's language ("44,1 кГц" in Russian).
+- The line shows once the song's tracks are known and stays empty before.
+
+### 3.6 Shuffle, repeat and previous
+
+- Shuffle plays the current song first and every other song of the queue once, in random order, after it:
+    - Turning shuffle on keeps the current song and its position and shuffles the others after it.
+    - Tapping a song while shuffle is on starts the queue with that song, the others shuffled after it.
+    - Turning shuffle off goes on in list order from the current song; turning it on again makes a new order.
+- The order is the player's shuffle order. A new queue gets it from the order itself (Media3 passes the start song when
+  a queue is set); for shuffle turned on in the middle of a queue, the player the session wraps sets the order before
+  it turns shuffle on, so that the same rule holds whichever controller turns it on: the app, the notification, the
+  system, Bluetooth or another app. Controllers that may read the timeline (§1.4) see the same order.
+- Repeat goes off, all, one, and round again. With repeat all, shuffle replays the same order on every lap.
+- Previous goes back to the start of the song after its first 3 seconds, otherwise to the previous song: the previous
+  one of the shuffle order while shuffle is on. At the first song it restarts the song, or with repeat all goes to the
+  last one. The notification, the lock screen, Bluetooth and headset buttons all reach the same rule.
+- Turning shuffle on or off keeps the count of broken songs (§2.4); only a new queue starts a new count.
+- Turning shuffle on in a 20 000-song queue reaches the controllers within 0.25 s (the median of 5 runs: 0.1 s on
+  the API 30 emulator, 0.2 s on API 36). The API 37 emulator image with 16 KB pages takes about 0.3 s; there the time
+  is only logged, as for the queue start (§2.5).
+
+### 3.7 Notification and system controls
+
+- The media notification and the system media controls show previous, play/pause and next, then shuffle and repeat.
+  The icons of these two show the current mode, dimmed when it is off, and their names say it: "Shuffle off", "Shuffle
+  on", "Repeat off", "Repeat all", "Repeat one". A tap turns shuffle on or off, or moves repeat to its next mode, and
+  both buttons follow changes made anywhere else.
+- Up to Android 12 the expanded notification shows all five and the compact one previous, play/pause and next. From
+  Android 13 the system builds its controls from the session; shuffle and repeat take the last two places of the
+  expanded player.
+- The system drops notification updates that come faster than five a second, as they do when playback starts, so
+  the service posts the notification again a second after shuffle or repeat changes: otherwise the buttons could keep
+  the old mode.
+- The platform session still publishes no queue (§2.3).
+
+### 3.8 Accessibility
+
+- Every control has a label, and the toggles a state: play/pause is "Play" or "Pause"; "Previous" and "Next";
+  "Shuffle" with the state on or off; "Repeat" with the state off, all or one and the action "Change repeat mode"; the
+  collapse button "Close Now Playing". The mini player reads its title and artist and offers "Open Now Playing" as its
+  action; its play/pause button stays a control of its own.
+- The seek bar is labelled "Playback position" and states the position in words ("1 minute, 2 seconds of 3 minutes, 45
+  seconds"). The accessibility adjust actions move it by a twentieth of the song and seek.
+- Covers are decorative and have no label. The mini player's progress line is hidden from accessibility services:
+  inside the bar it would be read as a bare percentage.
+- Now Playing announces itself as the pane "Now Playing", and its title is a heading.
+- Every label exists in English and Russian.
+
+### 3.9 Checks
+
+JVM tests: the shuffle order (the start song first, every song once, next and previous as inverses, inserts, removes
+and moves that keep a valid order, 20 000 songs built fast); the format line's parts for every format and the FLAC
+depths from STREAMINFO; the repeat cycle.
+
+Instrumented tests on the API 30, 36 and 37 emulators:
+
+- The screens on a test player: Now Playing shows title, artist, album, format line, elapsed and remaining time; its
+  controls call the player (play, pause, previous, next, shuffle, repeat round its cycle, a seek from the seek bar and
+  from the accessibility adjust action); labels and states as in §3.8; the placeholder without a cover. The mini
+  player shows title and artist, plays and pauses, opens Now Playing, and its progress line is hidden from
+  accessibility services.
+- Through the activity and the service: a tapped song brings up the mini player; it opens Now Playing; back returns to
+  the list; a predictive back gesture in progress keeps Now Playing on screen and moved, cancelling keeps it, finishing
+  returns to the list; back on the list is left to the system; the mini player's background reaches the bottom edge and
+  its controls stay above the navigation bar; a cover from the file shows on Now Playing.
+- Through the service: covers of MP3, FLAC, Ogg Vorbis, Opus and MP4 fixtures reach a controller, a front cover wins
+  over a back cover, a file without one has none, and the platform session gets title, artist and cover; the format
+  line of each decoding fixture; shuffle with the start song first and every song once, turned on in the middle of the
+  queue (the current song first, its position kept), turned off (list order from the current song), and repeat all
+  wrapping to the first song of the order; previous before and after 3 seconds; the notification's actions and the
+  platform session's custom actions for shuffle and repeat, pressed from there and following changes from the app;
+  shuffle keeps the count of broken songs; turning shuffle on in a 20 000-song queue, timed.
+
+Not run on the owner's phone in this step (the owner's decision of 20.10). By hand on the phone later: the
+notification, the lock screen and the system media controls with the shuffle and repeat
+buttons (are the dimmed icons readable?), the cover there and on a Bluetooth device, the predictive back gesture, the
+mini player above the gesture bar and the three-button bar, TalkBack on both screens (is the seek bar's state read
+too often while it plays?), and a large cover (3000x3000) in the profiler.

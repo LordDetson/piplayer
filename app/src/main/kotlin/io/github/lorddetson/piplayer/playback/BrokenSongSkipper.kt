@@ -1,9 +1,9 @@
 package io.github.lorddetson.piplayer.playback
 
 import androidx.media3.common.C
+import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
-import androidx.media3.common.Timeline
 import androidx.media3.common.Tracks
 
 /**
@@ -30,9 +30,12 @@ class BrokenSongSkipper(
         if (player.playbackState == Player.STATE_READY && hasNoAudio(tracks)) failed(FailureKind.SONG)
     }
 
-    /** A new queue starts a new count. */
-    override fun onTimelineChanged(timeline: Timeline, reason: Int) {
-        if (reason == Player.TIMELINE_CHANGE_REASON_PLAYLIST_CHANGED) streak.opened()
+    /**
+     * A new queue starts a new count. Media3 reports a new shuffle order as a change of the playlist too, but the
+     * current song stays: only a new current item from a playlist change counts (§3.6).
+     */
+    override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+        if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED) streak.opened()
     }
 
     /**

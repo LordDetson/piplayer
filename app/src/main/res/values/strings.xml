@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<resources>
+<resources xmlns:tools="http://schemas.android.com/tools">
     <string name="app_name" translatable="false">PiPlayer</string>
     <!-- The name of the media notification's channel in the system settings. -->
     <string name="playback_channel_name">Playback</string>
@@ -18,4 +18,43 @@
         <item quantity="other">Playback stopped: %1$d songs in a row could not be played.</item>
     </plurals>
     <string name="playback_stopped_device">Playback stopped because of a problem with the device.</string>
+    <!-- Names of the shuffle and repeat buttons in the notification and the system media controls: the current mode. -->
+    <string name="playback_shuffle_on">Shuffle on</string>
+    <string name="playback_shuffle_off">Shuffle off</string>
+    <string name="playback_repeat_off">Repeat off</string>
+    <string name="playback_repeat_all">Repeat all</string>
+    <string name="playback_repeat_one">Repeat one</string>
+
+    <!-- Now Playing and the mini player (docs/playback.md §3). -->
+    <string name="player_now_playing">Now Playing</string>
+    <!-- What tapping the mini player does, for accessibility services. -->
+    <string name="player_open_now_playing">Open Now Playing</string>
+    <string name="player_close_now_playing">Close Now Playing</string>
+    <string name="player_play">Play</string>
+    <string name="player_pause">Pause</string>
+    <string name="player_previous">Previous</string>
+    <string name="player_next">Next</string>
+    <string name="player_shuffle">Shuffle</string>
+    <string name="player_repeat">Repeat</string>
+    <!-- What tapping the repeat button does, for accessibility services. -->
+    <string name="player_change_repeat_mode">Change repeat mode</string>
+    <!-- States of the shuffle and repeat buttons, for accessibility services. -->
+    <string name="player_state_on">On</string>
+    <string name="player_state_off">Off</string>
+    <string name="player_repeat_state_all">All</string>
+    <string name="player_repeat_state_one">One</string>
+    <string name="player_position">Playback position</string>
+    <!-- The seek bar's state for accessibility services, for example "1 minute, 2 seconds of 3 minutes, 45 seconds". -->
+    <string name="player_position_state">%1$s of %2$s</string>
+    <!-- Parts of the format line, for example "FLAC · 24 bit · 96 kHz" (docs/playback.md §3.5). Units, which do not
+         change with the number. -->
+    <string name="format_bits" tools:ignore="PluralsCandidate">%1$d bit</string>
+    <string name="format_bits_float" tools:ignore="PluralsCandidate">%1$d bit float</string>
+    <string name="format_kbps" tools:ignore="PluralsCandidate">%1$d kbit/s</string>
+    <string name="format_khz">%1$s kHz</string>
+    <string name="format_mono">mono</string>
+    <plurals name="format_channels">
+        <item quantity="one">%1$d channel</item>
+        <item quantity="other">%1$d channels</item>
+    </plurals>
 </resources>

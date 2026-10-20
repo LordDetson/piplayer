@@ -5,51 +5,26 @@ import android.database.ContentObserver
 import android.os.Handler
 import android.os.Looper
 import android.provider.MediaStore
-import androidx.annotation.OptIn
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import androidx.media3.common.MediaItem
-import androidx.media3.common.MediaMetadata
-import androidx.media3.common.util.UnstableApi
-import androidx.media3.session.MediaController
-import androidx.media3.session.SessionError
-import io.github.lorddetson.piplayer.library.songs.Song
 import io.github.lorddetson.piplayer.library.songs.SongList
-import io.github.lorddetson.piplayer.playback.PlaybackConnection
-import io.github.lorddetson.piplayer.playback.QueueRequest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * The temporary song list (docs/playback.md §2.1 to §2.3): reads the media index whenever the screen starts with the
- * permission, or gets it, and a second after the index changes while the screen is started; turns a tap into a compact
- * queue request.
+ * The temporary song list (docs/playback.md §2.1, §2.2): reads the media index whenever the screen starts with the
+ * permission, or gets it, and a second after the index changes while the screen is started.
  */
 class SongsViewModel(application: Application) : AndroidViewModel(application) {
 
     private val mutableState = MutableStateFlow<SongsState>(SongsState.Loading)
     val state: StateFlow<SongsState> = mutableState.asStateFlow()
-
-    private val mutableMessages = Channel<String>(Channel.BUFFERED)
-
-    /** Messages of the playback service, such as playback stopping on broken songs. */
-    val messages: Flow<String> = mutableMessages.receiveAsFlow()
-
-    private val connection = PlaybackConnection(application, object : MediaController.Listener {
-        @OptIn(UnstableApi::class)
-        override fun onError(controller: MediaController, sessionError: SessionError) {
-            mutableMessages.trySend(sessionError.message)
-        }
-    })
 
     private var loading: Job? = null
     private var started = false
@@ -108,19 +83,6 @@ class SongsViewModel(application: Application) : AndroidViewModel(application) {
         observing = on
     }
 
-    /** Plays the whole list from [song], shown at [row]. */
-    fun play(row: Int, song: Song) {
-        val item = MediaItem.Builder()
-            .setMediaId(QueueRequest(song.id, row).mediaId)
-            .setMediaMetadata(MediaMetadata.Builder().setTitle(song.title).setArtist(song.artist).build())
-            .build()
-        connection.whenConnected {
-            setMediaItem(item)
-            prepare()
-            play()
-        }
-    }
-
     private fun load(delayMs: Long = 0) {
         loading?.cancel()
         loading = viewModelScope.launch {
@@ -132,7 +94,6 @@ class SongsViewModel(application: Application) : AndroidViewModel(application) {
 
     override fun onCleared() {
         observe(false)
-        connection.release()
     }
 
     private companion object {

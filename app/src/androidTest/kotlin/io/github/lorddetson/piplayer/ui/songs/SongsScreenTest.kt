@@ -1,7 +1,6 @@
 package io.github.lorddetson.piplayer.ui.songs
 
 import android.content.ContentValues
-import android.content.pm.PackageManager
 import android.provider.MediaStore
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
@@ -16,21 +15,19 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performScrollToNode
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import androidx.test.platform.app.InstrumentationRegistry
 import io.github.lorddetson.piplayer.MainActivity
 import io.github.lorddetson.piplayer.R
 import io.github.lorddetson.piplayer.TestFiles
-import io.github.lorddetson.piplayer.library.songs.AudioPermission
 import io.github.lorddetson.piplayer.library.songs.Song
 import io.github.lorddetson.piplayer.playback.PlaybackTesting
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.connectController
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.stopAndRelease
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.waitUntil
 import io.github.lorddetson.piplayer.playback.SongSourceRule
+import io.github.lorddetson.piplayer.ui.GrantAudioPermission
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.Rule
 import org.junit.Test
-import org.junit.rules.ExternalResource
 import org.junit.rules.RuleChain
 import org.junit.runner.RunWith
 
@@ -171,16 +168,6 @@ class SongsScreenTest {
             compose.waitUntilExactlyOneExists(hasText("Delta"), timeoutMillis = 10_000)
         } finally {
             uri?.let { resolver.delete(it, null, null) }
-        }
-    }
-
-    /** Grants the audio permission before the activity starts; a grant cannot be undone within a test run. */
-    private object GrantAudioPermission : ExternalResource() {
-        override fun before() {
-            val context = TestFiles.targetContext
-            InstrumentationRegistry.getInstrumentation().uiAutomation
-                .grantRuntimePermission(context.packageName, AudioPermission.name)
-            assertThat(context.checkSelfPermission(AudioPermission.name)).isEqualTo(PackageManager.PERMISSION_GRANTED)
         }
     }
 }

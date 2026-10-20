@@ -16,6 +16,7 @@ okhttp = "5.5.0"
 kotlinxSerialization = "1.11.0"
 kotlinxCoroutines = "1.11.0"
 media3 = "1.11.1"
+navigation3 = "1.2.0"
 ksp = "2.3.12"
 room3 = "3.0.3"
 # The version room3-runtime 3.0.3 itself depends on.
@@ -60,6 +61,10 @@ kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-t
 media3-inspector = { module = "androidx.media3:media3-inspector", version.ref = "media3" }
 media3-exoplayer = { module = "androidx.media3:media3-exoplayer", version.ref = "media3" }
 media3-session = { module = "androidx.media3:media3-session", version.ref = "media3" }
+# State holders for player controls; the controls themselves are PiPlayer's own.
+media3-ui-compose = { module = "androidx.media3:media3-ui-compose", version.ref = "media3" }
+androidx-navigation3-runtime = { module = "androidx.navigation3:navigation3-runtime", version.ref = "navigation3" }
+androidx-navigation3-ui = { module = "androidx.navigation3:navigation3-ui", version.ref = "navigation3" }
 room3-runtime = { module = "androidx.room3:room3-runtime", version.ref = "room3" }
 room3-compiler = { module = "androidx.room3:room3-compiler", version.ref = "room3" }
 androidx-sqlite-bundled = { module = "androidx.sqlite:sqlite-bundled", version.ref = "androidxSqlite" }
