@@ -2,4 +2,6 @@
 <resources>
     <string name="app_name" translatable="false">PiPlayer</string>
     <string name="main_placeholder">Your music library will appear here.</string>
+    <!-- The name of the media notification's channel in the system settings. -->
+    <string name="playback_channel_name">Playback</string>
 </resources>

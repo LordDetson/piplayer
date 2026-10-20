@@ -45,10 +45,12 @@ soon after 1.0, `later` is planned without a date. The items listed under Cut li
 
 - One Media3 player inside a media library service, so every system surface sees the same session. `M1`
 - Formats through platform decoders: MP3, AAC/M4A, FLAC, Ogg Vorbis, Opus, WAV, AMR/3GP, Matroska and WebM audio. `M1`
-- Seeking in MP3 files without a seek table through an index built while reading; estimated seeking in raw AAC
-  (ADTS) files. `M1`
+- Seeking in MP3 files by the header's table, by an index built while reading where the header has no table, and by
+  the bitrate otherwise; estimated seeking in raw AAC (ADTS) files and in raw AMR files of one mode (playback.md
+  §1.3). `M1`
 - Gapless playback; the whole queue lives in one player playlist that the playback service builds. `M1`
-- Audio focus: pause for calls and other players, lower the volume for short prompts, resume after short breaks. `M1`
+- Audio focus: pause for other players; hold playback during calls and other short breaks and resume after them;
+  lower the volume for short prompts. `M1`
 - Pause when wired headphones are unplugged or a Bluetooth output disconnects. `M1`
 - Headset and Bluetooth buttons: play/pause, next, previous; a double press skips forward. `M1`
 - Background playback that survives screen off; after the process is killed, the queue and position are restored. `M1`
@@ -236,8 +238,8 @@ Size: M (about 4 to 6 weeks).
 - Gradle project with Kotlin, Compose, Material 3 and Media3; minSdk 30, targetSdk 36 (TI §7.4).
 - One app module with packages for UI, playback, library, tagging and identification, plus one native module for
   the TagLib and Chromaprint JNI code; split into Gradle modules later only if build time or boundaries need it.
-  Application start-up checks the process name, so the media session, WorkManager, Room and DataStore exist only
-  in the main process; `:tagger` runs native calls only (TI §7.2).
+  Each main-process component (the media session, WorkManager, Room, DataStore) checks the process name when it
+  starts, so they exist only in the main process; `:tagger` runs native calls only (TI §7.2, playback.md §1.5).
 - Native spike: TagLib 2.3.2 and Chromaprint built with NDK r28+, 16 KB page alignment checked in CI (TI §3.2,
   §12 D4).
 - Identification spike: a debug-only screen opens a file through the system picker, fingerprints it with the
