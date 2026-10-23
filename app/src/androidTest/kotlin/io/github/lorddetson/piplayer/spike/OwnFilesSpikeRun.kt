@@ -10,7 +10,6 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import org.assertj.core.api.Assertions.assertThat
-import org.junit.Assume.assumeTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 
@@ -26,10 +25,11 @@ class OwnFilesSpikeRun {
 
     @Test
     fun identifyOwnFiles() {
-        assumeTrue(
-            "Runs only with the instrumentation argument ownFiles=true",
-            InstrumentationRegistry.getArguments().getString("ownFiles") == "true",
-        )
+        // An assumption would show up as a failure in this runner's report, so the opt-in test just stays empty.
+        if (InstrumentationRegistry.getArguments().getString("ownFiles") != "true") {
+            Log.i(TAG, "Skipped: runs only with the instrumentation argument ownFiles=true")
+            return
+        }
         val context = TestFiles.targetContext
         val root = context.filesDir
         val folder = File(root, "own-files")

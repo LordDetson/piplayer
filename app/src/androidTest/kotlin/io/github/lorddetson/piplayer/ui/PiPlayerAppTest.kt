@@ -33,6 +33,7 @@ import io.github.lorddetson.piplayer.playback.PlaybackTesting.stopAndRelease
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.waitUntil
 import io.github.lorddetson.piplayer.playback.SongSourceRule
 import io.github.lorddetson.piplayer.ui.player.PlayerTags
+import io.github.lorddetson.piplayer.ui.songs.SongsTags
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.After
 import org.junit.Assume.assumeTrue
@@ -77,14 +78,19 @@ class PiPlayerAppTest {
     private fun text(id: Int) = compose.activity.getString(id)
 
     private val inMiniPlayer = hasAnyAncestor(hasTestTag(PlayerTags.MINI_PLAYER))
+    private val inSongList = hasAnyAncestor(hasTestTag(SongsTags.LIST))
 
     private fun hasClickLabel(label: String) =
         SemanticsMatcher("click label \"$label\"") { it.config.getOrNull(SemanticsActions.OnClick)?.label == label }
 
     /** Taps [title] in the list and pauses once it plays, so that nothing moves on screen. */
     private fun playAndPause(title: String) {
-        compose.waitUntilExactlyOneExists(hasText(title), timeoutMillis = 10_000)
-        compose.onNodeWithText(title).performClick()
+        /*
+         * A restored mini player can show the same title as the list (docs/playback.md §4.4); only the list row is
+         * the tap target here.
+         */
+        compose.waitUntilExactlyOneExists(hasText(title) and inSongList, timeoutMillis = 10_000)
+        compose.onNode(hasText(title) and inSongList).performClick()
         controller.waitUntil("$title plays") { isPlaying && mediaMetadata.title == title }
         onMain { controller.pause() }
         compose.waitUntilExactlyOneExists(hasTestTag(PlayerTags.MINI_PLAYER), timeoutMillis = 10_000)

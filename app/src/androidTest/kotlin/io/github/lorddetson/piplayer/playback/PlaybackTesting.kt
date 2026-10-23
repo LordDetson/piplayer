@@ -99,6 +99,7 @@ object PlaybackTesting {
     fun MediaController.stopAndRelease() = onMain {
         repeatMode = Player.REPEAT_MODE_OFF
         shuffleModeEnabled = false
+        pause()
         stop()
         clearMediaItems()
         release()

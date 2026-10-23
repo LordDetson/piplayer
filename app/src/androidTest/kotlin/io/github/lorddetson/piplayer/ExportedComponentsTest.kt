@@ -47,6 +47,16 @@ class ExportedComponentsTest {
         }
     }
 
+    @Test
+    fun mediaButtonsFindTheMediaButtonReceiver() {
+        val receivers = context.packageManager.queryBroadcastReceivers(
+            Intent(Intent.ACTION_MEDIA_BUTTON).setPackage(context.packageName),
+            0,
+        )
+
+        assertThat(receivers.map { it.activityInfo.name }).contains("androidx.media3.session.MediaButtonReceiver")
+    }
+
     private fun permissionOf(component: ComponentInfo): String? = when (component) {
         is android.content.pm.ActivityInfo -> component.permission
         is android.content.pm.ServiceInfo -> component.permission
@@ -59,6 +69,8 @@ class ExportedComponentsTest {
             MainActivity::class.java.name to null,
             // Every controller may control playback through the media session (docs/playback.md §1.4).
             PlaybackService::class.java.name to null,
+            // The system sends headset buttons here after the process died (docs/playback.md §4.5).
+            "androidx.media3.session.MediaButtonReceiver" to null,
             "androidx.profileinstaller.ProfileInstallReceiver" to "android.permission.DUMP",
             // Media3's answer to the Bluetooth stack's media player probe on API 36 and 37.
             "androidx.media3.session.BluetoothValidationActivity" to "android.permission.BLUETOOTH_PRIVILEGED",

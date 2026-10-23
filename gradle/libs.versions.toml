@@ -6,6 +6,7 @@ androidxCore = "1.19.1"
 activityCompose = "1.13.0"
 lifecycle = "2.11.0"
 profileinstaller = "1.4.1"
+datastore = "1.2.1"
 junit = "5.14.4"
 assertj = "3.27.7"
 androidxTestRunner = "1.7.0"
@@ -31,6 +32,7 @@ androidx-activity-compose = { module = "androidx.activity:activity-compose", ver
 androidx-lifecycle-runtime-compose = { module = "androidx.lifecycle:lifecycle-runtime-compose", version.ref = "lifecycle" }
 androidx-lifecycle-viewmodel-compose = { module = "androidx.lifecycle:lifecycle-viewmodel-compose", version.ref = "lifecycle" }
 androidx-profileinstaller = { module = "androidx.profileinstaller:profileinstaller", version.ref = "profileinstaller" }
+androidx-datastore-preferences = { module = "androidx.datastore:datastore-preferences", version.ref = "datastore" }
 
 androidx-compose-bom = { module = "androidx.compose:compose-bom", version.ref = "composeBom" }
 androidx-compose-ui = { module = "androidx.compose.ui:ui" }

@@ -389,3 +389,115 @@ notification, the lock screen and the system media controls with the shuffle and
 buttons (are the dimmed icons readable?), the cover there and on a Bluetooth device, the predictive back gesture, the
 mini player above the gesture bar and the three-button bar, TalkBack on both screens (is the seek bar's state read
 too often while it plays?), and a large cover (3000x3000) in the profiler.
+
+## 4. Queue and position after process death
+
+### 4.1 One state file
+
+- The queue, the current song and its position, shuffle and repeat are kept in one Preferences DataStore file,
+  `files/datastore/playback_state.preferences_pb`. One snapshot is written with one `edit`, so a reader never sees half
+  of a snapshot.
+- A snapshot holds the compact queue request (A2.3), the current song's media index ID and its row, the position,
+  shuffle, repeat, the song's title, artist, album and duration, and the URI of the current file. The URI is for the
+  system's recent media controls; it is one file, not the queue.
+- A schema version at the top of the file lets a later version ignore an older snapshot instead of guessing. A file
+  that cannot be read is replaced by an empty one: playback still starts, only the saved state is lost.
+- The file is excluded from Android backup and device transfer: media index IDs and file URIs from one device mean
+  nothing on another.
+
+### 4.2 What is saved and when
+
+- The queue itself is never written: its compact request is enough to read the list again from the media index. A
+  20 000-song queue saves one short request, not 20 000 URIs or titles.
+- While playing, a snapshot is written every five seconds. It is also written at once when playback pauses or stops,
+  when the song changes, when the position jumps (a seek, a restart after an error), when shuffle or repeat changes, and
+  when the player's timeline or the compact queue request changes.
+- Snapshots are built on the main thread, where the player lives, and written off it. A snapshot equal to the last one
+  handed to the store is not written again, so a pause followed by a stop does not create two identical files.
+- A queue without a compact request is not saved: a debug file, a file opened from another app, or a test's own items.
+  Such playback never replaces the last library snapshot. A queue that is not the song list arrives with the library in
+  M2a.
+- The service writes the current state once more before it is destroyed, after saving on a task swipe, so the last
+  seconds of playback are not lost.
+
+### 4.3 Which song and position
+
+- If the saved song is still in the list, its media index ID selects it at its current row, and the saved position is
+  applied. The row is not trusted for this: songs may have been added or removed, so the ID is what is looked up.
+- If the saved song is gone, the saved row selects the song now at that row, clamped to the end of the list, and the
+  position is zero. The saved position belonged to another file, so applying it would start the new song in the middle.
+  An empty list restores nothing.
+- Shuffle and repeat are restored with the song. The exact random order from before the process died is not saved: the
+  order is generated again with the saved song first and every other song once after it (A3.6). Turning shuffle off
+  after the restore continues in list order from the saved song.
+
+### 4.4 Opening the app and resuming from the system
+
+- Opening PiPlayer after process death shows the saved queue paused, at the saved song and position. The screen's
+  controller sends the service a custom `RESTORE` session command after it connects. The service rebuilds the queue off
+  the main thread, selects the saved start, prepares it, and stays paused. It calls pause before loading the items, so a
+  leftover play-when-ready flag from the previous process cannot make the restored queue start by itself.
+- Only PiPlayer's own screen may send `RESTORE`: a controller from another app and the media notification's controller
+  cannot. A play request, a tapped song, or a newer restore cancels a restore still on its way, so a slow restore never
+  replaces what the user already started. If the player already has a queue, the command does nothing.
+- The system's recent media controls ask for the item to show before playback. The service gives them one item with the
+  saved title, artist, album, duration and cover reference, not the queue. Its play button then asks for playback
+  resumption: the service rebuilds the whole saved queue, selects the saved song and position, and lets Media3 start it.
+- This is the path for the lock screen, the system media controls and a Bluetooth device's play button after Android
+  killed the process. It does not publish the queue to the platform session (A2.3); only the restored current item is
+  visible.
+
+### 4.5 Headset and Bluetooth buttons after process death
+
+- `androidx.media3.session.MediaButtonReceiver` is declared exported for `android.intent.action.MEDIA_BUTTON`. When no
+  session is active after process death, the system sends a hardware key there instead of to the released session.
+- On API 26 and later the receiver forwards only the first key-down of play, play/pause and the headset hook, through
+  `startForegroundService`. Other keys are ignored there: a service started by a receiver must enter the foreground at
+  once, and only a play command can make Media3 do that. Once the service is running, next, previous, play/pause and the
+  default double tap of play/pause reach the session as usual (A3.6, A3.7).
+- A forwarded play with no saved queue starts the service and then finds nothing to play. The start check of A4.6 stops
+  it safely before the system's deadline instead of leaving a foreground service without a notification.
+- The receiver is a manifest component only; the app does not register another receiver for media buttons.
+
+### 4.6 Foreign starts of the service
+
+- The playback service is exported because the system, Bluetooth and other controllers must reach it. Any app can also
+  call `startForegroundService` on it. Android then expects a notification within five seconds and kills the process if
+  there is none.
+- A start is accepted as media when its action is `android.intent.action.MEDIA_BUTTON` with a key Media3 handles, when
+  it carries Media3's custom notification action, or when it is Media3's own start with no action and its self-start
+  extra. Media3 itself checks the value of that extra and stops a stale one.
+- Anything else is foreign, and so is a media button without a handled key or with an extra of the wrong type. If the
+  service is not in the foreground, it is stopped at once: the service posts a plain silent notification with the
+  foreground flag, removes it, and stops itself for that start ID with `START_NOT_STICKY`. The process therefore ends
+  normally instead of being killed for a missing notification.
+- If the service is already in the foreground, a foreign start is passed to Media3 and otherwise ignored: playback
+  must not stop because another app sent an unknown action.
+- A legitimate media-button or Media3 self-start keeps the service only if playback is active or becomes active. Four
+  seconds after the start, before the system's five-second deadline, a service that is still not in the foreground and
+  has no active playback is stopped the same safe way. A notification action is sent with a plain `startService` and has
+  no such deadline; it stops safely only if it finds no queue.
+
+### 4.7 Checks
+
+JVM tests: every snapshot key round-trips through Preferences, an older or broken snapshot is rejected, the saved song
+wins over the row and a missing one falls back to the row with position zero, and start intents are classified as media,
+notification, self-start or foreign.
+
+Instrumented tests on the API 30, 36 and 37 emulators:
+
+- The state store reads back a snapshot, keeps the latest of two queued writes, clears it, reports a missing file as
+  empty, and survives a new store on the same file.
+- Through the service: the position is saved every five seconds while playing and at once on pause and seek; a song
+  change and both modes are saved; a single debug file does not replace a saved library queue.
+- Opening the app shows the saved queue paused at its song and position with repeat restored, and keeps it paused. A
+  play request on an empty player rebuilds the queue and starts at the saved position. A missing saved song starts at
+  its row without the old position.
+- Headset next and previous move through the queue and a double tap of play/pause skips forward and keeps playing; the
+  exported receiver is declared for the system's media button.
+- A foreign action, a malformed media button and a play start with no saved queue stop before the system's deadline
+  without killing the process; a foreign start while playing does not stop playback.
+
+By hand on the phone later: open the app after a force stop and check the paused queue, press play from the lock screen
+and a Bluetooth device, use the headset buttons after process death, and send a foreign start with `adb` while watching
+that playback is unaffected.

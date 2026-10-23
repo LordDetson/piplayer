@@ -1,6 +1,7 @@
 package io.github.lorddetson.piplayer.ui.player
 
 import android.app.Application
+import android.os.Bundle
 import androidx.annotation.OptIn
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
@@ -14,6 +15,7 @@ import androidx.media3.session.MediaController
 import androidx.media3.session.SessionError
 import io.github.lorddetson.piplayer.library.songs.Song
 import io.github.lorddetson.piplayer.playback.PlaybackConnection
+import io.github.lorddetson.piplayer.playback.PlaybackSessionCallback
 import io.github.lorddetson.piplayer.playback.QueueRequest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -72,6 +74,8 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
             addListener(listener)
             showCover(mediaMetadata.artworkData)
             mutablePlayer.value = this
+            // Opening the screen shows the queue saved before the process died, paused (docs/playback.md §4.4).
+            sendCustomCommand(PlaybackSessionCallback.RESTORE_COMMAND, Bundle.EMPTY)
         }
     }
 

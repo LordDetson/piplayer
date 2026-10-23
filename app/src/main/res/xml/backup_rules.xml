@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The saved queue names media index IDs and files, which mean nothing after a restore on another device. -->
+<full-backup-content>
+    <exclude
+        domain="file"
+        path="datastore/playback_state.preferences_pb" />
+</full-backup-content>

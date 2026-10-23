@@ -21,7 +21,6 @@ import java.util.concurrent.TimeUnit
 import kotlin.time.Duration.Companion.seconds
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.After
-import org.junit.Assume.assumeFalse
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -201,7 +200,11 @@ class QueueNavigationTest {
         Log.i(TAG, "shuffle on in 20 000 songs: warm-up ${times.first()} ms, measured $measured ms, median $median ms")
         // As for the queue start (§2.5): the emulator image with 16 KB pages is slower throughout, so there the time
         // is only logged.
-        assumeFalse("the 16 KB page-size emulator only logs the time", isEmulatorWith16KbPages())
+        // An assumption would show up as a failure in this runner's report, so the test just stays empty here.
+        if (isEmulatorWith16KbPages()) {
+            Log.i(TAG, "16 KB page-size emulator: the shuffle bound is not checked")
+            return
+        }
         assertThat(median).describedAs("median of $measured ms").isLessThanOrEqualTo(250L)
     }
 

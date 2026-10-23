@@ -5,6 +5,7 @@ import android.provider.MediaStore
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.getBoundsInRoot
+import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
@@ -130,13 +131,17 @@ class SongsScreenTest {
 
     @Test
     fun theListShowsTheSongsInTitleOrderAndATapPlays() {
+        // A restored mini player may show the same title as a row (docs/playback.md §4.4).
+        val inList = hasAnyAncestor(hasTestTag(SongsTags.LIST))
         // The list is read off the main thread, which Compose does not wait for.
         compose.waitUntilExactlyOneExists(hasTestTag(SongsTags.LIST), timeoutMillis = 10_000)
         compose.onNodeWithTag(SongsTags.LIST).performScrollToNode(hasText("Charlie"))
-        val tops = listOf("Alpha", "Bravo", "Charlie").map { compose.onNodeWithText(it).getBoundsInRoot().top }
+        val tops = listOf("Alpha", "Bravo", "Charlie").map {
+            compose.onNode(hasText(it) and inList).getBoundsInRoot().top
+        }
         assertThat(tops).isSorted()
 
-        compose.onNodeWithText("Bravo").performClick()
+        compose.onNode(hasText("Bravo") and inList).performClick()
 
         val controller = connectController()
         try {
@@ -150,7 +155,7 @@ class SongsScreenTest {
 
     @Test
     fun theListFollowsChangesOfTheMediaIndex() {
-        compose.waitUntilExactlyOneExists(hasText("Charlie"), timeoutMillis = 10_000)
+        compose.waitUntilExactlyOneExists(hasAnyAncestor(hasTestTag(SongsTags.LIST)) and hasText("Charlie"), timeoutMillis = 10_000)
         songs.songs = songs.songs + SongSourceRule.song(4, "Delta")
 
         // Any change of the media index makes the screen read the list again: here, a file of the app's own.
@@ -165,7 +170,10 @@ class SongsScreenTest {
         )
         try {
             compose.onNodeWithTag(SongsTags.LIST).performScrollToIndex(0)
-            compose.waitUntilExactlyOneExists(hasText("Delta"), timeoutMillis = 10_000)
+            compose.waitUntilExactlyOneExists(
+                hasAnyAncestor(hasTestTag(SongsTags.LIST)) and hasText("Delta"),
+                timeoutMillis = 10_000,
+            )
         } finally {
             uri?.let { resolver.delete(it, null, null) }
         }
