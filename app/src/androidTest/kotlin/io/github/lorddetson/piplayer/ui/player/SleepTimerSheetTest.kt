@@ -40,15 +40,24 @@ class SleepTimerSheetTest {
     private fun text(id: Int) = context.getString(id)
 
     private val starts = mutableListOf<Pair<Long, Boolean>>()
+    private val choices = mutableListOf<TimerChoice>()
     private var cancelled = false
 
     private val presets = listOf("1:30", "1:00", "0:45", "0:30", "0:15")
 
-    private fun show(extras: PlaybackExtras = PlaybackExtras.NONE, nowMs: Long = NOW) = compose.setContent {
-        PiPlayerTheme {
-            SleepTimerContent(extras, nowMs, onStart = { duration, finish -> starts += duration to finish }, onCancel = { cancelled = true })
+    private fun show(extras: PlaybackExtras = PlaybackExtras.NONE, nowMs: Long = NOW, choice: TimerChoice = TimerChoice.DEFAULT) =
+        compose.setContent {
+            PiPlayerTheme {
+                SleepTimerContent(
+                    extras,
+                    nowMs,
+                    onStart = { duration, finish -> starts += duration to finish },
+                    onCancel = { cancelled = true },
+                    choice = choice,
+                    onChoiceChange = { choices += it },
+                )
+            }
         }
-    }
 
     private fun hours() = compose.onNodeWithContentDescription(text(R.string.timer_hours))
     private fun minutes() = compose.onNodeWithContentDescription(text(R.string.timer_minutes))
@@ -126,6 +135,32 @@ class SleepTimerSheetTest {
         compose.onNodeWithText(text(R.string.timer_start)).performClick()
 
         assertThat(starts).containsExactly(90 * 60_000L to true)
+    }
+
+    @Test
+    fun theSheetShowsTheLastChoice() {
+        show(choice = TimerChoice(hours = 1, minutes = 0, finishTrack = true))
+
+        hours().assertRangeInfoEquals(ProgressBarRangeInfo(1f, 0f..23f, steps = 22))
+        minutes().assertRangeInfoEquals(ProgressBarRangeInfo(0f, 0f..59f, steps = 58))
+        compose.onNodeWithText("1:00").assertIsSelected()
+        compose.onNodeWithText(text(R.string.timer_finish_track)).assertIsOn()
+    }
+
+    @Test
+    fun everyChangeOfTheChoiceIsReported() {
+        show()
+
+        hours().turnTo(2)
+        compose.onNodeWithText("0:45").performClick()
+        compose.onNodeWithText(text(R.string.timer_finish_track)).performClick()
+
+        assertThat(choices).containsSubsequence(
+            TimerChoice(hours = 2, minutes = 30, finishTrack = false),
+            TimerChoice(hours = 0, minutes = 45, finishTrack = false),
+            TimerChoice(hours = 0, minutes = 45, finishTrack = true),
+        )
+        assertThat(choices.last()).isEqualTo(TimerChoice(hours = 0, minutes = 45, finishTrack = true))
     }
 
     @Test

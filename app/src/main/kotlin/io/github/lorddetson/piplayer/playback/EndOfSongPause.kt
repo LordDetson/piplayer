@@ -14,12 +14,21 @@ import androidx.media3.exoplayer.ExoPlayer
  * [onChange] hears every change of [stopAfterCurrent].
  */
 @OptIn(UnstableApi::class)
-class EndOfSongPause(private val player: ExoPlayer, private val onChange: () -> Unit) : Player.Listener {
+class EndOfSongPause(
+    private val player: ExoPlayer,
+    private val onChange: () -> Unit,
+    stopAfterCurrent: Boolean = false,
+) : Player.Listener {
 
-    var stopAfterCurrent = false
+    /** Kept on until it has stopped playback, also from a saved setting while there is no queue yet (§6.4). */
+    var stopAfterCurrent = stopAfterCurrent
         private set
 
     private var forTimer = false
+
+    init {
+        apply()
+    }
 
     /** Turns "stop after current track" on, while there is a current song, or off. */
     fun setStopAfterCurrent(enabled: Boolean) {

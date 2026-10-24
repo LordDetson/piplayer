@@ -134,6 +134,7 @@ private fun SongsEntry(
 private fun rememberExtraControls(viewModel: PlayerViewModel, player: Player?): ExtraControls {
     val context = LocalContext.current
     val extras by viewModel.extras.collectAsStateWithLifecycle()
+    val timerChoice by viewModel.timerChoice.collectAsStateWithLifecycle()
     var hasPanel by remember { mutableStateOf(EqualizerPanel.isAvailable(context)) }
     LifecycleResumeEffect(Unit) {
         hasPanel = EqualizerPanel.isAvailable(context)
@@ -155,5 +156,7 @@ private fun rememberExtraControls(viewModel: PlayerViewModel, player: Player?): 
         cancelSleepTimer = viewModel::cancelSleepTimer,
         setStopAfterCurrent = viewModel::setStopAfterCurrent,
         openEqualizer = if (hasPanel) openEqualizer else null,
+        timerChoice = timerChoice,
+        saveTimerChoice = viewModel::saveTimerChoice,
     )
 }

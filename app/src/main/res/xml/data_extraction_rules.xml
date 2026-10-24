@@ -1,14 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The saved queue names media index IDs and files, which mean nothing after a restore on another device. -->
+<!-- The saved queue names media index IDs and files, which mean nothing after a restore on another device; "stop after
+     current track" belongs to that queue. -->
 <data-extraction-rules>
     <cloud-backup>
         <exclude
             domain="file"
             path="datastore/playback_state.preferences_pb" />
+        <exclude
+            domain="sharedpref"
+            path="playback_controls.xml" />
     </cloud-backup>
     <device-transfer>
         <exclude
             domain="file"
             path="datastore/playback_state.preferences_pb" />
+        <exclude
+            domain="sharedpref"
+            path="playback_controls.xml" />
     </device-transfer>
 </data-extraction-rules>

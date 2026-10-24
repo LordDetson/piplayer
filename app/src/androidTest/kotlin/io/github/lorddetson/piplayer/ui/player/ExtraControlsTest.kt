@@ -4,6 +4,7 @@ import android.os.SystemClock
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsOff
@@ -12,7 +13,9 @@ import androidx.compose.ui.test.hasStateDescription
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.getBoundsInRoot
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTouchInput
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.github.lorddetson.piplayer.R
 import io.github.lorddetson.piplayer.TestFiles
@@ -55,6 +58,26 @@ class ExtraControlsTest {
         compose.onNodeWithContentDescription(text(R.string.player_sleep_timer)).performClick()
 
         compose.onNodeWithText(text(R.string.timer_start)).assertIsDisplayed()
+    }
+
+    @Test
+    fun turningAWheelDoesNotMoveTheSheet() {
+        show()
+        compose.onNodeWithContentDescription(text(R.string.player_sleep_timer)).performClick()
+        compose.waitForIdle()
+        val title = compose.onNodeWithText(text(R.string.player_sleep_timer))
+        val before = title.getBoundsInRoot().top
+        val minutes = compose.onNodeWithContentDescription(text(R.string.timer_minutes))
+
+        minutes.performTouchInput {
+            down(center)
+            repeat(5) { moveBy(Offset(0f, -height / 10f)) }
+        }
+        compose.waitForIdle()
+        val during = title.getBoundsInRoot().top
+        minutes.performTouchInput { up() }
+
+        assertThat(during).isEqualTo(before)
     }
 
     @Test

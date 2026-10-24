@@ -68,7 +68,7 @@ class PlaybackService : MediaLibraryService() {
             close = { sendBroadcast(effectIntent(AudioEffect.ACTION_CLOSE_AUDIO_EFFECT_CONTROL_SESSION, it)) },
         ).also { effects = it }
         player.addListener(effects)
-        val controls = ServiceControls(player, ::publishControls).also { controls = it }
+        val controls = ServiceControls(player, StopAfterCurrentStore(this), ::publishControls).also { controls = it }
         val store = PlaybackStateStore.get(this)
         val saver = PlaybackStateSaver(player, store).also { saver = it }
         val callback = PlaybackSessionCallback(this, store, controls, saver::setQueue).also { callback = it }

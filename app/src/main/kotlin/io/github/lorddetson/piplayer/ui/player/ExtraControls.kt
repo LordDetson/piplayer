@@ -12,4 +12,7 @@ data class ExtraControls(
     val cancelSleepTimer: () -> Unit = {},
     val setStopAfterCurrent: (Boolean) -> Unit = {},
     val openEqualizer: (() -> Unit)? = null,
+    /** The sleep timer sheet's last choice, and where a new one goes (§6.2). */
+    val timerChoice: TimerChoice = TimerChoice.DEFAULT,
+    val saveTimerChoice: (TimerChoice) -> Unit = {},
 )

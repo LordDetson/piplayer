@@ -612,6 +612,9 @@ PiPlayer is in the background, force stop and reopen, and open a file whose temp
 - While a timer runs, the sheet shows the time left instead of the wheels, whether it finishes the track, and a button
   that cancels it. Cancelling keeps the sheet open with the wheels, so that a new timer can be set at once; starting
   one closes the sheet. Starting a timer replaces the running one.
+- The sheet keeps its last choice, hours, minutes and the checkbox, in the app's settings as soon as it changes,
+  whether or not a timer was started, so that the next evening's timer is one tap away, also after the app was closed.
+  The first time it shows 0:30 without the checkbox.
 
 ### 6.3 What the timer does
 
@@ -635,6 +638,9 @@ PiPlayer is in the background, force stop and reopen, and open a file whose temp
   start, so that play starts that song. The next song is the one repeat and shuffle would play: the next of the list or
   of the shuffle order, the first again with repeat all at the last song, the same song from its start with repeat one.
   After the last song with repeat off there is none, and playback stays at the end of the last song.
+- Turned on, it is kept in the app's settings until it has stopped playback or is turned off: it outlasts a closed
+  app and a killed process, and applies to the queue restored afterwards (§4). Like the saved queue, the setting stays
+  out of backups and transfers to another device.
 - It turns itself off once it has stopped playback, or when the user turns it off. Changing the song by hand (a skip,
   previous to another song, a new queue, an opened file, a broken song skipped) keeps it on: it then stops after the
   song that plays.
@@ -645,7 +651,7 @@ PiPlayer is in the background, force stop and reopen, and open a file whose temp
 - Both are commands of PiPlayer's own screen (`SLEEP_TIMER`, `STOP_AFTER_CURRENT`), refused for other apps and for the
   media notification's controller, like `RESTORE` and `OPEN` (§4.4, §5.4). Their state goes as session extras to
   PiPlayer's own controllers only, never into the platform session that other apps read.
-- Neither is saved with the queue (§4).
+- The timer is not saved; "stop after current track" is saved on its own, apart from the queue (§6.4).
 
 ### 6.6 Effects
 

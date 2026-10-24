@@ -66,6 +66,8 @@ fun SleepTimerContent(
     onStart: (durationMs: Long, finishTrack: Boolean) -> Unit,
     onCancel: () -> Unit,
     modifier: Modifier = Modifier,
+    choice: TimerChoice = TimerChoice.DEFAULT,
+    onChoiceChange: (TimerChoice) -> Unit = {},
 ) {
     Column(
         modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 16.dp),
@@ -74,7 +76,7 @@ fun SleepTimerContent(
     ) {
         Text(stringResource(R.string.player_sleep_timer), style = MaterialTheme.typography.titleLarge)
         val left = extras.sleepLeftMs(nowMs)
-        if (left != null) RunningTimer(left, extras.finishTrack, onCancel) else NewTimer(onStart)
+        if (left != null) RunningTimer(left, extras.finishTrack, onCancel) else NewTimer(choice, onChoiceChange, onStart)
     }
 }
 
@@ -87,17 +89,27 @@ private fun RunningTimer(leftMs: Long, finishTrack: Boolean, onCancel: () -> Uni
     OutlinedButton(onClick = onCancel) { Text(stringResource(R.string.timer_cancel)) }
 }
 
+/** The wheels, the chips and the checkbox, starting from [choice]; every change goes to [onChoiceChange] (§6.2). */
 @Composable
-private fun NewTimer(onStart: (durationMs: Long, finishTrack: Boolean) -> Unit) {
-    var hours by rememberSaveable { mutableIntStateOf(0) }
-    var minutes by rememberSaveable { mutableIntStateOf(DEFAULT_MINUTES) }
-    var finishTrack by rememberSaveable { mutableStateOf(false) }
+private fun NewTimer(
+    choice: TimerChoice,
+    onChoiceChange: (TimerChoice) -> Unit,
+    onStart: (durationMs: Long, finishTrack: Boolean) -> Unit,
+) {
+    var hours by rememberSaveable { mutableIntStateOf(choice.hours) }
+    var minutes by rememberSaveable { mutableIntStateOf(choice.minutes) }
+    var finishTrack by rememberSaveable { mutableStateOf(choice.finishTrack) }
     val locale = LocalConfiguration.current.locales[0]
+    fun changed() = onChoiceChange(TimerChoice(hours, minutes, finishTrack))
 
     Row(horizontalArrangement = Arrangement.spacedBy(24.dp), verticalAlignment = Alignment.CenterVertically) {
-        Wheel(hours, 0..23, { hours = it }, stringResource(R.string.timer_hours)) { spoken(it, MeasureUnit.HOUR, locale) }
+        Wheel(hours, 0..23, { hours = it; changed() }, stringResource(R.string.timer_hours)) {
+            spoken(it, MeasureUnit.HOUR, locale)
+        }
         Text(":", style = MaterialTheme.typography.displaySmall)
-        Wheel(minutes, 0..59, { minutes = it }, stringResource(R.string.timer_minutes)) { spoken(it, MeasureUnit.MINUTE, locale) }
+        Wheel(minutes, 0..59, { minutes = it; changed() }, stringResource(R.string.timer_minutes)) {
+            spoken(it, MeasureUnit.MINUTE, locale)
+        }
     }
     val selected = TimerPresets.matching(hours, minutes)
     Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -108,6 +120,7 @@ private fun NewTimer(onStart: (durationMs: Long, finishTrack: Boolean) -> Unit) 
                 onClick = {
                     hours = preset / 60
                     minutes = preset % 60
+                    changed()
                 },
                 label = { Text(PlayerTime.clock(preset * 60_000L)) },
                 modifier = Modifier.semantics {
@@ -118,7 +131,14 @@ private fun NewTimer(onStart: (durationMs: Long, finishTrack: Boolean) -> Unit) 
         }
     }
     Row(
-        Modifier.fillMaxWidth().toggleable(value = finishTrack, role = Role.Checkbox, onValueChange = { finishTrack = it }),
+        Modifier.fillMaxWidth().toggleable(
+            value = finishTrack,
+            role = Role.Checkbox,
+            onValueChange = {
+                finishTrack = it
+                changed()
+            },
+        ),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Checkbox(checked = finishTrack, onCheckedChange = null)
@@ -206,4 +226,3 @@ private fun spoken(value: Int, unit: MeasureUnit, locale: Locale): String =
     MeasureFormat.getInstance(locale, MeasureFormat.FormatWidth.WIDE).format(Measure(value, unit))
 
 private val ITEM_HEIGHT = 56.dp
-private const val DEFAULT_MINUTES = 30

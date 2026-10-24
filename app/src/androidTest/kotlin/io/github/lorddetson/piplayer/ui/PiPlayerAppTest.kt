@@ -12,6 +12,8 @@ import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsOn
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.getBoundsInRoot
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasContentDescription
@@ -27,6 +29,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.media3.session.MediaController
+import androidx.test.espresso.Espresso
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import io.github.lorddetson.piplayer.MainActivity
@@ -39,6 +42,8 @@ import io.github.lorddetson.piplayer.playback.PlaybackTesting.waitUntil
 import io.github.lorddetson.piplayer.playback.SongSourceRule
 import io.github.lorddetson.piplayer.ui.player.EqualizerPanel
 import io.github.lorddetson.piplayer.ui.player.PlayerTags
+import io.github.lorddetson.piplayer.ui.player.TimerChoice
+import io.github.lorddetson.piplayer.ui.player.TimerChoiceStore
 import io.github.lorddetson.piplayer.ui.songs.SongsTags
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.After
@@ -224,5 +229,28 @@ class PiPlayerAppTest {
         } finally {
             instrumentation.removeMonitor(monitor)
         }
+    }
+
+    @Test
+    fun theTimerSheetKeepsItsChoiceInTheSettings() {
+        TimerChoiceStore.clearForTests(compose.activity)
+        playAndPause("Alpha")
+        openNowPlaying()
+        val timer = hasContentDescription(text(R.string.player_sleep_timer))
+        compose.onNode(timer).performClick()
+
+        compose.onNodeWithText("1:00").performClick()
+        compose.onNodeWithText(text(R.string.timer_finish_track)).performClick()
+        compose.onNodeWithText(text(R.string.timer_finish_track)).assertIsOn()
+        compose.onNodeWithText("1:00").assertIsSelected()
+        // Closed without starting a timer, by the back key, which the sheet's own window takes.
+        Espresso.pressBack()
+        compose.waitUntilDoesNotExist(hasText(text(R.string.timer_start)), timeoutMillis = 5_000)
+
+        assertThat(TimerChoiceStore(compose.activity).read()).isEqualTo(TimerChoice(hours = 1, minutes = 0, finishTrack = true))
+        compose.onNode(timer).performClick()
+        compose.onNodeWithText("1:00").assertIsSelected()
+        compose.onNodeWithText(text(R.string.timer_finish_track)).assertIsOn()
+        TimerChoiceStore.clearForTests(compose.activity)
     }
 }

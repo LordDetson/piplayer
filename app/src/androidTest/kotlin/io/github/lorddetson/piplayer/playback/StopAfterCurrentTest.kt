@@ -1,9 +1,12 @@
 package io.github.lorddetson.piplayer.playback
 
+import android.content.Intent
+import android.os.Bundle
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionResult
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import io.github.lorddetson.piplayer.TestFiles
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.LONG_FIXTURE
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.SHORT_FIXTURE
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.connectController
@@ -13,6 +16,7 @@ import io.github.lorddetson.piplayer.playback.PlaybackTesting.holdsThroughout
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.onMain
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.stopAfterArgs
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.stopAndRelease
+import io.github.lorddetson.piplayer.playback.PlaybackTesting.tap
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.waitUntil
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.TimeUnit
@@ -20,12 +24,16 @@ import kotlin.time.Duration.Companion.seconds
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.After
 import org.junit.Before
+import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 
 /** "Stop after current track" through the playback service (docs/playback.md §6.4). */
 @RunWith(AndroidJUnit4::class)
 class StopAfterCurrentTest {
+
+    @get:Rule
+    val songs = SongSourceRule()
 
     private lateinit var controller: MediaController
 
@@ -42,6 +50,16 @@ class StopAfterCurrentTest {
                 }
             })
         }
+    }
+
+    /** As with a killed process: the controller and the service go, what they saved stays; then a new controller. */
+    private fun restartTheService() {
+        onMain { controller.release() }
+        val context = TestFiles.targetContext
+        context.stopService(Intent(context, PlaybackService::class.java))
+        eventually("the service is not running", timeout = 10.seconds) { !PlaybackService.isRunningForTests }
+        pauseReasons.clear()
+        connect()
     }
 
     @After
@@ -149,6 +167,31 @@ class StopAfterCurrentTest {
         eventually("the toggle is off") { !isOn() }
         controller.waitUntil("the next song follows", timeout = 5.seconds) { currentMediaItemIndex == 1 }
         controller.holdsThroughout("playback goes on", 1.seconds) { playWhenReady }
+    }
+
+    @Test
+    fun itOutlastsAKilledServiceAndStopsTheRestoredQueueThenIsNotKept() {
+        songs.songs = listOf(SongSourceRule.song(1, "A", SHORT_FIXTURE), SongSourceRule.song(2, "B", LONG_FIXTURE))
+        controller.tap(QueueRequest(startSongId = 1, startRow = 0))
+        controller.waitUntil("the first song plays") { isPlaying && currentMediaItemIndex == 0 && mediaItemCount == 2 }
+        onMain { controller.pause() }
+        stopAfterCurrent(true)
+        eventually("the toggle is on") { isOn() }
+
+        restartTheService()
+
+        eventually("the toggle is still on") { isOn() }
+        onMain { controller.sendCustomCommand(PlaybackSessionCallback.RESTORE_COMMAND, Bundle.EMPTY) }
+        controller.waitUntil("the saved queue is back") { mediaItemCount == 2 && currentMediaItemIndex == 0 }
+        onMain {
+            controller.seekTo(0, 1_000)
+            controller.play()
+        }
+        expectStoppedOn(1)
+        eventually("the toggle is off") { !isOn() }
+
+        restartTheService()
+        controller.holdsThroughout("the toggle stays off", 1.seconds) { !PlaybackExtras.from(sessionExtras).stopAfterCurrent }
     }
 
     @Test

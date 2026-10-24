@@ -12,6 +12,7 @@ import androidx.compose.material3.IconToggleButton
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -78,10 +79,16 @@ fun ExtraControlsRow(controls: ExtraControls, modifier: Modifier = Modifier) {
     }
 
     if (timerOpen) {
-        ModalBottomSheet(onDismissRequest = { timerOpen = false }) {
+        // Fully open from the start: a half-open sheet would follow the wheels' drags up, then drop back.
+        ModalBottomSheet(
+            onDismissRequest = { timerOpen = false },
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        ) {
             SleepTimerContent(
                 extras = controls.extras,
                 nowMs = now,
+                choice = controls.timerChoice,
+                onChoiceChange = controls.saveTimerChoice,
                 onStart = { duration, finishTrack ->
                     controls.setSleepTimer(duration, finishTrack)
                     timerOpen = false
