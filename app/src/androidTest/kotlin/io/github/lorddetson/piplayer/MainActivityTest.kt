@@ -34,11 +34,4 @@ class MainActivityTest {
         composeRule.onNodeWithText(activity.getString(R.string.spike_choose_file)).assertIsDisplayed()
     }
 
-    @Test
-    fun debugBuildsOfferToPlayAFile() {
-        assumeTrue(BuildConfig.DEBUG)
-        val activity = composeRule.activity
-
-        composeRule.onNodeWithText(activity.getString(R.string.debug_play_file)).assertIsDisplayed()
-    }
 }

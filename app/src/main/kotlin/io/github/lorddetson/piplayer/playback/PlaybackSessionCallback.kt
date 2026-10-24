@@ -27,6 +27,7 @@ import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.MoreExecutors
 import com.google.common.util.concurrent.SettableFuture
+import io.github.lorddetson.piplayer.R
 import io.github.lorddetson.piplayer.library.songs.AudioPermission
 import io.github.lorddetson.piplayer.library.songs.Song
 import io.github.lorddetson.piplayer.library.songs.SongList
@@ -34,24 +35,38 @@ import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
- * Who may connect to the session and what they may play or browse (docs/playback.md §1.4, §2.3), and how the saved
- * queue is restored (docs/playback.md §4.3, §4.4).
+ * Who may connect to the session and what they may play or browse (docs/playback.md §1.4, §2.3), how the saved queue
+ * is restored (docs/playback.md §4.3, §4.4), and how opened files join it (docs/playback.md §5).
  */
 class PlaybackSessionCallback(
     private val context: Context,
     private val store: PlaybackStateStore,
-    private val onQueueRequest: (QueueRequest?) -> Unit,
+    private val onQueueRequest: (QueueState?) -> Unit,
 ) : MediaLibrarySession.Callback {
 
     private val packageName = context.packageName
 
+    private val openFileReader = OpenFileReader(context)
+
+    private val openGrants = OpenFileGrants(context.contentResolver)
+
     /** Expands queue requests and restores off the main thread, one at a time. */
     private val expansion = MoreExecutors.listeningDecorator(Executors.newSingleThreadExecutor())
 
+    /**
+     * Reads opened files on its own thread: a file opened from another app starts at once even while a slow library
+     * restore is still reading the song list (docs/playback.md A5.1).
+     */
+    private val openExpansion = MoreExecutors.listeningDecorator(Executors.newSingleThreadExecutor())
+
     private val mainHandler = Handler(Looper.getMainLooper())
 
-    /** A restore that is superseded by the user or by a play request stops before it touches the player. */
+    /** A restore or a queue change that is superseded stops before it touches the player. */
     private val restoreGeneration = AtomicInteger()
+
+    /** The queue the player has, as far as saving and inserting opened files are concerned. */
+    @Volatile
+    private var currentOrigin: QueueState? = null
 
     @Volatile
     private var released = false
@@ -61,7 +76,8 @@ class PlaybackSessionCallback(
      * and the controllers Android trusts (the system, media control permissions, enabled notification listeners); a
      * controller that names PiPlayer's package from another app is refused. The queue is the user's music library, so
      * only controllers that may read it get the timeline (§1.4); the media notification's controller does not either,
-     * so that the platform session publishes no queue (§2.3). The restore command is PiPlayer's own screen's.
+     * so that the platform session publishes no queue (§2.3). The restore and open commands are PiPlayer's own
+     * screen's.
      */
     @OptIn(UnstableApi::class)
     override fun onConnect(session: MediaSession, controller: MediaSession.ControllerInfo): ConnectionResult {
@@ -77,7 +93,10 @@ class PlaybackSessionCallback(
                 .build()
         }
         val sessionCommands = if (fromPiPlayer && !session.isMediaNotificationController(controller)) {
-            ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS.buildUpon().add(RESTORE_COMMAND).build()
+            ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS.buildUpon()
+                .add(RESTORE_COMMAND)
+                .add(OPEN_COMMAND)
+                .build()
         } else {
             ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS
         }
@@ -129,8 +148,8 @@ class PlaybackSessionCallback(
         startIndex: Int,
         startPositionMs: Long,
     ): ListenableFuture<MediaItemsWithStartPosition> {
-        // The user changed the queue: a restore still on its way must not overwrite it.
-        restoreGeneration.incrementAndGet()
+        // The user changed the queue: a restore or an open still on its way must not overwrite it.
+        val token = restoreGeneration.incrementAndGet()
         val request = mediaItems.singleOrNull()?.let { QueueRequest.parse(it.mediaId) }
         if (request != null && !mayReadLibrary(mediaSession, controller)) {
             return Futures.immediateFailedFuture(UnsupportedOperationException("This app may not read the song list"))
@@ -139,7 +158,11 @@ class PlaybackSessionCallback(
             return Futures.transform(
                 onAddMediaItems(mediaSession, controller, mediaItems),
                 { items ->
-                    onQueueRequest(null)
+                    if (token == restoreGeneration.get()) {
+                        currentOrigin = null
+                        openGrants.keepOnly(emptyList())
+                        onQueueRequest(null)
+                    }
                     MediaItemsWithStartPosition(items, startIndex, startPositionMs)
                 },
                 MoreExecutors.directExecutor(),
@@ -149,7 +172,11 @@ class PlaybackSessionCallback(
             val songs = songsFor(request)
             val start = QueueRequest.startIndex(songs, request)
             if (start < 0) throw UnsupportedOperationException("The song list is empty")
-            onQueueRequest(request)
+            if (token != restoreGeneration.get()) throw UnsupportedOperationException("The queue request was superseded")
+            val state = QueueState(request, emptyList())
+            currentOrigin = state
+            openGrants.keepOnly(emptyList())
+            onQueueRequest(state)
             MediaItemsWithStartPosition(songs.map(::mediaItem), start, startPositionMs)
         }
     }
@@ -177,8 +204,9 @@ class PlaybackSessionCallback(
 
     /**
      * PiPlayer's screen asks the service to show the saved queue paused after the app was opened (docs/playback.md
-     * §4.4). It is a session command rather than automatic restoration, so that a play request or a test's own queue is
-     * never raced by it; other apps and the media notification's controller cannot send it.
+     * §4.4), or to insert files opened from another app (docs/playback.md §5.1). Both are session commands rather than
+     * automatic actions, so that a play request or a test's own queue is never raced by them; other apps and the media
+     * notification's controller cannot send them.
      */
     @OptIn(UnstableApi::class)
     override fun onCustomCommand(
@@ -188,11 +216,11 @@ class PlaybackSessionCallback(
         args: Bundle,
         progressReporter: MediaSession.ProgressReporter?,
     ): ListenableFuture<SessionResult> {
-        val mayRestore = controller.uid == Process.myUid() && !session.isMediaNotificationController(controller)
-        return if (customCommand.customAction == RESTORE_ACTION && mayRestore) {
-            restorePaused(session)
-        } else {
-            super.onCustomCommand(session, controller, customCommand, args, progressReporter)
+        val mayControl = controller.uid == Process.myUid() && !session.isMediaNotificationController(controller)
+        return when {
+            customCommand.customAction == RESTORE_ACTION && mayControl -> restorePaused(session)
+            customCommand.customAction == OPEN_ACTION && mayControl -> openFiles(session, args)
+            else -> super.onCustomCommand(session, controller, customCommand, args, progressReporter)
         }
     }
 
@@ -227,7 +255,7 @@ class PlaybackSessionCallback(
         return result
     }
 
-    /** Rebuilds the saved queue and starts at the saved song and position; Media3 then plays it. */
+    /** Rebuilds the saved queue and starts at the saved item and position; Media3 then plays it. */
     @OptIn(UnstableApi::class)
     private fun resumptionItems(mediaSession: MediaSession): ListenableFuture<MediaItemsWithStartPosition> {
         val token = restoreGeneration.incrementAndGet()
@@ -236,10 +264,14 @@ class PlaybackSessionCallback(
             try {
                 val snapshot = store.readBlocking()
                     ?: throw UnsupportedOperationException("There is no saved queue")
-                val songs = songsFor(snapshot.queue)
-                val start = QueueRestore.choose(songs.map { it.id }, snapshot)
-                    ?: throw UnsupportedOperationException("The song list is empty")
-                val items = songs.map(::mediaItem)
+                val (openItems, skipped) = readableOpenItems(snapshot)
+                val restored = restoredQueue(snapshot, openItems)
+                if (restored == null) {
+                    mainHandler.post {
+                        if (!released && token == restoreGeneration.get()) sendOpenSkipped(mediaSession, skipped)
+                    }
+                    throw UnsupportedOperationException("The saved queue is empty")
+                }
                 mainHandler.post {
                     val player = mediaSession.player
                     when {
@@ -248,10 +280,11 @@ class PlaybackSessionCallback(
                         player.mediaItemCount > 0 ->
                             result.setException(IllegalStateException("A queue is already loaded"))
                         else -> {
+                            sendOpenSkipped(mediaSession, skipped)
                             player.shuffleModeEnabled = snapshot.shuffle
                             player.repeatMode = snapshot.repeatMode
-                            onQueueRequest(snapshot.queue)
-                            result.set(MediaItemsWithStartPosition(items, start.index, start.positionMs))
+                            commit(restored.state)
+                            result.set(MediaItemsWithStartPosition(restored.items, restored.start.index, restored.start.positionMs))
                         }
                     }
                 }
@@ -276,22 +309,25 @@ class PlaybackSessionCallback(
                     result.set(SessionResult(SessionResult.RESULT_SUCCESS))
                     return@execute
                 }
-                val songs = songsFor(snapshot.queue)
-                val start = QueueRestore.choose(songs.map { it.id }, snapshot)
-                if (start == null) {
+                val (openItems, skipped) = readableOpenItems(snapshot)
+                val restored = restoredQueue(snapshot, openItems)
+                if (restored == null) {
+                    mainHandler.post {
+                        if (!released && token == restoreGeneration.get()) sendOpenSkipped(mediaSession, skipped)
+                    }
                     result.set(SessionResult(SessionResult.RESULT_SUCCESS))
                     return@execute
                 }
-                val items = songs.map(::mediaItem)
                 mainHandler.post {
                     if (released || token != restoreGeneration.get() || player.mediaItemCount > 0) {
                         result.set(SessionResult(SessionResult.RESULT_SUCCESS))
                     } else {
+                        sendOpenSkipped(mediaSession, skipped)
                         player.pause()
-                        player.setMediaItems(items, start.index, start.positionMs)
+                        player.setMediaItems(restored.items, restored.start.index, restored.start.positionMs)
                         player.shuffleModeEnabled = snapshot.shuffle
                         player.repeatMode = snapshot.repeatMode
-                        onQueueRequest(snapshot.queue)
+                        commit(restored.state)
                         player.prepare()
                         result.set(SessionResult(SessionResult.RESULT_SUCCESS))
                     }
@@ -303,6 +339,134 @@ class PlaybackSessionCallback(
         }
         return result
     }
+
+    /**
+     * Reads the files of an open-with intent and puts them right after the current item; the first one becomes current
+     * and plays (docs/playback.md §5.1). An empty player starts a queue of just these files.
+     */
+    private fun openFiles(session: MediaSession, args: Bundle): ListenableFuture<SessionResult> {
+        val uris = args.getStringArrayList(EXTRA_URIS)
+            ?.mapNotNull { value -> runCatching { Uri.parse(value) }.getOrNull() }
+            .orEmpty()
+            .distinct()
+        if (uris.isEmpty()) return Futures.immediateFuture(SessionResult(SessionError.ERROR_BAD_VALUE))
+        val token = restoreGeneration.incrementAndGet()
+        val result = SettableFuture.create<SessionResult>()
+        openExpansion.execute {
+            try {
+                val opened = uris.mapNotNull { uri -> runCatching { openFileReader.read(uri) }.getOrNull() }
+                val skipped = uris.size - opened.size
+                if (opened.isEmpty()) {
+                    result.set(
+                        SessionResult(
+                            SessionError.ERROR_IO,
+                            Bundle().apply { putInt(EXTRA_SKIPPED, skipped) },
+                        ),
+                    )
+                    // The open superseded a restore before it knew that it had nothing to play. Put the saved queue
+                    // back if the player is still empty, so a failed open does not leave the app blank.
+                    mainHandler.post {
+                        if (token == restoreGeneration.get() && session.player.mediaItemCount == 0) {
+                            restorePaused(session)
+                        }
+                    }
+                    return@execute
+                }
+                mainHandler.post {
+                    val player = session.player
+                    if (released || token != restoreGeneration.get()) {
+                        openGrants.keepOnly(currentOrigin?.openItems?.map { it.uri }.orEmpty())
+                        result.set(SessionResult(SessionResult.RESULT_SUCCESS))
+                        return@post
+                    }
+                    val state = currentOrigin
+                    val currentIndex = player.currentMediaItemIndex
+                    val newState = if (state == null || player.mediaItemCount == 0 || currentIndex < 0) {
+                        QueueState(null, opened.mapIndexed { row, file -> SavedOpenItem(row, file) })
+                            .also {
+                                player.setMediaItems(opened.map(::mediaItem), 0, 0)
+                                player.prepare()
+                                player.play()
+                            }
+                    } else {
+                        state.withInserted(currentIndex, opened).also {
+                            player.addMediaItems(currentIndex + 1, opened.map(::mediaItem))
+                            player.seekTo(currentIndex + 1, 0)
+                            player.prepare()
+                            player.play()
+                        }
+                    }
+                    currentOrigin = newState
+                    openGrants.take(newState.openItems.map { it.uri })
+                    openGrants.keepOnly(newState.openItems.map { it.uri })
+                    onQueueRequest(newState)
+                    result.set(
+                        SessionResult(
+                            SessionResult.RESULT_SUCCESS,
+                            Bundle().apply { putInt(EXTRA_SKIPPED, skipped) },
+                        ),
+                    )
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Could not open files", e)
+                openGrants.keepOnly(currentOrigin?.openItems?.map { it.uri }.orEmpty())
+                result.set(SessionResult(SessionError.ERROR_UNKNOWN))
+            }
+        }
+        return result
+    }
+
+    /**
+     * The opened files of [snapshot] that this process can still open. A temporary grant from the file manager ends
+     * with the process; such a file is left out of the restored queue and the caller notes how many were left out
+     * (docs/playback.md A5.3).
+     */
+    private fun readableOpenItems(snapshot: PlaybackSnapshot): Pair<List<SavedOpenItem>, Int> {
+        val readable = snapshot.openItems.filter { item ->
+            runCatching { openFileReader.canRead(Uri.parse(item.uri)) }.getOrDefault(false)
+        }
+        return readable to (snapshot.openItems.size - readable.size)
+    }
+
+    /** Tells the controllers that restored opened files are gone; call it on the main thread. */
+    @OptIn(UnstableApi::class)
+    private fun sendOpenSkipped(session: MediaSession, skipped: Int) {
+        if (skipped <= 0) return
+        val message = context.resources.getQuantityString(R.plurals.open_files_skipped, skipped, skipped)
+        session.sendError(SessionError(SessionError.ERROR_IO, message))
+    }
+
+    /** The saved queue with the readable opened files put back and the item and command state that belongs to it. */
+    private fun restoredQueue(snapshot: PlaybackSnapshot, openItems: List<SavedOpenItem>): RestoredQueue? {
+        val library = snapshot.queue?.let { request ->
+            runCatching { songsFor(request) }.getOrElse { e ->
+                Log.w(TAG, "Could not read the library part of the saved queue", e)
+                emptyList()
+            }
+        }.orEmpty()
+        val order = QueueRestore.order(library, snapshot, openItems)
+        if (order.isEmpty()) return null
+        val start = QueueRestore.choose(order, snapshot) ?: return null
+        val items = order.map { slot ->
+            when (slot) {
+                is QueueSlot.Library -> mediaItem(slot.song)
+                is QueueSlot.Open -> mediaItem(slot.item.file)
+            }
+        }
+        val openItems = QueueRestore.openItems(order)
+        val libraryRequest = if (order.any { it is QueueSlot.Library }) snapshot.queue else null
+        return RestoredQueue(items, start, QueueState(libraryRequest, openItems))
+    }
+
+    /** Makes a restored or new queue the one the saver writes and the one opened files are inserted into. */
+    private fun commit(state: QueueState) {
+        currentOrigin = state
+        openGrants.take(state.openItems.map { it.uri })
+        openGrants.keepOnly(state.openItems.map { it.uri })
+        onQueueRequest(state)
+    }
+
+    private data class RestoredQueue(val items: List<MediaItem>, val start: QueueStart, val state: QueueState)
 
     /**
      * Whether [controller] may read the user's music library through the session: PiPlayer itself, the controllers
@@ -327,6 +491,7 @@ class PlaybackSessionCallback(
     fun release() {
         released = true
         expansion.shutdown()
+        openExpansion.shutdown()
     }
 
     /**
@@ -349,10 +514,27 @@ class PlaybackSessionCallback(
         )
         .build()
 
+    /** A file opened from another app; its URI is also its media ID, so the current item can be found after a restore. */
+    private fun mediaItem(file: OpenedFile): MediaItem = MediaItem.Builder()
+        .setMediaId(file.uri)
+        .setUri(file.uri)
+        .setMediaMetadata(
+            MediaMetadata.Builder()
+                .setTitle(file.title)
+                .setArtist(file.artist)
+                .setAlbumTitle(file.album)
+                .setDurationMs(file.durationMs)
+                .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
+                .setIsBrowsable(false)
+                .setIsPlayable(true)
+                .build(),
+        )
+        .build()
+
     /** The saved song as the system UI shows it, before the queue is rebuilt. */
     private fun metadataItem(snapshot: PlaybackSnapshot): MediaItem {
         val builder = MediaItem.Builder()
-            .setMediaId(snapshot.songId.toString())
+            .setMediaId(snapshot.uri ?: snapshot.songId.toString())
             .setMediaMetadata(
                 MediaMetadata.Builder()
                     .setTitle(snapshot.title)
@@ -376,6 +558,17 @@ class PlaybackSessionCallback(
         const val RESTORE_ACTION = "io.github.lorddetson.piplayer.playback.RESTORE"
 
         val RESTORE_COMMAND = SessionCommand(RESTORE_ACTION, Bundle.EMPTY)
+
+        /** The custom session command with which PiPlayer's own screen inserts files opened from another app (§5.1). */
+        const val OPEN_ACTION = "io.github.lorddetson.piplayer.playback.OPEN"
+
+        val OPEN_COMMAND = SessionCommand(OPEN_ACTION, Bundle.EMPTY)
+
+        /** The URIs of an [OPEN_COMMAND], as strings. */
+        const val EXTRA_URIS = "io.github.lorddetson.piplayer.playback.URIS"
+
+        /** How many files of an opened set could not be read; in the result of [OPEN_COMMAND]. */
+        const val EXTRA_SKIPPED = "io.github.lorddetson.piplayer.playback.SKIPPED"
 
         /** Commands that change how the player is set up rather than what it plays. */
         private val SETUP_COMMANDS = intArrayOf(

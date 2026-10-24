@@ -16,6 +16,13 @@
         <item quantity="other">Воспроизведение остановлено: подряд не удалось воспроизвести %1$d песни.</item>
     </plurals>
     <string name="playback_stopped_device">Воспроизведение остановлено из-за сбоя на устройстве.</string>
+    <string name="open_files_failed">Не удалось открыть файл.</string>
+    <plurals name="open_files_skipped">
+        <item quantity="one">Не удалось открыть %1$d файл.</item>
+        <item quantity="few">Не удалось открыть %1$d файла.</item>
+        <item quantity="many">Не удалось открыть %1$d файлов.</item>
+        <item quantity="other">Не удалось открыть %1$d файла.</item>
+    </plurals>
     <string name="playback_shuffle_on">Перемешивание вкл.</string>
     <string name="playback_shuffle_off">Перемешивание выкл.</string>
     <string name="playback_repeat_off">Повтор выкл.</string>

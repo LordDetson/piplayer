@@ -3,6 +3,7 @@ package io.github.lorddetson.piplayer
 import android.content.Intent
 import android.content.pm.ComponentInfo
 import android.content.pm.PackageManager
+import android.net.Uri
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import io.github.lorddetson.piplayer.playback.PlaybackService
@@ -55,6 +56,42 @@ class ExportedComponentsTest {
         )
 
         assertThat(receivers.map { it.activityInfo.name }).contains("androidx.media3.session.MediaButtonReceiver")
+    }
+
+    @Test
+    fun audioFilesFromOtherAppsOpenPiPlayer() {
+        for (type in listOf("audio/mpeg", "audio/flac", "audio/ogg", "application/ogg")) {
+            val activities = context.packageManager.queryIntentActivities(
+                Intent(Intent.ACTION_VIEW)
+                    .setPackage(context.packageName)
+                    .addCategory(Intent.CATEGORY_DEFAULT)
+                    .setDataAndType(Uri.parse("content://com.example.files/song"), type),
+                PackageManager.MATCH_DEFAULT_ONLY,
+            )
+
+            assertThat(activities.map { it.activityInfo.name }).describedAs(type)
+                .contains(MainActivity::class.java.name)
+        }
+    }
+
+    @Test
+    fun onlyAudioContentIsClaimedAsOpenWith() {
+        for (intent in listOf(
+            Intent(Intent.ACTION_VIEW)
+                .setPackage(context.packageName)
+                .addCategory(Intent.CATEGORY_DEFAULT)
+                .setDataAndType(Uri.parse("file:///sdcard/Music/song.mp3"), "audio/mpeg"),
+            Intent(Intent.ACTION_VIEW)
+                .setPackage(context.packageName)
+                .addCategory(Intent.CATEGORY_DEFAULT)
+                .setDataAndType(Uri.parse("content://com.example.files/note"), "text/plain"),
+        )) {
+            val activities = context.packageManager.queryIntentActivities(intent, PackageManager.MATCH_DEFAULT_ONLY)
+
+            assertThat(activities.map { it.activityInfo.name }).describedAs(intent.toString()).doesNotContain(
+                MainActivity::class.java.name,
+            )
+        }
     }
 
     private fun permissionOf(component: ComponentInfo): String? = when (component) {

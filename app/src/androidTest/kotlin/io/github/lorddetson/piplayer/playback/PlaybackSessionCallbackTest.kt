@@ -1,6 +1,7 @@
 package io.github.lorddetson.piplayer.playback
 
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Bundle
 import android.os.Process
 import android.util.Log
@@ -24,6 +25,7 @@ import io.github.lorddetson.piplayer.TestFiles
 import io.github.lorddetson.piplayer.library.songs.AudioPermission
 import io.github.lorddetson.piplayer.library.songs.SongList
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.LONG_FIXTURE
+import io.github.lorddetson.piplayer.playback.PlaybackTesting.SHORT_FIXTURE
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.eventually
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.fileItem
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.onMain
@@ -58,7 +60,7 @@ class PlaybackSessionCallbackTest {
     private lateinit var store: PlaybackStateStore
     private lateinit var storeScope: CoroutineScope
     private val stateFile = File(context.cacheDir, "callback-state-${UUID.randomUUID()}.preferences_pb")
-    private val queueRequests = CopyOnWriteArrayList<QueueRequest?>()
+    private val queueRequests = CopyOnWriteArrayList<QueueState?>()
 
     @get:Rule
     val songs = SongSourceRule()
@@ -120,6 +122,7 @@ class PlaybackSessionCallbackTest {
             val expected = if (controller == piPlayer) {
                 ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS.buildUpon()
                     .add(PlaybackSessionCallback.RESTORE_COMMAND)
+                    .add(PlaybackSessionCallback.OPEN_COMMAND)
                     .build()
             } else {
                 ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS
@@ -129,13 +132,14 @@ class PlaybackSessionCallbackTest {
     }
 
     @Test
-    fun onlyPiPlayersOwnScreenMaySendTheRestoreCommand() {
+    fun onlyPiPlayersOwnScreenMaySendTheRestoreAndOpenCommands() {
         for (controller in listOf(systemUi, otherApp, notification)) {
             val result = onMain { callback.onConnect(session, controller) }
 
             assertThat(result.availableSessionCommands.commands)
                 .describedAs(controller.toString())
                 .doesNotContain(PlaybackSessionCallback.RESTORE_COMMAND)
+                .doesNotContain(PlaybackSessionCallback.OPEN_COMMAND)
         }
     }
 
@@ -243,7 +247,7 @@ class PlaybackSessionCallbackTest {
         assertThat(bravo.mediaMetadata.isPlayable).isTrue()
         // Nothing for other apps to read from the published items beyond what the notification shows.
         assertThat(bravo.requestMetadata).isEqualTo(MediaItem.RequestMetadata.EMPTY)
-        assertThat(queueRequests.last()).isEqualTo(request)
+        assertThat(queueRequests.last()).isEqualTo(QueueState(request, emptyList()))
     }
 
     @Test
@@ -271,7 +275,7 @@ class PlaybackSessionCallbackTest {
         assertThat(onMain { session.player.playWhenReady }).isFalse()
         eventually("the restored song is ready") { onMain { session.player.playbackState == Player.STATE_READY } }
         assertThat(onMain { session.player.currentPosition }).isBetween(400L, 700L)
-        assertThat(queueRequests.last()).isEqualTo(saved.queue)
+        assertThat(queueRequests.last()).isEqualTo(QueueState(requireNotNull(saved.queue), emptyList()))
     }
 
     @Test
@@ -332,7 +336,7 @@ class PlaybackSessionCallbackTest {
         assertThat(result.mediaItems.map { it.mediaId }).containsExactly("1", "2", "3")
         assertThat(result.startIndex).isEqualTo(1)
         assertThat(result.startPositionMs).isEqualTo(500L)
-        assertThat(queueRequests.last()).isEqualTo(saved.queue)
+        assertThat(queueRequests.last()).isEqualTo(QueueState(requireNotNull(saved.queue), emptyList()))
     }
 
     @Test
@@ -479,6 +483,309 @@ class PlaybackSessionCallbackTest {
             assertThatThrownBy { set.get(5, TimeUnit.SECONDS) }.describedAs(controller.toString())
                 .hasCauseInstanceOf(UnsupportedOperationException::class.java)
         }
+    }
+
+    @Test
+    fun openedFilesGoRightAfterTheCurrentSongAndTheFirstOnePlays() {
+        songs.songs = listOf(SongSourceRule.song(1, "A"), SongSourceRule.song(2, "B"), SongSourceRule.song(3, "C"))
+        val request = QueueRequest(startSongId = 2, startRow = 1)
+        val library = setItems(piPlayer, request)
+        onMain {
+            session.player.setMediaItems(library.mediaItems, library.startIndex, 0)
+            session.player.prepare()
+        }
+        val first = Uri.fromFile(TestFiles.copy(LONG_FIXTURE))
+        val second = Uri.fromFile(TestFiles.copy(SHORT_FIXTURE))
+
+        val result = onMain {
+            callback.onCustomCommand(
+                session,
+                piPlayer,
+                PlaybackSessionCallback.OPEN_COMMAND,
+                openArgs(first, second),
+                null,
+            )
+        }.get(15, TimeUnit.SECONDS)
+
+        assertThat(result.resultCode).isEqualTo(SessionResult.RESULT_SUCCESS)
+        assertThat(result.extras.getInt(PlaybackSessionCallback.EXTRA_SKIPPED, 0)).isZero()
+        assertThat(onMain { session.player.mediaItemCount }).isEqualTo(5)
+        assertThat(onMain { session.player.currentMediaItemIndex }).isEqualTo(2)
+        assertThat(onMain { session.player.playWhenReady }).isTrue()
+        eventually("the opened file is ready") { onMain { session.player.playbackState == Player.STATE_READY } }
+        assertThat(onMain { session.player.currentMediaItem?.mediaId }).isEqualTo(first.toString())
+        assertThat(mediaIds())
+            .containsExactly("1", "2", first.toString(), second.toString(), "3")
+        val state = requireNotNull(queueRequests.last())
+        assertThat(state.library).isEqualTo(request)
+        assertThat(state.openItems.map { it.index to it.uri })
+            .containsExactly(2 to first.toString(), 3 to second.toString())
+        assertThat(state.openItems[0].file.title).isNotBlank()
+    }
+
+    @Test
+    fun openedFilesStartAQueueWhenThePlayerIsEmpty() {
+        val first = Uri.fromFile(TestFiles.copy(LONG_FIXTURE))
+        val second = Uri.fromFile(TestFiles.copy(SHORT_FIXTURE))
+
+        val result = onMain {
+            callback.onCustomCommand(
+                session,
+                piPlayer,
+                PlaybackSessionCallback.OPEN_COMMAND,
+                openArgs(first, second),
+                null,
+            )
+        }.get(15, TimeUnit.SECONDS)
+
+        assertThat(result.resultCode).isEqualTo(SessionResult.RESULT_SUCCESS)
+        assertThat(onMain { session.player.mediaItemCount }).isEqualTo(2)
+        assertThat(onMain { session.player.currentMediaItemIndex }).isZero()
+        assertThat(onMain { session.player.playWhenReady }).isTrue()
+        eventually("the first opened file is ready") {
+            onMain { session.player.playbackState == Player.STATE_READY }
+        }
+        val state = requireNotNull(queueRequests.last())
+        assertThat(state.library).isNull()
+        assertThat(state.openItems.map { it.index to it.uri })
+            .containsExactly(0 to first.toString(), 1 to second.toString())
+    }
+
+    @Test
+    fun onlyPiPlayersScreenMayOpenFiles() {
+        val file = Uri.fromFile(TestFiles.copy(LONG_FIXTURE))
+        for (controller in listOf(systemUi, otherApp, notification)) {
+            val result = onMain {
+                callback.onCustomCommand(
+                    session,
+                    controller,
+                    PlaybackSessionCallback.OPEN_COMMAND,
+                    openArgs(file),
+                    null,
+                )
+            }.get(5, TimeUnit.SECONDS)
+
+            assertThat(result.resultCode).describedAs(controller.toString())
+                .isEqualTo(SessionResult.RESULT_ERROR_NOT_SUPPORTED)
+            assertThat(onMain { session.player.mediaItemCount }).describedAs(controller.toString()).isZero()
+        }
+    }
+
+    @Test
+    fun openedFilesThatCannotBeReadAreReportedAndSkipped() {
+        val valid = Uri.fromFile(TestFiles.copy(LONG_FIXTURE))
+        val missing = Uri.fromFile(File(context.cacheDir, "not-there.mp3"))
+
+        val result = onMain {
+            callback.onCustomCommand(
+                session,
+                piPlayer,
+                PlaybackSessionCallback.OPEN_COMMAND,
+                openArgs(valid, missing),
+                null,
+            )
+        }.get(15, TimeUnit.SECONDS)
+
+        assertThat(result.resultCode).isEqualTo(SessionResult.RESULT_SUCCESS)
+        assertThat(result.extras.getInt(PlaybackSessionCallback.EXTRA_SKIPPED, 0)).isEqualTo(1)
+        assertThat(onMain { session.player.mediaItemCount }).isEqualTo(1)
+    }
+
+    @Test
+    fun openedFilesThatAllCannotBeReadAreRefused() {
+        val result = onMain {
+            callback.onCustomCommand(
+                session,
+                piPlayer,
+                PlaybackSessionCallback.OPEN_COMMAND,
+                openArgs(Uri.fromFile(File(context.cacheDir, "not-there.mp3"))),
+                null,
+            )
+        }.get(15, TimeUnit.SECONDS)
+
+        assertThat(result.resultCode).isEqualTo(SessionResult.RESULT_ERROR_IO)
+        assertThat(result.extras.getInt(PlaybackSessionCallback.EXTRA_SKIPPED, 0)).isEqualTo(1)
+        assertThat(onMain { session.player.mediaItemCount }).isZero()
+        assertThat(queueRequests).isEmpty()
+    }
+
+    @Test
+    fun theSavedQueueRestoresLibrarySongsAndOpenedFilesInOrder() {
+        songs.songs = listOf(SongSourceRule.song(1, "A"), SongSourceRule.song(2, "B"), SongSourceRule.song(3, "C"))
+        val first = Uri.fromFile(TestFiles.copy(SHORT_FIXTURE))
+        val second = Uri.fromFile(TestFiles.copy(LONG_FIXTURE))
+        val openItems = listOf(
+            SavedOpenItem(1, OpenedFile(first.toString(), "Opened first", "Artist", "Album", 2_000)),
+            SavedOpenItem(3, OpenedFile(second.toString(), "Opened second", "Artist", "Album", 60_000)),
+        )
+        val saved = PlaybackSnapshot(
+            queue = QueueRequest(startSongId = 1, startRow = 0),
+            openItems = openItems,
+            songId = -1,
+            row = 3,
+            positionMs = 500,
+            shuffle = false,
+            repeatMode = PlaybackSnapshot.REPEAT_OFF,
+            title = "Opened second",
+            artist = "Artist",
+            album = "Album",
+            durationMs = 60_000,
+            uri = second.toString(),
+        )
+        runBlocking { store.write(saved) }
+
+        val result = onMain {
+            callback.onCustomCommand(session, piPlayer, PlaybackSessionCallback.RESTORE_COMMAND, Bundle.EMPTY, null)
+        }.get(15, TimeUnit.SECONDS)
+
+        assertThat(result.resultCode).isEqualTo(SessionResult.RESULT_SUCCESS)
+        assertThat(onMain { session.player.mediaItemCount }).isEqualTo(5)
+        assertThat(mediaIds())
+            .containsExactly("1", first.toString(), "2", second.toString(), "3")
+        assertThat(onMain { session.player.currentMediaItemIndex }).isEqualTo(3)
+        assertThat(onMain { session.player.playWhenReady }).isFalse()
+        eventually("the current opened file is ready") {
+            onMain { session.player.playbackState == Player.STATE_READY }
+        }
+        assertThat(onMain { session.player.currentPosition }).isBetween(400L, 700L)
+        val state = requireNotNull(queueRequests.last())
+        assertThat(state.library).isEqualTo(saved.queue)
+        assertThat(state.openItems).isEqualTo(openItems)
+    }
+
+    @Test
+    fun restoredOpenedFilesThatCannotBeReadAreLeftOutOfTheQueue() {
+        songs.songs = listOf(SongSourceRule.song(1, "A"), SongSourceRule.song(2, "B"))
+        val readable = Uri.fromFile(TestFiles.copy(SHORT_FIXTURE))
+        val missing = Uri.fromFile(File(context.cacheDir, "no-longer-granted.mp3"))
+        val saved = PlaybackSnapshot(
+            queue = QueueRequest(startSongId = 1, startRow = 0),
+            openItems = listOf(
+                SavedOpenItem(1, OpenedFile(readable.toString(), "Readable", null, null, 2_000)),
+                SavedOpenItem(2, OpenedFile(missing.toString(), "Gone", null, null, 2_000)),
+            ),
+            songId = 1,
+            row = 0,
+            positionMs = 0,
+            shuffle = false,
+            repeatMode = PlaybackSnapshot.REPEAT_OFF,
+            title = "A",
+            artist = null,
+            album = null,
+            durationMs = 2_000,
+            uri = null,
+        )
+        runBlocking { store.write(saved) }
+
+        val result = onMain {
+            callback.onCustomCommand(session, piPlayer, PlaybackSessionCallback.RESTORE_COMMAND, Bundle.EMPTY, null)
+        }.get(15, TimeUnit.SECONDS)
+
+        assertThat(result.resultCode).isEqualTo(SessionResult.RESULT_SUCCESS)
+        assertThat(mediaIds()).containsExactly("1", readable.toString(), "2")
+        assertThat(onMain { session.player.currentMediaItemIndex }).isZero()
+        val state = requireNotNull(queueRequests.last())
+        assertThat(state.openItems.map { it.index to it.uri }).containsExactly(1 to readable.toString())
+    }
+
+    @Test
+    fun aCurrentOpenedFileThatCannotBeReadFallsBackToItsRow() {
+        songs.songs = listOf(SongSourceRule.song(1, "A"), SongSourceRule.song(2, "B"))
+        val readable = Uri.fromFile(TestFiles.copy(SHORT_FIXTURE))
+        val missing = Uri.fromFile(File(context.cacheDir, "gone-current.mp3"))
+        val saved = PlaybackSnapshot(
+            queue = QueueRequest(startSongId = 1, startRow = 0),
+            openItems = listOf(
+                SavedOpenItem(1, OpenedFile(readable.toString(), "Readable", null, null, 2_000)),
+                SavedOpenItem(2, OpenedFile(missing.toString(), "Gone", null, null, 2_000)),
+            ),
+            songId = -1,
+            row = 2,
+            positionMs = 1_500,
+            shuffle = false,
+            repeatMode = PlaybackSnapshot.REPEAT_OFF,
+            title = "Gone",
+            artist = null,
+            album = null,
+            durationMs = 2_000,
+            uri = missing.toString(),
+        )
+        runBlocking { store.write(saved) }
+
+        onMain {
+            callback.onCustomCommand(session, piPlayer, PlaybackSessionCallback.RESTORE_COMMAND, Bundle.EMPTY, null)
+        }.get(15, TimeUnit.SECONDS)
+
+        assertThat(mediaIds()).containsExactly("1", readable.toString(), "2")
+        assertThat(onMain { session.player.currentMediaItem?.mediaId }).isEqualTo("2")
+        assertThat(onMain { session.player.currentPosition }).isLessThan(100L)
+    }
+
+    @Test
+    fun aPlayRequestRebuildsOpenedFilesWithTheLibrary() {
+        songs.songs = listOf(SongSourceRule.song(1, "A"), SongSourceRule.song(2, "B"))
+        val opened = Uri.fromFile(TestFiles.copy(SHORT_FIXTURE))
+        val saved = PlaybackSnapshot(
+            queue = QueueRequest(startSongId = 1, startRow = 0),
+            openItems = listOf(SavedOpenItem(1, OpenedFile(opened.toString(), "Opened", null, null, 2_000))),
+            songId = -1,
+            row = 1,
+            positionMs = 500,
+            shuffle = false,
+            repeatMode = PlaybackSnapshot.REPEAT_OFF,
+            title = "Opened",
+            artist = null,
+            album = null,
+            durationMs = 2_000,
+            uri = opened.toString(),
+        )
+        runBlocking { store.write(saved) }
+
+        val result = onMain { callback.onPlaybackResumption(session, systemUi, isForPlayback = true) }
+            .get(15, TimeUnit.SECONDS)
+
+        assertThat(result.mediaItems.map { it.mediaId })
+            .containsExactly("1", opened.toString(), "2")
+        assertThat(result.startIndex).isEqualTo(1)
+        assertThat(result.startPositionMs).isEqualTo(500L)
+        val state = requireNotNull(queueRequests.last())
+        assertThat(state.openItems.map { it.index to it.uri }).containsExactly(1 to opened.toString())
+    }
+
+    @Test
+    fun theSystemRecentItemCanBeAnOpenedFile() {
+        val opened = Uri.fromFile(TestFiles.copy(SHORT_FIXTURE))
+        val saved = PlaybackSnapshot(
+            queue = null,
+            openItems = listOf(SavedOpenItem(0, OpenedFile(opened.toString(), "Opened", null, null, 2_000))),
+            songId = -1,
+            row = 0,
+            positionMs = 500,
+            shuffle = false,
+            repeatMode = PlaybackSnapshot.REPEAT_OFF,
+            title = "Opened",
+            artist = null,
+            album = null,
+            durationMs = 2_000,
+            uri = opened.toString(),
+        )
+        runBlocking { store.write(saved) }
+
+        val result = onMain { callback.onPlaybackResumption(session, systemUi, isForPlayback = false) }
+            .get(5, TimeUnit.SECONDS)
+
+        assertThat(result.mediaItems).hasSize(1)
+        assertThat(result.mediaItems.single().mediaId).isEqualTo(opened.toString())
+        assertThat(result.mediaItems.single().mediaMetadata.title.toString()).isEqualTo("Opened")
+        assertThat(result.startPositionMs).isEqualTo(500L)
+    }
+
+    private fun openArgs(vararg uris: Uri) = Bundle().apply {
+        putStringArrayList(PlaybackSessionCallback.EXTRA_URIS, ArrayList(uris.map(Uri::toString)))
+    }
+
+    private fun mediaIds(): List<String> = onMain {
+        (0 until session.player.mediaItemCount).map { row -> session.player.getMediaItemAt(row).mediaId }
     }
 
     private fun setItems(controller: MediaSession.ControllerInfo, request: QueueRequest): MediaItemsWithStartPosition {

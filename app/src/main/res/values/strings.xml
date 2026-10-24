@@ -18,6 +18,12 @@
         <item quantity="other">Playback stopped: %1$d songs in a row could not be played.</item>
     </plurals>
     <string name="playback_stopped_device">Playback stopped because of a problem with the device.</string>
+    <!-- Open-with (docs/playback.md §5). -->
+    <string name="open_files_failed">Could not open the file.</string>
+    <plurals name="open_files_skipped">
+        <item quantity="one">%1$d file could not be opened.</item>
+        <item quantity="other">%1$d files could not be opened.</item>
+    </plurals>
     <!-- Names of the shuffle and repeat buttons in the notification and the system media controls: the current mode. -->
     <string name="playback_shuffle_on">Shuffle on</string>
     <string name="playback_shuffle_off">Shuffle off</string>

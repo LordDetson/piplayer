@@ -13,11 +13,4 @@
     <string name="spike_stage_fingerprinting">Computing the fingerprint…</string>
     <string name="spike_stage_acoustid">Looking the fingerprint up in AcoustID…</string>
     <string name="spike_stage_text_search">Searching MusicBrainz…</string>
-    <!-- M1 step 1: plays a picked file through the playback service until open-with arrives (M1 step 5). -->
-    <string name="debug_play_file">Play a file</string>
-    <string name="debug_pause">Pause</string>
-    <string name="debug_resume">Resume</string>
-    <string name="debug_playing">Playing: %1$s</string>
-    <string name="debug_paused">Paused: %1$s</string>
-    <string name="debug_playback_failed">Playback failed: %1$s</string>
 </resources>

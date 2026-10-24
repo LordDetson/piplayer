@@ -7,12 +7,12 @@ import androidx.media3.common.Player
 import androidx.media3.common.Timeline
 
 /**
- * Keeps the compact state of the playing queue up to date (docs/playback.md §4.2): every five seconds while playing and
- * at once when playback pauses, stops, changes song or position, or when shuffle, repeat or the queue changes. Snapshots
- * are built on the main thread, where the player lives; the store writes them off it.
+ * Keeps the compact state of the playing queue up to date (docs/playback.md §4.2, §5.3): every five seconds while
+ * playing and at once when playback pauses, stops, changes song or position, or when shuffle, repeat or the queue
+ * changes. Snapshots are built on the main thread, where the player lives; the store writes them off it.
  *
- * A queue that has no compact request (a debug file, a file opened from another app) is not saved; the last library
- * snapshot stays as it was.
+ * A queue without a compact request and no opened files (a test's own items) is not saved; the last snapshot stays as
+ * it was.
  */
 class PlaybackStateSaver(private val player: Player, private val store: PlaybackStateStore) : Player.Listener {
 
@@ -20,7 +20,7 @@ class PlaybackStateSaver(private val player: Player, private val store: Playback
 
     /** Written by the session callback's expansion thread, read on the main thread. */
     @Volatile
-    private var queue: QueueRequest? = null
+    private var queue: QueueState? = null
 
     /** The last snapshot handed to the store; only touched on the main thread. */
     private var last: PlaybackSnapshot? = null
@@ -48,13 +48,13 @@ class PlaybackStateSaver(private val player: Player, private val store: Playback
         handler.removeCallbacks(tick)
     }
 
-    /** The expandable queue now playing, or null when it is not one of PiPlayer's own lists. */
-    fun setQueue(request: QueueRequest?) {
-        queue = request
+    /** The queue now playing, or null when it is not one of PiPlayer's own lists or opened files. */
+    fun setQueue(state: QueueState?) {
+        queue = state
         // May come from the callback's expansion thread; the main thread owns the last snapshot.
         handler.post {
             last = null
-            if (request != null) save()
+            if (state != null) save()
         }
     }
 
@@ -62,15 +62,23 @@ class PlaybackStateSaver(private val player: Player, private val store: Playback
     fun saveNow() = save()
 
     private fun save() {
-        val request = queue ?: return
+        val state = queue ?: return
         val item = player.currentMediaItem ?: return
         val row = player.currentMediaItemIndex
         if (row < 0) return
-        val songId = item.mediaId.toLongOrNull() ?: return
+        val songId = item.mediaId.toLongOrNull() ?: -1L
+        val uri = item.localConfiguration?.uri?.toString()
+        if (songId < 0) {
+            // During an insertion the player can change before the new queue state arrives; do not save that moment.
+            if (state.openItems.none { it.index == row && it.uri == uri }) return
+        } else if (state.library == null) {
+            return
+        }
         val metadata = item.mediaMetadata
         val position = if (player.playbackState == Player.STATE_ENDED) 0L else player.currentPosition.coerceAtLeast(0)
         val snapshot = PlaybackSnapshot(
-            queue = request,
+            queue = state.library,
+            openItems = state.openItems,
             songId = songId,
             row = row,
             positionMs = position,
@@ -80,7 +88,7 @@ class PlaybackStateSaver(private val player: Player, private val store: Playback
             artist = metadata.artist?.toString(),
             album = metadata.albumTitle?.toString(),
             durationMs = (metadata.durationMs ?: 0L).coerceAtLeast(0),
-            uri = item.localConfiguration?.uri?.toString(),
+            uri = uri,
         )
         if (snapshot == last) return
         last = snapshot

@@ -1,10 +1,12 @@
 package io.github.lorddetson.piplayer.ui.player
 
 import android.app.Application
+import android.net.Uri
 import android.os.Bundle
 import androidx.annotation.OptIn
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.media3.common.MediaItem
@@ -13,6 +15,8 @@ import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionError
+import androidx.media3.session.SessionResult
+import io.github.lorddetson.piplayer.R
 import io.github.lorddetson.piplayer.library.songs.Song
 import io.github.lorddetson.piplayer.playback.PlaybackConnection
 import io.github.lorddetson.piplayer.playback.PlaybackSessionCallback
@@ -89,6 +93,37 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
             setMediaItem(item)
             prepare()
             play()
+        }
+    }
+
+    /**
+     * Inserts files opened from another app right after the current song; the first becomes current and plays
+     * (docs/playback.md §5.1). The service reads their tags and reports how many files could not be opened.
+     */
+    fun open(uris: List<Uri>) {
+        if (uris.isEmpty()) return
+        val arguments = Bundle().apply {
+            putStringArrayList(PlaybackSessionCallback.EXTRA_URIS, ArrayList(uris.map(Uri::toString)))
+        }
+        connection.whenConnected {
+            val result = sendCustomCommand(PlaybackSessionCallback.OPEN_COMMAND, arguments)
+            result.addListener(
+                {
+                    val sessionResult = runCatching { result.get() }.getOrNull() ?: return@addListener
+                    val app = getApplication<Application>()
+                    if (sessionResult.resultCode != SessionResult.RESULT_SUCCESS) {
+                        mutableMessages.trySend(app.getString(R.string.open_files_failed))
+                    } else {
+                        val skipped = sessionResult.extras.getInt(PlaybackSessionCallback.EXTRA_SKIPPED, 0)
+                        if (skipped > 0) {
+                            mutableMessages.trySend(
+                                app.resources.getQuantityString(R.plurals.open_files_skipped, skipped, skipped),
+                            )
+                        }
+                    }
+                },
+                ContextCompat.getMainExecutor(getApplication()),
+            )
         }
     }
 

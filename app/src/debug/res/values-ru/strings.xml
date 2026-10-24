@@ -12,10 +12,4 @@
     <string name="spike_stage_fingerprinting">Вычисление отпечатка…</string>
     <string name="spike_stage_acoustid">Поиск отпечатка в AcoustID…</string>
     <string name="spike_stage_text_search">Поиск в MusicBrainz…</string>
-    <string name="debug_play_file">Воспроизвести файл</string>
-    <string name="debug_pause">Пауза</string>
-    <string name="debug_resume">Продолжить</string>
-    <string name="debug_playing">Играет: %1$s</string>
-    <string name="debug_paused">На паузе: %1$s</string>
-    <string name="debug_playback_failed">Ошибка воспроизведения: %1$s</string>
 </resources>

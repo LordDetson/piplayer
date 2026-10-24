@@ -90,7 +90,7 @@ of milestone M1 (features.md); each step of M1 adds its section. Facts about Med
 - The notification is Media3's, with PiPlayer's monochrome play icon and the channel "Playback" (ID `playback`);
   tapping it opens PiPlayer.
 - Playback resumption from the system media controls and from headset buttons after the service has stopped: M1
-  step 4.
+  step 4. Files opened from another app arrive through PiPlayer's own screen and the `OPEN` session command: M1 step 5.
 
 ### 1.5 Processes
 
@@ -101,10 +101,9 @@ of milestone M1 (features.md); each step of M1 adds its section. Facts about Med
 
 ### 1.6 Debug entry
 
-- Debug builds have "Play a file" on the main screen: it picks an audio file with the system picker and plays it
-  through the session, the way the app will. It keeps a persisted read grant for the picked file (and gives back the
-  previous one), because playback outlives the activity whose grant the picker issued. It plays files that the media
-  index does not list, so it stays until open-with arrives (M1 step 5).
+- Debug builds have "Identify a file" on the main screen: it picks an audio file with the system picker and runs the
+  M0 identification spike on it. The old "Play a file" button is gone: files from other apps now arrive through
+  open-with (A5), in debug and release builds alike.
 
 ### 1.7 Checks
 
@@ -397,52 +396,67 @@ too often while it plays?), and a large cover (3000x3000) in the profiler.
 - The queue, the current song and its position, shuffle and repeat are kept in one Preferences DataStore file,
   `files/datastore/playback_state.preferences_pb`. One snapshot is written with one `edit`, so a reader never sees half
   of a snapshot.
-- A snapshot holds the compact queue request (A2.3), the current song's media index ID and its row, the position,
-  shuffle, repeat, the song's title, artist, album and duration, and the URI of the current file. The URI is for the
-  system's recent media controls; it is one file, not the queue.
-- A schema version at the top of the file lets a later version ignore an older snapshot instead of guessing. A file
-  that cannot be read is replaced by an empty one: playback still starts, only the saved state is lost.
+- A snapshot holds the optional compact library request (A2.3); the small ordered list of files opened from other apps,
+  each with its URI, title, artist, album, duration and final row; the current item (a media index ID, or the URI of an
+  opened file), its row and position; shuffle, repeat; and the current item's title, artist, album, duration and URI.
+  The current URI is also what the system's recent media controls show. A 20 000-song library queue still stores one
+  short request, not 20 000 URIs or titles (A5.3).
+- The schema is version 2. A version 1 file, which held only a library queue, is read as a library-only snapshot. A
+  schema that a later version does not know is ignored instead of guessed. A file that cannot be read is replaced by an
+  empty one: playback still starts, only the saved state is lost.
 - The file is excluded from Android backup and device transfer: media index IDs and file URIs from one device mean
   nothing on another.
 
 ### 4.2 What is saved and when
 
-- The queue itself is never written: its compact request is enough to read the list again from the media index. A
-  20 000-song queue saves one short request, not 20 000 URIs or titles.
+- The library part of the queue is never written: its compact request is enough to read the list again from the media
+  index. A 20 000-song queue saves one short request, not 20 000 URIs or titles.
+- Files opened from other apps are a small list, so each is saved whole: URI, title, artist, album, duration and its
+  final row among the library songs. They are written in the same snapshot as the library request, so their order
+  survives a changed library. They are not added to the media index or to any library file.
 - While playing, a snapshot is written every five seconds. It is also written at once when playback pauses or stops,
   when the song changes, when the position jumps (a seek, a restart after an error), when shuffle or repeat changes, and
   when the player's timeline or the compact queue request changes.
 - Snapshots are built on the main thread, where the player lives, and written off it. A snapshot equal to the last one
   handed to the store is not written again, so a pause followed by a stop does not create two identical files.
-- A queue without a compact request is not saved: a debug file, a file opened from another app, or a test's own items.
-  Such playback never replaces the last library snapshot. A queue that is not the song list arrives with the library in
-  M2a.
+- A queue with neither a compact request nor opened files is not saved: items that a controller or a test sets directly
+  never replace the last snapshot.
 - The service writes the current state once more before it is destroyed, after saving on a task swipe, so the last
   seconds of playback are not lost.
 
 ### 4.3 Which song and position
 
-- If the saved song is still in the list, its media index ID selects it at its current row, and the saved position is
-  applied. The row is not trusted for this: songs may have been added or removed, so the ID is what is looked up.
-- If the saved song is gone, the saved row selects the song now at that row, clamped to the end of the list, and the
-  position is zero. The saved position belonged to another file, so applying it would start the new song in the middle.
-  An empty list restores nothing.
-- Shuffle and repeat are restored with the song. The exact random order from before the process died is not saved: the
-  order is generated again with the saved song first and every other song once after it (A3.6). Turning shuffle off
-  after the restore continues in list order from the saved song.
+- The saved current item is found by its media index ID when it is a library song, or by its URI when it is an opened
+  file. The saved position is applied. The row is not trusted for this: songs may have been added or removed, so the ID
+  or URI is what is looked up.
+- If the saved item is gone, the saved row selects the item now at that row, clamped to the end of the queue, and the
+  position is zero. The saved position belonged to another file, so applying it would start the new item in the middle.
+  An empty queue restores nothing.
+- Opened files are put back at their saved rows. If the library shrank or grew, they keep their order and move to the
+  nearest free rows, so they stay where the user heard them.
+- Shuffle and repeat are restored with the item. The exact random order from before the process died is not saved: the
+  order is generated again with the saved item first and every other item once after it (A3.6). Turning shuffle off
+  after the restore continues in list order from the saved item.
 
 ### 4.4 Opening the app and resuming from the system
 
-- Opening PiPlayer after process death shows the saved queue paused, at the saved song and position. The screen's
+- Opening PiPlayer after process death shows the saved queue paused, at the saved item and position. The screen's
   controller sends the service a custom `RESTORE` session command after it connects. The service rebuilds the queue off
   the main thread, selects the saved start, prepares it, and stays paused. It calls pause before loading the items, so a
   leftover play-when-ready flag from the previous process cannot make the restored queue start by itself.
 - Only PiPlayer's own screen may send `RESTORE`: a controller from another app and the media notification's controller
-  cannot. A play request, a tapped song, or a newer restore cancels a restore still on its way, so a slow restore never
-  replaces what the user already started. If the player already has a queue, the command does nothing.
+  cannot. A play request, a tapped song, a newer restore or an open from another app cancels a restore still on its
+  way, so a slow restore never replaces what the user already started. If the player already has a queue, the command
+  does nothing.
+- Restored opened files whose temporary grant has expired are left out before the queue is built. The controllers get
+  the same "files could not be opened" message as for a failed open. The rest of the queue is restored normally, and a
+  file that opens but fails to decode is treated as a broken song (A2.4).
+- A file opened from another app is inserted as A5.1 says. If a restore is still reading the library, the open
+  supersedes it and the file starts at once; if the restore already showed the queue, the file goes right after its
+  current item. The opened files are then the queue that the next launch restores.
 - The system's recent media controls ask for the item to show before playback. The service gives them one item with the
   saved title, artist, album, duration and cover reference, not the queue. Its play button then asks for playback
-  resumption: the service rebuilds the whole saved queue, selects the saved song and position, and lets Media3 start it.
+  resumption: the service rebuilds the whole saved queue, selects the saved item and position, and lets Media3 start it.
 - This is the path for the lock screen, the system media controls and a Bluetooth device's play button after Android
   killed the process. It does not publish the queue to the platform session (A2.3); only the restored current item is
   visible.
@@ -480,8 +494,9 @@ too often while it plays?), and a large cover (3000x3000) in the profiler.
 
 ### 4.7 Checks
 
-JVM tests: every snapshot key round-trips through Preferences, an older or broken snapshot is rejected, the saved song
-wins over the row and a missing one falls back to the row with position zero, and start intents are classified as media,
+JVM tests: every snapshot key round-trips through Preferences, schema 1 becomes a library-only snapshot, broken and
+malformed opened files are rejected, the saved song wins over the row and a missing one falls back to the row with
+position zero, opened files are inserted and restored at their rows, and start intents are classified as media,
 notification, self-start or foreign.
 
 Instrumented tests on the API 30, 36 and 37 emulators:
@@ -489,7 +504,7 @@ Instrumented tests on the API 30, 36 and 37 emulators:
 - The state store reads back a snapshot, keeps the latest of two queued writes, clears it, reports a missing file as
   empty, and survives a new store on the same file.
 - Through the service: the position is saved every five seconds while playing and at once on pause and seek; a song
-  change and both modes are saved; a single debug file does not replace a saved library queue.
+  change and both modes are saved; a file set directly by a controller does not replace a saved library queue.
 - Opening the app shows the saved queue paused at its song and position with repeat restored, and keeps it paused. A
   play request on an empty player rebuilds the queue and starts at the saved position. A missing saved song starts at
   its row without the old position.
@@ -501,3 +516,81 @@ Instrumented tests on the API 30, 36 and 37 emulators:
 By hand on the phone later: open the app after a force stop and check the paused queue, press play from the lock screen
 and a Bluetooth device, use the headset buttons after process death, and send a foreign start with `adb` while watching
 that playback is unaffected.
+
+## 5. Files opened from other apps
+
+### 5.1 Opening and the queue
+
+- PiPlayer advertises `ACTION_VIEW` for `content://` audio: `audio/*` and `application/ogg`, with the default
+  category. It does not advertise `file://`, because another app could name any file PiPlayer can read, and it does not
+  advertise `ACTION_SEND` or `ACTION_SEND_MULTIPLE`. Those actions are read only if an explicit intent carries one. A
+  share target for playback is not part of M1; the v1.x share target stays for identification.
+- The activity is `singleTop`: a file manager sends a second file to the running activity through `onNewIntent`.
+- URIs come from `Intent.data`, `ClipData`, `EXTRA_STREAM` and an `EXTRA_STREAM` list. Their order is kept and
+  duplicates are removed. Only `content://` URIs are played.
+- Files are inserted right after the current item. The first opened file becomes current and starts playing, the other
+  files follow in intent order, the old current stays immediately before them, and the rest of the old queue follows.
+  If the player is empty, the opened files are the whole queue.
+- Opening a file while PiPlayer is in the background brings the activity forward; playback does not wait for the screen.
+  The activity sends the URIs to the service with the internal `OPEN` session command, which only PiPlayer's own screen
+  may send (A1.4).
+- A cold open-with launch starts the files at once. If the screen's restore of the saved queue is still reading the
+  library, the open supersedes it; if the restore already showed the queue, the files go right after its current item.
+  The queue is then saved as usual, so the next launch restores it.
+- A file that cannot be read is skipped and counted; if none can be read, the command fails and the screen shows a
+  message. An opened file is never added to the music library or to the media index.
+
+### 5.2 Tags and cover
+
+- The service reads title, artist, album and duration with `MediaMetadataRetriever` before inserting. A missing title
+  falls back to the display name without its extension, then to the URI.
+- The queue item carries those tags. ExoPlayer reads the embedded cover from the file, and the screen decodes it as for
+  a library song. No artwork is stored in the snapshot.
+- Reading tags blocks, so it happens off the main thread. A library queue still expands on its own thread, so opening
+  files does not delay the 1 s start bound of A2.3.
+
+### 5.3 Saving and restoring opened files
+
+- The snapshot is schema 2. It stores the optional library request, the opened files with their final rows, and the
+  current item. Schema 1, which had only a library queue, migrates to an empty opened list.
+- Restoring puts opened files back at their saved rows. If the library changed, they keep their order and move to the
+  nearest free rows. The current opened file is found by URI; a library current item by its media index ID.
+- A temporary grant ends with the process. At restore, each opened URI is checked; files that cannot be opened are left
+  out, and the controllers get the "files could not be opened" message. The rest of the queue is restored. A file that
+  opens but fails to decode is treated as a broken song (A2.4).
+- A provider that offers a persistable grant keeps the file readable after process death. PiPlayer takes such grants
+  when files are opened and releases them when the files leave the queue. A provider that offers none leaves a
+  temporary grant, which lasts only while the process does.
+- A 20 000-song library queue still saves one compact request plus the few opened files; the opened list is not a
+  second copy of the library.
+
+### 5.4 What other apps cannot do
+
+- Other apps cannot send `OPEN` or `RESTORE`. They may connect and control playback as A1.4 says, but the media
+  notification's controller, which runs in PiPlayer's process, cannot send them either.
+- Another app cannot make PiPlayer open a file with PiPlayer's permissions: `onAddMediaItems` still accepts only
+  PiPlayer's own items.
+- A `file://` URI is refused even when an explicit intent carries it, and the manifest does not match it.
+
+### 5.5 Checks
+
+JVM tests: opened files are inserted after the current item and keep their rows when the library changes; a pure opened
+queue has no gaps; a changed library restores opened files near their saved rows; the current opened file is found by
+URI; schema 2 and schema 1 snapshots round-trip; malformed opened files are rejected.
+
+Instrumented tests on the API 30, 36 and 37 emulators:
+
+- The open-with parser reads `data`, `ClipData`, `EXTRA_STREAM` and a stream list in order, removes duplicates and
+  refuses `file://`.
+- The manifest advertises `ACTION_VIEW` for `content://` audio and `application/ogg`, and not for `file://` or
+  non-audio content.
+- Through the service: files open right after the current song and the first one plays; several files keep their
+  order; a pure opened queue starts playing; unreadable files are skipped and counted; only PiPlayer's own screen may
+  send `OPEN`.
+- Restore puts library songs and opened files back in order, starts at the current opened file, and rebuilds them for a
+  system play request. An opened file whose URI is gone is left out with a message.
+- An end-to-end open-with intent through `MainActivity` with a real `content://` file inserts it after the current
+  song, saves the mixed queue, and restores the pure opened queue on a system play request.
+
+By hand on the phone later: open a file from Files while a song plays, open several files at once, open one while
+PiPlayer is in the background, force stop and reopen, and open a file whose temporary grant has expired.
