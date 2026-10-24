@@ -1,7 +1,8 @@
 # Playback
 
 How PiPlayer plays music: the playback service, its media session and the player inside it. This is the specification
-of milestone M1 (features.md); each step of M1 adds its section. Facts about Media3 refer to version 1.11.1.
+of milestone M1 (features.md); each step of M1 adds its section. Facts about Media3 refer to version 1.12.0-alpha01,
+the version PiPlayer builds with; sections 1 to 7 were written on 1.11.1 and their checks pass on both.
 
 ## 1. Service and session (M1 step 1)
 
