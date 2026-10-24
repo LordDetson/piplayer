@@ -21,6 +21,7 @@
     </queries>
 
     <application
+        android:name=".PiPlayerApplication"
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
@@ -75,6 +76,17 @@
                 <action android:name="android.intent.action.MEDIA_BUTTON" />
             </intent-filter>
         </receiver>
+
+        <!-- Hands a crash report to the app the user shares it with, for that share only (docs/playback.md §7.3). -->
+        <provider
+            android:name=".crash.CrashReportProvider"
+            android:authorities="${applicationId}.crashreports"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/crash_report_paths" />
+        </provider>
     </application>
 
 </manifest>

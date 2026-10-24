@@ -46,8 +46,10 @@ import androidx.navigation3.runtime.entryProvider
 import androidx.navigation3.runtime.rememberNavBackStack
 import androidx.navigation3.ui.NavDisplay
 import io.github.lorddetson.piplayer.R
+import io.github.lorddetson.piplayer.crash.CrashReports
 import io.github.lorddetson.piplayer.debug.DebugEntry
 import io.github.lorddetson.piplayer.library.songs.Song
+import io.github.lorddetson.piplayer.ui.crash.CrashPrompt
 import io.github.lorddetson.piplayer.ui.player.EqualizerPanel
 import io.github.lorddetson.piplayer.ui.player.ExtraControls
 import io.github.lorddetson.piplayer.ui.player.MiniPlayer
@@ -65,7 +67,8 @@ data object NowPlayingRoute : NavKey
 
 /**
  * The app's screens (docs/playback.md §3.1): the song list and Now Playing over it, which slides up when it opens and
- * down when it closes, following the predictive back gesture. Back is PiPlayer's only while Now Playing is open.
+ * down when it closes, following the predictive back gesture. Back is PiPlayer's only while Now Playing is open. The
+ * crash dialog (§7.3) comes over either.
  */
 @Composable
 fun PiPlayerApp(viewModel: PlayerViewModel = viewModel()) {
@@ -97,6 +100,7 @@ fun PiPlayerApp(viewModel: PlayerViewModel = viewModel()) {
             }
         },
     )
+    if (CrashReports.promptEnabled) CrashPrompt(CrashReports.of(LocalContext.current))
 }
 
 @Composable

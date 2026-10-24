@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application>
+        <!-- Crash on purpose, each in a process of its own, for CrashEndToEndTest (docs/playback.md §7.4). -->
+        <service
+            android:name=".crash.JavaCrashService"
+            android:exported="false"
+            android:process=":crashtest_java" />
+        <service
+            android:name=".crash.NativeCrashService"
+            android:exported="false"
+            android:process=":crashtest_native" />
+    </application>
+
+</manifest>

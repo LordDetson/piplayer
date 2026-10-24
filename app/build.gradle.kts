@@ -51,7 +51,8 @@ android {
         targetSdk = 36
         versionCode = 1
         versionName = "0.1.0"
-        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        // Turns the crash dialog off (docs/playback.md §7.4).
+        testInstrumentationRunner = "io.github.lorddetson.piplayer.PiPlayerTestRunner"
         ndk {
             // The native code (TagLib, Chromaprint) is built for these only; without the filter the APK would also
             // claim 32-bit ABIs through other libraries' .so files and crash there.

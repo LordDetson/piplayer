@@ -66,4 +66,26 @@
         <item quantity="many">%1$d каналов</item>
         <item quantity="other">%1$d канала</item>
     </plurals>
+
+    <string name="crash_title">В прошлый раз PiPlayer неожиданно закрылся</string>
+    <string name="crash_one">%1$s, %2$s</string>
+    <plurals name="crash_several">
+        <item quantity="one">%1$d отчёт</item>
+        <item quantity="few">%1$d отчёта</item>
+        <item quantity="many">%1$d отчётов</item>
+        <item quantity="other">%1$d отчёта</item>
+    </plurals>
+    <string name="crash_explanation">Отчёты помогают исправлять ошибки. Они остаются на устройстве, пока вы сами ими не поделитесь.</string>
+    <string name="crash_kind_java">Сбой</string>
+    <string name="crash_kind_native">Сбой в нативном коде</string>
+    <string name="crash_kind_anr">Приложение перестало отвечать</string>
+    <string name="crash_share">Поделиться</string>
+    <string name="crash_show">Показать отчёт</string>
+    <string name="crash_close">Закрыть</string>
+    <string name="crash_report_title">Отчёт о сбое</string>
+    <string name="crash_copy">Копировать</string>
+    <string name="crash_copied">Отчёт скопирован</string>
+    <string name="crash_copied_start">Скопированы первые 100 000 символов. Чтобы отправить отчёт целиком, поделитесь им.</string>
+    <string name="crash_share_title">Поделиться отчётом о сбое</string>
+    <string name="crash_share_subject">Отчёт о сбое PiPlayer</string>
 </resources>

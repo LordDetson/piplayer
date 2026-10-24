@@ -98,6 +98,7 @@ of milestone M1 (features.md); each step of M1 adds its section. Facts about Med
   only; any other name is neither.
 - Components of the main process check the role when they start and refuse to run elsewhere: the playback service
   now; WorkManager, the databases and DataStore when they arrive.
+- Crash capture (§7) is the exception: it runs in every process of the app, so that a crash anywhere leaves a report.
 
 ### 1.6 Debug entry
 
@@ -696,3 +697,65 @@ Instrumented tests on the API 30, 36 and 37 emulators:
 
 By hand on the phone: a 5-minute timer with the screen off, the fade by ear (also during a navigation prompt and over
 Bluetooth), stop after current, and the Equalizer button opening SoundAlive.
+
+## 7. Crash reports (M1 step 7)
+
+PiPlayer keeps its own crash reports on the device and offers them for sharing on the next start. It has no crash
+reporting service and sends nothing by itself: a report leaves the device only when the user shares it.
+
+### 7.1 What is caught
+
+- Kotlin and Java crashes, in every process of the app: PiPlayer's own handler writes the report in the crashing
+  process, then hands the crash on to Android's handler, so that Android still records it and ends the process as it
+  would. The handler is installed first thing in the application object, before anything else of the process runs.
+- Freezes (ANRs) and native crashes (TagLib, Chromaprint, the platform's codecs), which kill the process before any
+  code of the app can react: Android keeps a record of how each process ended (`ApplicationExitInfo`), and the main
+  process reads it at its next start. An ANR record carries the threads' stacks as text. A native crash carries a
+  tombstone from Android 12 on, which PiPlayer turns into text: the signal, the cause, the abort message and every
+  thread's backtrace with file, function, offset and build ID, laid out as Android's own crash dumps are, so that the
+  usual tools can symbolize it. Android 11 keeps no tombstone for apps, so there the report holds the record alone.
+- Other ways a process ends (the system reclaiming memory, the user stopping the app, an update) are not crashes and
+  make no report.
+- Each record is reported once: the reports remember which records they have seen. Records from before the first
+  start of a build with crash reports are not reported. A Java crash that the handler has written is not reported a
+  second time from its record; the record's details are added to the report instead.
+
+### 7.2 Reports
+
+- A report is plain text: the app's version and build, the device, Android's version and build, the process, the
+  time, the kind (crash, native crash, ANR), then the stack trace (with its causes) or the trace. The text stays as it
+  is: messages may name files and songs, which is why the user sees the whole report before sharing it.
+- An ANR trace is kept up to 4 MB, and the report says where it was cut; a tombstone larger than 8 MB is not read. A
+  trace that cannot be read leaves a report with the record and the reason.
+- The newest 5 reports are kept in the app's private storage; older ones are deleted. They stay out of backups and
+  transfers to another device.
+
+### 7.3 On the next start
+
+- When there are reports the user has not seen, the app shows a dialog: "PiPlayer stopped unexpectedly last time",
+  with the kind and time (or how many reports there are), and Share, Show report and Close. It appears once for those
+  reports, whatever the user chooses.
+- Several new reports are offered together as one text, newest first.
+- Show report opens the full text on a screen of its own, selectable, with Share and Copy.
+- Share opens the system share sheet with the report as a text file and, up to 32 000 characters, as text too (longer
+  text is cut at a line and says so). The share sheet has no Copy button once a file is attached; the report screen's
+  Copy puts up to 100 000 characters on the clipboard.
+
+### 7.4 Checks
+
+JVM tests: the handler writes a complete report and then hands the crash on exactly once, also when it cannot write,
+and ignores a crash within the crash; the report text; which exit records make a report (kinds, seen records, the
+first start, a Java crash already written); turning records into reports (a decoded tombstone, an unreadable one, an
+ANR trace cut at its limit, a trace that cannot be opened, Android's record added to the handler's report); keeping
+the newest 5; the tombstone decoder on hand-made tombstones; cutting the shared text; the backup exclusions.
+
+Instrumented tests on the API 30, 36 and 37 emulators: the installed handler is in front of Android's (in the tests,
+in front of the test runner's, which hands on to Android's); the dialog appears once
+for new reports, and Close, Show report and Share work; the share intent carries the text and a readable file; the
+report screen scrolls to the end of a long report.
+
+End to end, run by hand with `-e crashTests true` (they crash test processes, which Android counts against the app if
+repeated within minutes): a Java crash and a native crash in debug-only processes give one report each, with Android's
+record; on API 31 and later the native report has the decoded tombstone, with the signal and the backtrace.
+
+By hand on the phone: the dialog after the end-to-end crashes, and sharing a report to email, Telegram and Files.

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Only the file being shared; the reports themselves stay private (docs/playback.md §7.3). -->
+<paths>
+    <files-path
+        name="shared"
+        path="crashes/shared/" />
+</paths>
