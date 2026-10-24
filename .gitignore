@@ -26,3 +26,4 @@ Thumbs.db
 
 # Kotlin compiler state
 .kotlin/
+opencode.json
