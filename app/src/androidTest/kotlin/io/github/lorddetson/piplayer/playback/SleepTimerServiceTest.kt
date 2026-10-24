@@ -136,7 +136,7 @@ class SleepTimerServiceTest {
     }
 
     @Test
-    fun finishTrackModePausesAtTheEndOfTheSongWithoutAFade() {
+    fun finishTrackModeStopsOnTheNextSongWithoutAFade() {
         val items = listOf(fileItem(SHORT_FIXTURE), fileItem(LONG_FIXTURE))
         onMain {
             controller.setMediaItems(items)
@@ -147,10 +147,11 @@ class SleepTimerServiceTest {
         timer(500, finishTrack = true)
         eventually("the timer finishes the track") { extras().finishTrack }
 
-        controller.waitUntil("playback pauses", timeout = 5.seconds) { !playWhenReady }
+        controller.waitUntil("playback stops on the next song", timeout = 5.seconds) {
+            !playWhenReady && currentMediaItemIndex == 1 && currentPosition < 500
+        }
 
-        assertThat(onMain { controller.currentMediaItemIndex }).isEqualTo(0)
-        assertThat(onMain { controller.currentPosition }).isGreaterThanOrEqualTo(1_800L)
+        controller.holdsThroughout("the next song does not play", 1.seconds) { !isPlaying }
         assertThat(volumes).isEmpty()
         eventually("the timer is off") { extras().sleepDeadlineMs == null }
     }

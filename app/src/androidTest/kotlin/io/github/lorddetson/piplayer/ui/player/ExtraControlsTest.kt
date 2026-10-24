@@ -1,6 +1,9 @@
 package io.github.lorddetson.piplayer.ui.player
 
 import android.os.SystemClock
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsOff
@@ -52,6 +55,28 @@ class ExtraControlsTest {
         compose.onNodeWithContentDescription(text(R.string.player_sleep_timer)).performClick()
 
         compose.onNodeWithText(text(R.string.timer_start)).assertIsDisplayed()
+    }
+
+    @Test
+    fun cancellingTheTimerKeepsTheSheetOpenForANewOne() {
+        val player = compose.runOnUiThread { TestPlayer(listOf(TestSong("Halo", durationMs = 225_000))) }
+        var extras by mutableStateOf(PlaybackExtras(sleepDeadlineMs = SystemClock.elapsedRealtime() + 30 * 60_000L))
+        var cancelled = false
+        compose.setContent {
+            val controls = ExtraControls(extras = extras, cancelSleepTimer = {
+                cancelled = true
+                // The service reports the timer gone.
+                extras = PlaybackExtras.NONE
+            })
+            PiPlayerTheme { NowPlaying(player, null, onClose = {}, controls = controls) }
+        }
+        compose.onNodeWithContentDescription(text(R.string.player_sleep_timer)).performClick()
+
+        compose.onNodeWithText(text(R.string.timer_cancel)).performClick()
+
+        assertThat(cancelled).isTrue()
+        compose.onNodeWithText(text(R.string.timer_start)).assertIsDisplayed()
+        compose.onNodeWithContentDescription(text(R.string.timer_hours)).assertIsDisplayed()
     }
 
     @Test

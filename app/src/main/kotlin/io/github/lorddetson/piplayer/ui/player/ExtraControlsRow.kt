@@ -86,10 +86,8 @@ fun ExtraControlsRow(controls: ExtraControls, modifier: Modifier = Modifier) {
                     controls.setSleepTimer(duration, finishTrack)
                     timerOpen = false
                 },
-                onCancel = {
-                    controls.cancelSleepTimer()
-                    timerOpen = false
-                },
+                // The sheet stays open with the wheels, so that a new timer can be set at once (§6.2).
+                onCancel = controls.cancelSleepTimer,
             )
         }
     }

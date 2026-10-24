@@ -8,14 +8,6 @@ import org.junit.jupiter.api.Test
 class SongEndRulesTest {
 
     @Test
-    fun `a change of song by hand or a new queue turns stop after current off`() {
-        assertThat(SongEndRules.clearsStopAfterCurrent(Player.MEDIA_ITEM_TRANSITION_REASON_SEEK)).isTrue()
-        assertThat(SongEndRules.clearsStopAfterCurrent(Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED)).isTrue()
-        assertThat(SongEndRules.clearsStopAfterCurrent(Player.MEDIA_ITEM_TRANSITION_REASON_AUTO)).isFalse()
-        assertThat(SongEndRules.clearsStopAfterCurrent(Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT)).isFalse()
-    }
-
-    @Test
     fun `a song that ends on its own while the pause is set means the end was missed`() {
         assertThat(SongEndRules.missedEnd(Player.MEDIA_ITEM_TRANSITION_REASON_AUTO)).isTrue()
         assertThat(SongEndRules.missedEnd(Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT)).isTrue()

@@ -65,20 +65,26 @@ class StopAfterCurrentTest {
 
     private fun isOn() = PlaybackExtras.from(onMain { controller.sessionExtras }).stopAfterCurrent
 
+    /** Waits until playback has stopped after a song and moved to [index], paused at its start. */
+    private fun expectStoppedOn(index: Int) {
+        controller.waitUntil("playback stops on song $index", timeout = 5.seconds) {
+            !playWhenReady && currentMediaItemIndex == index && currentPosition < 500
+        }
+        assertThat(pauseReasons).containsExactly(Player.PLAY_WHEN_READY_CHANGE_REASON_END_OF_MEDIA_ITEM)
+        controller.holdsThroughout("the next song does not play", 1.seconds) { !isPlaying && currentPosition < 500 }
+    }
+
     @Test
-    fun playbackPausesAtTheEndOfTheSongAndTheToggleTurnsItselfOff() {
+    fun playbackStopsOnTheNextSongAndTheToggleTurnsItselfOff() {
         playQueue(SHORT_FIXTURE, SHORT_FIXTURE, LONG_FIXTURE)
 
         assertThat(stopAfterCurrent(true)).isEqualTo(SessionResult.RESULT_SUCCESS)
         eventually("the toggle is on") { isOn() }
 
-        controller.waitUntil("playback pauses", timeout = 5.seconds) { !playWhenReady }
-        assertThat(pauseReasons).containsExactly(Player.PLAY_WHEN_READY_CHANGE_REASON_END_OF_MEDIA_ITEM)
-        assertThat(onMain { controller.currentMediaItemIndex }).isEqualTo(0)
-        assertThat(onMain { controller.currentPosition }).isGreaterThanOrEqualTo(1_800L)
+        expectStoppedOn(1)
         eventually("the toggle is off") { !isOn() }
 
-        // Play goes on with the next song, and the song after it follows without another pause.
+        // Play starts the next song from its start, and the song after it follows without another stop.
         onMain { controller.play() }
         controller.waitUntil("the second song plays") { isPlaying && currentMediaItemIndex == 1 }
         controller.waitUntil("the third song follows", timeout = 5.seconds) { currentMediaItemIndex == 2 }
@@ -87,18 +93,16 @@ class StopAfterCurrentTest {
     }
 
     @Test
-    fun aSkipTurnsItOff() {
+    fun aSkipKeepsItAndItStopsAfterTheSongSkippedTo() {
         playQueue(LONG_FIXTURE, SHORT_FIXTURE, LONG_FIXTURE)
         stopAfterCurrent(true)
         eventually("the toggle is on") { isOn() }
 
         onMain { controller.seekToNextMediaItem() }
 
+        controller.holdsThroughout("the toggle stays on", 1.seconds) { PlaybackExtras.from(sessionExtras).stopAfterCurrent }
+        expectStoppedOn(2)
         eventually("the toggle is off") { !isOn() }
-        controller.waitUntil("the skipped-to song plays into the next one", timeout = 5.seconds) {
-            currentMediaItemIndex == 2 && playWhenReady
-        }
-        assertThat(pauseReasons).isEmpty()
     }
 
     @Test
@@ -109,9 +113,29 @@ class StopAfterCurrentTest {
 
         onMain { controller.seekTo(10_500) }
 
-        controller.waitUntil("playback pauses at the end of the song", timeout = 5.seconds) { !playWhenReady }
+        expectStoppedOn(1)
+    }
+
+    @Test
+    fun withRepeatOneItStopsOnTheSameSongFromItsStart() {
+        playQueue(SHORT_FIXTURE, LONG_FIXTURE)
+        onMain { controller.repeatMode = Player.REPEAT_MODE_ONE }
+        stopAfterCurrent(true)
+        eventually("the toggle is on") { isOn() }
+
+        expectStoppedOn(0)
+    }
+
+    @Test
+    fun afterTheLastSongPlaybackStaysAtItsEnd() {
+        playQueue(SHORT_FIXTURE)
+        stopAfterCurrent(true)
+        eventually("the toggle is on") { isOn() }
+
+        controller.waitUntil("playback stops", timeout = 5.seconds) { !playWhenReady }
         assertThat(onMain { controller.currentMediaItemIndex }).isEqualTo(0)
-        assertThat(pauseReasons).containsExactly(Player.PLAY_WHEN_READY_CHANGE_REASON_END_OF_MEDIA_ITEM)
+        assertThat(onMain { controller.currentPosition }).isGreaterThanOrEqualTo(1_800L)
+        eventually("the toggle is off") { !isOn() }
     }
 
     @Test

@@ -610,7 +610,8 @@ PiPlayer is in the background, force stop and reopen, and open a file whose temp
   chip sets the wheels to its time; the chip that matches the wheels is outlined. There are no seconds.
 - A checkbox "Finish the current track" and a Start button, which is disabled at 0:00.
 - While a timer runs, the sheet shows the time left instead of the wheels, whether it finishes the track, and a button
-  that cancels it. Starting a timer replaces the running one.
+  that cancels it. Cancelling keeps the sheet open with the wheels, so that a new timer can be set at once; starting
+  one closes the sheet. Starting a timer replaces the running one.
 
 ### 6.3 What the timer does
 
@@ -620,8 +621,9 @@ PiPlayer is in the background, force stop and reopen, and open a file whose temp
   of the ear (from the player's own volume down to -50 dB), and at the time playback pauses. The queue, the song and its
   position stay, and the player's volume comes back at once, so the next play starts at full volume. The fade uses the
   player's own volume, never the device volume, and multiplies with ducking for prompts.
-- With "Finish the current track": when the time is up while music plays, playback pauses at the end of the song that
-  is then playing, without a fade. A song skipped to by hand in the meantime is the one that finishes.
+- With "Finish the current track": when the time is up while music plays, the song that is then playing plays to its
+  end, without a fade, and playback stops on the next song, as "stop after current track" does (§6.4). A song skipped
+  to by hand in the meantime is the one that finishes.
 - A pause while the volume falls or while the song is being finished (by the user, a disconnected output, another
   player taking audio focus) ends the timer and restores the volume. Skipping songs does not. A call holds playback and
   so lets the timer run out, which is meant at bedtime. A timer that is up while nothing plays just ends.
@@ -629,10 +631,13 @@ PiPlayer is in the background, force stop and reopen, and open a file whose temp
 
 ### 6.4 Stop after current track
 
-- A toggle: when the current song ends, playback pauses at its end; play then goes on as repeat and shuffle say (the
-  next song, the same song with repeat one, the first with repeat all at the last song). It turns itself off when it
-  has paused, when the user changes the song (skip, previous to another song, a new queue, an opened file) or turns it
-  off. A broken song that is skipped counts as a change of song. A seek within the song keeps it.
+- A toggle: when the song that plays ends, playback stops and moves to the next song without playing it, paused at its
+  start, so that play starts that song. The next song is the one repeat and shuffle would play: the next of the list or
+  of the shuffle order, the first again with repeat all at the last song, the same song from its start with repeat one.
+  After the last song with repeat off there is none, and playback stays at the end of the last song.
+- It turns itself off once it has stopped playback, or when the user turns it off. Changing the song by hand (a skip,
+  previous to another song, a new queue, an opened file, a broken song skipped) keeps it on: it then stops after the
+  song that plays.
 - It only turns on while there is a current song.
 
 ### 6.5 Who may set them
@@ -676,8 +681,9 @@ Instrumented tests on the API 30, 36 and 37 emulators:
   start sends the time and the checkbox, the running timer with its time left and cancel, the toggle, the Equalizer
   button only with a panel; labels and states.
 - Through the service: a short timer fades and pauses at its time with the volume restored and the queue and position
-  kept; a pause during the fade ends the timer; finish-track mode pauses at the song's end; stop after current pauses
-  at the end of the song, turns itself off, and play goes on with the next song; a skip turns it off; the commands are
+  kept; a pause during the fade ends the timer; finish-track mode stops at the song's end on the next song; stop after current stops
+  at the end of the song on the next song at its start, turns itself off, and play goes on from there; a skip keeps it
+  and it stops after the song skipped to; repeat one stops on the same song; the last song stays at its end; the commands are
   refused for other apps and the notification's controller; the state reaches only PiPlayer's controllers.
 - The session is announced with PiPlayer's package and session ID and closed when the service is destroyed; the
   Equalizer button starts the panel intent for PiPlayer's session (intercepted).
