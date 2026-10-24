@@ -19,6 +19,7 @@ import androidx.media3.session.SessionResult
 import io.github.lorddetson.piplayer.R
 import io.github.lorddetson.piplayer.library.songs.Song
 import io.github.lorddetson.piplayer.playback.PlaybackConnection
+import io.github.lorddetson.piplayer.playback.PlaybackExtras
 import io.github.lorddetson.piplayer.playback.PlaybackSessionCallback
 import io.github.lorddetson.piplayer.playback.QueueRequest
 import kotlinx.coroutines.Dispatchers
@@ -63,10 +64,19 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
         override fun onMediaMetadataChanged(mediaMetadata: MediaMetadata) = showCover(mediaMetadata.artworkData)
     }
 
+    private val mutableExtras = MutableStateFlow(PlaybackExtras.NONE)
+
+    /** The sleep timer and "stop after current track" as the service reports them (§6.5). */
+    val extras: StateFlow<PlaybackExtras> = mutableExtras.asStateFlow()
+
     private val connection = PlaybackConnection(application, object : MediaController.Listener {
         @OptIn(UnstableApi::class)
         override fun onError(controller: MediaController, sessionError: SessionError) {
             mutableMessages.trySend(sessionError.message)
+        }
+
+        override fun onExtrasChanged(controller: MediaController, extras: Bundle) {
+            mutableExtras.value = PlaybackExtras.from(extras)
         }
     })
 
@@ -77,10 +87,28 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
             controller = this
             addListener(listener)
             showCover(mediaMetadata.artworkData)
+            mutableExtras.value = PlaybackExtras.from(sessionExtras)
             mutablePlayer.value = this
             // Opening the screen shows the queue saved before the process died, paused (docs/playback.md §4.4).
             sendCustomCommand(PlaybackSessionCallback.RESTORE_COMMAND, Bundle.EMPTY)
         }
+    }
+
+    /** A sleep timer of [durationMs] (§6.3). */
+    fun setSleepTimer(durationMs: Long, finishTrack: Boolean) = connection.whenConnected {
+        val args = Bundle().apply {
+            putLong(PlaybackSessionCallback.EXTRA_DURATION_MS, durationMs)
+            putBoolean(PlaybackSessionCallback.EXTRA_FINISH_TRACK, finishTrack)
+        }
+        sendCustomCommand(PlaybackSessionCallback.SLEEP_TIMER_COMMAND, args)
+    }
+
+    fun cancelSleepTimer() = setSleepTimer(0, finishTrack = false)
+
+    /** "Stop after current track" (§6.4). */
+    fun setStopAfterCurrent(enabled: Boolean) = connection.whenConnected {
+        val args = Bundle().apply { putBoolean(PlaybackSessionCallback.EXTRA_ENABLED, enabled) }
+        sendCustomCommand(PlaybackSessionCallback.STOP_AFTER_CURRENT_COMMAND, args)
     }
 
     /** Plays the whole list from [song], shown at [row] (§2.3). */

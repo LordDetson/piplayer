@@ -19,6 +19,7 @@ import androidx.media3.session.MediaLibraryService.MediaLibrarySession
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSession.ConnectionResult
 import androidx.media3.session.MediaSession.MediaItemsWithStartPosition
+import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionResult
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.github.lorddetson.piplayer.TestFiles
@@ -131,6 +132,8 @@ class PlaybackSessionCallbackTest {
                 ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS.buildUpon()
                     .add(PlaybackSessionCallback.RESTORE_COMMAND)
                     .add(PlaybackSessionCallback.OPEN_COMMAND)
+                    .add(PlaybackSessionCallback.SLEEP_TIMER_COMMAND)
+                    .add(PlaybackSessionCallback.STOP_AFTER_CURRENT_COMMAND)
                     .build()
             } else {
                 ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS
@@ -148,6 +151,64 @@ class PlaybackSessionCallbackTest {
                 .describedAs(controller.toString())
                 .doesNotContain(PlaybackSessionCallback.RESTORE_COMMAND)
                 .doesNotContain(PlaybackSessionCallback.OPEN_COMMAND)
+                .doesNotContain(PlaybackSessionCallback.SLEEP_TIMER_COMMAND)
+                .doesNotContain(PlaybackSessionCallback.STOP_AFTER_CURRENT_COMMAND)
+        }
+    }
+
+    /** Records what the session callback asks of the service's controls (docs/playback.md §6.5). */
+    private class RecordingControls : PlaybackControls {
+        val calls = CopyOnWriteArrayList<String>()
+
+        override fun setSleepTimer(durationMs: Long, finishTrack: Boolean) {
+            calls += "timer $durationMs $finishTrack"
+        }
+
+        override fun setStopAfterCurrent(enabled: Boolean) {
+            calls += "stop after $enabled"
+        }
+
+        override fun extras(): Bundle = PlaybackExtras(sleepDeadlineMs = 123, stopAfterCurrent = true).toBundle()
+    }
+
+    @Test
+    fun onlyPiPlayersScreenMaySetTheTimerAndStopAfterCurrent() {
+        val controls = RecordingControls()
+        val withControls = PlaybackSessionCallback(context, store, controls) { queueRequests += it }
+        fun send(controller: MediaSession.ControllerInfo, command: SessionCommand, args: Bundle) =
+            onMain { withControls.onCustomCommand(session, controller, command, args, null) }.get(5, TimeUnit.SECONDS)
+        try {
+            for (controller in listOf(systemUi, otherApp, notification)) {
+                assertThat(send(controller, PlaybackSessionCallback.SLEEP_TIMER_COMMAND, PlaybackTesting.timerArgs(60_000)).resultCode)
+                    .describedAs(controller.toString()).isEqualTo(SessionResult.RESULT_ERROR_NOT_SUPPORTED)
+                assertThat(send(controller, PlaybackSessionCallback.STOP_AFTER_CURRENT_COMMAND, PlaybackTesting.stopAfterArgs(true)).resultCode)
+                    .describedAs(controller.toString()).isEqualTo(SessionResult.RESULT_ERROR_NOT_SUPPORTED)
+            }
+            assertThat(controls.calls).isEmpty()
+
+            assertThat(send(piPlayer, PlaybackSessionCallback.SLEEP_TIMER_COMMAND, PlaybackTesting.timerArgs(90_000, finishTrack = true)).resultCode)
+                .isEqualTo(SessionResult.RESULT_SUCCESS)
+            assertThat(send(piPlayer, PlaybackSessionCallback.STOP_AFTER_CURRENT_COMMAND, PlaybackTesting.stopAfterArgs(true)).resultCode)
+                .isEqualTo(SessionResult.RESULT_SUCCESS)
+            assertThat(controls.calls).containsExactly("timer 90000 true", "stop after true")
+        } finally {
+            withControls.release()
+        }
+    }
+
+    @Test
+    fun piPlayersScreenGetsTheTimerStateWhenItConnectsAndOthersDoNot() {
+        val withControls = PlaybackSessionCallback(context, store, RecordingControls()) { queueRequests += it }
+        try {
+            val own = onMain { withControls.onConnect(session, piPlayer) }
+            assertThat(PlaybackExtras.from(own.sessionExtras ?: Bundle.EMPTY)).isEqualTo(PlaybackExtras(sleepDeadlineMs = 123, stopAfterCurrent = true))
+
+            for (controller in listOf(systemUi, otherApp, notification)) {
+                val result = onMain { withControls.onConnect(session, controller) }
+                assertThat(result.sessionExtras?.isEmpty ?: true).describedAs(controller.toString()).isTrue()
+            }
+        } finally {
+            withControls.release()
         }
     }
 

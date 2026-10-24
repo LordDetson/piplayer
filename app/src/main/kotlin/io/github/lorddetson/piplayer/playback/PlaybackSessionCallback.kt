@@ -41,6 +41,7 @@ import java.util.concurrent.atomic.AtomicInteger
 class PlaybackSessionCallback(
     private val context: Context,
     private val store: PlaybackStateStore,
+    private val controls: PlaybackControls = PlaybackControls.NONE,
     private val onQueueRequest: (QueueState?) -> Unit,
 ) : MediaLibrarySession.Callback {
 
@@ -76,8 +77,8 @@ class PlaybackSessionCallback(
      * and the controllers Android trusts (the system, media control permissions, enabled notification listeners); a
      * controller that names PiPlayer's package from another app is refused. The queue is the user's music library, so
      * only controllers that may read it get the timeline (§1.4); the media notification's controller does not either,
-     * so that the platform session publishes no queue (§2.3). The restore and open commands are PiPlayer's own
-     * screen's.
+     * so that the platform session publishes no queue (§2.3). The restore, open, sleep timer and "stop after current"
+     * commands are PiPlayer's own screen's, and only it gets their state (§6.5).
      */
     @OptIn(UnstableApi::class)
     override fun onConnect(session: MediaSession, controller: MediaSession.ControllerInfo): ConnectionResult {
@@ -92,10 +93,13 @@ class PlaybackSessionCallback(
                 .apply { if (!holdsAudioPermission(controller)) remove(Player.COMMAND_GET_TIMELINE) }
                 .build()
         }
-        val sessionCommands = if (fromPiPlayer && !session.isMediaNotificationController(controller)) {
+        val ownScreen = fromPiPlayer && !session.isMediaNotificationController(controller)
+        val sessionCommands = if (ownScreen) {
             ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS.buildUpon()
                 .add(RESTORE_COMMAND)
                 .add(OPEN_COMMAND)
+                .add(SLEEP_TIMER_COMMAND)
+                .add(STOP_AFTER_CURRENT_COMMAND)
                 .build()
         } else {
             ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS
@@ -103,6 +107,7 @@ class PlaybackSessionCallback(
         return ConnectionResult.AcceptedResultBuilder(session)
             .setAvailableSessionCommands(sessionCommands)
             .setAvailablePlayerCommands(playerCommands)
+            .apply { if (ownScreen) setSessionExtras(controls.extras()) }
             .build()
     }
 
@@ -204,7 +209,8 @@ class PlaybackSessionCallback(
 
     /**
      * PiPlayer's screen asks the service to show the saved queue paused after the app was opened (docs/playback.md
-     * §4.4), or to insert files opened from another app (docs/playback.md §5.1). Both are session commands rather than
+     * §4.4), to insert files opened from another app (docs/playback.md §5.1), or to set the sleep timer or "stop after
+     * current track" (§6.5). Both are session commands rather than
      * automatic actions, so that a play request or a test's own queue is never raced by them; other apps and the media
      * notification's controller cannot send them.
      */
@@ -220,6 +226,14 @@ class PlaybackSessionCallback(
         return when {
             customCommand.customAction == RESTORE_ACTION && mayControl -> restorePaused(session)
             customCommand.customAction == OPEN_ACTION && mayControl -> openFiles(session, args)
+            customCommand.customAction == SLEEP_TIMER_ACTION && mayControl -> {
+                controls.setSleepTimer(args.getLong(EXTRA_DURATION_MS), args.getBoolean(EXTRA_FINISH_TRACK))
+                Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+            }
+            customCommand.customAction == STOP_AFTER_CURRENT_ACTION && mayControl -> {
+                controls.setStopAfterCurrent(args.getBoolean(EXTRA_ENABLED))
+                Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+            }
             else -> super.onCustomCommand(session, controller, customCommand, args, progressReporter)
         }
     }
@@ -298,6 +312,8 @@ class PlaybackSessionCallback(
 
     /** The app was opened: show the saved queue paused, unless a play request or the user got there first. */
     private fun restorePaused(mediaSession: MediaSession): ListenableFuture<SessionResult> {
+        // A restore that an open put off can come after the service has gone.
+        if (released) return Futures.immediateFuture(SessionResult(SessionError.ERROR_INVALID_STATE))
         val player = mediaSession.player
         if (player.mediaItemCount > 0) return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
         val token = restoreGeneration.incrementAndGet()
@@ -366,7 +382,7 @@ class PlaybackSessionCallback(
                     // The open superseded a restore before it knew that it had nothing to play. Put the saved queue
                     // back if the player is still empty, so a failed open does not leave the app blank.
                     mainHandler.post {
-                        if (token == restoreGeneration.get() && session.player.mediaItemCount == 0) {
+                        if (!released && token == restoreGeneration.get() && session.player.mediaItemCount == 0) {
                             restorePaused(session)
                         }
                     }
@@ -563,6 +579,23 @@ class PlaybackSessionCallback(
         const val OPEN_ACTION = "io.github.lorddetson.piplayer.playback.OPEN"
 
         val OPEN_COMMAND = SessionCommand(OPEN_ACTION, Bundle.EMPTY)
+
+        /** The custom session command with which PiPlayer's own screen sets or cancels the sleep timer (§6.5). */
+        const val SLEEP_TIMER_ACTION = "io.github.lorddetson.piplayer.playback.SLEEP_TIMER"
+
+        val SLEEP_TIMER_COMMAND = SessionCommand(SLEEP_TIMER_ACTION, Bundle.EMPTY)
+
+        /** The timer's length in milliseconds; 0 or less cancels it. */
+        const val EXTRA_DURATION_MS = "io.github.lorddetson.piplayer.playback.DURATION_MS"
+
+        const val EXTRA_FINISH_TRACK = "io.github.lorddetson.piplayer.playback.FINISH_TRACK"
+
+        /** The custom session command with which PiPlayer's own screen sets "stop after current track" (§6.5). */
+        const val STOP_AFTER_CURRENT_ACTION = "io.github.lorddetson.piplayer.playback.STOP_AFTER_CURRENT"
+
+        val STOP_AFTER_CURRENT_COMMAND = SessionCommand(STOP_AFTER_CURRENT_ACTION, Bundle.EMPTY)
+
+        const val EXTRA_ENABLED = "io.github.lorddetson.piplayer.playback.ENABLED"
 
         /** The URIs of an [OPEN_COMMAND], as strings. */
         const val EXTRA_URIS = "io.github.lorddetson.piplayer.playback.URIS"

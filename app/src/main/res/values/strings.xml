@@ -52,6 +52,18 @@
     <string name="player_position">Playback position</string>
     <!-- The seek bar's state for accessibility services, for example "1 minute, 2 seconds of 3 minutes, 45 seconds". -->
     <string name="player_position_state">%1$s of %2$s</string>
+    <!-- The sleep timer, "stop after current track" and the Equalizer (docs/playback.md §6). -->
+    <string name="player_sleep_timer">Sleep timer</string>
+    <!-- The sleep timer's state for accessibility services, for example "42 minutes left". -->
+    <string name="player_sleep_timer_left">%1$s left</string>
+    <string name="player_stop_after_current">Stop after current track</string>
+    <string name="player_equalizer">Equalizer</string>
+    <string name="timer_hours">Hours</string>
+    <string name="timer_minutes">Minutes</string>
+    <string name="timer_finish_track">Finish the current track</string>
+    <string name="timer_start">Start</string>
+    <string name="timer_cancel">Cancel timer</string>
+    <string name="timer_will_finish_track">The current track will play to its end</string>
     <!-- Parts of the format line, for example "FLAC · 24 bit · 96 kHz" (docs/playback.md §3.5). Units, which do not
          change with the number. -->
     <string name="format_bits" tools:ignore="PluralsCandidate">%1$d bit</string>

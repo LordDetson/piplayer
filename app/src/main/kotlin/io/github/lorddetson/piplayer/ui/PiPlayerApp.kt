@@ -1,5 +1,9 @@
 package io.github.lorddetson.piplayer.ui
 
+import android.content.ActivityNotFoundException
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.annotation.OptIn
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.slideInVertically
@@ -22,15 +26,21 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.media3.common.C
 import androidx.media3.common.Player
+import androidx.media3.common.util.UnstableApi
 import androidx.navigation3.runtime.NavKey
 import androidx.navigation3.runtime.entryProvider
 import androidx.navigation3.runtime.rememberNavBackStack
@@ -38,6 +48,8 @@ import androidx.navigation3.ui.NavDisplay
 import io.github.lorddetson.piplayer.R
 import io.github.lorddetson.piplayer.debug.DebugEntry
 import io.github.lorddetson.piplayer.library.songs.Song
+import io.github.lorddetson.piplayer.ui.player.EqualizerPanel
+import io.github.lorddetson.piplayer.ui.player.ExtraControls
 import io.github.lorddetson.piplayer.ui.player.MiniPlayer
 import io.github.lorddetson.piplayer.ui.player.NowPlaying
 import io.github.lorddetson.piplayer.ui.player.PlayerViewModel
@@ -79,7 +91,7 @@ fun PiPlayerApp(viewModel: PlayerViewModel = viewModel()) {
             }
             entry<NowPlayingRoute> {
                 Box(Modifier.fillMaxSize()) {
-                    NowPlaying(player, cover, onClose = { close() })
+                    NowPlaying(player, cover, onClose = { close() }, controls = rememberExtraControls(viewModel, player))
                     SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).windowInsetsPadding(WindowInsets.navigationBars))
                 }
             }
@@ -111,4 +123,37 @@ private fun SongsEntry(
             SongsScreen(onSongClick = onSongClick, modifier = Modifier.weight(1f))
         }
     }
+}
+
+/**
+ * Now Playing's second row (docs/playback.md §6.1): the service's timer state, its commands, and the Equalizer while
+ * the device has an effect panel, checked again whenever the screen resumes.
+ */
+@OptIn(UnstableApi::class)
+@Composable
+private fun rememberExtraControls(viewModel: PlayerViewModel, player: Player?): ExtraControls {
+    val context = LocalContext.current
+    val extras by viewModel.extras.collectAsStateWithLifecycle()
+    var hasPanel by remember { mutableStateOf(EqualizerPanel.isAvailable(context)) }
+    LifecycleResumeEffect(Unit) {
+        hasPanel = EqualizerPanel.isAvailable(context)
+        onPauseOrDispose { }
+    }
+    // A panel must be started for a result: it reads who called it.
+    val panel = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { }
+    val openEqualizer = {
+        val sessionId = player?.audioSessionId ?: C.AUDIO_SESSION_ID_UNSET
+        try {
+            panel.launch(EqualizerPanel.intent(sessionId, context.packageName))
+        } catch (_: ActivityNotFoundException) {
+            hasPanel = false
+        }
+    }
+    return ExtraControls(
+        extras = extras,
+        setSleepTimer = viewModel::setSleepTimer,
+        cancelSleepTimer = viewModel::cancelSleepTimer,
+        setStopAfterCurrent = viewModel::setStopAfterCurrent,
+        openEqualizer = if (hasPanel) openEqualizer else null,
+    )
 }

@@ -23,6 +23,15 @@ object PlayerTime {
         return "-" + formatDuration(seconds * 1_000)
     }
 
+    /** A time left or a timer's length as "h:mm", without seconds: a part of a minute counts as a whole one. */
+    fun clock(durationMs: Long): String {
+        val minutes = wholeMinutes(durationMs) / 60_000
+        return "%d:%02d".format(minutes / 60, minutes % 60)
+    }
+
+    /** [durationMs] rounded up to whole minutes, as the sleep timer shows and states it. */
+    fun wholeMinutes(durationMs: Long): Long = (durationMs.coerceAtLeast(0) + 59_999) / 60_000 * 60_000
+
     /** [durationMs] in words, as accessibility services read it: "1 minute, 2 seconds". */
     fun spoken(durationMs: Long, locale: Locale): String {
         val seconds = durationMs.coerceAtLeast(0) / 1_000

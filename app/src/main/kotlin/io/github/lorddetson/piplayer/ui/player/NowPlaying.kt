@@ -65,7 +65,13 @@ import io.github.lorddetson.piplayer.R
  */
 @OptIn(UnstableApi::class)
 @Composable
-fun NowPlaying(player: Player?, cover: ImageBitmap?, onClose: () -> Unit, modifier: Modifier = Modifier) {
+fun NowPlaying(
+    player: Player?,
+    cover: ImageBitmap?,
+    onClose: () -> Unit,
+    modifier: Modifier = Modifier,
+    controls: ExtraControls = ExtraControls(),
+) {
     val metadata = rememberCurrentItemState(player).mediaMetadata
     val pane = stringResource(R.string.player_now_playing)
     Column(
@@ -130,6 +136,7 @@ fun NowPlaying(player: Player?, cover: ImageBitmap?, onClose: () -> Unit, modifi
             NextButton(player)
             RepeatButton(player)
         }
+        ExtraControlsRow(controls)
     }
 }
 

@@ -594,3 +594,93 @@ Instrumented tests on the API 30, 36 and 37 emulators:
 
 By hand on the phone later: open a file from Files while a song plays, open several files at once, open one while
 PiPlayer is in the background, force stop and reopen, and open a file whose temporary grant has expired.
+
+## 6. Sleep timer, stop after current, effects (M1 step 6)
+
+### 6.1 Buttons
+
+- Now Playing has a second row under its controls: the sleep timer, "Stop after current track" and the Equalizer.
+  The timer button shows the time left next to its icon while a timer runs. The Equalizer button shows only when the
+  device has an effect panel; PiPlayer checks again whenever the screen resumes, since a panel app can come and go.
+
+### 6.2 Setting the sleep timer
+
+- The timer button opens a sheet: two wheels, hours (0 to 23) and minutes (0 to 59), that turn round in both
+  directions; under them ready-made times as chips, from the longest to the shortest: 1:30, 1:00, 0:45, 0:30, 0:15. A
+  chip sets the wheels to its time; the chip that matches the wheels is outlined. There are no seconds.
+- A checkbox "Finish the current track" and a Start button, which is disabled at 0:00.
+- While a timer runs, the sheet shows the time left instead of the wheels, whether it finishes the track, and a button
+  that cancels it. Starting a timer replaces the running one.
+
+### 6.3 What the timer does
+
+- The timer counts real time, also while playback is paused, and lives in the playback service: closing the screen
+  does not stop it. It is lost when the process dies, and with it the playback it was meant to stop.
+- Without "Finish the current track": the volume falls over the last 10 s before the time is up, smoothly in steps
+  of the ear (from the player's own volume down to -50 dB), and at the time playback pauses. The queue, the song and its
+  position stay, and the player's volume comes back at once, so the next play starts at full volume. The fade uses the
+  player's own volume, never the device volume, and multiplies with ducking for prompts.
+- With "Finish the current track": when the time is up while music plays, playback pauses at the end of the song that
+  is then playing, without a fade. A song skipped to by hand in the meantime is the one that finishes.
+- A pause while the volume falls or while the song is being finished (by the user, a disconnected output, another
+  player taking audio focus) ends the timer and restores the volume. Skipping songs does not. A call holds playback and
+  so lets the timer run out, which is meant at bedtime. A timer that is up while nothing plays just ends.
+- While the music plays, the player's wake lock keeps the timer on time with the screen off and the device dozing.
+
+### 6.4 Stop after current track
+
+- A toggle: when the current song ends, playback pauses at its end; play then goes on as repeat and shuffle say (the
+  next song, the same song with repeat one, the first with repeat all at the last song). It turns itself off when it
+  has paused, when the user changes the song (skip, previous to another song, a new queue, an opened file) or turns it
+  off. A broken song that is skipped counts as a change of song. A seek within the song keeps it.
+- It only turns on while there is a current song.
+
+### 6.5 Who may set them
+
+- Both are commands of PiPlayer's own screen (`SLEEP_TIMER`, `STOP_AFTER_CURRENT`), refused for other apps and for the
+  media notification's controller, like `RESTORE` and `OPEN` (§4.4, §5.4). Their state goes as session extras to
+  PiPlayer's own controllers only, never into the platform session that other apps read.
+- Neither is saved with the queue (§4).
+
+### 6.6 Effects
+
+- Media3 does not announce the audio session to effect apps itself. The service announces PiPlayer's session
+  (`ACTION_OPEN_AUDIO_EFFECT_CONTROL_SESSION` with the session ID, PiPlayer's package and the music content type) once
+  the player has its session ID, and again whenever playback starts, so that an effect app that was restarted takes
+  the session back. It closes the session (`ACTION_CLOSE_AUDIO_EFFECT_CONTROL_SESSION`) when the service is destroyed,
+  not on pause, so that effects are there at once on play. The broadcasts are implicit; Android lets them through to
+  effect apps in the background.
+- Effects belong to the session, not to a song, so they stay across songs, gapless joins and format changes. Offload
+  stays off. A multichannel file played on an external output without a mixer (HDMI, some USB) may play without them.
+- The Equalizer button opens the device's panel (`ACTION_DISPLAY_AUDIO_EFFECT_CONTROL_PANEL`) for PiPlayer's session,
+  started for a result as the panel requires. The manifest declares the action under `<queries>`, which PiPlayer needs
+  to see whether a panel exists. On the owner's S24 Ultra the panel is Samsung's SoundAlive, and no app there declares a
+  receiver for the session announcements (Samsung's own effects presumably apply to the whole output; to be heard on
+  the phone). The emulators have AOSP's MusicFX, which opens PiPlayer's session on the announcement.
+
+### 6.7 Accessibility
+
+- The timer button is labelled "Sleep timer" and states the time left; the toggle "Stop after current track" with the
+  state on or off; the Equalizer button "Equalizer". Each wheel is labelled "Hours" or "Minutes", states its value
+  ("1 hour", "30 minutes") and can be adjusted by accessibility services; each chip reads its time in words.
+
+### 6.8 Checks
+
+JVM tests: the fade curve; the timer's rules on a fake clock (no change before the fade, the fade to the deadline, a
+late tick after deep sleep, a pause or cancel during the fade, finish-track mode, a timer that is up while paused); when
+"stop after current" turns itself off; the chips' order and matching.
+
+Instrumented tests on the API 30, 36 and 37 emulators:
+
+- The sheet and buttons on a test player: wheels, chips longest first, the outlined chip, Start disabled at 0:00, a
+  start sends the time and the checkbox, the running timer with its time left and cancel, the toggle, the Equalizer
+  button only with a panel; labels and states.
+- Through the service: a short timer fades and pauses at its time with the volume restored and the queue and position
+  kept; a pause during the fade ends the timer; finish-track mode pauses at the song's end; stop after current pauses
+  at the end of the song, turns itself off, and play goes on with the next song; a skip turns it off; the commands are
+  refused for other apps and the notification's controller; the state reaches only PiPlayer's controllers.
+- The session is announced with PiPlayer's package and session ID and closed when the service is destroyed; the
+  Equalizer button starts the panel intent for PiPlayer's session (intercepted).
+
+By hand on the phone: a 5-minute timer with the screen off, the fade by ear (also during a navigation prompt and over
+Bluetooth), stop after current, and the Equalizer button opening SoundAlive.

@@ -2,6 +2,7 @@ package io.github.lorddetson.piplayer.playback
 
 import android.content.ComponentName
 import android.net.Uri
+import android.os.Bundle
 import android.os.ParcelFileDescriptor
 import android.os.Process
 import androidx.media3.common.MediaItem
@@ -58,6 +59,10 @@ object PlaybackTesting {
     fun <P> P.waitUntil(what: String, timeout: Duration = 10.seconds, condition: P.() -> Boolean) =
         eventually(what, timeout) { onMain { condition() } }
 
+    /** Like [throughout], with [condition] evaluated on the main thread. */
+    fun <P> P.holdsThroughout(what: String, duration: Duration, condition: P.() -> Boolean) =
+        throughout(what, duration) { onMain { condition() } }
+
     private fun token(): SessionToken {
         val context = TestFiles.targetContext
         return SessionToken(context, ComponentName(context, PlaybackService::class.java))
@@ -97,12 +102,35 @@ object PlaybackTesting {
      * test.
      */
     fun MediaController.stopAndRelease() = onMain {
+        // A timer or "stop after current" left by a test would pause a later one (docs/playback.md §6).
+        if (isSessionCommandAvailable(PlaybackSessionCallback.SLEEP_TIMER_COMMAND)) {
+            sendCustomCommand(PlaybackSessionCallback.SLEEP_TIMER_COMMAND, timerArgs(durationMs = 0))
+        }
+        if (isSessionCommandAvailable(PlaybackSessionCallback.STOP_AFTER_CURRENT_COMMAND)) {
+            sendCustomCommand(PlaybackSessionCallback.STOP_AFTER_CURRENT_COMMAND, stopAfterArgs(enabled = false))
+        }
+        volume = 1f
         repeatMode = Player.REPEAT_MODE_OFF
         shuffleModeEnabled = false
         pause()
         stop()
         clearMediaItems()
         release()
+    }
+
+    /** The arguments of a sleep timer command. */
+    fun timerArgs(durationMs: Long, finishTrack: Boolean = false) = Bundle().apply {
+        putLong(PlaybackSessionCallback.EXTRA_DURATION_MS, durationMs)
+        putBoolean(PlaybackSessionCallback.EXTRA_FINISH_TRACK, finishTrack)
+    }
+
+    /** The arguments of a "stop after current track" command. */
+    fun stopAfterArgs(enabled: Boolean) = Bundle().apply { putBoolean(PlaybackSessionCallback.EXTRA_ENABLED, enabled) }
+
+    /** Runs a shell [command] as the shell user and returns its output. */
+    fun shell(command: String): String {
+        val output = InstrumentationRegistry.getInstrumentation().uiAutomation.executeShellCommand(command)
+        return ParcelFileDescriptor.AutoCloseInputStream(output).bufferedReader().use { it.readText() }
     }
 
     /** Whether `dumpsys power` lists ExoPlayer's wake lock for this app as held and not disabled. */

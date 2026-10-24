@@ -1,5 +1,9 @@
 package io.github.lorddetson.piplayer.ui
 
+import android.app.Activity
+import android.app.Instrumentation
+import android.content.Intent
+import android.media.audiofx.AudioEffect
 import androidx.activity.BackEventCompat
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.semantics.SemanticsActions
@@ -24,6 +28,7 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.media3.session.MediaController
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
 import io.github.lorddetson.piplayer.MainActivity
 import io.github.lorddetson.piplayer.R
 import io.github.lorddetson.piplayer.playback.PlaybackTesting
@@ -32,6 +37,7 @@ import io.github.lorddetson.piplayer.playback.PlaybackTesting.onMain
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.stopAndRelease
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.waitUntil
 import io.github.lorddetson.piplayer.playback.SongSourceRule
+import io.github.lorddetson.piplayer.ui.player.EqualizerPanel
 import io.github.lorddetson.piplayer.ui.player.PlayerTags
 import io.github.lorddetson.piplayer.ui.songs.SongsTags
 import org.assertj.core.api.Assertions.assertThat
@@ -188,6 +194,35 @@ class PiPlayerAppTest {
         openNowPlaying()
         compose.waitUntil(timeoutMillis = 10_000) {
             compose.onAllNodes(hasTestTag(PlayerTags.COVER), useUnmergedTree = true).fetchSemanticsNodes().size == 1
+        }
+    }
+
+    @Test
+    fun theEqualizerButtonOpensTheDevicesPanelForPiPlayersSession() {
+        assumeTrue("this device has an effect panel", EqualizerPanel.isAvailable(compose.activity))
+        playAndPause("Alpha")
+        openNowPlaying()
+        val sessionId = onMain { controller.audioSessionId }
+        var started: Intent? = null
+        val monitor = object : Instrumentation.ActivityMonitor() {
+            override fun onStartActivity(intent: Intent): Instrumentation.ActivityResult? =
+                if (intent.action == AudioEffect.ACTION_DISPLAY_AUDIO_EFFECT_CONTROL_PANEL) {
+                    started = intent
+                    Instrumentation.ActivityResult(Activity.RESULT_CANCELED, null)
+                } else {
+                    null
+                }
+        }
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        instrumentation.addMonitor(monitor)
+        try {
+            compose.onNode(hasContentDescription(text(R.string.player_equalizer))).performClick()
+
+            compose.waitUntil(timeoutMillis = 5_000) { started != null }
+            assertThat(started!!.getIntExtra(AudioEffect.EXTRA_AUDIO_SESSION, 0)).isEqualTo(sessionId).isNotZero()
+            assertThat(started!!.getStringExtra(AudioEffect.EXTRA_PACKAGE_NAME)).isEqualTo(compose.activity.packageName)
+        } finally {
+            instrumentation.removeMonitor(monitor)
         }
     }
 }

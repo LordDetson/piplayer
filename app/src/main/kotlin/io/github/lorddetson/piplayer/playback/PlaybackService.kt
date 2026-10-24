@@ -7,9 +7,11 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.media.audiofx.AudioEffect
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.Process
 import android.util.Log
 import android.view.KeyEvent
 import androidx.annotation.OptIn
@@ -33,6 +35,8 @@ class PlaybackService : MediaLibraryService() {
     private var session: MediaLibrarySession? = null
     private var callback: PlaybackSessionCallback? = null
     private var saver: PlaybackStateSaver? = null
+    private var controls: ServiceControls? = null
+    private var effects: AudioEffectSession? = null
 
     private val handler = Handler(Looper.getMainLooper())
     private val postNotificationAgain = Runnable { postNotification() }
@@ -59,9 +63,15 @@ class PlaybackService : MediaLibraryService() {
         // Before the session's own listener, so that a skipped song's error never reaches the controllers (§2.4).
         player.addListener(BrokenSongSkipper(player, ::stopped))
         player.addListener(MediaButtons.listener(this, ::showButtons))
+        val effects = AudioEffectSession(
+            open = { sendBroadcast(effectIntent(AudioEffect.ACTION_OPEN_AUDIO_EFFECT_CONTROL_SESSION, it)) },
+            close = { sendBroadcast(effectIntent(AudioEffect.ACTION_CLOSE_AUDIO_EFFECT_CONTROL_SESSION, it)) },
+        ).also { effects = it }
+        player.addListener(effects)
+        val controls = ServiceControls(player, ::publishControls).also { controls = it }
         val store = PlaybackStateStore.get(this)
         val saver = PlaybackStateSaver(player, store).also { saver = it }
-        val callback = PlaybackSessionCallback(this, store, saver::setQueue).also { callback = it }
+        val callback = PlaybackSessionCallback(this, store, controls, saver::setQueue).also { callback = it }
         session = MediaLibrarySession.Builder(this, SessionPlayer(player), callback)
             .setSessionActivity(openApp())
             .setMediaButtonPreferences(MediaButtons.of(this, player.shuffleModeEnabled, player.repeatMode))
@@ -143,6 +153,10 @@ class PlaybackService : MediaLibraryService() {
 
     override fun onDestroy() {
         handler.removeCallbacks(postNotificationAgain)
+        controls?.release()
+        controls = null
+        effects?.release()
+        effects = null
         handler.removeCallbacks(startCheck)
         saver?.saveNow()
         saver?.stop()
@@ -158,6 +172,24 @@ class PlaybackService : MediaLibraryService() {
         isRunningForTests = false
         super.onDestroy()
     }
+
+    /**
+     * The sleep timer's and "stop after current"'s state goes to PiPlayer's own controllers only (§6.5): the session-wide
+     * extras would also reach the platform session, which other apps read.
+     */
+    @OptIn(UnstableApi::class)
+    private fun publishControls(extras: Bundle) {
+        val session = session ?: return
+        session.connectedControllers
+            .filter { it.uid == Process.myUid() && !session.isMediaNotificationController(it) }
+            .forEach { session.setSessionExtras(it, extras) }
+    }
+
+    /** An announcement of PiPlayer's audio [sessionId] to effect apps (§6.6); Android lets it reach them in the background. */
+    private fun effectIntent(action: String, sessionId: Int) = Intent(action)
+        .putExtra(AudioEffect.EXTRA_AUDIO_SESSION, sessionId)
+        .putExtra(AudioEffect.EXTRA_PACKAGE_NAME, packageName)
+        .putExtra(AudioEffect.EXTRA_CONTENT_TYPE, AudioEffect.CONTENT_TYPE_MUSIC)
 
     /** What tapping the notification does: bring PiPlayer to the front, as its launcher icon would. */
     private fun openApp(): PendingIntent = PendingIntent.getActivity(

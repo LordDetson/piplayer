@@ -45,6 +45,16 @@
     <string name="player_repeat_state_one">Одна</string>
     <string name="player_position">Позиция воспроизведения</string>
     <string name="player_position_state">%1$s из %2$s</string>
+    <string name="player_sleep_timer">Таймер сна</string>
+    <string name="player_sleep_timer_left">Осталось %1$s</string>
+    <string name="player_stop_after_current">Стоп после трека</string>
+    <string name="player_equalizer">Эквалайзер</string>
+    <string name="timer_hours">Часы</string>
+    <string name="timer_minutes">Минуты</string>
+    <string name="timer_finish_track">Дослушать текущий трек</string>
+    <string name="timer_start">Старт</string>
+    <string name="timer_cancel">Отменить таймер</string>
+    <string name="timer_will_finish_track">Текущий трек доиграет до конца</string>
     <string name="format_bits">%1$d бит</string>
     <string name="format_bits_float">%1$d бит float</string>
     <string name="format_kbps">%1$d кбит/с</string>
