@@ -68,7 +68,15 @@ class PlaybackSessionCallbackTest {
 
     private val piPlayer = controller(context.packageName, Process.myUid(), trusted = true)
     private val systemUi = controller("com.android.systemui", Process.SYSTEM_UID, trusted = true)
-    private val otherApp = controller("com.example.remote", Process.myUid() + 1, trusted = false)
+    /**
+     * The uid of an app that may not read music. Not simply the uid after PiPlayer's: on the owner's phone that one
+     * belongs to an app that may, which package visibility hides from PiPlayer.
+     */
+    private val foreignUid = (Process.myUid() + 1..Process.LAST_APPLICATION_UID).first {
+        TestFiles.targetContext.checkPermission(AudioPermission.name, -1, it) != PackageManager.PERMISSION_GRANTED
+    }
+
+    private val otherApp = controller("com.example.remote", foreignUid, trusted = false)
 
     /** The controller Media3 itself connects for the media notification, in PiPlayer's process. */
     private val notification = controller(
@@ -169,7 +177,7 @@ class PlaybackSessionCallbackTest {
 
     @Test
     fun anotherAppPosingAsPiPlayerIsRefused() {
-        val impostor = controller(context.packageName, Process.myUid() + 1, trusted = false)
+        val impostor = controller(context.packageName, foreignUid, trusted = false)
 
         val result = onMain { callback.onConnect(session, impostor) }
 
@@ -414,7 +422,7 @@ class PlaybackSessionCallbackTest {
     @Test
     fun theNameOfAnAppThatMayReadMusicIsNotEnough() {
         // The permission belongs to the caller's uid; a package name can be claimed by anyone.
-        val impostor = controller("com.android.shell", Process.myUid() + 1, trusted = false)
+        val impostor = controller("com.android.shell", foreignUid, trusted = false)
         songs.songs = listOf(SongSourceRule.song(1, "A"))
         val request = MediaItem.Builder().setMediaId(QueueRequest(startSongId = 1, startRow = 0).mediaId).build()
 
