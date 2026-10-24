@@ -1,0 +1,106 @@
+{
+  "seconds": 12.0,
+  "cuts": [
+    0.0,
+    3.0013,
+    5.6373,
+    8.9835,
+    9.427,
+    12.0
+  ],
+  "albums": {
+    "flac": {
+      "rate": 44100,
+      "files": [
+        "gapless/flac/1.flac",
+        "gapless/flac/2.flac",
+        "gapless/flac/3.flac",
+        "gapless/flac/4.flac",
+        "gapless/flac/5.flac"
+      ],
+      "frames": [
+        132357,
+        116248,
+        147567,
+        19559,
+        113469
+      ],
+      "md5": "d0040cec9a6b2fd081576b9e5be90a90"
+    },
+    "mp3": {
+      "rate": 44100,
+      "files": [
+        "gapless/mp3/1.mp3",
+        "gapless/mp3/2.mp3",
+        "gapless/mp3/3.mp3",
+        "gapless/mp3/4.mp3",
+        "gapless/mp3/5.mp3"
+      ],
+      "frames": [
+        132357,
+        116248,
+        147567,
+        19559,
+        113469
+      ]
+    },
+    "aac": {
+      "rate": 44100,
+      "files": [
+        "gapless/aac/1.m4a",
+        "gapless/aac/2.m4a",
+        "gapless/aac/3.m4a",
+        "gapless/aac/4.m4a",
+        "gapless/aac/5.m4a"
+      ],
+      "frames": [
+        132357,
+        116248,
+        147567,
+        19559,
+        113469
+      ]
+    },
+    "opus": {
+      "rate": 48000,
+      "files": [
+        "gapless/opus/1.opus",
+        "gapless/opus/2.opus",
+        "gapless/opus/3.opus",
+        "gapless/opus/4.opus",
+        "gapless/opus/5.opus"
+      ],
+      "frames": [
+        144062,
+        126528,
+        160618,
+        21288,
+        123504
+      ]
+    },
+    "aac-ffmpeg": {
+      "rate": 44100,
+      "files": [
+        "gapless/aac-ffmpeg/1.m4a",
+        "gapless/aac-ffmpeg/2.m4a",
+        "gapless/aac-ffmpeg/3.m4a",
+        "gapless/aac-ffmpeg/4.m4a",
+        "gapless/aac-ffmpeg/5.m4a"
+      ],
+      "frames": [
+        132357,
+        116248,
+        147567,
+        19559,
+        113469
+      ],
+      "late": [
+        763,
+        488,
+        913,
+        921,
+        195
+      ]
+    }
+  }
+}

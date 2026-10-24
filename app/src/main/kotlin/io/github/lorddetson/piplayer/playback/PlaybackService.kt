@@ -60,6 +60,8 @@ class PlaybackService : MediaLibraryService() {
                 .apply { setSmallIcon(R.drawable.ic_notification) },
         )
         val player = PlaybackPlayer.builder(this).build()
+        // Debug builds journal the audio path; release builds do nothing here (§8.3).
+        AudioJournal.attach(this, player)
         // Before the session's own listener, so that a skipped song's error never reaches the controllers (§2.4).
         player.addListener(BrokenSongSkipper(player, ::stopped))
         player.addListener(MediaButtons.listener(this, ::showButtons))

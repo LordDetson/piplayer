@@ -760,3 +760,63 @@ repeated within minutes): a Java crash and a native crash in debug-only processe
 record; on API 31 and later the native report has the decoded tombstone, with the signal and the backtrace.
 
 By hand on the phone: the dialog after the end-to-end crashes, and sharing a report to email, Telegram and Files.
+
+## 8. Gapless playback (M1 step 8)
+
+Songs of an album that run into each other play as one stream: no silence, no repeated or lost audio where one song
+ends and the next begins.
+
+### 8.1 How
+
+- Encoders add silence: a delay at the start of a song and padding to fill its last frame. The player trims both by what
+  the file says, and keeps one audio output across songs of the same sample rate and channel layout, so the joined
+  audio is the original to the sample. Offload stays off (§6.6), so the player trims also with the screen off.
+- Per format:
+    - MP3: the LAME (Xing or Info) tag, which LAME and ffmpeg write, or iTunSMPB. An MP3 with neither gets nothing
+      trimmed.
+    - AAC in MP4 or M4A: iTunSMPB, as iTunes writes it, or an edit list. AAC encoded by ffmpeg is a known limitation:
+      ffmpeg ends its edit list with a short last frame, and Media3 takes the padding as the frames' length minus the
+      edit's end, which comes to nothing, so the rest of the last frame plays (0 to 1023 samples, up to 23 ms at each
+      join).
+    - Raw AAC (ADTS) carries no gapless information: each join keeps the encoder's delay and padding.
+    - FLAC and WAV: nothing to trim.
+    - Opus in Ogg: the pre-skip, and the end of the last page.
+- The last song's padding is trimmed too.
+- A song with another sample rate or channel layout than the one before it gets a new audio output, which Media3 fades
+  in over 20 ms: a short gap. Within an album in one format and rate this does not happen.
+- Media3 1.11 shifted every join of an MP3 with a LAME tag by 529 samples and kept the end of every Opus song; PiPlayer
+  uses 1.12.0-alpha01, which fixes both, and moves to 1.12.0 once it is stable, before its first public release.
+
+### 8.2 The fixture
+
+- One continuous 12 s piece, stereo, 16-bit, computed from a formula, so that the tests compute it too: on the left a
+  slow logarithmic sweep, a steady tone and a chirp from 2 to 12 kHz each half second that pins an alignment to the
+  sample; on the right a falling sweep and a low tone.
+- It is split at fixed times into 5 songs, one under a second, none a whole number of any encoder's frames (576, 1024,
+  1152, 960 samples) or FLAC blocks, and encoded as albums: FLAC, MP3 (LAME, variable bitrate), AAC in M4A with
+  iTunSMPB and no edit list, Opus in Ogg (the piece computed at 48 kHz), and AAC as ffmpeg writes it, the known
+  limitation.
+- `scripts/generate_gapless_fixtures.py` makes the albums and checks each file's gapless information against the true
+  length of its song (the LAME tag, iTunSMPB, the edit list and frame table, STREAMINFO, the pre-skip and last
+  granule). The files (1.5 MB) are in the repository like the other fixtures.
+
+### 8.3 Checks
+
+Instrumented tests on the API 30, 36 and 37 emulators and the owner's phone. Each album plays through the service's
+player with its output copied after trimming:
+
+- The left channel lines up with the piece to the sample: in windows of 4096 samples before and after every join and
+  at both ends, the best match with the formula is at an offset of 0 (searched 1100 samples either way).
+- The FLAC album is the piece bit for bit (MD5).
+- Exactly the piece comes out (AAC from ffmpeg: with its late samples, the last song's included), one audio output
+  serves the album, and every song change is automatic. On the phone no underrun; the emulators only log underruns,
+  which their host's audio causes.
+- AAC from ffmpeg: each join is late by exactly the rest of the song's last frame. The test fails once Media3 changes
+  this, so that this section is updated.
+
+A debug build keeps an audio journal (`files/debug/audio-journal.txt`): the decoders, each new audio output, every
+song change and every underrun. Through the service with its default settings, the FLAC album plays through with
+automatic song changes, no pause and one audio output. With `-e screenOff true`, the albums play through the service
+with the screen off, one audio output each and no underrun on the phone.
+
+By hand on the phone: one of the owner's albums (MP3 with a LAME tag) with the screen off and earbuds, no gap heard.
