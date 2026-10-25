@@ -33,7 +33,7 @@ platform session code (it carries no package name).
 | K3 | Playback resumes from the system media controls | H: after K1, play on the lock screen or quick settings card | As K1 |
 | B1 | A Bluetooth controller controls playback | H: play, pause, next and previous on the earbuds | Each takes effect |
 | Q1 | A 20 000-item queue starts within about 1 s | T: `PlaybackQueueTest` | Median at most 1 s (an image with 16 KB pages only logs it) |
-| Q2 | With 20 000 songs the notification, lock screen and a Bluetooth controller stay responsive | H | No visible delay |
+| Q2 | With 20 000 songs the notification, lock screen and a Bluetooth controller stay responsive | T: `BigQueueHoldTest`, `-e bigQueueSeconds 180`, holds a queue of 20 000 songs; H: the controls meanwhile | No visible delay |
 
 Commands for the instrumented rows, from the repository root:
 
@@ -41,6 +41,7 @@ Commands for the instrumented rows, from the repository root:
 ./gradlew :app:installDebug :app:installDebugAndroidTest
 adb shell am instrument -w io.github.lorddetson.piplayer.test/io.github.lorddetson.piplayer.PiPlayerTestRunner
 adb shell am instrument -w -e screenOff true -e class io.github.lorddetson.piplayer.playback.ScreenOffGaplessTest io.github.lorddetson.piplayer.test/io.github.lorddetson.piplayer.PiPlayerTestRunner
+adb shell am instrument -w -e bigQueueSeconds 180 -e class io.github.lorddetson.piplayer.playback.BigQueueHoldTest io.github.lorddetson.piplayer.test/io.github.lorddetson.piplayer.PiPlayerTestRunner
 ```
 
 The audio journal of a debug build:
@@ -53,24 +54,24 @@ adb shell run-as io.github.lorddetson.piplayer cat files/debug/audio-journal.txt
 
 Each cell is `pass`, `fail` with what happened, or `n/a`. All runs are of 2026-10-25, on the build of commit f502ab7
 (Media3 1.12.0-alpha01). On the phone, music played at volume 0 during the automated runs, from the owner's library
-for K1 and K2. An empty S24 cell is a check by hand that the owner has yet to make.
+for K1 and K2. The checks by hand on the phone were made by the owner.
 
 | ID | API 30 | API 36 | API 37 | S24 Ultra |
 |---|---|---|---|---|
 | A1 | pass: 296 tests, Q1's timing run again on its own | pass: 296 tests | pass: 296 tests, the platform queue tests run again after a fix of the test's own `dumpsys` parsing | pass: 296 tests; one that timed out waiting for an opened file passed twice on its own |
 | G1 | pass | pass | pass | pass: Samsung's FLAC and MP3 decoders, the platform's AAC and Opus ones; one output and no underrun for each album |
 | G2 | pass | pass | pass | pass: no underrun |
-| G3 | n/a | n/a | n/a | |
+| G3 | n/a | n/a | n/a | pass: a public domain recording (the overture to Le nozze di Figaro) cut mid-music into 4 MP3 tracks with LAME tags, played with the screen off over earbuds: no gap heard; the journal shows automatic song changes, one output and no underrun |
 | C1 | pass: paused on the ring (transient loss of focus), playing the same song after the call | n/a | n/a | n/a |
-| C2 | n/a | n/a | n/a | |
+| C2 | n/a | n/a | n/a | pass with the Clock app's timer in place of a call (it takes audio focus the same way): held while it rang, went on after Dismiss; a real call is still to be checked |
 | N1 | pass: paused and stayed paused | n/a | n/a | n/a |
-| N2 | n/a | n/a | n/a | |
+| N2 | n/a | n/a | n/a | pass: paused on unplugging USB-C headphones and on putting the earbuds away (becoming noisy), and stayed paused |
 | K1 | pass: resumed at the paused position (62.7 s) | n/a | n/a | pass: resumed at the paused position (8.0 s) |
 | K2 | pass: killed at 33.1 s, resumed from about 30 s | n/a | n/a | pass: killed at about 29 s, resumed from about 25 to 27 s |
-| K3 | pass: Resume on the quick settings card played the saved song from its position | n/a | n/a | |
-| B1 | n/a | n/a | n/a | |
+| K3 | pass: Resume on the quick settings card played the saved song from its position | n/a | n/a | pass: play on the media card played the saved song from its position (39.6 s) |
+| B1 | n/a | n/a | n/a | pass: the earbuds' tap played and paused, the double tap skipped forward, the triple tap went back to the start and, within 3 s, to the previous song |
 | Q1 | pass: median 915 ms and 979 ms on its own (1323 ms within the whole suite) | pass | pass | pass: median 501 ms |
-| Q2 | n/a | n/a | n/a | |
+| Q2 | n/a | n/a | n/a | pass: no visible delay, also with several presses a second; no underrun |
 
 Found during these runs and fixed before them: after the system restarted the service, a media button resumed a queue
 that the platform session published in full, without the notification (playback.md §2.3, §4.5).
