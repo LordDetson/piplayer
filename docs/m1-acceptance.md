@@ -51,24 +51,25 @@ adb shell run-as io.github.lorddetson.piplayer cat files/debug/audio-journal.txt
 
 ## Results
 
-Each cell is `pass`, `fail` with what happened, or `n/a`. The emulator runs are of 2026-10-25, on the build of commit
-f502ab7 (Media3 1.12.0-alpha01).
+Each cell is `pass`, `fail` with what happened, or `n/a`. All runs are of 2026-10-25, on the build of commit f502ab7
+(Media3 1.12.0-alpha01). On the phone, music played at volume 0 during the automated runs, from the owner's library
+for K1 and K2. An empty S24 cell is a check by hand that the owner has yet to make.
 
 | ID | API 30 | API 36 | API 37 | S24 Ultra |
 |---|---|---|---|---|
-| A1 | pass: 296 tests, Q1's timing run again on its own | pass: 296 tests | pass: 296 tests, the platform queue tests run again after a fix of the test's own `dumpsys` parsing | |
-| G1 | pass | pass | pass | |
-| G2 | pass | pass | pass | |
+| A1 | pass: 296 tests, Q1's timing run again on its own | pass: 296 tests | pass: 296 tests, the platform queue tests run again after a fix of the test's own `dumpsys` parsing | pass: 296 tests; one that timed out waiting for an opened file passed twice on its own |
+| G1 | pass | pass | pass | pass: Samsung's FLAC and MP3 decoders, the platform's AAC and Opus ones; one output and no underrun for each album |
+| G2 | pass | pass | pass | pass: no underrun |
 | G3 | n/a | n/a | n/a | |
 | C1 | pass: paused on the ring (transient loss of focus), playing the same song after the call | n/a | n/a | n/a |
 | C2 | n/a | n/a | n/a | |
 | N1 | pass: paused and stayed paused | n/a | n/a | n/a |
 | N2 | n/a | n/a | n/a | |
-| K1 | pass: resumed at the paused position (62.7 s) | n/a | n/a | |
-| K2 | pass: killed at 33.1 s, resumed from about 30 s | n/a | n/a | |
+| K1 | pass: resumed at the paused position (62.7 s) | n/a | n/a | pass: resumed at the paused position (8.0 s) |
+| K2 | pass: killed at 33.1 s, resumed from about 30 s | n/a | n/a | pass: killed at about 29 s, resumed from about 25 to 27 s |
 | K3 | pass: Resume on the quick settings card played the saved song from its position | n/a | n/a | |
 | B1 | n/a | n/a | n/a | |
-| Q1 | pass: median 915 ms and 979 ms on its own (1323 ms within the whole suite) | pass | pass | |
+| Q1 | pass: median 915 ms and 979 ms on its own (1323 ms within the whole suite) | pass | pass | pass: median 501 ms |
 | Q2 | n/a | n/a | n/a | |
 
 Found during these runs and fixed before them: after the system restarted the service, a media button resumed a queue
