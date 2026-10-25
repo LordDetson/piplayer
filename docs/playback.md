@@ -189,6 +189,10 @@ is heard as a click. The becoming-noisy broadcast is protected, so emulator test
   command but `GET_TIMELINE`, so the platform sees the current song, its controls and its position, but no list of
   what comes next. Media3 would otherwise publish all 20 000 items at every track change, and Bluetooth reads them
   again at every play and pause. A window of neighbouring songs can come later (`v1.x`).
+- The platform session takes the commands of the notification's controller, which Media3 connects only once the
+  session is added to the service; until then it has all of them. So the service adds its session as soon as it builds
+  it, rather than when a controller first asks for it, and the platform session never holds the queue, not even for a
+  moment (Bluetooth on Android 11 can crash on a queue that is there one moment and gone the next).
 - A 20 000-song queue starts within about 1 s of the tap. Every queue item is a local file, so the player makes a
   progressive media source for it directly: Media3's default factory would first work out the kind of stream of each
   item on the main thread (a median of 1.15 s against 0.73 s for 20 000 songs on the API 30 emulator).
@@ -473,6 +477,9 @@ too often while it plays?), and a large cover (3000x3000) in the profiler.
   default double tap of play/pause reach the session as usual (A3.6, A3.7).
 - A forwarded play with no saved queue starts the service and then finds nothing to play. The start check of A4.6 stops
   it safely before the system's deadline instead of leaving a foreground service without a notification.
+- When the process is killed while playing, the system starts the service again on its own, and a later key reaches
+  that running session instead of the receiver. Playback then resumes the same way, in the foreground under its
+  notification, and the platform session gets no queue (§2.3).
 - The receiver is a manifest component only; the app does not register another receiver for media buttons.
 
 ### 4.6 Foreign starts of the service
@@ -514,6 +521,9 @@ Instrumented tests on the API 30, 36 and 37 emulators:
   exported receiver is declared for the system's media button.
 - A foreign action, a malformed media button and a play start with no saved queue stop before the system's deadline
   without killing the process; a foreign start while playing does not stop playback.
+- The platform session publishes no queue (read from `dumpsys media_session`) when a queue starts from the app, when a
+  media button resumes it through the receiver, and when the key reaches a service that runs without anything having
+  asked Media3 for its session, as after the system restarts it; that playback runs in the foreground.
 
 By hand on the phone later: open the app after a force stop and check the paused queue, press play from the lock screen
 and a Bluetooth device, use the headset buttons after process death, and send a foreign start with `adb` while watching

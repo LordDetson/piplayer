@@ -74,10 +74,16 @@ class PlaybackService : MediaLibraryService() {
         val store = PlaybackStateStore.get(this)
         val saver = PlaybackStateSaver(player, store).also { saver = it }
         val callback = PlaybackSessionCallback(this, store, controls, saver::setQueue).also { callback = it }
-        session = MediaLibrarySession.Builder(this, SessionPlayer(player), callback)
+        val session = MediaLibrarySession.Builder(this, SessionPlayer(player), callback)
             .setSessionActivity(openApp())
             .setMediaButtonPreferences(MediaButtons.of(this, player.shuffleModeEnabled, player.repeatMode))
             .build()
+        this.session = session
+        // Added at once, not when a controller first asks for it: until then Media3 has no notification controller,
+        // whose commands the platform session takes, so after the system restarts the service (its process killed
+        // while playing) a media button would resume a queue that the platform session publishes in full, with no
+        // notification (§2.3, §4.5).
+        addSession(session)
         saver.start()
         isRunningForTests = true
     }
