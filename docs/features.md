@@ -125,7 +125,8 @@ soon after 1.0, `later` is planned without a date. The items listed under Cut li
 
 ### Player UI
 
-- Compose app with Material 3: light, dark or system theme, dynamic color on Android 12+. `M1`
+- Compose app with Material 3 following the system's light or dark theme, dynamic color on Android 12+. `M1`
+- A choice of light, dark or system theme in the settings. `M2a`
 - Edge-to-edge layout with correct insets, and system back including predictive back, on every screen as required
   by targetSdk 36. `M1`
 - Content labels and semantic actions on every new control from the first screen. `M1`
@@ -287,7 +288,8 @@ Size: L (about 10 weeks).
   identity (TI §3.1, §10).
 - Media index sync, the background tag pass, Songs, Albums, Artists and Folders as the media library tree,
   grouping, sorting, the scroll thumb, search, queue editing with its own shuffle order, local covers including a
-  track's own cover, playing a folder with its subfolders, library folders, onboarding, the settings skeleton.
+  track's own cover, playing a folder with its subfolders, library folders, onboarding, the settings skeleton with
+  the theme choice.
 - Done when the owner uses PiPlayer as the daily player for a week, and a generated 20 000-track library (a script
   that creates short tagged files with varied and Cyrillic names) is browsable within seconds of the first launch
   and scrolls smoothly on a named device (the slowest one available); a search for "ежик" finds "Ёжик" and
