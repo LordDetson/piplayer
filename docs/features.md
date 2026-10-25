@@ -105,8 +105,8 @@ soon after 1.0, `later` is planned without a date. The items listed under Cut li
   difference between ё and е. `M2a`
 - Queue: play next, add to queue, drag to reorder, remove; tapping a track plays the visible list from it. `M2a`
 - Browse Genres and Playlists. `M2b`
-- Legacy tag encodings (for example Windows-1251) shown correctly, with an automatic mode and a manual
-  choice. `M2b`
+- Legacy tag encodings (for example Windows-1251) detected and shown correctly in an automatic mode. `M2a`
+- A manual choice of the legacy encoding. `M2b`
 - Playlists: create, rename, reorder, import and export M3U8; entries keep resolving after files move. `M2b`
 - Smart lists: Favorites, Recently added, Recently played, Most played, Songs missing information. `M2b`
 - "Songs missing information": no title or a file-name title, no artist or album, no cover, no MusicBrainz
@@ -163,8 +163,9 @@ soon after 1.0, `later` is planned without a date. The items listed under Cut li
   session. `M1`
 - Minimal permissions, each requested at first use and explained in the app. `M1`
 - System surfaces show PiPlayer's own metadata (its tag reading, later identification results). `M2a`
-- Car displays (Android Auto) with browsing and search, voice requests, a cover provider for external
-  hosts. `v1.x`
+- A cover provider, so that hosts outside PiPlayer show the covers of the media library tree (Bluetooth and
+  other controllers). `M2a`
+- Car displays (Android Auto) with browsing and search, voice requests. `v1.x`
 - Configurable extra buttons for the notification and the car (favorite, seek back 10 s, seek forward
   10 s). `v1.x`
 - Share target for audio files that opens identification; launcher shortcuts. `v1.x`
@@ -252,8 +253,8 @@ Size: M (about 4 to 6 weeks).
   that is too slow. Done with Room 3.0.3: instr() per word over one normalized search column, through an index on
   (title key, search text), answers every search-as-you-type query within 13 to 33 ms (95th percentile, two emulator
   runs) on the API 30 emulator; LIKE takes 38 to 96 ms there, because the platform's LIKE goes through ICU. No
-  full-text index and no bundled SQLite. To be measured again on the slowest phone in M2a; if it is too slow there,
-  the fallback is the bundled SQLite with an FTS5 trigram index, since FTS4 cannot find the middle of a word.
+  full-text index and no bundled SQLite. To be measured again in M2a on the real library schema; if it is too slow
+  there, the fallback is the bundled SQLite with an FTS5 trigram index, since FTS4 cannot find the middle of a word.
 - CI: build, JVM tests, lint, a check that only the intended components are exported.
 - Strings in resources from the first screen, with English and Russian resource sets.
 - Done when a debug build runs on API 30 and 36 emulators and on a 16 KB page-size emulator image, the
@@ -288,21 +289,21 @@ Size: L (about 10 weeks).
   identity (TI §3.1, §10).
 - Media index sync, the background tag pass, Songs, Albums, Artists and Folders as the media library tree,
   grouping, sorting, the scroll thumb, search, queue editing with its own shuffle order, local covers including a
-  track's own cover, playing a folder with its subfolders, library folders, onboarding, the settings skeleton with
-  the theme choice.
+  track's own cover and a cover provider for the tree, playing a folder with its subfolders, library folders,
+  automatic detection of legacy tag encodings, onboarding, the settings skeleton with the theme choice.
 - Done when the owner uses PiPlayer as the daily player for a week, and a generated 20 000-track library (a script
   that creates short tagged files with varied and Cyrillic names) is browsable within seconds of the first launch
-  and scrolls smoothly on a named device (the slowest one available); a search for "ежик" finds "Ёжик" and
+  and scrolls smoothly on the API 30 emulator and the owner's phone; a search for "ежик" finds "Ёжик" and
   "Beyonce" finds "Beyoncé".
 
 ### M2b Library data
 
 Size: M (about 5 weeks).
 
-- Playlists with resolution hints, smart lists, favorite tracks and albums, statistics, legacy encodings, track details,
-  multi-select, the Genres and Playlists categories.
+- Playlists with resolution hints, smart lists, favorite tracks and albums, statistics, the manual choice of legacy
+  encodings, track details, multi-select, the Genres and Playlists categories.
 - Done when favorites, playlists and statistics survive a rebuild of the media index and a deletion of the library
-  database, and the legacy-encoding fixtures show readable text, on the same named device.
+  database, and the legacy-encoding fixtures show readable text.
 
 ### M3 Identification (single file)
 
@@ -368,7 +369,7 @@ planned for v1.x.
 
 v1.x, in planned order (items moved by the cut line come first):
 
-1. Car displays (Android Auto), voice requests, the cover provider and configurable notification buttons.
+1. Car displays (Android Auto), voice requests and configurable notification buttons.
 2. Lyrics (TI §9) with timing offsets, together with folder grants: their health check and per-folder write
    status, background tag writing, .lrc files and cover.jpg in the album folder.
 3. ReplayGain from tags, speed and pitch, silence skipping, then fades.
