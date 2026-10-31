@@ -2,6 +2,7 @@ package io.github.lorddetson.piplayer.playback
 
 import android.net.Uri
 import io.github.lorddetson.piplayer.TestFiles
+import io.github.lorddetson.piplayer.identification.text.TextNormalizer
 import io.github.lorddetson.piplayer.library.songs.Song
 import io.github.lorddetson.piplayer.library.songs.SongList
 import io.github.lorddetson.piplayer.library.songs.SongSource
@@ -10,7 +11,7 @@ import java.util.concurrent.atomic.AtomicInteger
 import org.junit.rules.ExternalResource
 
 /**
- * Gives the song list a test's own songs instead of the media index for one test, and forgets them afterwards. The
+ * Gives the song list a test's own songs instead of the library for one test, and forgets them afterwards. The
  * playback service outlives a test, so it reads the source on every request.
  */
 class SongSourceRule(private val initial: () -> List<Song> = { emptyList() }) : ExternalResource() {
@@ -32,7 +33,8 @@ class SongSourceRule(private val initial: () -> List<Song> = { emptyList() }) : 
         SongList.sourceOverride = SongSource {
             readCount.incrementAndGet()
             failure?.let { throw it }
-            songs
+            // In list order, as the library database gives its songs (docs/library.md §1.4).
+            songs.sortedWith(compareBy<Song> { TextNormalizer.normalize(it.title) }.thenBy { it.id })
         }
         SongList.forget()
     }

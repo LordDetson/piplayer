@@ -9,6 +9,7 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.preferencesDataStore
+import io.github.lorddetson.piplayer.ProcessRole
 import java.io.IOException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -125,7 +126,11 @@ class PlaybackStateStore internal constructor(private val dataStore: DataStore<P
 
         /** The store of this process; its file is shared by the service and the screens. */
         fun get(context: Context): PlaybackStateStore = instance ?: synchronized(this) {
-            instance ?: PlaybackStateStore(context.applicationContext.playbackStateDataStore).also { instance = it }
+            instance ?: run {
+                // DataStore allows one process per file (docs/playback.md §1.5).
+                ProcessRole.current(context).requireMain("The playback state store")
+                PlaybackStateStore(context.applicationContext.playbackStateDataStore).also { instance = it }
+            }
         }
     }
 }

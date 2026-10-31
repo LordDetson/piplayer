@@ -868,11 +868,13 @@ the user database; user data is not touched. A rebuild cancels running batch pha
 made live in the user database.
 
 - `audio_file(id, media_store_id, volume_name, relative_path, display_name, document_uri, size, mtime,
-  generation_modified, format, codec, sample_rate, bit_depth, channels, bitrate, duration_ms, duration_source,
+  generation_modified, mime_type, <media kinds>, format, codec, sample_rate, bit_depth, channels, bitrate, duration_ms, duration_source,
   content_key, tag_encoding, embedded_cover_present, embedded_cover_width, embedded_cover_height,
   embedded_cover_bytes, embedded_cover_hash, unsafe_count, tag_pass_at)`
-- `media_index_entry(file_id, title, artist, album, album_artist, year, track_number, duration_ms)`: media index
-  values, precedence level 4, used only while `tag_pass_at` is null (§7.1).
+  The media kinds are the index's flags: music, podcast, audiobook, ringtone, notification, alarm and recording (the
+  last unknown on Android 11); every audio row is stored, and lists hide kinds by setting (library.md §1.3).
+- `media_index_entry(file_id, title, artist, album, album_artist, composer, genre, year, track_number, duration_ms)`:
+  media index values, precedence level 4, used only while `tag_pass_at` is null (§7.1).
 - `track(id, file_id, track_key, start_ms, end_ms, <typed tag columns>, raw_tags_json)`: values from PiPlayer's
   reader, precedence level 3. Typed columns: title, artist, artists, album, album artist, album artists, sort names,
   date, original date, track and disc numbers and totals, disc subtitle, compilation, label, catalog number, barcode,
@@ -885,7 +887,8 @@ made live in the user database.
   user fields, for lists, sorting, smart lists and search. Search (M0 spike): one `search_text` column holds the
   title, artists, album, composer, genre and file name, each normalized like §4.1 and joined by spaces; a query is
   normalized the same way and split into words (no repeats, longest first, at most 8), and every word must occur in
-  the text, tested with `instr()` (on the platform's SQLite, LIKE goes through ICU and is two to three times slower).
+  the text, tested with `instr()` (in the M0 spike on the platform's SQLite, LIKE went through ICU and was two to three
+  times slower). The library database uses the SQLite bundled with the app (library.md §1.1).
   An index on (`title_key`, `search_text`) lets a search walk the titles in order and stop at the first page of 50.
   Known gaps for M2a: letters without a decomposition (ø, ł, đ, æ, œ, ß, ı) and halfwidth kana are not folded yet,
   and a name typed without its punctuation ("acdc" for "AC/DC") is not found. `missing_info_reasons` is the set of §1 reasons, written by
@@ -1001,7 +1004,7 @@ tests, and a high-band error rate within the threshold of §11.4.
 | M2a | Duration source: reliable headers are used; MP3 without a frame-count header and raw ADTS are walked; a Xing/VBRI byte count off by more than 2 %, a CBR header off by more than 2 s, and WAV, MP4 and FLAC headers that the payload cannot support trigger a walk |
 | M2a | Content key: golden values (each fixture has its expected key in hex, checked on every TagLib or parser change); on synthetic payload offsets the key stays the same when only tag regions change and changes when payload bytes change |
 | M2a | Re-attachment order (§3.1): content key, location with duration, unique recording MBID, cached fingerprint, playlist hints; another song at the same path with a duration 3 s off is not attached; two unattached files with the same recording MBID attach neither |
-| M2a | Start-up mirror: when the user database's change counter differs from the mirrored one, merged values, favorites, statistics, badge state and Keep as-is/Skip state are mirrored again |
+| M2b | Start-up mirror: when the user database's change counter differs from the mirrored one, favorites, statistics and the badge state are mirrored again; M3 adds the merged values of decided fields and the Keep as-is/Skip state |
 | M2a | IPC from `:tagger` for the tag pass: each result stays under 128 KB; a larger result or a value over 16 KB travels through a file; no cover bytes cross the process boundary |
 | M2b | Legacy encodings, per file: "Кино", "Ёжик" and "Би-2" stored as Windows-1251 are decoded as such in automatic mode; "Beyoncé", "Motörhead", "Sigur Rós" and "ÉTÉ" stay ISO-8859-1; ID3v1, encoding-0 ID3v2 frames and RIFF INFO |
 | M2b | "Songs missing information": the reasons of §1 on merged values, including a title from the file name (level 5, or level 4 equal to the display name), the cover rule (embedded, saved, album thumbnail) and the MusicBrainz filter being off by default |
@@ -1039,7 +1042,7 @@ tests, and a high-band error rate within the threshold of §11.4.
 | M0 | TagLib reads the tag fixtures of every format |
 | M2a | Content key through the real reader: unchanged after tag edits in every format (ID3v2 growing past its padding, ID3v1 and APE added or removed, FLAC metadata blocks, MP4 with `moov` before and after `mdat`), changed when the audio changes. Ogg Vorbis and Opus: unchanged after comments are rewritten across page boundaries, also when the number of header pages changes and when a large embedded cover is added; the bounded page walk (D10) reads no more of a file than the key of other formats, measured on the generated library; a chained Ogg file takes the token `file` |
 | M2a | Exact duration of VBR MP3 without a frame-count header and of raw ADTS matches the decoded length within one frame; truncated WAV, MP4 and FLAC files report the length of what is left |
-| M2a | Re-attachment (§3.1): a moved or renamed file and a media index rebuild with new IDs keep favorites, playlists and statistics; a moved Ogg file whose comments an external tool rewrote keeps its content key and re-attaches by it |
+| M2a | Re-attachment (§3.1): a moved or renamed file and a media index rebuild with new IDs keep their track identity, which favorites, playlists and statistics refer to from M2b; a moved Ogg file whose comments an external tool rewrote keeps its content key and re-attaches by it |
 | M2a | `:tagger` isolation: a fixture that crashes the native reader and a call that hangs for more than 30 s are counted; the second time the file is marked unsafe; playback continues |
 | M2b | Deleting `library.db` keeps favorites, playlists, statistics and (from M3) decisions, which re-attach after the rebuild |
 | M3 | Decoding table: every format the player plays is read with `MediaExtractorCompat`, decoded and fingerprinted |

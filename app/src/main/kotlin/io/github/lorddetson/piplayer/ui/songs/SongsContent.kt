@@ -39,6 +39,7 @@ sealed interface SongsState {
 
 object SongsTags {
     const val LIST = "songs_list"
+    const val LOADING = "songs_loading"
 }
 
 /** The song list without its state holder: the permission card, the list or its empty state. */
@@ -52,7 +53,7 @@ fun SongsContent(
 ) {
     when (state) {
         SongsState.Loading -> Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            CircularProgressIndicator()
+            CircularProgressIndicator(Modifier.testTag(SongsTags.LOADING))
         }
         is SongsState.NeedsPermission -> PermissionCard(state.deniedForGood, onAllowAccess, onOpenSettings, modifier)
         is SongsState.Loaded -> if (state.songs.isEmpty()) {

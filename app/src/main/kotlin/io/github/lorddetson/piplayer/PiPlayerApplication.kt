@@ -3,6 +3,7 @@ package io.github.lorddetson.piplayer
 import android.app.Application
 import android.content.Context
 import io.github.lorddetson.piplayer.crash.CrashReports
+import io.github.lorddetson.piplayer.library.Library
 import kotlin.concurrent.thread
 
 /** PiPlayer's application object, in every process of the app. */
@@ -22,6 +23,8 @@ class PiPlayerApplication : Application() {
         // and disk reads.
         if (ProcessRole.current(this) == ProcessRole.MAIN) {
             thread(name = "crash-reports", priority = Thread.MIN_PRIORITY) { crashReports.refresh() }
+            // The library follows the media index for as long as the process lives (docs/library.md §1.3).
+            Library.start(this)
         }
     }
 }

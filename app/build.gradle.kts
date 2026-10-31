@@ -126,6 +126,10 @@ dependencies {
     implementation(libs.media3.ui.compose)
     implementation(libs.androidx.navigation3.runtime)
     implementation(libs.androidx.navigation3.ui)
+    implementation(libs.room3.runtime)
+    // The SQLite bundled with the app: one version on every device, with JSON for bulk writes (docs/library.md §1.1).
+    implementation(libs.androidx.sqlite.bundled)
+    ksp(libs.room3.compiler)
 
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)
@@ -142,9 +146,7 @@ dependencies {
     androidTestImplementation(libs.androidx.test.ext.junit)
     androidTestImplementation(libs.androidx.test.espresso.core)
     androidTestImplementation(libs.assertj.core)
-    // The M0 Room spike (library search) lives in the instrumented tests only; the library schema comes with M2a.
-    androidTestImplementation(libs.room3.runtime)
+    // The M0 Room spike (library search) also measures the platform's SQLite.
     androidTestImplementation(libs.androidx.sqlite.framework)
-    androidTestImplementation(libs.androidx.sqlite.bundled)
     kspAndroidTest(libs.room3.compiler)
 }

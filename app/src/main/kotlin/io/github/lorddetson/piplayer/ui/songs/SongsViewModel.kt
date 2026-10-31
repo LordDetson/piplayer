@@ -1,102 +1,93 @@
 package io.github.lorddetson.piplayer.ui.songs
 
 import android.app.Application
-import android.database.ContentObserver
-import android.os.Handler
-import android.os.Looper
-import android.provider.MediaStore
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import io.github.lorddetson.piplayer.library.Library
 import io.github.lorddetson.piplayer.library.songs.SongList
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * The temporary song list (docs/playback.md §2.1, §2.2): reads the media index whenever the screen starts with the
- * permission, or gets it, and a second after the index changes while the screen is started.
+ * The song list (docs/playback.md §2.1, §2.2, docs/library.md §1.4): shows "Loading" until the library is ready, then
+ * reads the list whenever the screen starts with the permission, and after every sync that changed the library while
+ * the screen is started. The first time, its first page is shown ahead of the whole list.
  */
 class SongsViewModel(application: Application) : AndroidViewModel(application) {
 
     private val mutableState = MutableStateFlow<SongsState>(SongsState.Loading)
     val state: StateFlow<SongsState> = mutableState.asStateFlow()
 
-    private var loading: Job? = null
+    private var watching: Job? = null
     private var started = false
     private var granted = false
-    private var observing = false
 
-    /** Reloads a second after the media index reports a change, once for a burst of changes. */
-    private val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
-        override fun onChange(selfChange: Boolean) {
-            load(delayMs = CHANGE_DELAY_MS)
-        }
-    }
-
-    /** The screen started: with the permission, the list is read again and the media index watched. */
+    /** The screen started: with the permission, the list is read and the library watched. */
     fun onStart(granted: Boolean, deniedForGood: Boolean) {
         started = true
-        this.granted = granted
-        if (granted) {
-            observe(true)
-            load()
-        } else {
-            mutableState.value = SongsState.NeedsPermission(deniedForGood)
-        }
+        permission(granted, deniedForGood)
+        if (granted) watch()
     }
 
-    /** The screen stopped: the media index is no longer watched. */
+    /** The screen stopped: the library is no longer watched. */
     fun onStop() {
         started = false
-        observe(false)
+        watching?.cancel()
+        watching = null
     }
 
     /**
      * The screen checked the permission again (it resumed, or the system dialog answered): [granted], or not and
-     * [deniedForGood] once the system no longer shows its dialog. Reads the list only when access was just granted.
+     * [deniedForGood] once the system no longer shows its dialog.
      */
     fun onPermission(granted: Boolean, deniedForGood: Boolean) {
+        permission(granted, deniedForGood)
+        if (granted && started) watch()
+    }
+
+    private fun permission(granted: Boolean, deniedForGood: Boolean) {
         val newlyGranted = granted && !this.granted
         this.granted = granted
         if (!granted) {
+            watching?.cancel()
+            watching = null
             mutableState.value = SongsState.NeedsPermission(deniedForGood)
-        } else if (newlyGranted && started) {
-            observe(true)
-            load()
+        } else if (newlyGranted) {
+            // Access granted while the process runs: the library starts watching the index and syncs.
+            Library.start(getApplication())
+            if (mutableState.value is SongsState.NeedsPermission) mutableState.value = SongsState.Loading
         }
     }
 
-    private fun observe(on: Boolean) {
-        if (on == observing) return
-        val resolver = getApplication<Application>().contentResolver
-        if (on) {
-            resolver.registerContentObserver(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, true, observer)
-        } else {
-            resolver.unregisterContentObserver(observer)
-            loading?.cancel()
-        }
-        observing = on
-    }
-
-    private fun load(delayMs: Long = 0) {
-        loading?.cancel()
-        loading = viewModelScope.launch {
-            if (delayMs > 0) delay(delayMs)
-            val songs = withContext(Dispatchers.IO) { SongList.load(getApplication<Application>()) }
-            mutableState.value = SongsState.Loaded(songs)
+    private fun watch() {
+        if (watching?.isActive == true) return
+        val app = getApplication<Application>()
+        watching = viewModelScope.launch {
+            SongList.changes(app).collectLatest {
+                // Before the list is first shown, its first page comes ahead of the whole list: 20 000 songs take a
+                // few hundred milliseconds to read, the first page a few.
+                if (mutableState.value !is SongsState.Loaded) {
+                    val page = withContext(Dispatchers.IO) { SongList.firstPage(app, FIRST_PAGE) }
+                    if (page.isNotEmpty()) mutableState.value = SongsState.Loaded(page)
+                }
+                val songs = withContext(Dispatchers.IO) { SongList.load(app) }
+                mutableState.value = SongsState.Loaded(songs)
+            }
         }
     }
 
     override fun onCleared() {
-        observe(false)
+        watching?.cancel()
     }
 
     private companion object {
-        const val CHANGE_DELAY_MS = 1_000L
+        /** More than a tall screen shows. */
+        const val FIRST_PAGE = 50
     }
 }

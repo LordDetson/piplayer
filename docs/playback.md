@@ -97,8 +97,8 @@ the version PiPlayer builds with; sections 1 to 7 were written on 1.11.1 and the
 
 - A process's role comes from its name: the package name is the main process; `:tagger` (M2a) runs native tag calls
   only; any other name is neither.
-- Components of the main process check the role when they start and refuse to run elsewhere: the playback service
-  now; WorkManager, the databases and DataStore when they arrive.
+- Components of the main process check the role when they start and refuse to run elsewhere: the playback service,
+  the library database and its sync, and DataStore (library.md §1.5); WorkManager when it arrives.
 - Crash capture (§7) is the exception: it runs in every process of the app, so that a crash anywhere leaves a report.
 
 ### 1.6 Debug entry
@@ -141,24 +141,24 @@ is heard as a click. The becoming-noisy broadcast is protected, so emulator test
 
 ## 2. Song list and queue (M1 step 2)
 
-### 2.1 Temporary song list
+### 2.1 Song list
 
-- Until the library arrives (M2a), the main screen lists the songs of the platform's media index: the rows of
-  `MediaStore.Audio.Media` on every attached external volume with `IS_MUSIC` set. The media index decides `IS_MUSIC` by
-  folder alone: files under Ringtones, Notifications, Alarms, Podcasts, Audiobooks and Recordings (on Android 11 only
-  once its media module is updated) are left out, a path with a Music folder counts even inside those, and everything
-  else counts, voice messages in other folders included. Hidden folders and folders with `.nomedia` are not indexed, the
-  songs of an unmounted SD card disappear, and audio-only WebM, Matroska video and 3GP files are filed as video by the
-  index and are not listed (M2a's own sync will find them).
+- The main screen lists the songs of the platform's media index: the rows of `MediaStore.Audio.Media` on every attached
+  external volume with `IS_MUSIC` set. Since M2a they come from the library database, which a sync keeps up to date
+  with the index (library.md §1). The media index decides `IS_MUSIC` by folder alone: files under Ringtones,
+  Notifications, Alarms, Podcasts, Audiobooks and Recordings (on Android 11 only once its media module is updated) are
+  left out, a path with a Music folder counts even inside those, and everything else counts, voice messages in other
+  folders included. Hidden folders and folders with `.nomedia` are not indexed, the songs of an unmounted SD card
+  disappear, and audio-only WebM, Matroska video and 3GP files are filed as video by the index and are not listed.
 - A row shows the title, the artist and the length. The index gives the file name without its extension as the title
   when the file has no title tag, `<unknown>` as the artist (shown as "Unknown artist"), the folder's name as the
   album, and no length, or 0, for files it could not read (shown as "--:--"); such rows stay in the list.
 - Order: by the title normalized as for search (TI §4.1: case, diacritics outside Cyrillic and "ё" folded, punctuation
-  as spaces), compared character by character (digits before Latin before Cyrillic), then by the index's ID, so that
-  the list and the playback service always agree.
-- The list is read again whenever the screen starts, when access is granted, and, while the screen is started, a
-  second after the media index reports a change (once for a burst of changes). The list held in memory is shared by the screen and the playback service, which run in one process, so that
-  a tap does not read 20 000 rows a second time.
+  as spaces), compared by code point (digits before Latin before Cyrillic), then by the index's ID, so that the list
+  and the playback service always agree.
+- The list is read from the library when the screen starts and after every sync that changed it (library.md §1.4).
+  The list held in memory is shared by the screen and the playback service, which run in one process, so that a tap
+  does not read 20 000 rows a second time.
 
 ### 2.2 Permission
 
@@ -258,8 +258,8 @@ large queue, and a song from an SD card if there is one.
   it; letting go returns to the list, cancelling keeps Now Playing. The manifest opts in with
   `enableOnBackInvokedCallback`, because targetSdk 36 makes predictive back the default only on Android 16. Android 13
   delivers back only once the gesture ends, and Android 11 and 12 have classic back.
-- The song list is a screen of its own, so it reads the media index again each time Now Playing closes (§2.1); the
-  library of M2a keeps its own index.
+- The song list is a screen of its own, so it reads the library again each time Now Playing closes (§2.1,
+  library.md §1.4).
 - Edge-to-edge: both screens draw behind the status and navigation bars and display cutouts. The list keeps its rows
   clear of the bars; the mini player's background reaches the bottom edge of the window while its content sits above
   the navigation bar. Now Playing keeps its content inside the safe drawing area, and the seek bar out of the side

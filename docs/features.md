@@ -255,6 +255,8 @@ Size: M (about 4 to 6 weeks).
   runs) on the API 30 emulator; LIKE takes 38 to 96 ms there, because the platform's LIKE goes through ICU. No
   full-text index and no bundled SQLite. To be measured again in M2a on the real library schema; if it is too slow
   there, the fallback is the bundled SQLite with an FTS5 trigram index, since FTS4 cannot find the middle of a word.
+  M2a moved the library database to the bundled SQLite for the speed of the first sync (library.md §1.1); the same
+  search answers within 21 ms there on the generated 20 000-file library.
 - CI: build, JVM tests, lint, a check that only the intended components are exported.
 - Strings in resources from the first screen, with English and Russian resource sets.
 - Done when a debug build runs on API 30 and 36 emulators and on a 16 KB page-size emulator image, the

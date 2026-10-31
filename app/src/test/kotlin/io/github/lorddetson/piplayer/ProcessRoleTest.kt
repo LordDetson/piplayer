@@ -1,6 +1,8 @@
 package io.github.lorddetson.piplayer
 
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatCode
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 
 class ProcessRoleTest {
@@ -22,5 +24,19 @@ class ProcessRoleTest {
         assertThat(ProcessRole.of("$packageName:other", packageName)).isEqualTo(ProcessRole.OTHER)
         assertThat(ProcessRole.of("$packageName.tagger", packageName)).isEqualTo(ProcessRole.OTHER)
         assertThat(ProcessRole.of("com.example.app", packageName)).isEqualTo(ProcessRole.OTHER)
+    }
+
+    @Test
+    fun `main process components start in the main process`() {
+        assertThatCode { ProcessRole.MAIN.requireMain("The library database") }.doesNotThrowAnyException()
+    }
+
+    @Test
+    fun `main process components refuse to start anywhere else`() {
+        for (role in listOf(ProcessRole.TAGGER, ProcessRole.OTHER)) {
+            assertThatThrownBy { role.requireMain("The library database") }
+                .isInstanceOf(IllegalStateException::class.java)
+                .hasMessage("The library database runs only in the main process")
+        }
     }
 }

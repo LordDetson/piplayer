@@ -15,10 +15,11 @@ class SongListTest {
     fun forget() = SongList.forget()
 
     @Test
-    fun `the list is kept in title order`() {
+    fun `the list keeps the order its source gives`() {
+        // The library database sorts (docs/library.md §1.4); sorting again would cost a tap 20 000 normalizations.
         SongList.load(SongSource { listOf(song(2, "B"), song(1, "A")) })
 
-        assertThat(SongList.current()!!.map { it.id }).containsExactly(1L, 2L)
+        assertThat(SongList.current()!!.map { it.id }).containsExactly(2L, 1L)
     }
 
     @Test
