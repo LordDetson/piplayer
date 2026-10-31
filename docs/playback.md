@@ -1,8 +1,9 @@
 # Playback
 
 How PiPlayer plays music: the playback service, its media session and the player inside it. This is the specification
-of milestone M1 (features.md); each step of M1 adds its section. Facts about Media3 refer to version 1.12.0-alpha01,
-the version PiPlayer builds with; sections 1 to 7 were written on 1.11.1 and their checks pass on both.
+of milestone M1 (features.md); each step of M1 adds its section. Facts about Media3 refer to version 1.12.0-alpha02,
+the version PiPlayer builds with; sections 1 to 7 were written on 1.11.1 and their checks pass on it and on the
+1.12.0 alphas.
 
 ## 1. Service and session (M1 step 1)
 
@@ -795,7 +796,8 @@ ends and the next begins.
 - A song with another sample rate or channel layout than the one before it gets a new audio output, which Media3 fades
   in over 20 ms: a short gap. Within an album in one format and rate this does not happen.
 - Media3 1.11 shifted every join of an MP3 with a LAME tag by 529 samples and kept the end of every Opus song; PiPlayer
-  uses 1.12.0-alpha01, which fixes both, and moves to 1.12.0 once it is stable, before its first public release.
+  uses 1.12.0-alpha02 (1.12.0-alpha01 fixed both), and moves to 1.12.0 once it is stable, before its first public
+  release.
 
 ### 8.2 The fixture
 
