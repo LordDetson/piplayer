@@ -18,7 +18,7 @@ import kotlinx.coroutines.Dispatchers
  */
 // Not unique: within one sync's transaction an index rebuild can hand a stored ID to another file before its old owner
 // has taken its new one.
-@Entity(tableName = "audio_file", indices = [Index("media_store_id"), Index("volume_name")])
+@Entity(tableName = "audio_file", indices = [Index("media_store_id"), Index("volume_name", "relative_path")])
 data class AudioFileEntity(
     @PrimaryKey val id: Long,
     @ColumnInfo(name = "media_store_id") val mediaStoreId: Long,
@@ -37,8 +37,19 @@ data class AudioFileEntity(
     @ColumnInfo(name = "is_alarm") val isAlarm: Boolean,
     /** Null on Android 11, whose index has no such flag. */
     @ColumnInfo(name = "is_recording") val isRecording: Boolean?,
+    /** Whether the file counts as a recording: the index's flag, or on Android 11 a `Recordings` folder (§3.5). */
+    val recording: Boolean,
+    /** The rule of the file's folder as the user database had it when it was mirrored (§3.4), a `FolderRuleState`. */
+    @ColumnInfo(name = "folder_rule") val folderRule: Int,
     /** Reads of the file that crashed or hung `:tagger`; at 2 it is not read any more (docs/library.md §4.4). */
     @ColumnInfo(name = "unsafe_count", defaultValue = "0") val unsafeCount: Int = 0,
+)
+
+/** The user database's change counter that the folder rules of `audio_file` mirror (docs/library.md §3.4). */
+@Entity(tableName = "library_meta")
+data class LibraryMetaEntity(
+    @PrimaryKey val id: Int = 1,
+    @ColumnInfo(name = "mirrored_user_counter") val mirroredUserCounter: Long,
 )
 
 /** The media index's values for a file, as it gives them (TI §10.1, precedence level 4). */
@@ -96,10 +107,14 @@ data class VolumeSyncStateEntity(
  */
 @Database(
     entities = [
-        AudioFileEntity::class, MediaIndexEntryEntity::class, TrackDisplayEntity::class, VolumeSyncStateEntity::class,
+        AudioFileEntity::class,
+        MediaIndexEntryEntity::class,
+        TrackDisplayEntity::class,
+        VolumeSyncStateEntity::class,
+        LibraryMetaEntity::class,
         OutsideFileEntity::class,
     ],
-    version = 2,
+    version = 3,
     exportSchema = false,
 )
 abstract class LibraryDatabase : RoomDatabase() {

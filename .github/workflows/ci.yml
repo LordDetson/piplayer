@@ -58,6 +58,18 @@ jobs:
           :app:assembleRelease :macrobenchmark:assembleBenchmark
           --continue --stacktrace
 
+      # The build exports the database schemas; a schema that differs from the committed one is a version without its
+      # migration (docs/library.md §3.1).
+      - name: Check that the committed database schemas are up to date
+        shell: bash
+        run: |
+          changed="$(git status --porcelain -- app/schemas)"
+          if [ -n "$changed" ]; then
+            echo "$changed"
+            echo "The database schemas changed: give the database a new version with a migration and commit its schema."
+            exit 1
+          fi
+
       - name: Check 16 KB alignment of the APK and its 64-bit native libraries
         shell: bash
         run: |

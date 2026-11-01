@@ -856,10 +856,12 @@ Where things live:
 - `user.db` lives in the default database directory.
 - Settings live in DataStore in the main process (`files/datastore/`), in two files: `settings` (legacy-encoding
   mode, ID3v1 policy, unmetered-only, protected-fields list, cover preset and the other options) is backed up;
-  `device_state` (the user's own AcoustID application key, rate-limiter last-request times) is not.
+  `device_state` (the user's own AcoustID application key, rate-limiter last-request times, and from M2a "stop after
+  current track" and the permission flag of library.md §3.2) is not.
 - Library folder rules are user decisions and live in the user database.
-- The persisted queue (M1) lives in its own file in no-backup storage: it refers to track identities and, for files
-  opened from other apps, to their URIs, which do not carry over to another device.
+- The persisted queue (M1) lives in its own DataStore file, `playback_state`, which the backup rules leave out: it
+  refers to track identities and, for files opened from other apps, to their URIs, which do not carry over to another
+  device.
 
 ### 10.1 Library database (`library.db`): rebuildable, excluded from backup
 

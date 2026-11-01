@@ -10,18 +10,30 @@ import android.provider.MediaStore
 import androidx.annotation.VisibleForTesting
 import io.github.lorddetson.piplayer.ProcessRole
 import io.github.lorddetson.piplayer.library.db.LibraryDatabase
+import io.github.lorddetson.piplayer.library.rules.FolderRule
+import io.github.lorddetson.piplayer.library.rules.RulesSource
 import io.github.lorddetson.piplayer.library.songs.AudioPermission
 import io.github.lorddetson.piplayer.library.sync.LibraryStatus
 import io.github.lorddetson.piplayer.library.sync.LibrarySync
 import io.github.lorddetson.piplayer.library.sync.MediaIndex
 import io.github.lorddetson.piplayer.library.sync.MediaStoreIndex
+import io.github.lorddetson.piplayer.userdata.FolderRuleEntity
+import io.github.lorddetson.piplayer.userdata.UserData
 import java.io.File
+import java.util.concurrent.locks.ReentrantReadWriteLock
+import kotlin.concurrent.read
+import kotlin.concurrent.write
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
 
@@ -32,12 +44,20 @@ object Library {
 
     private val opened = MutableStateFlow<Opened?>(null)
     private val lock = Any()
+    private val access = ReentrantReadWriteLock()
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var observer: ContentObserver? = null
 
     @Volatile
     private var indexOverride: MediaIndex? = null
 
     fun database(context: Context): LibraryDatabase = opened(context).database
+
+    /**
+     * Runs [block] on the library database while it cannot be closed: lists read it through here. The bundled SQLite
+     * does not check for a closed connection, so closing it under a read would take the whole process down.
+     */
+    fun <T> read(context: Context, block: (LibraryDatabase) -> T): T = access.read { block(database(context)) }
 
     fun sync(context: Context): LibrarySync = opened(context).sync
 
@@ -70,6 +90,10 @@ object Library {
                 watcher,
             )
             observer = watcher
+            // A change of the folder rules is applied by a sync at once.
+            scope.launch {
+                UserData.database(app).user().changeCounterFlow().drop(1).collect { opened.value?.sync?.request() }
+            }
         }
         sync.request()
     }
@@ -91,12 +115,17 @@ object Library {
         val app = context.applicationContext
         val old = synchronized(lock) { opened.value }
         old?.sync?.awaitIdle()
-        synchronized(lock) {
-            old?.sync?.close()
-            old?.database?.close()
-            if (empty) SQLiteDatabase.deleteDatabase(file(app))
-            indexOverride = index
-            opened.value = open(app)
+        // A sync asked for after that, by a change of the index or of the user data, must not run while the database
+        // closes under it.
+        old?.sync?.closeAndJoin()
+        // After the reads under way, before any new one.
+        access.write {
+            synchronized(lock) {
+                old?.database?.close()
+                if (empty) SQLiteDatabase.deleteDatabase(file(app))
+                indexOverride = index
+                opened.value = open(app)
+            }
         }
     }
 
@@ -107,8 +136,21 @@ object Library {
     private fun open(context: Context): Opened {
         ProcessRole.current(context).requireMain("The library")
         val database = LibraryDatabase.open(context, file(context))
-        val sync = LibrarySync(database, indexOverride ?: MediaStoreIndex(context), mayRead = { mayRead(context) })
+        val sync = LibrarySync(
+            database,
+            indexOverride ?: MediaStoreIndex(context),
+            mayRead = { mayRead(context) },
+            rules = userRules(context),
+        )
         return Opened(database, sync)
+    }
+
+    /** The folder rules of the user database (docs/library.md §3.4). */
+    private fun userRules(context: Context) = object : RulesSource {
+        override suspend fun counter() = UserData.database(context).user().changeCounter()
+
+        override suspend fun rules() = UserData.database(context).user().folderRules()
+            .map { FolderRule(it.volumeName, it.relativePath, it.mode == FolderRuleEntity.INCLUDE) }
     }
 
     private fun file(context: Context) = File(context.noBackupFilesDir, LibraryDatabase.FILE_NAME)

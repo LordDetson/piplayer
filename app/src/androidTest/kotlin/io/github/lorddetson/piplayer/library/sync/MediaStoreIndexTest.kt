@@ -13,6 +13,7 @@ import io.github.lorddetson.piplayer.TestFiles
 import io.github.lorddetson.piplayer.library.db.LibraryDatabase
 import io.github.lorddetson.piplayer.library.songs.LibrarySongSource
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.onMain
+import io.github.lorddetson.piplayer.settings.HiddenFiles
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.waitUntil
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
@@ -137,7 +138,8 @@ class MediaStoreIndexTest {
         val sync = LibrarySync(database, index, mayRead = { true })
         try {
             sync.sync()
-            val songs = LibrarySongSource(database).songs()
+            // The fixtures last 2 s: no length limit here, this test is about reading the index.
+            val songs = LibrarySongSource(database, HiddenFiles(minLengthSeconds = 0)).songs()
                 .filter { song -> inserted.any { it.id == song.id } }
                 .associateBy { it.id }
 

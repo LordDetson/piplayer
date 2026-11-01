@@ -94,7 +94,7 @@ class MediaStoreIndex(private val context: Context) : MediaIndex {
         fun row(volume: String) = IndexRow(
             mediaStoreId = cursor.getLong(id),
             volume = volume,
-            relativePath = cursor.getString(relativePath).orEmpty(),
+            relativePath = IndexPaths.relativePath(cursor.getString(relativePath)),
             displayName = cursor.getString(displayName).orEmpty(),
             size = cursor.getLong(size),
             modifiedSeconds = cursor.getLong(modified),

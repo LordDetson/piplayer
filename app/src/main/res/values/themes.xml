@@ -1,5 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Window theme only; the UI itself is themed by Compose Material 3. -->
-    <style name="Theme.PiPlayer" parent="android:Theme.Material.Light.NoActionBar" />
+    <!-- Window theme only; the UI itself is themed by Compose Material 3. DayNight, so that the window shown before the
+         first frame follows the night mode that ThemeWindow gives the activity from the theme choice (docs/library.md
+         §3.6). -->
+    <style name="Theme.PiPlayer" parent="android:Theme.DeviceDefault.DayNight">
+        <item name="android:windowActionBar">false</item>
+        <item name="android:windowNoTitle">true</item>
+    </style>
 </resources>

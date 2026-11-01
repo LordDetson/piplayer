@@ -16,13 +16,16 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
-import androidx.core.content.edit
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.LifecycleStartEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.lorddetson.piplayer.library.songs.AudioPermission
 import io.github.lorddetson.piplayer.library.songs.Song
+import io.github.lorddetson.piplayer.settings.SettingsFiles
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
 
 /**
  * The song list with its permission handling (docs/playback.md §2.2): it asks only on a tap, checks again whenever it
@@ -61,8 +64,8 @@ fun SongsScreen(
     )
 }
 
-private const val PREFERENCES = "songs"
-private const val DENIED_BEFORE = "audio_permission_denied_before"
+/** In the `device_state` file (docs/library.md §3.2): whether access was denied on this device. */
+private val DENIED_BEFORE = booleanPreferencesKey("audio_permission_denied_before")
 
 private fun Context.hasAudioPermission() =
     ContextCompat.checkSelfPermission(this, AudioPermission.name) == PackageManager.PERMISSION_GRANTED
@@ -74,9 +77,12 @@ private fun Context.hasAudioPermission() =
 private fun Context.deniedForGood(granted: Boolean): Boolean {
     val activity = findActivity() ?: return false
     val rationale = ActivityCompat.shouldShowRequestPermissionRationale(activity, AudioPermission.name)
-    val preferences = getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
-    if (rationale) preferences.edit { putBoolean(DENIED_BEFORE, true) }
-    return AudioPermissionState.deniedForGood(granted, rationale, preferences.getBoolean(DENIED_BEFORE, false))
+    val file = SettingsFiles.deviceState(this)
+    val deniedBefore = runBlocking {
+        if (rationale) SettingsFiles.edit(file) { it[DENIED_BEFORE] = true }
+        file.data.first()[DENIED_BEFORE] ?: false
+    }
+    return AudioPermissionState.deniedForGood(granted, rationale, deniedBefore)
 }
 
 private fun Context.openAppSettings() {

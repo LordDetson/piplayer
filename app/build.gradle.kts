@@ -5,6 +5,7 @@ plugins {
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.ksp)
+    alias(libs.plugins.room3)
 }
 
 /**
@@ -31,6 +32,11 @@ val prepareRecordings = tasks.register<PrepareFingerprintSamples>("prepareRecord
     workingDirectory = rootProject.layout.projectDirectory
     python = providers.gradleProperty("piplayer.python")
         .orElse(if (System.getProperty("os.name").startsWith("Windows")) "python" else "python3")
+}
+
+// The user database's schema, one file per version, committed; the migration tests read it (docs/library.md §3.1).
+room3 {
+    schemaDirectory("$projectDir/schemas")
 }
 
 androidComponents {
@@ -166,5 +172,6 @@ dependencies {
     androidTestImplementation(libs.assertj.core)
     // The M0 Room spike (library search) also measures the platform's SQLite.
     androidTestImplementation(libs.androidx.sqlite.framework)
+    androidTestImplementation(libs.room3.testing)
     kspAndroidTest(libs.room3.compiler)
 }

@@ -72,7 +72,8 @@ The data model it implements is sketched in track-identification.md §10 (TI bel
   screen does) asks for nothing. Without the permission nothing is synced: the
   index would show only the app's own files, and the deletion check would empty the library.
 - **Ready.** The library is ready once a sync has finished or failed in this process, or as soon as the database
-  shows that an earlier process synced it.
+  shows that an earlier process synced it. It knows its folders only once a sync has succeeded, in this process or an
+  earlier one: a failed first sync leaves it ready with no folders known.
 
 ### 1.4 Songs from the library
 
@@ -160,6 +161,80 @@ The data model it implements is sketched in track-identification.md §10 (TI bel
   scroll is well within its limit on the phone, so there is none yet; the start limits were measured on debug builds,
   which are slower than the release build, and are not measured on the release build in this step.
 
+## 3. User data, settings, library folders and hidden files (M2a step 3)
+
+### 3.1 User database
+
+- `user.db` holds what the user decided; it is never rebuilt from files (TI §10.2). It lives in the app's default
+  database directory, is opened with Room 3 on the bundled SQLite, and only in the main process (§1.5).
+- Its schema is exported from version 1 and committed (`app/schemas/`); every later version comes with a migration and
+  a test that runs it, and there is no destructive fallback. CI fails when a build changes a committed schema, so that
+  a changed schema cannot keep its old version.
+- Version 1 holds:
+    - `library_folder_rule(volume_name, relative_path, mode)`: a folder the user included or excluded (§3.4);
+    - `user_meta(id, change_counter)`: one row whose counter goes up in the same transaction as every write of user
+      data, so that the library database can tell whether it still mirrors it (TI §10.3).
+- Later tables (track identities, favorites, playlists, statistics, decisions) arrive with their milestones.
+
+### 3.2 Settings files
+
+- Settings live in DataStore in the main process, in two files (TI §10):
+    - `settings`, backed up: the theme, the hidden-file choices (§3.5) and the sleep timer's last choice;
+    - `device_state`, not backed up: "stop after current track" (playback.md §6.4) and whether the audio permission was
+      denied before (playback.md §2.2).
+- The three SharedPreferences files of M1 (`player`, `playback_controls`, `songs`) move into them under the same keys
+  the first time each file is read, and are deleted afterwards.
+
+### 3.3 Backup
+
+- Both rule files (`fullBackupContent` for Android 11, `dataExtractionRules` for cloud backup and device transfer on
+  Android 12 and later) list what is backed up: `user.db` with its WAL file and the `settings` file. Everything else
+  stays out: the library database, `device_state`, the saved queue, crash reports and caches (TI §10.3).
+
+### 3.4 Library folders
+
+- A folder rule includes or excludes a folder of a volume with all its subfolders. The deepest rule above a file
+  decides; a file under no rule is included. "Only these folders" is an excluded volume root with included folders
+  inside it.
+- Paths are compared as the media index gives them (`relative_path`, ending with `/`), ignoring case; the index gives
+  `/` for a volume's root, which the library keeps as the empty path. A rule for a volume that is not attached, or for
+  a folder that holds no audio now, is kept and shown as such.
+- An explicitly included folder shows everything in it, also the kinds and short files §3.5 hides elsewhere: a user
+  who includes `Recordings/Lectures/` wants to see the lectures.
+- The library database mirrors the rules: every file carries the rule of its folder (none, include or exclude), set
+  by each sync, so that lists filter without reading the user database. The library database keeps the user
+  database's change counter it last mirrored (TI §10.3); a sync that finds another counter applies the rules to every
+  file again. A write of the rules asks for a sync at once.
+
+### 3.5 Hidden files
+
+- The lists show every audio file of the index except the hidden ones, so podcasts and audiobooks are listed too.
+- Hidden by default, each with its own setting:
+    - system sounds: ringtones, notification sounds and alarms;
+    - recordings: what the index flags as a recording; on Android 11, which has no such flag, a file under a folder
+      named `Recordings` (any level, ignoring case);
+    - short files: shorter than a chosen length (off, 5, 10, 15, 30 or 60 s; 10 s by default), by the length the
+      index gives until the tag pass measures it. A file whose length is unknown is never short. The index estimates a
+      VBR MP3 file without a frame-count header from its first frame and can make it look short (in the generated
+      library 81 such files of 31 s were estimated at 8 to 9 s); M2a step 7 measures the exact length.
+- A change of a hidden-file setting or of a folder rule reloads the lists at once, and a list kept for the playback
+  service is not handed out after such a change, as after a sync (§1.4).
+
+### 3.6 Settings screen and theme
+
+- A Settings screen, opened from the Songs screen's top bar, has two sections in M2a: Library (the hidden-file
+  settings and Library folders) and Appearance (the theme). Other sections arrive with their milestones.
+- The theme is System (the default), Light or Dark; dynamic color stays on where the system has it. The choice is
+  read before the activity draws anything and becomes the night mode of its configuration, so its window background and
+  the system bars follow it from the first frame on. Android 12 and later also keep it as the app's night mode, which
+  themes the splash screen; on Android 11 the starting window the system shows before the app runs follows the system.
+  A new choice that changes what the screen shows creates it again, keeping its state.
+- Library folders shows each attached volume as a tree of the folders that hold audio, with each folder included,
+  excluded or following its parent; rules that match none of those folders (their volume is not attached, or their
+  folder holds no audio now) are listed below with a way to remove them. Until the library knows its folders (before
+  a sync has succeeded, or without access to the audio files) no rule is listed so.
+- A failed write of a setting or a rule, as on a full disk, is logged and changes nothing; it never ends the app.
+
 ## 4. The tag reader process `:tagger` (M2a step 4)
 
 PiPlayer reads tags with TagLib, native code that a malformed file can crash or hang. It runs in a process of its own,
@@ -223,7 +298,8 @@ the way the main process calls it and the count of failed reads; the tag pass of
   count above 0. A size or modification time other than the stored one counts as a new file, with a count of 0; a
   reply deletes the row.
 - `library.db` is rebuildable: a rebuild forgets the counts, which costs at most two more failed reads per unsafe file.
-- The library database moves to schema version 2 (no migration, as in §1.1: the next sync fills it again).
+- The library database moves to schema version 3 (step 3 took version 2; no migration, as in §1.1: the next sync
+  fills it again).
 
 ### 4.5 Crashes and the debug hooks
 
