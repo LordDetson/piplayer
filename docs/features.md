@@ -295,8 +295,8 @@ Size: L (about 10 weeks).
   automatic detection of legacy tag encodings, onboarding, the settings skeleton with the theme choice.
 - Done when the owner uses PiPlayer as the daily player for a week, and a generated 20 000-track library (a script
   that creates short tagged files with varied and Cyrillic names) is browsable within seconds of the first launch
-  and scrolls smoothly on the API 30 emulator and the owner's phone; a search for "ежик" finds "Ёжик" and
-  "Beyonce" finds "Beyoncé".
+  on the API 30 emulator and the owner's phone and scrolls smoothly on the phone (emulators draw through the host's
+  graphics, library.md §2.2); a search for "ежик" finds "Ёжик" and "Beyonce" finds "Beyoncé".
 
 ### M2b Library data
 

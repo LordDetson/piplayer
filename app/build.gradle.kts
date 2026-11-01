@@ -66,9 +66,25 @@ android {
             buildConfigField("String", "ACOUSTID_API_KEY", "\"$acoustIdApiKey\"")
         }
         release {
-            isMinifyEnabled = false
+            // R8 and resource shrinking (docs/library.md §2.1).
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
+        // The release build signed with the debug key and profileable, for the Macrobenchmark checks (docs/library.md
+        // §2.1); never published.
+        create("benchmark") {
+            initWith(getByName("release"))
+            // A package of its own: a connected run uninstalls the app it tested, which must not be the debug build.
+            applicationIdSuffix = ".benchmark"
+            signingConfig = signingConfigs.getByName("debug")
+            matchingFallbacks += "release"
+        }
+    }
+
+    sourceSets {
+        // The benchmark build is the release build, with the release versions of the debug-only classes.
+        getByName("benchmark") { kotlin.directories.add("src/release/kotlin") }
     }
 
     compileOptions {

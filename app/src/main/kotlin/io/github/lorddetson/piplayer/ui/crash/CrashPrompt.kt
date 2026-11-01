@@ -16,9 +16,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.lorddetson.piplayer.R
@@ -34,6 +38,10 @@ import kotlinx.coroutines.withContext
  * The dialog after a crash (docs/playback.md §7.3): once for the reports not shown yet, with Share, Show report and
  * Close. Show report puts the report screen in its place; closing either ends the offer.
  */
+object CrashTags {
+    const val PROMPT = "crash_prompt"
+}
+
 @Composable
 fun CrashPrompt(reports: CrashReports, share: suspend (String) -> Unit = rememberCrashShare()) {
     val pending by reports.pending.collectAsStateWithLifecycle()
@@ -75,6 +83,8 @@ private fun CrashDialog(reports: List<ReportStore.Report>, onShare: () -> Unit, 
     }
     AlertDialog(
         onDismissRequest = onClose,
+        // A dialog is a window of its own, outside the activity's test tags as resource IDs.
+        modifier = Modifier.semantics { testTagsAsResourceId = true }.testTag(CrashTags.PROMPT),
         title = { Text(stringResource(R.string.crash_title)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
