@@ -88,4 +88,12 @@
     <string name="crash_copied_start">Скопированы первые 100 000 символов. Чтобы отправить отчёт целиком, поделитесь им.</string>
     <string name="crash_share_title">Поделиться отчётом о сбое</string>
     <string name="crash_share_subject">Отчёт о сбое PiPlayer</string>
+    <string name="settings_open">Настройки</string>
+    <string name="settings_title">Настройки</string>
+    <string name="settings_back">Назад</string>
+    <string name="settings_appearance">Оформление</string>
+    <string name="settings_theme">Тема</string>
+    <string name="theme_system">Как в системе</string>
+    <string name="theme_light">Светлая</string>
+    <string name="theme_dark">Тёмная</string>
 </resources>

@@ -6,18 +6,23 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.OptIn
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -33,6 +38,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LifecycleResumeEffect
@@ -55,6 +61,7 @@ import io.github.lorddetson.piplayer.ui.player.ExtraControls
 import io.github.lorddetson.piplayer.ui.player.MiniPlayer
 import io.github.lorddetson.piplayer.ui.player.NowPlaying
 import io.github.lorddetson.piplayer.ui.player.PlayerViewModel
+import io.github.lorddetson.piplayer.ui.settings.SettingsScreen
 import io.github.lorddetson.piplayer.ui.songs.SongsScreen
 import kotlinx.serialization.Serializable
 
@@ -64,6 +71,10 @@ data object SongsRoute : NavKey
 
 @Serializable
 data object NowPlayingRoute : NavKey
+
+/** The Settings screen (docs/library.md §3.6). */
+@Serializable
+data object SettingsRoute : NavKey
 
 /**
  * The app's screens (docs/playback.md §3.1): the song list and Now Playing over it, which slides up when it opens and
@@ -88,9 +99,26 @@ fun PiPlayerApp(viewModel: PlayerViewModel = viewModel()) {
         predictivePopTransitionSpec = { EnterTransition.None togetherWith slideOutVertically(targetOffsetY = { it }) },
         entryProvider = entryProvider {
             entry<SongsRoute> {
-                SongsEntry(player, cover, snackbar, onSongClick = viewModel::play) {
-                    if (backStack.lastOrNull() != NowPlayingRoute) backStack.add(NowPlayingRoute)
-                }
+                SongsEntry(
+                    player,
+                    cover,
+                    snackbar,
+                    onSongClick = viewModel::play,
+                    onOpenNowPlaying = { if (backStack.lastOrNull() != NowPlayingRoute) backStack.add(NowPlayingRoute) },
+                    onOpenSettings = { if (backStack.lastOrNull() != SettingsRoute) backStack.add(SettingsRoute) },
+                )
+            }
+            // Settings comes in from the side, unlike Now Playing.
+            entry<SettingsRoute>(
+                metadata = NavDisplay.transitionSpec {
+                    slideInHorizontally(initialOffsetX = { it }) togetherWith ExitTransition.KeepUntilTransitionsFinished
+                } + NavDisplay.popTransitionSpec {
+                    EnterTransition.None togetherWith slideOutHorizontally(targetOffsetX = { it })
+                } + NavDisplay.predictivePopTransitionSpec {
+                    EnterTransition.None togetherWith slideOutHorizontally(targetOffsetX = { it })
+                },
+            ) {
+                SettingsScreen(onBack = { close() })
             }
             entry<NowPlayingRoute> {
                 Box(Modifier.fillMaxSize()) {
@@ -110,6 +138,7 @@ private fun SongsEntry(
     snackbar: SnackbarHostState,
     onSongClick: (row: Int, song: Song) -> Unit,
     onOpenNowPlaying: () -> Unit,
+    onOpenSettings: () -> Unit,
 ) {
     Scaffold(
         bottomBar = { MiniPlayer(player, cover, onOpen = onOpenNowPlaying) },
@@ -122,7 +151,16 @@ private fun SongsEntry(
                 .padding(start = 24.dp, top = 24.dp, end = 24.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Text(text = stringResource(R.string.app_name), style = MaterialTheme.typography.headlineMedium)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = stringResource(R.string.app_name),
+                    style = MaterialTheme.typography.headlineMedium,
+                    modifier = Modifier.weight(1f),
+                )
+                IconButton(onClick = onOpenSettings) {
+                    Icon(painterResource(R.drawable.ic_settings), stringResource(R.string.settings_open))
+                }
+            }
             DebugEntry()
             SongsScreen(onSongClick = onSongClick, modifier = Modifier.weight(1f))
         }
