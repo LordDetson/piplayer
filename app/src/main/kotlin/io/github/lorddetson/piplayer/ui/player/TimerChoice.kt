@@ -45,7 +45,7 @@ class TimerChoiceStore(context: Context) {
         val previous = lastWrite
         lastWrite = scope.launch {
             previous?.join()
-            file.edit {
+            SettingsFiles.edit(file) {
                 it[HOURS] = choice.hours
                 it[MINUTES] = choice.minutes
                 it[FINISH_TRACK] = choice.finishTrack

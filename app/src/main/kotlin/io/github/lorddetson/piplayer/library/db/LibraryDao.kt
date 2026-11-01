@@ -45,13 +45,30 @@ interface LibraryDao {
     @Query("DELETE FROM track_display WHERE file_id IN (:fileIds)")
     suspend fun deleteDisplays(fileIds: List<Long>)
 
-    /** The music of the library in list order (docs/library.md §1.4). */
+    /** The songs of the library in list order, without the hidden files (docs/library.md §1.4, §3.5). */
     @Query("$SONGS ORDER BY d.title_key, f.media_store_id")
-    suspend fun songs(): List<SongRow>
+    suspend fun songs(showSystemSounds: Boolean, showRecordings: Boolean, minLengthMs: Long): List<SongRow>
 
     /** The first [count] songs of [songs]. */
     @Query("$SONGS ORDER BY d.title_key, f.media_store_id LIMIT :count")
-    suspend fun firstSongs(count: Int): List<SongRow>
+    suspend fun firstSongs(showSystemSounds: Boolean, showRecordings: Boolean, minLengthMs: Long, count: Int): List<SongRow>
+
+    /** Every folder that holds a file, with its volume. */
+    @Query("SELECT DISTINCT volume_name AS volume, relative_path AS relativePath FROM audio_file")
+    suspend fun folders(): List<FolderKey>
+
+    /** Every folder with each rule its files carry; a folder whose files differ comes once per rule. */
+    @Query("SELECT DISTINCT volume_name AS volume, relative_path AS relativePath, folder_rule AS rule FROM audio_file")
+    suspend fun folderRules(): List<FolderRuleRow>
+
+    @Query("UPDATE audio_file SET folder_rule = :rule WHERE volume_name = :volume AND relative_path = :relativePath")
+    suspend fun setFolderRule(volume: String, relativePath: String, rule: Int)
+
+    @Query("SELECT COALESCE((SELECT mirrored_user_counter FROM library_meta WHERE id = 1), 0)")
+    suspend fun mirroredUserCounter(): Long
+
+    @Query("INSERT OR REPLACE INTO library_meta (id, mirrored_user_counter) VALUES (1, :counter)")
+    suspend fun setMirroredUserCounter(counter: Long)
 
     @Query("SELECT * FROM audio_file")
     suspend fun files(): List<AudioFileEntity>
@@ -63,5 +80,17 @@ interface LibraryDao {
     suspend fun displays(): List<TrackDisplayEntity>
 }
 
+/** A folder of a volume, as the media index gives its path. */
+data class FolderKey(val volume: String, val relativePath: String)
+
+/** A folder with a rule its files carry. */
+data class FolderRuleRow(val volume: String, val relativePath: String, val rule: Int)
+
+// Excluded folders never; included folders whole; elsewhere every file but the hidden kinds and short files. A file
+// whose length is unknown is never short (docs/library.md §3.5).
 private const val SONGS = "SELECT f.media_store_id AS mediaStoreId, d.title, d.artist, d.album, d.duration_ms AS durationMs " +
-    "FROM track_display d JOIN audio_file f ON f.id = d.file_id WHERE f.is_music"
+    "FROM track_display d JOIN audio_file f ON f.id = d.file_id " +
+    "WHERE f.folder_rule != 2 AND (f.folder_rule = 1 OR (" +
+    "(:showSystemSounds OR NOT (f.is_ringtone OR f.is_notification OR f.is_alarm)) " +
+    "AND (:showRecordings OR NOT f.recording) " +
+    "AND (d.duration_ms IS NULL OR d.duration_ms >= :minLengthMs)))"

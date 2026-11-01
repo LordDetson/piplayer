@@ -1,10 +1,9 @@
 package io.github.lorddetson.piplayer
 
+import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
-import android.graphics.Color
-import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.LaunchedEffect
@@ -23,34 +22,32 @@ import io.github.lorddetson.piplayer.playback.OpenWith
 import io.github.lorddetson.piplayer.ui.PiPlayerApp
 import io.github.lorddetson.piplayer.ui.player.PlayerViewModel
 import io.github.lorddetson.piplayer.ui.theme.PiPlayerTheme
+import io.github.lorddetson.piplayer.ui.theme.ThemeWindow
 
 class MainActivity : ComponentActivity() {
 
     private val playerViewModel: PlayerViewModel by viewModels()
 
+    /** The theme choice when the activity was created; read before anything is drawn. */
+    private lateinit var initialTheme: ThemeMode
+
+    override fun attachBaseContext(newBase: Context) {
+        super.attachBaseContext(newBase)
+        // Read before the first frame, so that the app never starts in the other theme (docs/library.md §3.6).
+        initialTheme = AppearanceSettings(newBase).readTheme()
+        ThemeWindow.override(initialTheme)?.let(::applyOverrideConfiguration)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
+        ThemeWindow.remember(this, initialTheme)
+        // The configuration's night mode follows the choice, so the bars' automatic style does too.
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         val appearance = AppearanceSettings(this)
-        // Read before the first frame, so that the app never starts in the other theme (docs/library.md §3.6).
-        val initialTheme = appearance.readTheme()
         setContent {
             val theme by appearance.theme.collectAsStateWithLifecycle(initialTheme)
-            val dark = theme.isDark(isSystemInDarkTheme())
-            // The system bars' icons follow the app's theme, not only the system's.
-            LaunchedEffect(theme, dark) {
-                if (theme == ThemeMode.SYSTEM) {
-                    enableEdgeToEdge()
-                } else {
-                    val style = if (dark) {
-                        SystemBarStyle.dark(Color.TRANSPARENT)
-                    } else {
-                        SystemBarStyle.light(Color.TRANSPARENT, Color.TRANSPARENT)
-                    }
-                    enableEdgeToEdge(statusBarStyle = style, navigationBarStyle = style)
-                }
-            }
-            PiPlayerTheme(darkTheme = dark) {
+            LaunchedEffect(theme) { ThemeWindow.follow(this@MainActivity, theme, initialTheme) }
+            PiPlayerTheme(darkTheme = theme.isDark(isSystemInDarkTheme())) {
                 // Test tags double as resource IDs, so that the checks of the release build find elements by them
                 // (docs/library.md §2.2).
                 Box(Modifier.fillMaxSize().semantics { testTagsAsResourceId = true }) {

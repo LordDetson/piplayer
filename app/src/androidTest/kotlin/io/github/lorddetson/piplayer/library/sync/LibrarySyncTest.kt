@@ -3,6 +3,9 @@ package io.github.lorddetson.piplayer.library.sync
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.github.lorddetson.piplayer.TestFiles
 import io.github.lorddetson.piplayer.library.FakeMediaIndex
+import io.github.lorddetson.piplayer.library.FakeRules
+import io.github.lorddetson.piplayer.library.rules.FolderRule
+import io.github.lorddetson.piplayer.library.rules.FolderRuleState
 import io.github.lorddetson.piplayer.library.FakeMediaIndex.Companion.PRIMARY
 import io.github.lorddetson.piplayer.library.FakeMediaIndex.Companion.row
 import io.github.lorddetson.piplayer.library.db.LibraryDatabase
@@ -27,7 +30,9 @@ class LibrarySyncTest {
     private var mayRead = true
     private val syncs = mutableListOf<LibrarySync>()
 
-    private fun newSync() = LibrarySync(database, index, mayRead = { mayRead }).also { syncs += it }
+    private val rules = FakeRules()
+
+    private fun newSync() = LibrarySync(database, index, mayRead = { mayRead }, rules).also { syncs += it }
 
     private val sync = newSync()
 
@@ -101,6 +106,69 @@ class LibrarySyncTest {
         assertThat(dao.entries().single().title).isEqualTo(title)
         assertThat(dao.entries().single().artist).isEqualTo("Back\\slash")
         assertThat(dao.displays().single().title).isEqualTo(title)
+    }
+
+    @Test
+    fun aChangeOfTheFolderRulesIsAppliedToEveryFileByTheNextSync() = runBlocking<Unit> {
+        index.volume().rows = listOf(row(1, path = "Music/Rock/"), row(2, path = "Music/Pop/"))
+        sync.sync()
+        val revision = sync.status.value.revision
+        assertThat(dao.files().map { it.folderRule }).containsOnly(FolderRuleState.NONE.stored)
+
+        rules.set(FolderRule(PRIMARY, "Music/Rock/", include = false), FolderRule(PRIMARY, "Music/Pop/", include = true))
+
+        assertThat(sync.sync()).isTrue()
+        assertThat(sync.status.value.revision).isGreaterThan(revision)
+        val byId = files()
+        assertThat(byId.getValue(1).folderRule).isEqualTo(FolderRuleState.EXCLUDE.stored)
+        assertThat(byId.getValue(2).folderRule).isEqualTo(FolderRuleState.INCLUDE.stored)
+        // The same rules again: nothing to apply.
+        assertThat(sync.sync()).isFalse()
+    }
+
+    @Test
+    fun aNewOrMovedFileTakesTheRuleOfItsFolderWhenTheRulesStayTheSame() = runBlocking<Unit> {
+        index.volume().rows = listOf(row(1, path = "Music/Rock/"), row(2, path = "Music/Pop/"))
+        rules.set(FolderRule(PRIMARY, "Music/Rock/", include = false))
+        sync.sync()
+        sync.close()
+
+        // The next process, with the rules unchanged: a file added under the excluded folder and one moved into it.
+        index.volume().rows = listOf(row(1, path = "Music/Rock/"), row(2, path = "Music/Rock/", generation = 10), row(3, path = "Music/Rock/Live/"))
+        val later = newSync()
+        assertThat(later.sync()).isTrue()
+
+        assertThat(files().mapValues { it.value.folderRule }).containsExactlyInAnyOrderEntriesOf(
+            mapOf(1L to FolderRuleState.EXCLUDE.stored, 2L to FolderRuleState.EXCLUDE.stored, 3L to FolderRuleState.EXCLUDE.stored),
+        )
+    }
+
+    @Test
+    fun theMirroredRulesOutliveTheProcess() = runBlocking<Unit> {
+        index.volume().rows = listOf(row(1, path = "Music/Rock/"))
+        rules.set(FolderRule(PRIMARY, "Music/Rock/", include = false))
+        sync.sync()
+        sync.close()
+
+        // The next process finds the rules mirrored: nothing to apply.
+        assertThat(newSync().sync()).isFalse()
+
+        rules.set()
+        assertThat(newSync().sync()).isTrue()
+        assertThat(files().getValue(1).folderRule).isEqualTo(FolderRuleState.NONE.stored)
+    }
+
+    @Test
+    fun aRecordingIsTheIndexsFlagOrOnAndroid11ARecordingsFolder() = runBlocking<Unit> {
+        index.volume().rows = listOf(
+            row(1, path = "Music/", kinds = MediaKinds(recording = true)),
+            row(2, path = "Recordings/", kinds = MediaKinds(recording = null)),
+            row(3, path = "Recordings/", kinds = MediaKinds(recording = false)),
+        )
+
+        sync.sync()
+
+        assertThat(files().mapValues { it.value.recording }).containsExactlyInAnyOrderEntriesOf(mapOf(1L to true, 2L to true, 3L to false))
     }
 
     @Test
@@ -259,6 +327,28 @@ class LibrarySyncTest {
         assertThat(dao.files()).isEmpty()
         assertThat(dao.volumes()).isEmpty()
         assertThat(sync.status.value.ready).isTrue()
+        assertThat(sync.status.value.known).describedAs("the library knows its folders").isFalse()
+    }
+
+    @Test
+    fun theLibraryKnowsItsFoldersOnlyOnceASyncHasSucceeded() = runBlocking<Unit> {
+        index.volume().rows = listOf(row(1))
+        index.failingVolume = FakeMediaIndex.PRIMARY
+        index.failure = IllegalStateException("The index went away")
+        sync.sync()
+        assertThat(sync.status.value.known).isFalse()
+
+        index.failure = null
+        sync.sync()
+
+        assertThat(sync.status.value.known).isTrue()
+    }
+
+    @Test
+    fun aDeviceWithoutVolumesIsKnownAfterItsFirstSync() = runBlocking<Unit> {
+        sync.sync()
+
+        assertThat(sync.status.value.known).isTrue()
     }
 
     @Test
@@ -301,6 +391,7 @@ class LibrarySyncTest {
 
         withTimeout(5.seconds) { later.status.first { it.ready } }
         assertThat(gate.count).isEqualTo(1)
+        assertThat(later.status.value.known).describedAs("the folders of the earlier sync are known").isTrue()
         gate.countDown()
         later.awaitIdle()
     }

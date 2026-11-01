@@ -17,7 +17,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.datastore.preferences.core.booleanPreferencesKey
-import androidx.datastore.preferences.core.edit
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.LifecycleStartEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -80,7 +79,7 @@ private fun Context.deniedForGood(granted: Boolean): Boolean {
     val rationale = ActivityCompat.shouldShowRequestPermissionRationale(activity, AudioPermission.name)
     val file = SettingsFiles.deviceState(this)
     val deniedBefore = runBlocking {
-        if (rationale) file.edit { it[DENIED_BEFORE] = true }
+        if (rationale) SettingsFiles.edit(file) { it[DENIED_BEFORE] = true }
         file.data.first()[DENIED_BEFORE] ?: false
     }
     return AudioPermissionState.deniedForGood(granted, rationale, deniedBefore)

@@ -61,6 +61,7 @@ import io.github.lorddetson.piplayer.ui.player.ExtraControls
 import io.github.lorddetson.piplayer.ui.player.MiniPlayer
 import io.github.lorddetson.piplayer.ui.player.NowPlaying
 import io.github.lorddetson.piplayer.ui.player.PlayerViewModel
+import io.github.lorddetson.piplayer.ui.settings.FoldersScreen
 import io.github.lorddetson.piplayer.ui.settings.SettingsScreen
 import io.github.lorddetson.piplayer.ui.songs.SongsScreen
 import kotlinx.serialization.Serializable
@@ -72,9 +73,22 @@ data object SongsRoute : NavKey
 @Serializable
 data object NowPlayingRoute : NavKey
 
+/** The Library folders screen (docs/library.md §3.6). */
+@Serializable
+data object FoldersRoute : NavKey
+
 /** The Settings screen (docs/library.md §3.6). */
 @Serializable
 data object SettingsRoute : NavKey
+
+// Settings pages come in from the side, unlike Now Playing.
+private val FROM_THE_SIDE = NavDisplay.transitionSpec {
+    slideInHorizontally(initialOffsetX = { it }) togetherWith ExitTransition.KeepUntilTransitionsFinished
+} + NavDisplay.popTransitionSpec {
+    EnterTransition.None togetherWith slideOutHorizontally(targetOffsetX = { it })
+} + NavDisplay.predictivePopTransitionSpec {
+    EnterTransition.None togetherWith slideOutHorizontally(targetOffsetX = { it })
+}
 
 /**
  * The app's screens (docs/playback.md §3.1): the song list and Now Playing over it, which slides up when it opens and
@@ -108,17 +122,14 @@ fun PiPlayerApp(viewModel: PlayerViewModel = viewModel()) {
                     onOpenSettings = { if (backStack.lastOrNull() != SettingsRoute) backStack.add(SettingsRoute) },
                 )
             }
-            // Settings comes in from the side, unlike Now Playing.
-            entry<SettingsRoute>(
-                metadata = NavDisplay.transitionSpec {
-                    slideInHorizontally(initialOffsetX = { it }) togetherWith ExitTransition.KeepUntilTransitionsFinished
-                } + NavDisplay.popTransitionSpec {
-                    EnterTransition.None togetherWith slideOutHorizontally(targetOffsetX = { it })
-                } + NavDisplay.predictivePopTransitionSpec {
-                    EnterTransition.None togetherWith slideOutHorizontally(targetOffsetX = { it })
-                },
-            ) {
-                SettingsScreen(onBack = { close() })
+            entry<SettingsRoute>(metadata = FROM_THE_SIDE) {
+                SettingsScreen(
+                    onBack = { close() },
+                    onOpenFolders = { if (backStack.lastOrNull() != FoldersRoute) backStack.add(FoldersRoute) },
+                )
+            }
+            entry<FoldersRoute>(metadata = FROM_THE_SIDE) {
+                FoldersScreen(onBack = { close() })
             }
             entry<NowPlayingRoute> {
                 Box(Modifier.fillMaxSize()) {

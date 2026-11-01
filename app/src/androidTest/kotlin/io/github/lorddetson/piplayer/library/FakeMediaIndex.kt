@@ -96,7 +96,7 @@ class FakeMediaIndex : MediaIndex {
             kinds: MediaKinds = MediaKinds(),
             artist: String? = "Artist $id",
             album: String? = "Album $id",
-            durationMs: Long? = 2_000,
+            durationMs: Long? = 60_000,
         ) = IndexRow(
             mediaStoreId = id, volume = volume, relativePath = path, displayName = name, size = 1_000 + id,
             modifiedSeconds = 1_700_000_000 + id, generationModified = generation, mimeType = "audio/mpeg", kinds = kinds,

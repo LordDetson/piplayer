@@ -6,11 +6,17 @@ import io.github.lorddetson.piplayer.library.FakeMediaIndex
 import io.github.lorddetson.piplayer.library.FakeMediaIndex.Companion.row
 import io.github.lorddetson.piplayer.library.Library
 import io.github.lorddetson.piplayer.library.LibraryRule
+import io.github.lorddetson.piplayer.settings.HiddenFiles
+import io.github.lorddetson.piplayer.settings.LibrarySettings
 import io.github.lorddetson.piplayer.ui.GrantAudioPermission
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import kotlin.concurrent.thread
+import kotlin.time.Duration.Companion.seconds
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.After
 import org.junit.Rule
@@ -66,6 +72,30 @@ class SongListLibraryTest {
         assertThat(SongList.current()).isNull()
         assertThat(SongList.load(context).map { it.title }).containsExactly("Alpha", "Bravo", "Charlie")
         assertThat(SongList.current()).hasSize(3)
+    }
+
+    @Test
+    fun aChangeOfTheHiddenFilesReloadsTheListAndDropsTheKeptOne() = runBlocking<Unit> {
+        gate.countDown()
+        index.volume().rows = listOf(row(1, "Alpha"), row(2, "Bravo", durationMs = 3_000))
+        Library.sync(context).request()
+        Library.sync(context).awaitIdle()
+        val settings = LibrarySettings(context)
+        try {
+            val revisions = mutableListOf<Any>()
+            val watcher = launch { SongList.changes(context).collect { revisions += it } }
+            assertThat(SongList.load(context).map { it.title }).containsExactly("Alpha")
+            withTimeout(5.seconds) { while (revisions.isEmpty()) delay(10) }
+
+            settings.setMinLengthSeconds(0)
+
+            withTimeout(5.seconds) { while (revisions.size < 2) delay(50) }
+            watcher.cancel()
+            assertThat(SongList.current()).isNull()
+            assertThat(SongList.load(context).map { it.title }).containsExactly("Alpha", "Bravo")
+        } finally {
+            settings.setMinLengthSeconds(HiddenFiles.DEFAULT_MIN_LENGTH_SECONDS)
+        }
     }
 
     @Test

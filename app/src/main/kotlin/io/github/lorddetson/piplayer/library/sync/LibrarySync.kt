@@ -8,6 +8,9 @@ import io.github.lorddetson.piplayer.library.db.LibraryDatabase
 import io.github.lorddetson.piplayer.library.db.VolumeSyncStateEntity
 import io.github.lorddetson.piplayer.library.db.JsonRows
 import io.github.lorddetson.piplayer.library.db.replaceAll
+import io.github.lorddetson.piplayer.library.rules.FolderRuleMatcher
+import io.github.lorddetson.piplayer.library.rules.Recordings
+import io.github.lorddetson.piplayer.library.rules.RulesSource
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -29,16 +32,18 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
 /**
- * Whether the library can be listed yet, and how many syncs have changed its files in this process (docs/library.md
- * §1.3).
+ * Whether the library can be listed yet, how many syncs have changed its files in this process, and whether it [known]s
+ * the folders that hold audio: whether its database holds the result of a sync that succeeded, in this process or an
+ * earlier one; a failed sync makes the library ready, not known (docs/library.md §1.3).
  */
-data class LibraryStatus(val ready: Boolean = false, val revision: Long = 0)
+data class LibraryStatus(val ready: Boolean = false, val revision: Long = 0, val known: Boolean = false)
 
 /** Keeps the library database up to date with the media index (docs/library.md §1.3). */
 class LibrarySync(
     private val database: LibraryDatabase,
     private val index: MediaIndex,
     private val mayRead: () -> Boolean,
+    private val rules: RulesSource = RulesSource.NONE,
 ) {
 
     private val dao: LibraryDao = database.library()
@@ -116,7 +121,20 @@ class LibrarySync(
         scope.cancel()
     }
 
+    /** [close], then waits until the background work has ended, so that the database may be closed. */
+    suspend fun closeAndJoin() {
+        close()
+        scope.coroutineContext[Job]?.join()
+        // A sync called directly, not from the background loop.
+        running.withLock { }
+    }
+
     private fun markReady() = mutableStatus.update { it.copy(ready = true) }
+
+    private fun markKnown() = mutableStatus.update { it.copy(ready = true, known = true) }
+
+    /** The folder rules of the sync under way. */
+    private var matcher = FolderRuleMatcher(emptyList())
 
     /**
      * What a sync writes for one volume. [rows] are the rows to store, the updated ones first; the added ones get their
@@ -134,14 +152,22 @@ class LibrarySync(
     private suspend fun syncOnce(): Boolean {
         val stored = dao.volumes().associateBy { it.volumeName }
         // An earlier process synced the library: lists may show it while this sync reads the index.
-        if (stored.isNotEmpty()) markReady()
+        if (stored.isNotEmpty()) markKnown()
+        // The folder rules as the user database has them now; read first, so that a change during the sync is
+        // applied by the next one (docs/library.md §3.4).
+        val userCounter = rules.counter()
+        matcher = FolderRuleMatcher(rules.rules())
+        val rulesChanged = userCounter != dao.mirroredUserCounter()
         val attached = index.volumes()
         val plans = attached.mapNotNull { volume -> plan(volume, stored[volume]) }
         val detached = SyncPlanner.detached(stored.keys, attached)
         val detachedFiles = detached.flatMap { volume -> dao.storedFiles(volume).map { it.fileId } }
 
-        val filesChanged = plans.any { !it.changes.isEmpty } || detachedFiles.isNotEmpty()
-        if (!filesChanged && plans.none { it.stateChanged } && detached.isEmpty()) return false
+        val filesChanged = plans.any { !it.changes.isEmpty } || detachedFiles.isNotEmpty() || rulesChanged
+        if (!filesChanged && plans.none { it.stateChanged } && detached.isEmpty()) {
+            markKnown()
+            return false
+        }
         database.withWriteTransaction {
             delete(detachedFiles)
             detached.forEach { dao.forgetVolume(it) }
@@ -149,8 +175,17 @@ class LibrarySync(
                 write(plan)
                 if (plan.stateChanged) dao.saveVolume(plan.state)
             }
+            if (rulesChanged) {
+                // The files written above already carry the new rules; only folders whose files carry another rule
+                // are written again, so that a first sync and a change of one rule stay quick.
+                for (folder in dao.folderRules()) {
+                    val rule = matcher.stateFor(folder.volume, folder.relativePath).stored
+                    if (folder.rule != rule) dao.setFolderRule(folder.volume, folder.relativePath, rule)
+                }
+                dao.setMirroredUserCounter(userCounter)
+            }
         }
-        if (filesChanged) mutableStatus.update { it.copy(revision = it.revision + 1) }
+        mutableStatus.update { it.copy(ready = true, known = true, revision = if (filesChanged) it.revision + 1 else it.revision) }
         return filesChanged
     }
 
@@ -225,6 +260,8 @@ class LibrarySync(
         flag(row.kinds.notification)
         flag(row.kinds.alarm)
         flag(row.kinds.recording)
+        flag(Recordings.isRecording(row.kinds.recording, row.relativePath))
+        long(matcher.stateFor(row.volume, row.relativePath).stored.toLong())
     }
 
     private fun JsonRows.Row.entry(id: Long, row: IndexRow) {
@@ -260,7 +297,7 @@ class LibrarySync(
         val FILE_COLUMNS = listOf(
             "id", "media_store_id", "volume_name", "relative_path", "display_name", "size", "mtime", "generation_modified",
             "mime_type", "is_music", "is_podcast", "is_audiobook", "is_ringtone", "is_notification", "is_alarm",
-            "is_recording",
+            "is_recording", "recording", "folder_rule",
         )
         val ENTRY_COLUMNS = listOf(
             "file_id", "title", "artist", "album", "album_artist", "composer", "genre", "year", "track_number",

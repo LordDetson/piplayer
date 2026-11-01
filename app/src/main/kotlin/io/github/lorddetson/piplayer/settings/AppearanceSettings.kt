@@ -1,7 +1,6 @@
 package io.github.lorddetson.piplayer.settings
 
 import android.content.Context
-import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -20,7 +19,7 @@ class AppearanceSettings(context: Context) {
     fun readTheme(): ThemeMode = runBlocking { theme.first() }
 
     suspend fun setTheme(mode: ThemeMode) {
-        file.edit { it[THEME] = mode.stored }
+        SettingsFiles.edit(file) { it[THEME] = mode.stored }
     }
 
     private companion object {

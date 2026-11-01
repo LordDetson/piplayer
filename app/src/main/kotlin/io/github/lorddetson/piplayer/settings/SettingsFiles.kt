@@ -1,11 +1,15 @@
 package io.github.lorddetson.piplayer.settings
 
 import android.content.Context
+import android.util.Log
+import java.io.IOException
 import androidx.datastore.core.DataMigration
 import androidx.datastore.core.DataStore
 import androidx.datastore.core.handlers.ReplaceFileCorruptionHandler
 import androidx.datastore.preferences.SharedPreferencesMigration
+import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.preferencesDataStore
 import io.github.lorddetson.piplayer.ProcessRole
@@ -15,6 +19,19 @@ import io.github.lorddetson.piplayer.ProcessRole
  * also in the backup rules. A file that cannot be read starts empty rather than stopping the app.
  */
 object SettingsFiles {
+
+    /**
+     * Changes [file]; a write that fails, as on a full disk, is logged and changes nothing, as a failed write of the
+     * SharedPreferences of M1 did. Returns the stored settings, or null when the write failed.
+     */
+    suspend fun edit(file: DataStore<Preferences>, change: (MutablePreferences) -> Unit): Preferences? = try {
+        file.edit(change)
+    } catch (e: IOException) {
+        Log.w(TAG, "A settings write failed", e)
+        null
+    }
+
+    private const val TAG = "SettingsFiles"
 
     const val SETTINGS = "settings"
     const val DEVICE_STATE = "device_state"
