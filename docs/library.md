@@ -127,3 +127,107 @@ The data model it implements is sketched in track-identification.md §10 (TI bel
   50 in title order within 50 ms (95th percentile), on both devices.
 - The scroll of 20 000 songs is measured in step 2, on a release build with R8: debug builds of Compose are not
   representative.
+
+## 4. The tag reader process `:tagger` (M2a step 4)
+
+PiPlayer reads tags with TagLib, native code that a malformed file can crash or hang. It runs in a process of its own,
+`:tagger`, so that such a file cannot stop playback or the screens (TI §7.2 step 11). This step builds the process,
+the way the main process calls it and the count of failed reads; the tag pass of step 5 is its first real user.
+
+### 4.1 The process
+
+- `TaggerService`, declared with `android:process=":tagger"` and not exported, is a bound service with an AIDL
+  interface. It refuses to start in any other process, and it opens no database and no DataStore file.
+- The main process opens each file itself and hands the service a read-only `ParcelFileDescriptor`, one file per
+  call, with the file's display name (TagLib picks the format by its extension). `:tagger` never resolves a URI. A
+  descriptor that is not a regular file (some document providers hand out a pipe) is copied into the cache by the main
+  process first, as in M0.
+- `TagReader` (nativelib) refuses to read in any process whose name does not end in `:tagger`; nativelib's own
+  instrumented tests read with a switch that only they can reach.
+- The service closes the descriptor it was given after each call.
+
+### 4.2 What a read returns
+
+- TagLib's property map (keys with their lists of values), the audio properties (length, bitrate, sample rate,
+  channels) and, for each embedded picture, its type, MIME type, description and size in bytes. Picture bytes never
+  cross the process boundary; the files of covers arrive with step 13.
+- A read that TagLib cannot do returns the reason, as in M0: invalid descriptor, not a regular file, unknown format,
+  read error, native error.
+- The reply travels as UTF-8 JSON. It crosses inline when it is at most 120 KiB and no single string in it (a key, a
+  value, a picture's MIME type, type or description) is longer than 16 KiB in UTF-8, so that each binder reply stays
+  under 128 KB (the binder buffer of about 1 MB is shared by every transaction of the process). Otherwise `:tagger`
+  writes the JSON to a file under the app's cache directory (`tagger/`) and only the file's path crosses; the main
+  process reads the file, deletes it, and accepts only paths inside that directory. Files left there by a process that
+  died are deleted when the main process next connects.
+- Settings that will affect reading (legacy encoding, from step 5) travel as call parameters, because DataStore
+  exists only in the main process.
+
+### 4.3 Calls from the main process
+
+- One `TaggerClient` per main process makes one call at a time. It binds the service on its first call, asks it for
+  its process ID, and unbinds after 30 s without calls, so that `:tagger` does not hold memory while nothing is read.
+  When the service has died (a crash, a kill, or Android giving up on a process that crashed twice within a minute),
+  the next call binds it again.
+- Every call names the file it reads, for the count of failed reads (§4.4): a file of the library by its row ID, any
+  other file (picked in the debug screen, opened from another app) by its URI, size and modification time, which the
+  main process takes from the open descriptor (`fstat`).
+- Before each call the count of the file is raised by one and committed. When the reply arrives, the count goes back
+  to 0 (also for a reply that says TagLib could not read the file: the native code returned).
+- A call that has not returned after 30 s kills `:tagger` (`Process.killProcess` with the ID it gave) and counts as a
+  crash: the count stays raised. A call during which `:tagger` dies counts the same way.
+- A file whose count has reached 2 is unsafe: further calls for it return "unsafe" at once, without reaching
+  `:tagger`. The tag pass skips unsafe files (step 5).
+- A caller that gives up during a call (its coroutine is cancelled) kills `:tagger` too, so that no native call
+  outlives its caller and `:tagger` never runs two calls at once; that read proved nothing, so its count goes back to
+  what it was.
+- What a call returns: the reply, "crashed", "timed out" or "unsafe".
+
+### 4.4 Where the count lives
+
+- Library files: `audio_file.unsafe_count` in `library.db` (TI §10.1). The sync keeps it when it stores a file again
+  with the same size and modification time (also when an index rebuild gives the file a new index ID), and sets it to
+  0 when either changed: a changed file gets new chances. A removed file takes its count with it.
+- Other files: the table `outside_file(uri, size, mtime, unsafe_count)` in `library.db`, one row per file that has a
+  count above 0. A size or modification time other than the stored one counts as a new file, with a count of 0; a
+  reply deletes the row.
+- `library.db` is rebuildable: a rebuild forgets the counts, which costs at most two more failed reads per unsafe file.
+- The library database moves to schema version 2 (no migration, as in §1.1: the next sync fills it again).
+
+### 4.5 Crashes and the debug hooks
+
+- A native crash in `:tagger` makes a crash report like any other (playback.md §7), with the process name
+  `io.github.lorddetson.piplayer:tagger`.
+- Debug builds of the native library have two test hooks, compiled only when CMake builds the `Debug` configuration:
+  a file that starts with the bytes `PIPLAYER-TEST-ABORT` makes the reader call `abort()`, and one that starts with
+  `PIPLAYER-TEST-HANG` makes it sleep until it is killed. Release libraries contain neither (checked by hand: the
+  marker strings are absent from the release `libpiplayer_jni.so`).
+- The debug screen "Identify a file" reads tags through `:tagger`; a crash, a timeout or an unsafe file shows as the
+  failed tag stage, and the other stages still run.
+
+### 4.6 Checks
+
+JVM tests:
+
+- the reply encoding: inline up to 120 KiB, a file above it, a file for any string over 16 KiB (measured in UTF-8),
+  the round trip of every field;
+- the call guard on a fake connection and fake counts: the count is raised and committed before the call, back to 0
+  after a reply (also a TagLib failure), kept after a crash, kept after a timeout, which kills the process; the second
+  failure makes the file unsafe and no further call reaches the connection; calls run one at a time; a cancelled call
+  kills the process and leaves the count as it was; the timeout is 30 s by default.
+
+Instrumented tests on the API 30, 36 and 37 emulators:
+
+- tags of the M0 fixtures read through `:tagger` equal TagLib's own reading, with picture sizes and no picture bytes;
+  a reply with a value over 16 KiB and one over 120 KiB in total arrive through a file, which is then gone, and the
+  largest inline reply parcels to less than 128 KB;
+- `TagReader` refuses to read in the main process; the service runs in `:tagger` and is not exported;
+- a hanging file is killed after the timeout and counted; a second hang makes it unsafe and the third call does not
+  reach `:tagger`; a good file read after the kill works (the service is bound again); one test waits the real 30 s;
+- a song keeps playing while `:tagger` is killed during a read;
+- the counts in `library.db`: committed before the call (visible from another connection while the call hangs),
+  kept by a sync for an unchanged file and across an index rebuild, reset for a changed file; the outside table keyed
+  by URI, size and modification time.
+
+Crash tests, opt-in with `-e crashTests true` like the crash reports' end-to-end tests (Android counts repeated
+crashes against the app): a file that aborts the reader is counted as a crash, a second abort makes it unsafe, a song
+keeps playing meanwhile, and the crash leaves a native crash report of `:tagger`.

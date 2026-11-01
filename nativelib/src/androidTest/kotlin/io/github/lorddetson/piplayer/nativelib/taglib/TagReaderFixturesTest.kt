@@ -48,9 +48,13 @@ class TagReaderFixturesTest(private val file: String, private val fixture: Fixtu
         ).map { (file, fixture) -> arrayOf(file, fixture) }
     }
 
+    init {
+        TagReader.anyProcess = true
+    }
+
     private fun read(fileName: String? = file): TagReadResult.Success {
         val result = TestFiles.open(TestFiles.copy("tags/$file")).use { pfd ->
-            TagReader.read(pfd.fd, fileName, readPictures = true)
+            TagReader.read(pfd.fd, fileName, pictures = Pictures.DATA)
         }
         assertThat(result).isInstanceOf(TagReadResult.Success::class.java)
         return result as TagReadResult.Success
@@ -86,7 +90,23 @@ class TagReaderFixturesTest(private val file: String, private val fixture: Fixtu
         val cover = pictures.single()
         assertThat(cover.mimeType).isEqualTo("image/png")
         // A PNG file starts with these eight bytes.
-        assertThat(cover.data.copyOf(8)).containsExactly(0x89.toByte(), 'P'.code.toByte(), 'N'.code.toByte(),
+        assertThat(cover.data!!.copyOf(8)).containsExactly(0x89.toByte(), 'P'.code.toByte(), 'N'.code.toByte(),
             'G'.code.toByte(), 0x0D, 0x0A, 0x1A, 0x0A)
+    }
+
+    @Test
+    fun readsThePictureSizesWithoutTheirBytes() {
+        if (!fixture.cover) return
+        val cover = read().pictures.single()
+
+        val result = TestFiles.open(TestFiles.copy("tags/$file")).use { pfd ->
+            TagReader.read(pfd.fd, file, pictures = Pictures.SIZES)
+        }
+
+        val summary = (result as TagReadResult.Success).pictures.single()
+        assertThat(summary.data).isNull()
+        assertThat(summary.sizeBytes).isEqualTo(cover.data!!.size)
+        assertThat(listOf(summary.mimeType, summary.pictureType, summary.description))
+            .containsExactly(cover.mimeType, cover.pictureType, cover.description)
     }
 }

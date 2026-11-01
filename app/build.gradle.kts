@@ -79,6 +79,8 @@ android {
     buildFeatures {
         compose = true
         buildConfig = true
+        // The tag reader process's interface (docs/library.md §4.1).
+        aidl = true
     }
 
     testOptions {

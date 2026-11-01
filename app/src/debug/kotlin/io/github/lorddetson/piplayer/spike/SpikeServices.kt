@@ -17,11 +17,16 @@ import io.github.lorddetson.piplayer.identification.musicbrainz.toCandidate
 import io.github.lorddetson.piplayer.identification.text.RecordingSearch
 import io.github.lorddetson.piplayer.identification.text.TextSearch
 import io.github.lorddetson.piplayer.nativelib.taglib.TagReadResult
-import io.github.lorddetson.piplayer.nativelib.taglib.TagReader
 import io.github.lorddetson.piplayer.net.HttpClients
 import io.github.lorddetson.piplayer.net.RateLimiter
 import io.github.lorddetson.piplayer.net.RetryPolicy
 import io.github.lorddetson.piplayer.net.UserAgent
+import io.github.lorddetson.piplayer.tagging.TagRead
+import io.github.lorddetson.piplayer.tagging.TagReadGuard
+import io.github.lorddetson.piplayer.tagging.TagTarget
+import io.github.lorddetson.piplayer.tagging.Tagger
+import io.github.lorddetson.piplayer.tagging.TaggerResult
+import io.github.lorddetson.piplayer.tagging.outsideTarget
 import java.io.Closeable
 import java.io.File
 import java.io.FileNotFoundException
@@ -61,9 +66,11 @@ class OpenedFile private constructor(
     override val sizeBytes: Long?,
     private val pfd: ParcelFileDescriptor,
     private val copy: File?,
+    private val target: TagTarget,
 ) : SpikeFile, Closeable {
 
-    override fun readTags(): TagReadResult = TagReader.read(pfd.fd, displayName)
+    /** Through `:tagger`, counted against the file like every read (docs/library.md §4.5). */
+    override suspend fun readTags(): TagReadResult = Tagger.client(context).read(target, pfd, displayName).tagsOrThrow()
 
     override fun pcmSource(): PcmSource = MediaCodecPcmSource(context, pfd.fileDescriptor)
 
@@ -89,7 +96,7 @@ class OpenedFile private constructor(
                     }
                 }
             val pfd = resolver.openFileDescriptor(uri, "r") ?: throw FileNotFoundException("Cannot open $uri")
-            if (isRegularFile(pfd)) return OpenedFile(context, name, size, pfd, null)
+            if (isRegularFile(pfd)) return OpenedFile(context, name, size, pfd, null, outsideTarget(uri.toString(), pfd))
 
             val copy = try {
                 File.createTempFile("spike", null, context.cacheDir)
@@ -101,7 +108,9 @@ class OpenedFile private constructor(
                 ParcelFileDescriptor.AutoCloseInputStream(pfd).use { input ->
                     copy.outputStream().use { input.copyTo(it) }
                 }
-                return OpenedFile(context, name, copy.length(), ParcelFileDescriptor.open(copy, MODE), copy)
+                // The copy is new each time; the provider's URI and the size name the file.
+                val target = TagTarget.Outside(uri.toString(), copy.length(), mtimeMs = 0)
+                return OpenedFile(context, name, copy.length(), ParcelFileDescriptor.open(copy, MODE), copy, target)
             } catch (e: Exception) {
                 copy.delete()
                 throw e
@@ -109,8 +118,10 @@ class OpenedFile private constructor(
         }
 
         /** Opens a file of the app's own storage, as the own-files corpus run reads them. */
-        fun open(context: Context, file: File): OpenedFile =
-            OpenedFile(context, file.name, file.length(), ParcelFileDescriptor.open(file, MODE), null)
+        fun open(context: Context, file: File): OpenedFile {
+            val pfd = ParcelFileDescriptor.open(file, MODE)
+            return OpenedFile(context, file.name, file.length(), pfd, null, outsideTarget(Uri.fromFile(file).toString(), pfd))
+        }
 
         private const val MODE = ParcelFileDescriptor.MODE_READ_ONLY
 
@@ -121,3 +132,14 @@ class OpenedFile private constructor(
         }
     }
 }
+
+/** The reader's result of a `:tagger` call; a crash, a timeout or an unsafe file fails the tag stage. */
+fun TaggerResult<TagRead>.tagsOrThrow(): TagReadResult = when (this) {
+    is TaggerResult.Replied -> value.report.toResult()
+    TaggerResult.Crashed -> throw TaggerFailure("the tag reader process crashed on this file")
+    TaggerResult.TimedOut ->
+        throw TaggerFailure("the tag reader did not answer within ${TagReadGuard.DEFAULT_TIMEOUT.inWholeSeconds} s")
+    TaggerResult.Unsafe -> throw TaggerFailure("the file is marked unsafe: it crashed or hung the tag reader twice")
+}
+
+class TaggerFailure(message: String) : Exception(message)

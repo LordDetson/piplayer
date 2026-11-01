@@ -96,8 +96,8 @@ the version PiPlayer builds with; sections 1 to 7 were written on 1.11.1 and the
 
 ### 1.5 Processes
 
-- A process's role comes from its name: the package name is the main process; `:tagger` (M2a) runs native tag calls
-  only; any other name is neither.
+- A process's role comes from its name: the package name is the main process; `:tagger` (M2a, library.md §4) runs
+  native tag calls only, and TagLib refuses to read anywhere else; any other name is neither.
 - Components of the main process check the role when they start and refuse to run elsewhere: the playback service,
   the library database and its sync, and DataStore (library.md §1.5); WorkManager when it arrives.
 - Crash capture (§7) is the exception: it runs in every process of the app, so that a crash anywhere leaves a report.

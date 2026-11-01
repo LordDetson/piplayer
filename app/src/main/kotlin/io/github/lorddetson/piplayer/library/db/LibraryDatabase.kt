@@ -37,6 +37,8 @@ data class AudioFileEntity(
     @ColumnInfo(name = "is_alarm") val isAlarm: Boolean,
     /** Null on Android 11, whose index has no such flag. */
     @ColumnInfo(name = "is_recording") val isRecording: Boolean?,
+    /** Reads of the file that crashed or hung `:tagger`; at 2 it is not read any more (docs/library.md §4.4). */
+    @ColumnInfo(name = "unsafe_count", defaultValue = "0") val unsafeCount: Int = 0,
 )
 
 /** The media index's values for a file, as it gives them (TI §10.1, precedence level 4). */
@@ -68,6 +70,18 @@ data class TrackDisplayEntity(
     @ColumnInfo(name = "search_text") val searchText: String,
 )
 
+/**
+ * A file outside the library that crashed or hung `:tagger` (docs/library.md §4.4); another size or modification time
+ * makes it a new file.
+ */
+@Entity(tableName = "outside_file")
+data class OutsideFileEntity(
+    @PrimaryKey val uri: String,
+    val size: Long,
+    val mtime: Long,
+    @ColumnInfo(name = "unsafe_count") val unsafeCount: Int,
+)
+
 /** How far the last sync of a volume got (docs/library.md §1.3). */
 @Entity(tableName = "volume_sync_state")
 data class VolumeSyncStateEntity(
@@ -81,8 +95,11 @@ data class VolumeSyncStateEntity(
  * sync fills them again.
  */
 @Database(
-    entities = [AudioFileEntity::class, MediaIndexEntryEntity::class, TrackDisplayEntity::class, VolumeSyncStateEntity::class],
-    version = 1,
+    entities = [
+        AudioFileEntity::class, MediaIndexEntryEntity::class, TrackDisplayEntity::class, VolumeSyncStateEntity::class,
+        OutsideFileEntity::class,
+    ],
+    version = 2,
     exportSchema = false,
 )
 abstract class LibraryDatabase : RoomDatabase() {

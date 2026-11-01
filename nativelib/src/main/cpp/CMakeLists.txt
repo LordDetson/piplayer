@@ -95,6 +95,8 @@ target_include_directories(piplayer_jni SYSTEM PRIVATE
   "$<TARGET_PROPERTY:tag,INCLUDE_DIRECTORIES>"
   "${CMAKE_BINARY_DIR}/taglib")
 target_link_libraries(piplayer_jni PRIVATE tag chromaprint speex_resampler log)
+# The test hooks of the `:tagger` tests exist only in debug builds (docs/library.md §4.5).
+target_compile_definitions(piplayer_jni PRIVATE $<$<CONFIG:Debug>:PIPLAYER_TEST_HOOKS>)
 # Only JNI_OnLoad is exported; natives are registered there.
 target_link_options(piplayer_jni PRIVATE
   "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/exports.map" "-Wl,--no-undefined")

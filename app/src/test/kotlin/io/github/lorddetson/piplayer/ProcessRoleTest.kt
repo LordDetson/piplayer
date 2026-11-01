@@ -39,4 +39,14 @@ class ProcessRoleTest {
                 .hasMessage("The library database runs only in the main process")
         }
     }
+
+    @Test
+    fun `the tag reader service starts only in the tagger process`() {
+        assertThatCode { ProcessRole.TAGGER.requireTagger("The tag reader service") }.doesNotThrowAnyException()
+        for (role in listOf(ProcessRole.MAIN, ProcessRole.OTHER)) {
+            assertThatThrownBy { role.requireTagger("The tag reader service") }
+                .isInstanceOf(IllegalStateException::class.java)
+                .hasMessage("The tag reader service runs only in the :tagger process")
+        }
+    }
 }

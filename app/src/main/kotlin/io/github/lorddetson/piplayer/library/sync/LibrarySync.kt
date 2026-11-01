@@ -194,7 +194,7 @@ class LibrarySync(
         val first = dao.lastFileId() + 1
         val ids = changes.updated.map { it.fileId } + List(changes.added.size) { first + it }
         val indices = plan.rows.indices.toList()
-        replaceAll("audio_file", FILE_COLUMNS, indices) { i -> file(ids[i], plan.rows[i]) }
+        replaceAll("audio_file", FILE_COLUMNS, indices, KEPT_UNSAFE_COUNT) { i -> file(ids[i], plan.rows[i]) }
         replaceAll("media_index_entry", ENTRY_COLUMNS, indices) { i -> entry(ids[i], plan.rows[i]) }
         replaceAll("track_display", DISPLAY_COLUMNS, indices) { i -> display(ids[i], plan.displays[i]) }
     }
@@ -267,5 +267,15 @@ class LibrarySync(
             "duration_ms",
         )
         val DISPLAY_COLUMNS = listOf("file_id", "title", "artist", "album", "duration_ms", "title_key", "search_text")
+
+        /**
+         * A file stored again keeps its count of failed tag reads while its size and modification time stay the same;
+         * a changed file starts again from 0 (docs/library.md §4.4). SQLite reads the old rows before it replaces them.
+         */
+        val KEPT_UNSAFE_COUNT = mapOf(
+            "unsafe_count" to "COALESCE((SELECT o.unsafe_count FROM audio_file o WHERE " +
+                "o.id = value->>${FILE_COLUMNS.indexOf("id")} AND o.size = value->>${FILE_COLUMNS.indexOf("size")} " +
+                "AND o.mtime = value->>${FILE_COLUMNS.indexOf("mtime")}), 0)",
+        )
     }
 }

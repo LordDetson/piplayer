@@ -16,6 +16,10 @@ class TagReaderDescriptorTest {
 
     private val flac: File = TestFiles.copy("tags/vorbis-comment.flac")
 
+    init {
+        TagReader.anyProcess = true
+    }
+
     @Test
     fun aNegativeDescriptorIsInvalid() {
         assertThat(TagReader.read(-1)).isEqualTo(TagReadResult.Failure(TagReadError.INVALID_FD))
@@ -90,7 +94,7 @@ class TagReaderDescriptorTest {
         val garbage = TestFiles.write("garbage-leak.bin", Random(2).nextBytes(4096))
         val before = openDescriptors()
         repeat(250) {
-            TestFiles.open(flac).use { TagReader.read(it.fd, "vorbis-comment.flac", readPictures = true) }
+            TestFiles.open(flac).use { TagReader.read(it.fd, "vorbis-comment.flac", pictures = Pictures.DATA) }
             TestFiles.open(garbage).use { TagReader.read(it.fd) }
         }
         assertThat(openDescriptors()).isEqualTo(before)

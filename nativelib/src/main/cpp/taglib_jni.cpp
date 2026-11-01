@@ -7,6 +7,12 @@
 #include <jni.h>
 #include <sys/stat.h>
 
+#ifdef PIPLAYER_TEST_HOOKS
+#include <cstdlib>
+#include <cstring>
+#include <unistd.h>
+#endif
+
 #include <fileref.h>
 #include <mpegfile.h>
 #include <tpropertymap.h>
@@ -17,6 +23,10 @@
 
 namespace piplayer {
 namespace {
+
+// Picture modes, the ordinals of Pictures in TagReader.kt.
+constexpr jint PICTURES_SIZES = 1;
+constexpr jint PICTURES_DATA = 2;
 
 // Status codes shared with TagReader.kt.
 constexpr jint OK = 0;
@@ -69,21 +79,26 @@ bool sendProperties(JNIEnv *env, jobject sink, const TagLib::PropertyMap &proper
   return true;
 }
 
-bool sendPictures(JNIEnv *env, jobject sink, TagLib::FileRef &file) {
+/** Sends each picture with its bytes, or with its size only unless [withData]. */
+bool sendPictures(JNIEnv *env, jobject sink, TagLib::FileRef &file, bool withData) {
   for (const auto &picture : file.complexProperties("PICTURE")) {
     TagLib::ByteVector data = picture.value("data").toByteVector();
-    if (data.size() > MAX_PICTURE_BYTES) continue;
-    jbyteArray jData = env->NewByteArray(static_cast<jsize>(data.size()));
-    if (jData == nullptr) return false;
-    env->SetByteArrayRegion(jData, 0, static_cast<jsize>(data.size()), reinterpret_cast<const jbyte *>(data.data()));
+    jbyteArray jData = nullptr;
+    if (withData) {
+      if (data.size() > MAX_PICTURE_BYTES) continue;
+      jData = env->NewByteArray(static_cast<jsize>(data.size()));
+      if (jData == nullptr) return false;
+      env->SetByteArrayRegion(jData, 0, static_cast<jsize>(data.size()), reinterpret_cast<const jbyte *>(data.data()));
+    }
+    auto size = static_cast<jint>(std::min<unsigned int>(data.size(), std::numeric_limits<jint>::max()));
     jstring mimeType = toJava(env, picture.value("mimeType").toString());
     if (mimeType == nullptr) return false;
     jstring pictureType = toJava(env, picture.value("pictureType").toString());
     if (pictureType == nullptr) return false;
     jstring description = toJava(env, picture.value("description").toString());
     if (description == nullptr) return false;
-    env->CallVoidMethod(sink, sinkPicture, jData, mimeType, pictureType, description);
-    env->DeleteLocalRef(jData);
+    env->CallVoidMethod(sink, sinkPicture, jData, size, mimeType, pictureType, description);
+    if (jData != nullptr) env->DeleteLocalRef(jData);
     env->DeleteLocalRef(mimeType);
     env->DeleteLocalRef(pictureType);
     env->DeleteLocalRef(description);
@@ -112,11 +127,35 @@ std::string nameForDetection(int fd, const std::string &fileName) {
   return TagLib::MPEG::File::isSupported(&probe) ? fileName : std::string();
 }
 
-jint read(JNIEnv *env, jclass, jint fd, jstring jFileName, jboolean readPictures, jobject sink) {
+#ifdef PIPLAYER_TEST_HOOKS
+/**
+ * Debug builds only: a file that starts with one of these markers aborts or hangs the reader, as a malformed file
+ * might, for the tests of the `:tagger` process (docs/library.md §4.5).
+ */
+void runTestHooks(int fd) {
+  static constexpr char ABORT_MARKER[] = "PIPLAYER-TEST-ABORT";
+  static constexpr char HANG_MARKER[] = "PIPLAYER-TEST-HANG";
+  char head[32] = {};
+  ssize_t count = pread(fd, head, sizeof(head), 0);
+  auto startsWith = [&](const char *marker) {
+    size_t length = strlen(marker);
+    return count >= static_cast<ssize_t>(length) && memcmp(head, marker, length) == 0;
+  };
+  if (startsWith(ABORT_MARKER)) abort();
+  if (startsWith(HANG_MARKER)) {
+    for (;;) sleep(60);
+  }
+}
+#endif
+
+jint read(JNIEnv *env, jclass, jint fd, jstring jFileName, jint pictures, jobject sink) {
   if (fd < 0) return INVALID_FD;
   struct stat info {};
   if (fstat(fd, &info) != 0) return INVALID_FD;
   if (!S_ISREG(info.st_mode)) return NOT_SEEKABLE;
+#ifdef PIPLAYER_TEST_HOOKS
+  runTestHooks(fd);
+#endif
   // TagLib takes an empty file named *.mp3 for a valid MPEG file without frames.
   if (info.st_size == 0) return UNSUPPORTED_FORMAT;
 
@@ -141,7 +180,10 @@ jint read(JNIEnv *env, jclass, jint fd, jstring jFileName, jboolean readPictures
                           audio->channels());
       if (env->ExceptionCheck()) return NATIVE_ERROR;
     }
-    if (readPictures && !sendPictures(env, sink, file)) return NATIVE_ERROR;
+    if ((pictures == PICTURES_SIZES || pictures == PICTURES_DATA) &&
+        !sendPictures(env, sink, file, pictures == PICTURES_DATA)) {
+      return NATIVE_ERROR;
+    }
     return stream.error() != 0 ? IO_ERROR : OK;
   } catch (...) {
     return NATIVE_ERROR;
@@ -158,11 +200,11 @@ bool registerTagReader(JNIEnv *env) {
   stringClass = static_cast<jclass>(env->NewGlobalRef(string));
   sinkProperty = env->GetMethodID(sink, "property", "(Ljava/lang/String;[Ljava/lang/String;)V");
   sinkAudio = env->GetMethodID(sink, "audio", "(IIII)V");
-  sinkPicture = env->GetMethodID(sink, "picture", "([BLjava/lang/String;Ljava/lang/String;Ljava/lang/String;)V");
+  sinkPicture = env->GetMethodID(sink, "picture", "([BILjava/lang/String;Ljava/lang/String;Ljava/lang/String;)V");
   if (sinkProperty == nullptr || sinkAudio == nullptr || sinkPicture == nullptr) return false;
 
   static const JNINativeMethod methods[] = {
-      {"nativeRead", "(ILjava/lang/String;ZLio/github/lorddetson/piplayer/nativelib/taglib/TagSink;)I",
+      {"nativeRead", "(ILjava/lang/String;ILio/github/lorddetson/piplayer/nativelib/taglib/TagSink;)I",
        reinterpret_cast<void *>(read)},
   };
   return env->RegisterNatives(reader, methods, 1) == JNI_OK;

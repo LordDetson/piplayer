@@ -77,6 +77,12 @@
             </intent-filter>
         </receiver>
 
+        <!-- Reads tags with TagLib in a process of its own, so that a malformed file cannot stop playback (docs/library.md §4). -->
+        <service
+            android:name=".tagging.TaggerService"
+            android:exported="false"
+            android:process=":tagger" />
+
         <!-- Hands a crash report to the app the user shares it with, for that share only (docs/playback.md §7.3). -->
         <provider
             android:name=".crash.CrashReportProvider"

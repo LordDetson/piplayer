@@ -38,7 +38,7 @@ class IdentificationSpikeTest {
         private val tags: TagReadResult,
     ) : SpikeFile {
         val source = PcmSource { SourceInfo("audio/mpeg", "c2.android.mp3.decoder", durationUs = 213_900_000) }
-        override fun readTags() = tags
+        override suspend fun readTags() = tags
         override fun pcmSource() = source
     }
 

@@ -18,7 +18,7 @@ interface SpikeFile {
     val displayName: String?
     val sizeBytes: Long?
 
-    fun readTags(): TagReadResult
+    suspend fun readTags(): TagReadResult
 
     /** A fresh decoder over the file's audio. */
     fun pcmSource(): PcmSource

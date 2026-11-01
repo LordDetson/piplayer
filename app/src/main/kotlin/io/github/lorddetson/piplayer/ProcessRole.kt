@@ -20,6 +20,10 @@ enum class ProcessRole {
     /** Stops [component], which belongs to the main process, from starting in any other one. */
     fun requireMain(component: String) = check(this == MAIN) { "$component runs only in the main process" }
 
+    /** Stops [component], which belongs to `:tagger`, from starting in any other process. */
+    fun requireTagger(component: String) =
+        check(this == TAGGER) { "$component runs only in the $TAGGER_SUFFIX process" }
+
     companion object {
         const val TAGGER_SUFFIX = ":tagger"
 

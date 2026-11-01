@@ -644,9 +644,10 @@ how far it got.
       and never opens the databases; only the main process opens them (§12 D9).
     - The main process opens each file (`ContentResolver.openFileDescriptor`, or the working copy) and passes the
       `ParcelFileDescriptor`; `:tagger` never resolves URIs. One file per native call.
-    - Before each call the main process increments `audio_file.unsafe_count` and commits; it resets the count when a
-      result arrives. A call that runs longer than 30 s kills `:tagger` and counts as a crash. A count of 2 marks the
-      file "unsafe", which also protects the library tag pass.
+    - Before each call the main process increments `audio_file.unsafe_count` (for files outside the library,
+      `outside_file.unsafe_count`) and commits; it resets the count when a result arrives. A call that runs longer
+      than 30 s kills `:tagger` and counts as a crash. A count of 2 marks the file "unsafe", which also protects the
+      library tag pass; a file whose size or modification time changes starts again from 0 (library.md §4.4).
     - Each IPC result stays under 128 KB (the binder buffer is about 1 MB, shared by all transactions of the
       process). A larger result, or any single value over 16 KB (embedded lyrics, large binary frames, raw tags), is
       written to a file in app storage and only its path crosses. Cover bytes never cross: images travel through
@@ -871,6 +872,8 @@ made live in the user database.
   generation_modified, mime_type, <media kinds>, format, codec, sample_rate, bit_depth, channels, bitrate, duration_ms, duration_source,
   content_key, tag_encoding, embedded_cover_present, embedded_cover_width, embedded_cover_height,
   embedded_cover_bytes, embedded_cover_hash, unsafe_count, tag_pass_at)`
+- `outside_file(uri, size, mtime, unsafe_count)`: the count of failed reads (§7.2 step 11) of files outside the
+  library, such as files opened from other apps; a row exists only while its count is above 0 (library.md §4.4).
   The media kinds are the index's flags: music, podcast, audiobook, ringtone, notification, alarm and recording (the
   last unknown on Android 11); every audio row is stored, and lists hide kinds by setting (library.md §1.3).
 - `media_index_entry(file_id, title, artist, album, album_artist, composer, genre, year, track_number, duration_ms)`:

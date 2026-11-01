@@ -135,6 +135,53 @@ class LibrarySyncTest {
     }
 
     @Test
+    fun theUnsafeCountOfAnUnchangedFileSurvivesItsNextSync() = runBlocking<Unit> {
+        index.volume().rows = listOf(row(1), row(2))
+        sync.sync()
+        dao.setUnsafeCount(files().getValue(1).id, 2)
+
+        // A new generation and title, but the same size and modification time (docs/library.md §4.4).
+        index.volume().rows = listOf(row(1, title = "Renamed", generation = 10), row(2))
+        assertThat(sync.sync()).isTrue()
+
+        assertThat(files().getValue(1).unsafeCount).isEqualTo(2)
+        assertThat(files().getValue(2).unsafeCount).isZero()
+    }
+
+    @Test
+    fun aChangedFileGetsNewChances() = runBlocking<Unit> {
+        index.volume().rows = listOf(row(1), row(2))
+        sync.sync()
+        dao.setUnsafeCount(files().getValue(1).id, 2)
+        dao.setUnsafeCount(files().getValue(2).id, 1)
+
+        index.volume().rows = listOf(
+            row(1, generation = 10).copy(size = 5_000),
+            row(2, generation = 11).let { it.copy(modifiedSeconds = it.modifiedSeconds + 1) },
+        )
+        sync.sync()
+
+        assertThat(files().getValue(1).unsafeCount).isZero()
+        assertThat(files().getValue(2).unsafeCount).isZero()
+    }
+
+    @Test
+    fun theUnsafeCountSurvivesAnIndexRebuild() = runBlocking<Unit> {
+        val before = row(1, name = "a.mp3")
+        index.volume().rows = listOf(before)
+        sync.sync()
+        dao.setUnsafeCount(dao.files().single().id, 1)
+
+        index.volume().version = "2"
+        index.volume().rows = listOf(
+            row(2, name = "a.mp3", generation = 1).copy(size = before.size, modifiedSeconds = before.modifiedSeconds),
+        )
+        sync.sync()
+
+        assertThat(dao.files().single().unsafeCount).isEqualTo(1)
+    }
+
+    @Test
     fun deletedRowsLeaveEveryTable() = runBlocking<Unit> {
         index.volume().rows = listOf(row(1), row(2))
         sync.sync()

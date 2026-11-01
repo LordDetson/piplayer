@@ -56,6 +56,22 @@ interface LibraryDao {
     @Query("SELECT * FROM audio_file")
     suspend fun files(): List<AudioFileEntity>
 
+    /** Null when there is no such file. */
+    @Query("SELECT unsafe_count FROM audio_file WHERE id = :fileId")
+    suspend fun unsafeCount(fileId: Long): Int?
+
+    @Query("UPDATE audio_file SET unsafe_count = :count WHERE id = :fileId")
+    suspend fun setUnsafeCount(fileId: Long, count: Int)
+
+    @Query("SELECT * FROM outside_file WHERE uri = :uri")
+    suspend fun outsideFile(uri: String): OutsideFileEntity?
+
+    @Upsert
+    suspend fun saveOutsideFile(file: OutsideFileEntity)
+
+    @Query("DELETE FROM outside_file WHERE uri = :uri")
+    suspend fun forgetOutsideFile(uri: String)
+
     @Query("SELECT * FROM media_index_entry")
     suspend fun entries(): List<MediaIndexEntryEntity>
 
