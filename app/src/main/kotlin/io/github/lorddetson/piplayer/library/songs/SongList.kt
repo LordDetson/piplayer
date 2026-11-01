@@ -40,7 +40,7 @@ object SongList {
         if (!Library.mayRead(app)) return load(SongSource { emptyList() })
         // A saved queue restored while the first sync runs would otherwise find an empty library and be dropped.
         Library.awaitReady(app, READY_TIMEOUT_MS)
-        return load(LibrarySongSource(Library.database(app)), Library.revision())
+        return Library.read(app) { database -> load(LibrarySongSource(database), Library.revision()) }
     }
 
     /**
@@ -48,7 +48,7 @@ object SongList {
      * reads the whole list (docs/library.md §1.4).
      */
     fun firstPage(context: Context, count: Int): List<Song> =
-        sourceOverride?.songs()?.take(count) ?: LibrarySongSource(Library.database(context)).firstSongs(count)
+        sourceOverride?.songs()?.take(count) ?: Library.read(context) { LibrarySongSource(it).firstSongs(count) }
 
     /**
      * The library's revision whenever the list may be read: once the library is ready, and after every sync that

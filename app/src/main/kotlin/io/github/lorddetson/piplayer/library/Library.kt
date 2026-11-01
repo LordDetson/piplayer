@@ -16,6 +16,9 @@ import io.github.lorddetson.piplayer.library.sync.LibrarySync
 import io.github.lorddetson.piplayer.library.sync.MediaIndex
 import io.github.lorddetson.piplayer.library.sync.MediaStoreIndex
 import java.io.File
+import java.util.concurrent.locks.ReentrantReadWriteLock
+import kotlin.concurrent.read
+import kotlin.concurrent.write
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -32,12 +35,19 @@ object Library {
 
     private val opened = MutableStateFlow<Opened?>(null)
     private val lock = Any()
+    private val access = ReentrantReadWriteLock()
     private var observer: ContentObserver? = null
 
     @Volatile
     private var indexOverride: MediaIndex? = null
 
     fun database(context: Context): LibraryDatabase = opened(context).database
+
+    /**
+     * Runs [block] on the library database while it cannot be closed: lists read it through here. The bundled SQLite
+     * does not check for a closed connection, so closing it under a read would take the whole process down.
+     */
+    fun <T> read(context: Context, block: (LibraryDatabase) -> T): T = access.read { block(database(context)) }
 
     fun sync(context: Context): LibrarySync = opened(context).sync
 
@@ -91,12 +101,15 @@ object Library {
         val app = context.applicationContext
         val old = synchronized(lock) { opened.value }
         old?.sync?.awaitIdle()
-        synchronized(lock) {
-            old?.sync?.close()
-            old?.database?.close()
-            if (empty) SQLiteDatabase.deleteDatabase(file(app))
-            indexOverride = index
-            opened.value = open(app)
+        // After the reads under way, before any new one.
+        access.write {
+            synchronized(lock) {
+                old?.sync?.close()
+                old?.database?.close()
+                if (empty) SQLiteDatabase.deleteDatabase(file(app))
+                indexOverride = index
+                opened.value = open(app)
+            }
         }
     }
 
