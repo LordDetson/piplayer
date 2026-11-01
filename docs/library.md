@@ -159,3 +159,65 @@ The data model it implements is sketched in track-identification.md §10 (TI bel
 - A Baseline Profile is added only if the scroll fails this limit or the start fails the limits of §1.7. With R8 the
   scroll is well within its limit on the phone, so there is none yet; the start limits were measured on debug builds,
   which are slower than the release build, and are not measured on the release build in this step.
+
+## 3. User data, settings, library folders and hidden files (M2a step 3)
+
+### 3.1 User database
+
+- `user.db` holds what the user decided; it is never rebuilt from files (TI §10.2). It lives in the app's default
+  database directory, is opened with Room 3 on the bundled SQLite, and only in the main process (§1.5).
+- Its schema is exported from version 1 and committed (`app/schemas/`); every later version comes with a migration and
+  a test that runs it, and there is no destructive fallback.
+- Version 1 holds:
+    - `library_folder_rule(volume_name, relative_path, mode)`: a folder the user included or excluded (§3.4);
+    - `user_meta(id, change_counter)`: one row whose counter goes up in the same transaction as every write of user
+      data, so that the library database can tell whether it still mirrors it (TI §10.3).
+- Later tables (track identities, favorites, playlists, statistics, decisions) arrive with their milestones.
+
+### 3.2 Settings files
+
+- Settings live in DataStore in the main process, in two files (TI §10):
+    - `settings`, backed up: the theme, the hidden-file choices (§3.5) and the sleep timer's last choice;
+    - `device_state`, not backed up: "stop after current track" (playback.md §6.4) and whether the audio permission was
+      denied before (playback.md §2.2).
+- The three SharedPreferences files of M1 (`player`, `playback_controls`, `songs`) move into them under the same keys
+  the first time each file is read, and are deleted afterwards.
+
+### 3.3 Backup
+
+- Both rule files (`fullBackupContent` for Android 11, `dataExtractionRules` for cloud backup and device transfer on
+  Android 12 and later) list what is backed up: `user.db` with its WAL file and the `settings` file. Everything else
+  stays out: the library database, `device_state`, the saved queue, crash reports and caches (TI §10.3).
+
+### 3.4 Library folders
+
+- A folder rule includes or excludes a folder of a volume with all its subfolders. The deepest rule above a file
+  decides; a file under no rule is included. "Only these folders" is an excluded volume root with included folders
+  inside it.
+- Paths are compared as the media index gives them (`relative_path`, ending with `/`), ignoring case. A rule for a
+  volume that is not attached is kept and shown as such.
+- An explicitly included folder shows everything in it, also the kinds and short files §3.5 hides elsewhere: a user
+  who includes `Recordings/Lectures/` wants to see the lectures.
+- The library database mirrors the rules: every folder of the index gets a row with whether it is included, rebuilt
+  by each sync and whenever the rules change, so that lists filter without reading the user database.
+
+### 3.5 Hidden files
+
+- The lists show every audio file of the index except the hidden ones, so podcasts and audiobooks are listed too.
+- Hidden by default, each with its own setting:
+    - system sounds: ringtones, notification sounds and alarms;
+    - recordings: what the index flags as a recording; on Android 11, which has no such flag, a file under a folder
+      named `Recordings` (any level, ignoring case);
+    - short files: shorter than a chosen length (off, 5, 10, 15, 30 or 60 s; 10 s by default), by the length the
+      index gives until the tag pass measures it. A file whose length is unknown is never short.
+- A change of a hidden-file setting or of a folder rule reloads the lists at once, and a list kept for the playback
+  service is not handed out after such a change, as after a sync (§1.4).
+
+### 3.6 Settings screen and theme
+
+- A Settings screen, opened from the Songs screen's top bar, has two sections in M2a: Library (the hidden-file
+  settings and Library folders) and Appearance (the theme). Other sections arrive with their milestones.
+- The theme is System (the default), Light or Dark; dynamic color stays on where the system has it. The choice is
+  read before the first frame, so the app never starts in the wrong theme, and the system bars follow it.
+- Library folders shows each attached volume as a tree of the folders that hold audio, with each folder included,
+  excluded or following its parent; rules of volumes that are not attached are listed below with a way to remove them.
