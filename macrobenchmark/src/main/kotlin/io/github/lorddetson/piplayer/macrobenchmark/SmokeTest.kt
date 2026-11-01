@@ -1,0 +1,76 @@
+package io.github.lorddetson.piplayer.macrobenchmark
+
+import android.content.Intent
+import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
+import androidx.test.uiautomator.By
+import androidx.test.uiautomator.UiDevice
+import androidx.test.uiautomator.Until
+import java.util.regex.Pattern
+import io.github.lorddetson.piplayer.macrobenchmark.TheApp.MINI_PLAYER
+import io.github.lorddetson.piplayer.macrobenchmark.TheApp.NOW_PLAYING
+import io.github.lorddetson.piplayer.macrobenchmark.TheApp.PACKAGE
+import org.assertj.core.api.Assertions.assertThat
+import org.junit.After
+import org.junit.Before
+import org.junit.Test
+import org.junit.runner.RunWith
+
+/**
+ * The release build, shrunk and obfuscated by R8, still does what a user does first: it starts, lists the library,
+ * plays a tapped song and shows it in the mini player and Now Playing (docs/library.md §2.2). Needs music on the device.
+ */
+@RunWith(AndroidJUnit4::class)
+class SmokeTest {
+
+    private val instrumentation = InstrumentationRegistry.getInstrumentation()
+    private val device = UiDevice.getInstance(instrumentation)
+
+    @Before
+    fun start() {
+        device.executeShellCommand("am force-stop $PACKAGE")
+        TheApp.grantAccess(device)
+        val intent = checkNotNull(instrumentation.context.packageManager.getLaunchIntentForPackage(PACKAGE))
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+        instrumentation.context.startActivity(intent)
+    }
+
+    @After
+    fun stop() {
+        device.executeShellCommand("am force-stop $PACKAGE")
+    }
+
+    @Test
+    fun theSongsScreenListsTheLibrary() {
+        val list = TheApp.songsList(device)
+
+        assertThat(list.childCount).describedAs("rows on screen").isPositive()
+    }
+
+    @Test
+    fun aTappedSongPlaysAndNowPlayingShowsIt() {
+        TheApp.songsList(device)
+        TheApp.waitForTheWholeList(device)
+        val row = TheApp.songsList(device).children.first()
+        // The first text of a row is the song's title.
+        val title = checkNotNull(row.findObject(By.text(Pattern.compile(".+")))) { "A row without text" }.text
+
+        row.click()
+
+        val mini = checkNotNull(device.wait(Until.findObject(By.res(MINI_PLAYER)), 10_000)) { "No mini player" }
+        assertThat(device.wait({ TheApp.isPlaying(device) }, 10_000)).describedAs("playing").isTrue()
+        assertThat(mini.wait(Until.hasObject(By.text(title)), 10_000)).describedAs("the title in the mini player").isTrue()
+        mini.click()
+        val nowPlaying = checkNotNull(device.wait(Until.findObject(By.res(NOW_PLAYING)), 10_000)) { "No Now Playing" }
+        assertThat(nowPlaying.wait(Until.hasObject(By.text(title)), 10_000)).describedAs("the title in Now Playing").isTrue()
+    }
+
+    private fun UiDevice.wait(condition: () -> Boolean, timeoutMs: Long): Boolean {
+        val end = System.currentTimeMillis() + timeoutMs
+        while (System.currentTimeMillis() < end) {
+            if (condition()) return true
+            Thread.sleep(200)
+        }
+        return condition()
+    }
+}

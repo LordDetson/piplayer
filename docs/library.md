@@ -127,3 +127,35 @@ The data model it implements is sketched in track-identification.md §10 (TI bel
   50 in title order within 50 ms (95th percentile), on both devices.
 - The scroll of 20 000 songs is measured in step 2, on a release build with R8: debug builds of Compose are not
   representative.
+
+## 2. Release build with R8 and smooth scrolling (M2a step 2)
+
+### 2.1 Release build
+
+- The release build runs R8: code is shrunk, optimized and obfuscated, and unused resources are removed. Classes that
+  native code finds by name through JNI (the TagLib reader and its sink, the Chromaprint session, the resampler) keep
+  their names and native methods through the native library's consumer rules.
+- The release build stays unsigned until M5. A `benchmark` build type is the release build signed with the debug key
+  and profileable from the shell, so that it can be installed and measured; it is never published. It is a package of
+  its own (`io.github.lorddetson.piplayer.benchmark`): a connected run uninstalls the app it tested, with its data,
+  and must leave the debug build alone.
+- CI builds the release APK, so an error R8 reports while building (a missing class, an unresolved reference) shows
+  up on every push. A missing keep rule for a class reached by name only fails when the app runs, which the smoke
+  checks of §2.2 cover on a device.
+
+### 2.2 Checks on the release build
+
+- A Macrobenchmark module runs against the `benchmark` build:
+    - smoke checks: the app starts, the Songs screen lists the library, a tap plays the song, and the mini player and
+      Now Playing show the tapped song's title;
+    - the scroll of Songs over the generated library (§1.6) with flings down and up, measured frame by frame.
+- Smooth means that at most 5 % of the frames miss their display refresh during the flings, as the system counts
+  janky frames (`dumpsys gfxinfo`: on Android 12 and later frames that missed their refresh, on Android 11 frames longer
+  than one refresh period), on the owner's phone. Emulators draw through the host's graphics and miss most refreshes
+  whatever the app does (50 to 77 % on the API 30 emulator; 71 % even with every method compiled ahead of time), so
+  the scroll check runs on devices only, with the generated library on them.
+- Measured on 01.11.2026 with R8: 0.04 to 0.17 % janky frames in four runs on the owner's phone (for example 7 of
+  18 095); on the API 30 emulator 76.6 % without R8, 50.3 % and 58.7 % with it.
+- A Baseline Profile is added only if the scroll fails this limit or the start fails the limits of §1.7. With R8 the
+  scroll is well within its limit on the phone, so there is none yet; the start limits were measured on debug builds,
+  which are slower than the release build, and are not measured on the release build in this step.

@@ -51,10 +51,11 @@ jobs:
 
       # Instrumented tests run on emulators locally; CI at least compiles them. Compiling does not need the
       # downloaded fingerprint recordings, which only the androidTest asset merge asks for.
-      - name: Build debug, unit tests, lint
+      - name: Build debug and release (R8), unit tests, lint
         run: >-
           ./gradlew assembleDebug testDebugUnitTest lintDebug
           :app:compileDebugAndroidTestKotlin :nativelib:compileDebugAndroidTestKotlin
+          :app:assembleRelease :macrobenchmark:assembleBenchmark
           --continue --stacktrace
 
       - name: Check 16 KB alignment of the APK and its 64-bit native libraries
