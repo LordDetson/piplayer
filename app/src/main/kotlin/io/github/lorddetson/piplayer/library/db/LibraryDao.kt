@@ -6,6 +6,7 @@ import androidx.room3.Insert
 import androidx.room3.Query
 import androidx.room3.Upsert
 import io.github.lorddetson.piplayer.library.sync.StoredFile
+import io.github.lorddetson.piplayer.library.tagpass.PassFile
 
 /** A song as lists show it, with the media index's ID. */
 data class SongRow(
@@ -162,7 +163,91 @@ interface LibraryDao {
 
     @Query("DELETE FROM track WHERE file_id IN (:fileIds)")
     suspend fun deleteTracks(fileIds: List<Long>)
+
+    /**
+     * What the tag pass still has to read: the files of a lower reader version, those no version has settled yet, in list
+     * order with the kinds that lists hide last; not those in excluded folders or marked unsafe (docs/library.md §5).
+     */
+    @Query(
+        "SELECT f.id AS fileId, f.media_store_id AS mediaStoreId, f.volume_name AS volume, f.display_name AS displayName, " +
+            "f.size, f.mtime FROM audio_file f LEFT JOIN track_display d ON d.file_id = f.id " +
+            "WHERE (f.reader_version IS NULL OR f.reader_version < :readerVersion) AND f.unsafe_count < :unsafeCount " +
+            "AND f.folder_rule != 2 " +
+            "ORDER BY (f.is_ringtone OR f.is_notification OR f.is_alarm OR f.recording), d.title_key, f.id",
+    )
+    suspend fun unreadFiles(readerVersion: Int, unsafeCount: Int): List<PassFile>
+
+    /** The current size and modification time and place of [fileIds]. */
+    @Query("SELECT id, size, mtime, volume_name AS volume, relative_path AS relativePath FROM audio_file WHERE id IN (:fileIds)")
+    suspend fun fileStates(fileIds: List<Long>): List<FileState>
+
+    @Query("UPDATE audio_file SET tag_failure = :failure, reader_version = :readerVersion WHERE id = :fileId")
+    suspend fun markFailed(fileId: Long, failure: String, readerVersion: Int?)
+
+    /** Leaves what was read in place, and has the next pass read the file again. */
+    @Query("UPDATE audio_file SET reader_version = NULL WHERE id IN (:fileIds)")
+    suspend fun readAgain(fileIds: List<Long>)
+
+    @Query(
+        "SELECT f.media_store_id AS mediaStoreId, d.title, d.artist, d.album, d.duration_ms AS durationMs " +
+            "FROM track_display d JOIN audio_file f ON f.id = d.file_id WHERE d.file_id IN (:fileIds)",
+    )
+    suspend fun songRowsOf(fileIds: List<Long>): List<SongRow>
+
+    @Query("SELECT * FROM album")
+    suspend fun albums(): List<AlbumEntity>
+
+    @Query("SELECT * FROM artist")
+    suspend fun artists(): List<ArtistEntity>
+
+    @Query("SELECT * FROM genre")
+    suspend fun genres(): List<GenreEntity>
+
+    @Query("SELECT * FROM track_artist")
+    suspend fun trackArtists(): List<TrackArtistEntity>
+
+    @Query("SELECT * FROM track_genre")
+    suspend fun trackGenres(): List<TrackGenreEntity>
+
+    @Query(
+        "INSERT OR IGNORE INTO album (album_key, title, album_artist, release_mbid, compilation) " +
+            "VALUES (:key, :title, :albumArtist, :releaseMbid, :compilation)",
+    )
+    suspend fun addAlbum(key: String, title: String, albumArtist: String?, releaseMbid: String?, compilation: Boolean)
+
+    @Query("SELECT id FROM album WHERE album_key = :key")
+    suspend fun albumId(key: String): Long
+
+    @Query("INSERT OR IGNORE INTO artist (artist_key, name, sort_name, mbid) VALUES (:key, :name, :sortName, :mbid)")
+    suspend fun addArtist(key: String, name: String, sortName: String?, mbid: String?)
+
+    @Query("SELECT id FROM artist WHERE artist_key = :key")
+    suspend fun artistId(key: String): Long
+
+    @Query("INSERT OR IGNORE INTO genre (genre_key, name) VALUES (:key, :name)")
+    suspend fun addGenre(key: String, name: String)
+
+    @Query("SELECT id FROM genre WHERE genre_key = :key")
+    suspend fun genreId(key: String): Long
+
+    @Insert
+    suspend fun addTrackArtists(rows: List<TrackArtistEntity>)
+
+    @Insert
+    suspend fun addTrackGenres(rows: List<TrackGenreEntity>)
+
+    @Query("DELETE FROM album WHERE id NOT IN (SELECT album_id FROM track WHERE album_id IS NOT NULL)")
+    suspend fun deleteAlbumsWithoutTracks()
+
+    @Query("DELETE FROM artist WHERE id NOT IN (SELECT artist_id FROM track_artist)")
+    suspend fun deleteArtistsWithoutTracks()
+
+    @Query("DELETE FROM genre WHERE id NOT IN (SELECT genre_id FROM track_genre)")
+    suspend fun deleteGenresWithoutTracks()
 }
+
+/** A file's size, modification time and place as the database holds them now. */
+data class FileState(val id: Long, val size: Long, val mtime: Long, val volume: String, val relativePath: String)
 
 /** A read track with what the display needs of its file. */
 data class ReadFileRow(
@@ -170,6 +255,7 @@ data class ReadFileRow(
     val size: Long,
     val mtime: Long,
     val displayName: String,
+    val relativePath: String,
     val embeddedCover: Boolean?,
     val tagLengthMs: Long?,
     val exactDurationMs: Long?,
@@ -194,6 +280,7 @@ data class FolderKey(val volume: String, val relativePath: String)
 data class FolderRuleRow(val volume: String, val relativePath: String, val rule: Int)
 
 private const val READ_FILES = "SELECT t.*, f.size, f.mtime, f.display_name AS displayName, " +
+    "f.relative_path AS relativePath, " +
     "f.embedded_cover_present AS embeddedCover, f.tag_length_ms AS tagLengthMs, f.duration_ms AS exactDurationMs " +
     "FROM track t JOIN audio_file f ON f.id = t.file_id"
 

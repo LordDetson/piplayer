@@ -361,3 +361,35 @@ Instrumented tests on the API 30, 36 and 37 emulators:
 Crash tests, opt-in with `-e crashTests true` like the crash reports' end-to-end tests (Android counts repeated
 crashes against the app): a file that aborts the reader is counted as a crash, a second abort makes it unsafe, a song
 keeps playing meanwhile, and the crash leaves a native crash report of `:tagger`.
+
+## 5. The tag pass (M2a step 5)
+
+### 5.1 What it reads
+
+- Each file of the library that no reader version has settled yet or only an older one has, except those in excluded
+  folders and those marked unsafe. Hidden kinds and short files are read too, for their tags.
+- A run takes its list when it starts, visible songs in list order first, then the kinds lists hide, so that the first
+  screens get better first. A file that arrives later waits for the next run.
+
+### 5.2 What it stores
+
+- Results go into the database in batches of up to 200 files, 1 MiB of raw tags or one second, whichever comes first,
+  one transaction each, while no sync runs. Everything is written where it is: a run stopped at any point loses at most
+  one batch, and the next run goes on, reading nothing that was committed.
+- A file the sync replaced while it was being read keeps nothing of that read, by its size and modification time. A file
+  renamed meanwhile keeps the read and shows its new name where the name counts.
+- A read file has `tag_pass_at`, its technical columns and a `track` row with its typed values and raw tags. Values over
+  16 KiB, such as lyrics, stay out of the raw tags. Albums, artists and genres are filled from the track; those left
+  without tracks go when the run ends. A file moved to another folder is read again, because its album depends on the
+  folder.
+- An album is one by its release ID, or else by its normalized title and album artist within a folder, plus the
+  compilation flag. A last folder named like a disc (`CD1`, `Disc 2`, `Диск 1`) does not count.
+
+### 5.3 What can go wrong
+
+| Case | Stored | Lists show | Tried again |
+|---|---|---|---|
+| Read | `tag_pass_at`, reader version | Tags, then the file name | When the file or the reader version changes |
+| TagLib does not know the format, or fails on it | `tag_failure` `unsupported` or `read`, reader version | Index values | When the file or the reader version changes |
+| The file cannot be opened | `tag_failure` `open` | Index values | In a later process |
+| `:tagger` crashes or hangs | `tag_failure` `crash`, the count of §4.4 | Index values | In a later process, until the count marks it unsafe; the run waits a minute first, because Android gives up on a process that crashes twice a minute |

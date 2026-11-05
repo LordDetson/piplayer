@@ -109,6 +109,9 @@ class LibrarySync(
         }
     }
 
+    /** Runs [block] while no sync runs, so that it never sees or writes a file under a sync's feet. */
+    suspend fun <T> exclusive(block: suspend () -> T): T = running.withLock { block() }
+
     /** Waits until no sync runs and none is asked for. */
     suspend fun awaitIdle() {
         synchronized(this) { soon }?.join()
@@ -139,7 +142,8 @@ class LibrarySync(
     /**
      * What a sync writes for one volume. [rows] are the rows to store, the updated ones first; the added ones get their
      * IDs when they are written. [displays] are their display values, in the same order. [changedFiles] are read files
-     * that changed since, so that what the pass read of them no longer holds.
+     * that changed since, so that what the pass read of them no longer holds. [movedFiles] are read files in another
+     * folder now: their albums need a new look, so the next pass reads them again.
      */
     private class VolumePlan(
         val state: VolumeSyncStateEntity,
@@ -148,6 +152,7 @@ class LibrarySync(
         val rows: List<IndexRow>,
         val displays: List<DisplayValues>,
         val changedFiles: List<Long>,
+        val movedFiles: List<Long>,
     )
 
     /** Reads the whole index first and writes everything in one transaction, so a failed read writes nothing. */
@@ -226,10 +231,13 @@ class LibrarySync(
         val changedFiles = changes.updated.filter { update ->
             reads[update.fileId]?.let { !it.holdsFor(update.row) } == true
         }.map { it.fileId }
+        val movedFiles = changes.updated.filter { update ->
+            reads[update.fileId]?.let { it.holdsFor(update.row) && it.relativePath != update.row.relativePath } == true
+        }.map { it.fileId }
         val inputs = changes.updated.map { update ->
             input(update.fileId, update.row, reads[update.fileId]?.takeIf { it.holdsFor(update.row) })
         } + changes.added.map { input(fileId = 0, it, read = null) }
-        return VolumePlan(state, stateChanged = state != stored, changes, rows, TrackDisplayWriter.resolve(inputs), changedFiles)
+        return VolumePlan(state, stateChanged = state != stored, changes, rows, TrackDisplayWriter.resolve(inputs), changedFiles, movedFiles)
     }
 
     private fun ReadFileRow.holdsFor(row: IndexRow) = size == row.size && mtime == row.modifiedSeconds
@@ -253,6 +261,7 @@ class LibrarySync(
         replaceAll("audio_file", FILE_COLUMNS, indices, KEPT_COLUMNS, SAME_FILE) { i -> file(ids[i], plan.rows[i]) }
         replaceAll("media_index_entry", ENTRY_COLUMNS, indices) { i -> entry(ids[i], plan.rows[i]) }
         with(TrackDisplayWriter) { write(ids, plan.displays) }
+        for (chunk in plan.movedFiles.chunked(DELETE_CHUNK)) dao.readAgain(chunk)
     }
 
     /** In chunks, so that no statement takes thousands of parameters. */

@@ -44,12 +44,15 @@ class TrackDisplayWriter(private val database: LibraryDatabase) {
 
     /** Derives the display of [fileIds] again from what the database holds. */
     suspend fun refresh(fileIds: List<Long>) {
-        val rows = fileIds.chunked(CHUNK).flatMap { chunk ->
-            val reads = dao.readFilesOf(chunk).associateBy { it.track.fileId }
-            dao.indexInputsOf(chunk).map { it.toInput(reads[it.fileId]) }
-        }
+        val rows = inputsOf(fileIds)
         val resolved = resolve(rows)
         database.withWriteTransaction { write(rows.map { it.fileId }, resolved) }
+    }
+
+    /** The inputs of [fileIds]. */
+    internal suspend fun inputsOf(fileIds: List<Long>): List<DisplayInput> = fileIds.chunked(CHUNK).flatMap { chunk ->
+        val reads = dao.readFilesOf(chunk).associateBy { it.track.fileId }
+        dao.indexInputsOf(chunk).map { it.toInput(reads[it.fileId]) }
     }
 
     /** The inputs of every file. */
