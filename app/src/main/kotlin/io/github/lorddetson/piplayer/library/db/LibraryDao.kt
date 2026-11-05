@@ -184,6 +184,10 @@ interface LibraryDao {
     @Query("UPDATE audio_file SET tag_failure = :failure, reader_version = :readerVersion WHERE id = :fileId")
     suspend fun markFailed(fileId: Long, failure: String, readerVersion: Int?)
 
+    /** Leaves what was read in place, and has the next pass read every file again. */
+    @Query("UPDATE audio_file SET reader_version = 0")
+    suspend fun forgetReaderVersions()
+
     /** Leaves what was read in place, and has the next pass read the file again. */
     @Query("UPDATE audio_file SET reader_version = NULL WHERE id IN (:fileIds)")
     suspend fun readAgain(fileIds: List<Long>)

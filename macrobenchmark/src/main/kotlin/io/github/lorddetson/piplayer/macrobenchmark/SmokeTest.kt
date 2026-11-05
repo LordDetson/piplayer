@@ -26,6 +26,10 @@ class SmokeTest {
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
     private val device = UiDevice.getInstance(instrumentation)
 
+    private companion object {
+        const val TAG_PROGRESS = "songs_progress"
+    }
+
     @Before
     fun start() {
         device.executeShellCommand("am force-stop $PACKAGE")
@@ -63,6 +67,25 @@ class SmokeTest {
         mini.click()
         val nowPlaying = checkNotNull(device.wait(Until.findObject(By.res(NOW_PLAYING)), 10_000)) { "No Now Playing" }
         assertThat(nowPlaying.wait(Until.hasObject(By.text(title)), 10_000)).describedAs("the title in Now Playing").isTrue()
+    }
+
+    /** `:tagger`, its JSON replies and the database writes of the pass under R8 (docs/library.md §5.5). */
+    @Test
+    fun theTagPassReadsTheLibrary() {
+        // A library already read has nothing for the pass to do.
+        device.executeShellCommand("am force-stop $PACKAGE")
+        device.executeShellCommand("pm clear $PACKAGE")
+        device.executeShellCommand("logcat -c")
+        start()
+
+        val line = checkNotNull(device.wait(Until.findObject(By.res(TAG_PROGRESS)), 60_000)) { "No progress line" }
+        val readSome = device.wait({
+            Regex("""\d+""").find(line.contentDescription.orEmpty())?.value?.toInt()?.let { it >= 400 } == true
+        }, 120_000)
+
+        assertThat(readSome).describedAs("files read, as the line says: ${line.contentDescription}").isTrue()
+        assertThat(device.executeShellCommand("pidof $PACKAGE:tagger").trim()).describedAs("the tagger process").isNotEmpty()
+        assertThat(device.executeShellCommand("logcat -d -s TagPass:W")).doesNotContain("The tag pass failed")
     }
 
     private fun UiDevice.wait(condition: () -> Boolean, timeoutMs: Long): Boolean {

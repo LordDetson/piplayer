@@ -2,10 +2,12 @@ package io.github.lorddetson.piplayer.library
 
 import android.content.Context
 import android.content.pm.PackageManager
+import android.content.res.Resources
 import android.database.ContentObserver
 import android.database.sqlite.SQLiteDatabase
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
 import android.provider.MediaStore
 import androidx.annotation.VisibleForTesting
 import io.github.lorddetson.piplayer.ProcessRole
@@ -13,10 +15,17 @@ import io.github.lorddetson.piplayer.library.db.LibraryDatabase
 import io.github.lorddetson.piplayer.library.rules.FolderRule
 import io.github.lorddetson.piplayer.library.rules.RulesSource
 import io.github.lorddetson.piplayer.library.songs.AudioPermission
+import io.github.lorddetson.piplayer.library.songs.SongList
 import io.github.lorddetson.piplayer.library.sync.LibraryStatus
 import io.github.lorddetson.piplayer.library.sync.LibrarySync
 import io.github.lorddetson.piplayer.library.sync.MediaIndex
 import io.github.lorddetson.piplayer.library.sync.MediaStoreIndex
+import io.github.lorddetson.piplayer.library.tagpass.PassGate
+import io.github.lorddetson.piplayer.library.tagpass.TagPass
+import io.github.lorddetson.piplayer.library.tagpass.TagPassRunner
+import io.github.lorddetson.piplayer.library.tagpass.TaggerPassReader
+import io.github.lorddetson.piplayer.library.values.LegacyText
+import io.github.lorddetson.piplayer.tagging.Tagger
 import io.github.lorddetson.piplayer.userdata.FolderRuleEntity
 import io.github.lorddetson.piplayer.userdata.UserData
 import java.io.File
@@ -40,7 +49,17 @@ import kotlinx.coroutines.withTimeoutOrNull
 /** The library of this process: its database and its sync, opened once, in the main process only (docs/library.md §1). */
 object Library {
 
-    private class Opened(val database: LibraryDatabase, val sync: LibrarySync)
+    private class Opened(val database: LibraryDatabase, val sync: LibrarySync) {
+        @Volatile
+        var pass: TagPassRunner? = null
+    }
+
+    /** When the tag pass may read; the app and the playback service tell it what they see. */
+    val passGate = PassGate()
+
+    /** Tests turn the tag pass off, because it would read the device's real library under them. */
+    @Volatile
+    var tagPassEnabled = true
 
     private val opened = MutableStateFlow<Opened?>(null)
     private val lock = Any()
@@ -76,6 +95,7 @@ object Library {
         val app = context.applicationContext
         if (!mayRead(app)) return
         val sync = sync(app)
+        startTagPass(app)
         synchronized(lock) {
             if (observer != null) return
             // Every change of the index's audio rows, on every volume; a burst brings one sync a second later.
@@ -83,6 +103,9 @@ object Library {
                 override fun onChange(selfChange: Boolean) {
                     opened.value?.sync?.requestSoon()
                 }
+            }
+            app.getSystemService(PowerManager::class.java).addThermalStatusListener { status ->
+                passGate.setHot(status >= PowerManager.THERMAL_STATUS_MODERATE)
             }
             app.contentResolver.registerContentObserver(
                 MediaStore.Audio.Media.getContentUri(MediaStore.VOLUME_EXTERNAL),
@@ -96,6 +119,45 @@ object Library {
             }
         }
         sync.request()
+    }
+
+    /** The tag pass of the open library, once; it reads when it has something to read (docs/library.md §5.5). */
+    private fun startTagPass(app: Context) {
+        if (!tagPassEnabled) return
+        val library = opened(app)
+        val runner = synchronized(lock) {
+            library.pass ?: tagPassRunner(app, library).also { library.pass = it }
+        }
+        runner.start()
+    }
+
+    private fun tagPassRunner(app: Context, library: Opened): TagPassRunner {
+        val pass = TagPass(
+            library.database,
+            library.sync,
+            TaggerPassReader(app, Tagger.client(app)),
+            cyrillicLanguage = {
+                val locales = listOf(Resources.getSystem().configuration.locales, app.resources.configuration.locales)
+                LegacyText.isCyrillicLanguage(locales.flatMap { list -> List(list.size()) { list[it].language } })
+            },
+            gate = passGate::awaitOpen,
+            onBatch = SongList::applyInPlace,
+        )
+        return TagPassRunner(pass, library.sync.status, passGate)
+    }
+
+    /** A sync now, and a run of the tag pass after it; what the settings offer (docs/library.md §5.6). */
+    fun refresh(context: Context) {
+        val library = opened(context.applicationContext)
+        library.sync.request()
+        library.pass?.runAgain()
+    }
+
+    /** Has the tag pass read every file again, those it could not read too. Lists keep what they show meanwhile. */
+    suspend fun readAllTagsAgain(context: Context) {
+        val library = opened(context.applicationContext)
+        library.sync.exclusive { library.database.library().forgetReaderVersions() }
+        library.pass?.readAllAgain()
     }
 
     /** Waits, off the main thread, until the library is ready, or [timeoutMs] has passed (docs/library.md §1.4). */
@@ -114,6 +176,7 @@ object Library {
     suspend fun reopen(context: Context, index: MediaIndex? = null, empty: Boolean = false) {
         val app = context.applicationContext
         val old = synchronized(lock) { opened.value }
+        old?.pass?.stopAndJoin()
         old?.sync?.awaitIdle()
         // A sync asked for after that, by a change of the index or of the user data, must not run while the database
         // closes under it.

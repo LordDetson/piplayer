@@ -241,6 +241,22 @@ class TagPassTest {
     }
 
     @Test
+    fun readingEverythingAgainAlsoTriesWhatFailedInThisProcess() = runBlocking<Unit> {
+        library(1)
+        reader.answers[1] = PassRead.OpenFailed
+        val pass = pass()
+        pass.run()
+        reader.answers.remove(1)
+        reader.reads.set(0)
+
+        pass.forgetFailures()
+        pass.run()
+
+        assertThat(reader.reads.get()).isEqualTo(1)
+        assertThat(files().getValue(1).tagPassAt).isNotNull()
+    }
+
+    @Test
     fun aCrashIsRecordedAndTheRunGoesOn() = runBlocking<Unit> {
         library(1, 2)
         reader.answers[1] = PassRead.Crashed

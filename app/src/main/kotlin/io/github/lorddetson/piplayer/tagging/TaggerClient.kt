@@ -175,6 +175,6 @@ object Tagger {
     private var client: TaggerClient? = null
 
     fun client(context: Context): TaggerClient = client ?: synchronized(this) {
-        client ?: TaggerClient(context, LibraryUnsafeCounts(Library.database(context))).also { client = it }
+        client ?: TaggerClient(context, LibraryUnsafeCounts { Library.database(context) }).also { client = it }
     }
 }

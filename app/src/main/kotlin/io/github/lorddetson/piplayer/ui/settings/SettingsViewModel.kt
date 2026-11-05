@@ -3,6 +3,7 @@ package io.github.lorddetson.piplayer.ui.settings
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import io.github.lorddetson.piplayer.library.Library
 import io.github.lorddetson.piplayer.settings.AppearanceSettings
 import io.github.lorddetson.piplayer.settings.HiddenFiles
 import io.github.lorddetson.piplayer.settings.LibrarySettings
@@ -37,5 +38,13 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
 
     fun setMinLengthSeconds(seconds: Int) {
         viewModelScope.launch { library.setMinLengthSeconds(seconds) }
+    }
+
+    /** Looks for new and changed files now (docs/library.md §5.6). */
+    fun refreshLibrary() = Library.refresh(getApplication())
+
+    /** Has the tag pass read every file again; lists keep what they show meanwhile (docs/library.md §5.6). */
+    fun readAllTagsAgain() {
+        viewModelScope.launch { Library.readAllTagsAgain(getApplication()) }
     }
 }

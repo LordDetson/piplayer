@@ -116,6 +116,10 @@
     <string name="settings_min_length_off">Off</string>
     <string name="settings_min_length_value">Shorter than %1$d s</string>
     <string name="settings_dialog_cancel">Cancel</string>
+    <string name="settings_refresh_library">Refresh the library</string>
+    <string name="settings_refresh_library_summary">Look for new and changed files now</string>
+    <string name="settings_reread_tags">Read all tags again</string>
+    <string name="settings_reread_tags_summary">Reads the tags of every file again in the background</string>
     <string name="settings_library_folders">Library folders</string>
     <string name="settings_library_folders_summary">Choose the folders the library includes</string>
     <string name="folders_empty">No folders with audio yet</string>

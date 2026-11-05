@@ -21,6 +21,7 @@ import androidx.core.app.ServiceCompat
 import androidx.core.content.IntentCompat
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.media3.session.CommandButton
 import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.MediaLibraryService
@@ -28,6 +29,7 @@ import androidx.media3.session.MediaSession
 import androidx.media3.session.SessionError
 import io.github.lorddetson.piplayer.ProcessRole
 import io.github.lorddetson.piplayer.R
+import io.github.lorddetson.piplayer.library.Library
 import io.github.lorddetson.piplayer.library.songs.SongList
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.MainScope
@@ -45,6 +47,8 @@ class PlaybackService : MediaLibraryService() {
 
     private val handler = Handler(Looper.getMainLooper())
     private val mainScope = MainScope()
+
+    private val passGateListener = PassGateListener()
     private var passBatches: Job? = null
     private val postNotificationAgain = Runnable { postNotification() }
     private var lastStartId = 0
@@ -81,6 +85,9 @@ class PlaybackService : MediaLibraryService() {
         val store = PlaybackStateStore.get(this)
         val saver = PlaybackStateSaver(player, store).also { saver = it }
         val callback = PlaybackSessionCallback(this, store, controls, saver::setQueue).also { callback = it }
+        player.addListener(passGateListener)
+        player.addAnalyticsListener(passGateListener)
+        playbackLooperForTests = player.playbackLooper
         val sessionPlayer = SessionPlayer(player)
         val session = MediaLibrarySession.Builder(this, sessionPlayer, callback)
             .setSessionActivity(openApp())
@@ -171,6 +178,8 @@ class PlaybackService : MediaLibraryService() {
     }
 
     override fun onDestroy() {
+        Library.passGate.setPlaying(false)
+        playbackLooperForTests = null
         passBatches?.cancel()
         passBatches = null
         handler.removeCallbacks(postNotificationAgain)
@@ -315,9 +324,22 @@ class PlaybackService : MediaLibraryService() {
         private const val TAG = "PlaybackService"
 
         /** For tests that stop the service and wait until it is gone; the service outlives a test otherwise. */
+        /** The looper of the player of the running service, for a test to watch how late it comes. */
+        @Volatile
+        var playbackLooperForTests: android.os.Looper? = null
+
         @VisibleForTesting
         @Volatile
         var isRunningForTests = false
             private set
     }
+}
+
+/** Music keeps the tag pass going with the screen off; trouble with the audio holds it (docs/library.md §5.5). */
+@OptIn(UnstableApi::class)
+private class PassGateListener : Player.Listener, AnalyticsListener {
+    override fun onIsPlayingChanged(isPlaying: Boolean) = Library.passGate.setPlaying(isPlaying)
+
+    override fun onAudioUnderrun(eventTime: AnalyticsListener.EventTime, bufferSize: Int, bufferSizeMs: Long, elapsedSinceLastFeedMs: Long) =
+        Library.passGate.audioUnderrun()
 }

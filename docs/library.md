@@ -405,3 +405,25 @@ keeps playing meanwhile, and the crash leaves a native crash report of `:tagger`
   the background after a pass that changed rows ended, on the same song. Other returns read nothing unless the library
   changed. A row whose new length crosses the short-file limit stays until then.
 - A line over the top of the list shows the progress of a run of at least 50 files, without moving any row.
+
+### 5.5 When it runs
+
+- In the main process, one run at a time, on a thread of background priority: a few seconds after the process starts,
+  after a sync that changed the library or its folder rules, and when asked (§5.6). It needs a library that knows its files.
+- It reads while the app shows or music plays, also with the screen off and no charger; otherwise Android soon freezes the
+  process, and a read frozen in the middle could count as a hang. So a library opened rarely and never played may stay unread
+  for long; lists show the index's values meanwhile.
+- A run waits between files when that no longer holds, and for a minute after an underrun of the audio or after a device
+  has been hot (thermal status moderate or above). Nothing is cancelled for that, because cancelling a read kills `:tagger`.
+- The pass takes no wake lock of its own and no WorkManager: quotas apply to that even during playback.
+- Checks: a pass over the 20 000 generated files on the phone, with the FLAC album on repeat, the screen off and no
+  charger: no underrun, no stall, no new audio output, and the worst lateness of the playback thread's looper compared
+  with a minute of playback without the pass (`TagPassScreenOffTest`).
+
+### 5.6 What the settings offer
+
+- **Refresh the library**: a sync now, and a run of the pass after it, for what the sync found. Nothing else: a sync also
+  runs by itself when the index reports a change (§1.3), so this is for when something seems to be missing.
+- **Read all tags again**: every file is read again, those that failed before too. `tag_pass_at` stays set, so lists keep
+  showing what they show until the new values land.
+- A rebuild that keeps the user data comes after step 8, because it relies on re-attachment (TI §6).

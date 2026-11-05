@@ -106,6 +106,10 @@
     <string name="settings_min_length_off">Нет</string>
     <string name="settings_min_length_value">Короче %1$d с</string>
     <string name="settings_dialog_cancel">Отмена</string>
+    <string name="settings_refresh_library">Обновить библиотеку</string>
+    <string name="settings_refresh_library_summary">Найти новые и изменённые файлы сейчас</string>
+    <string name="settings_reread_tags">Перечитать все теги</string>
+    <string name="settings_reread_tags_summary">Заново прочитать теги всех файлов в фоне</string>
     <string name="settings_library_folders">Папки библиотеки</string>
     <string name="settings_library_folders_summary">Выберите папки, которые входят в библиотеку</string>
     <string name="folders_empty">Папок с аудио пока нет</string>

@@ -124,6 +124,9 @@ class TagPass(
         return PassResult(read, failed)
     }
 
+    /** The files that failed in this process get another try in the next run. */
+    fun forgetFailures() = failedHere.clear()
+
     private class Pending(val file: PassFile, val answer: PassRead, val parsed: ParsedRead?)
 
     private class ParsedRead(val report: TagReport, val tags: TrackTags, val encoding: String?, val rawTags: String)
