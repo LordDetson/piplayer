@@ -74,13 +74,15 @@ class SmokeTest {
     @Test
     fun theTagPassReadsTheLibrary() {
         assumeTrue("Needs the generated library, for a long enough run", TheApp.generatedFiles(device) >= TheApp.GENERATED_FILES)
+        // The pass rests while the phone is hot, by design (docs/library.md §5.5): it would show nothing to wait for.
+        assumeTrue("Needs a phone that is not hot: ${thermalStatus()}", !isHot())
         // A library already read has nothing for the pass to do.
         device.executeShellCommand("am force-stop $PACKAGE")
         device.executeShellCommand("pm clear $PACKAGE")
         device.executeShellCommand("logcat -c")
         start()
 
-        val line = checkNotNull(device.wait(Until.findObject(By.res(TAG_PROGRESS)), 60_000)) { "No progress line" }
+        val line = checkNotNull(device.wait(Until.findObject(By.res(TAG_PROGRESS)), 60_000)) { "No progress line, ${thermalStatus()}" }
         val readSome = device.wait({
             Regex("""\d+""").find(line.contentDescription.orEmpty())?.value?.toInt()?.let { it >= 400 } == true
         }, 120_000)
@@ -89,6 +91,12 @@ class SmokeTest {
         assertThat(device.executeShellCommand("pidof $PACKAGE:tagger").trim()).describedAs("the tagger process").isNotEmpty()
         assertThat(device.executeShellCommand("logcat -d -s TagPass:W")).doesNotContain("The tag pass failed")
     }
+
+    private fun thermalStatus(): String =
+        device.executeShellCommand("dumpsys thermalservice").lineSequence().first { "Thermal Status" in it }.trim()
+
+    /** At the status PowerManager calls moderate and above. */
+    private fun isHot(): Boolean = thermalStatus().substringAfter(":").trim().toInt() >= 2
 
     private fun UiDevice.wait(condition: () -> Boolean, timeoutMs: Long): Boolean {
         val end = System.currentTimeMillis() + timeoutMs
