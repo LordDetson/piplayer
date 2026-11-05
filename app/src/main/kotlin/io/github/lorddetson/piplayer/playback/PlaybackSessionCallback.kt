@@ -517,17 +517,7 @@ class PlaybackSessionCallback(
     private fun mediaItem(song: Song): MediaItem = MediaItem.Builder()
         .setMediaId(song.id.toString())
         .setUri(song.uri)
-        .setMediaMetadata(
-            MediaMetadata.Builder()
-                .setTitle(song.title)
-                .setArtist(song.artist)
-                .setAlbumTitle(song.album)
-                .setDurationMs(song.durationMs)
-                .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
-                .setIsBrowsable(false)
-                .setIsPlayable(true)
-                .build(),
-        )
+        .setMediaMetadata(SessionItemRefresher.songMetadata(song))
         .build()
 
     /** A file opened from another app; its URI is also its media ID, so the current item can be found after a restore. */

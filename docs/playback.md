@@ -216,6 +216,16 @@ is heard as a click. The becoming-noisy broadcast is protected, so emulator test
   controllers (a non-fatal session error), which the screen shows. Pressing play again retries the song with a new
   count, so playback moves on from it if it fails again.
 
+### 2.6 What the session shows
+
+- The session's player shows the queue item's metadata and nothing of what the extractor finds in the stream, so that
+  fields PiPlayer leaves empty show nothing, not raw tags (TI §7.1). It stays a `ForwardingPlayer` that filters both the
+  value it gives and what its listeners hear, because the session keeps what it hears. The stream's cover stays until the
+  cover resolver of M2a step 13 takes over; before that every cover would vanish.
+- While the tag pass lands its batches (library.md §5), the playing item and the next one come up to date in place, each
+  when its values differ, with the same URI: playback does not prepare again. The next item after a transition catches up
+  at that transition. The other items of a queue wait, because each change costs every controller a new timeline.
+
 ### 2.5 Checks
 
 JVM tests: the compact request's format; the order of titles; finding the start song; which errors skip, which stop,

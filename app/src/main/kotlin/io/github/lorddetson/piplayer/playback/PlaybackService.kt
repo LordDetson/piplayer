@@ -28,6 +28,11 @@ import androidx.media3.session.MediaSession
 import androidx.media3.session.SessionError
 import io.github.lorddetson.piplayer.ProcessRole
 import io.github.lorddetson.piplayer.R
+import io.github.lorddetson.piplayer.library.songs.SongList
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.MainScope
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.launch
 
 /** The one player of PiPlayer and its media session, which every surface talks to (docs/playback.md §1.1, §4.2). */
 class PlaybackService : MediaLibraryService() {
@@ -39,6 +44,8 @@ class PlaybackService : MediaLibraryService() {
     private var effects: AudioEffectSession? = null
 
     private val handler = Handler(Looper.getMainLooper())
+    private val mainScope = MainScope()
+    private var passBatches: Job? = null
     private val postNotificationAgain = Runnable { postNotification() }
     private var lastStartId = 0
     private var startCheckKind = StartIntentRules.Kind.MEDIA_BUTTON
@@ -74,7 +81,8 @@ class PlaybackService : MediaLibraryService() {
         val store = PlaybackStateStore.get(this)
         val saver = PlaybackStateSaver(player, store).also { saver = it }
         val callback = PlaybackSessionCallback(this, store, controls, saver::setQueue).also { callback = it }
-        val session = MediaLibrarySession.Builder(this, SessionPlayer(player), callback)
+        val sessionPlayer = SessionPlayer(player)
+        val session = MediaLibrarySession.Builder(this, sessionPlayer, callback)
             .setSessionActivity(openApp())
             .setMediaButtonPreferences(MediaButtons.of(this, player.shuffleModeEnabled, player.repeatMode))
             .build()
@@ -85,6 +93,9 @@ class PlaybackService : MediaLibraryService() {
         // notification (§2.3, §4.5).
         addSession(session)
         saver.start()
+        val refresher = SessionItemRefresher(sessionPlayer) { id -> SongList.current()?.firstOrNull { it.id == id } }
+        refresher.start()
+        passBatches = mainScope.launch { SongList.batches.drop(1).collect { refresher.refresh() } }
         isRunningForTests = true
     }
 
@@ -160,6 +171,8 @@ class PlaybackService : MediaLibraryService() {
     }
 
     override fun onDestroy() {
+        passBatches?.cancel()
+        passBatches = null
         handler.removeCallbacks(postNotificationAgain)
         controls?.release()
         controls = null

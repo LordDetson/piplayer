@@ -575,12 +575,13 @@ re-checked before release (M5); in M4a they also drive automatic preparation.
   car displays, voice requests and the widget. After Apply and Undo the playing item and the queued items of the same
   tracks are refreshed in place (Media3 `replaceMediaItem`) without restarting playback; verify on devices that the
   player does not prepare the file again.
-- **System surfaces.** The player given to the media session is wrapped (`ForwardingSimpleBasePlayer`) so that its
+- **System surfaces.** The player given to the media session is wrapped (a `ForwardingPlayer`, playback.md §2.6) so that its
   metadata is only the MediaItem's metadata built from the merged values, with `artworkUri` pointing to the cover the
   resolver chose (§5.2), and each item's duration is the stored exact duration (§3.1) whenever one is stored.
   Metadata that Media3's extractors read from the stream (tag frames, the embedded picture as `artworkData`) is never
   shown: otherwise fields PiPlayer leaves empty would show raw tags, and the session's bitmap loader would prefer the
-  old embedded picture to a saved cover. Verify on the pinned Media3 version (M2a).
+  old embedded picture to a saved cover. Checked on the pinned Media3 version in M2a; until the cover resolver arrives
+  in step 13 the stream's picture stays, because nothing else would show a cover.
 - **Undo for changes saved only in PiPlayer** (M3). Apply and Edit fields store the values they set; Keep as-is and
   Skip store no values. Undo marks a decision undone and re-resolves the winners, so undoing an older decision
   changes only the fields where it still wins: after two identifications in a row, undoing the older one changes

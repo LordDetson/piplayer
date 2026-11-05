@@ -2,6 +2,8 @@ package io.github.lorddetson.piplayer.playback
 
 import androidx.annotation.OptIn
 import androidx.media3.common.ForwardingPlayer
+import androidx.media3.common.MediaMetadata
+import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 
@@ -9,9 +11,15 @@ import androidx.media3.exoplayer.ExoPlayer
  * The player the session wraps, so that every controller turns shuffle on the same way: the app, the notification,
  * the system, Bluetooth and other apps (docs/playback.md §3.6). Shuffle turned on in the middle of a queue starts at
  * the current song; a new queue gets its start song first from [StartFirstShuffleOrder] itself.
+ *
+ * It shows the queue item's metadata, built from the library's merged values, and nothing of what the extractor finds
+ * in the stream, so that fields PiPlayer leaves empty do not show raw tags (TI §7.1). The stream's cover stays until the
+ * cover resolver of M2a step 13 takes over.
  */
 @OptIn(UnstableApi::class)
 class SessionPlayer(private val player: ExoPlayer) : ForwardingPlayer(player) {
+
+    private val filtered = HashMap<Player.Listener, Player.Listener>()
 
     init {
         // The player is still empty, so this changes no timeline and tells no listener.
@@ -28,5 +36,27 @@ class SessionPlayer(private val player: ExoPlayer) : ForwardingPlayer(player) {
             player.setShuffleOrder(order.startingAt(player.mediaItemCount, player.currentMediaItemIndex))
         }
         super.setShuffleModeEnabled(shuffleModeEnabled)
+    }
+
+    override fun getMediaMetadata(): MediaMetadata = itemMetadata(super.getMediaMetadata())
+
+    override fun addListener(listener: Player.Listener) {
+        super.addListener(filtered.getOrPut(listener) { MetadataFilter(listener) })
+    }
+
+    override fun removeListener(listener: Player.Listener) {
+        filtered.remove(listener)?.let { super.removeListener(it) }
+    }
+
+    private fun itemMetadata(stream: MediaMetadata): MediaMetadata {
+        val item = currentMediaItem?.mediaMetadata ?: return MediaMetadata.EMPTY
+        if (stream.artworkData == null || item.artworkData != null || item.artworkUri != null) return item
+        return item.buildUpon().setArtworkData(stream.artworkData, stream.artworkDataType).build()
+    }
+
+    /** A listener hears the same as [getMediaMetadata] gives; the session keeps what it hears. */
+    private inner class MetadataFilter(listener: Player.Listener) : ForwardingListener(listener) {
+        override fun onMediaMetadataChanged(mediaMetadata: MediaMetadata) =
+            super.onMediaMetadataChanged(itemMetadata(mediaMetadata))
     }
 }
