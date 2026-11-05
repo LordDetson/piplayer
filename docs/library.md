@@ -27,12 +27,16 @@ The data model it implements is sketched in track-identification.md §10 (TI bel
   track number, length), as the index gives them. Later steps use them only until the tag pass has read the file
   (TI §7.1).
 - `track_display`: what lists show and sort by: title, artist, album and length, the title key and the search text.
-    - The title is the index's title, or the display name without its extension when the index has none.
-    - The artist is empty when the index gives none or its placeholder `<unknown>`; the album and the length are empty
-      when the index gives none (a length of 0 counts as none).
+    - One resolver computes these values from the precedence levels of TI §7.1. The title is the first of: the file's
+      tag once the tag pass has read it, the index's title until then, the file name parsed as in TI §3.3, the display
+      name without its extension. The artist goes the same way, without the last step.
+    - Before the read, the index's placeholder `<unknown>` and blanks count as empty. After it, an empty tag stays
+      empty: the index no longer fills it, only the file name.
+    - The album is the tag or, until the read, the index's value. The length is the exact one once measured (step 7),
+      then the index's, then the tag reader's estimate (a length of 0 counts as none).
     - The title key is the title normalized as for search (TI §4.1).
-    - The search text joins the normalized title, artist, album, composer, genre and display name without its extension
-      with spaces (TI §10.1), leaving out empty values. Search itself arrives in step 12; the column and its index exist now, so that
+    - The search text joins the normalized title, all artists, album, composers, genres and display name without its
+      extension with spaces (TI §10.1), leaving out empty values. Search itself arrives in step 12; the column and its index exist now, so that
       search can be measured on the real schema early.
 - `volume_sync_state`: per volume, the index version and generation the last sync reached.
 
