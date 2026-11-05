@@ -40,6 +40,7 @@ fun SongsScreen(
 ) {
     val context = LocalContext.current
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val passProgress by viewModel.passProgress.collectAsStateWithLifecycle()
 
     val request = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         viewModel.onPermission(granted, context.deniedForGood(granted))
@@ -61,6 +62,9 @@ fun SongsScreen(
         onOpenSettings = { context.openAppSettings() },
         onSongClick = onSongClick,
         modifier = modifier,
+        passProgress = passProgress,
+        onFirstVisibleSong = { viewModel.firstVisibleSong = it },
+        onScrolled = viewModel::onScrolled,
     )
 }
 

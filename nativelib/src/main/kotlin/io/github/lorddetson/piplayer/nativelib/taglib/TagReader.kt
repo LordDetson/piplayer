@@ -71,11 +71,18 @@ data class FrameCountHeader(val constantBitrate: Boolean, val frames: Long, val 
 
 sealed interface TagReadResult {
 
-    /** [properties] is TagLib's property map: upper-case keys such as TITLE, each with its list of values. */
+    /**
+     * [properties] is TagLib's property map: upper-case keys such as TITLE, each with its list of values. [container]
+     * names what holds the audio, such as `mpeg`, `adts` or `ogg-opus` (docs/library.md §4.2). [codec] names its coding
+     * and [bitDepth] its sample size, the latter for lossless codings only.
+     */
     data class Success(
         val properties: Map<String, List<String>>,
         val audio: AudioProperties?,
         val pictures: List<Picture>,
+        val container: String? = null,
+        val codec: String? = null,
+        val bitDepth: Int? = null,
     ) : TagReadResult
 
     data class Failure(val error: TagReadError) : TagReadResult
@@ -101,15 +108,16 @@ object TagReader {
 
     /**
      * [fileName] helps TagLib pick the format by extension; without it the format is detected from the content.
-     * Throws IllegalStateException outside the `:tagger` process.
+     * [markLegacy] marks each byte at or above 0x80 of text in a legacy encoding as 0xE000 plus the byte, so that the
+     * caller can decode it (TI §3.6). Throws IllegalStateException outside the `:tagger` process.
      */
-    fun read(fd: Int, fileName: String? = null, pictures: Pictures = Pictures.NONE): TagReadResult {
+    fun read(fd: Int, fileName: String? = null, pictures: Pictures = Pictures.NONE, markLegacy: Boolean = false): TagReadResult {
         check(anyProcess || Application.getProcessName().endsWith(TAGGER_SUFFIX)) {
             "TagReader reads only in the $TAGGER_SUFFIX process"
         }
         if (fd < 0) return TagReadResult.Failure(TagReadError.INVALID_FD)
         val sink = TagSink()
-        return when (nativeRead(fd, fileName, pictures.ordinal, sink)) {
+        return when (nativeRead(fd, fileName, pictures.ordinal, markLegacy, sink)) {
             0 -> sink.result()
             1 -> TagReadResult.Failure(TagReadError.INVALID_FD)
             2 -> TagReadResult.Failure(TagReadError.NOT_SEEKABLE)
@@ -141,7 +149,7 @@ object TagReader {
      * format, 4 native error, 5 read error.
      */
     @JvmStatic
-    private external fun nativeRead(fd: Int, fileName: String?, pictures: Int, sink: TagSink): Int
+    private external fun nativeRead(fd: Int, fileName: String?, pictures: Int, markLegacy: Boolean, sink: TagSink): Int
 }
 
 /** Collects what the native reader finds; its methods are called from native code by name. */
@@ -150,6 +158,9 @@ internal class TagSink {
     private val properties = LinkedHashMap<String, List<String>>()
     private var audio: AudioProperties? = null
     private val pictures = mutableListOf<Picture>()
+    private var container: String? = null
+    private var codec: String? = null
+    private var bitDepth: Int? = null
 
     var mpegLayout: MpegLayout? = null
         private set
@@ -188,5 +199,15 @@ internal class TagSink {
         pictures += Picture(data, sizeBytes, mimeType, pictureType, description)
     }
 
-    fun result() = TagReadResult.Success(properties.toMap(), audio, pictures.toList())
+    fun container(name: String) {
+        container = name
+    }
+
+    /** [bitDepth] is 0 when it says nothing. */
+    fun technical(codec: String?, bitDepth: Int) {
+        this.codec = codec
+        this.bitDepth = bitDepth.takeIf { it > 0 }
+    }
+
+    fun result() = TagReadResult.Success(properties.toMap(), audio, pictures.toList(), container, codec, bitDepth)
 }

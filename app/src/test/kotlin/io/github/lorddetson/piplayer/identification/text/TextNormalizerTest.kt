@@ -41,10 +41,73 @@ class TextNormalizerTest {
         assertThat(TextNormalizer.normalize("한국어")).isEqualTo("한국어")
     }
 
+    @ParameterizedTest(name = "{0} -> {1}")
+    @CsvSource(
+        delimiter = '|',
+        textBlock = """
+        MØ                  | mo
+        Trentemøller        | trentemoller
+        Łódź                | lodz
+        łza                 | lza
+        Đorđe               | dorde
+        Æon                 | aeon
+        æther               | aether
+        Œuvre               | oeuvre
+        cœur                | coeur
+        Straße              | strasse
+        GROẞE               | grosse
+        Kıraç               | kirac
+        Með blóðnasir       | med blodnasir
+        ÐA                  | da
+        Þór                 | thor
+        þú                  | thu
+        Ħal                 | hal
+        ħal                 | hal
+        Ŧa                  | ta
+        ŧa                  | ta
+        Ŋa                  | nga
+        ŋa                  | nga
+        Ǿ                   | o
+        ǽ                   | ae""",
+    )
+    fun `folds Latin letters that have no decomposition`(input: String, expected: String) {
+        assertThat(TextNormalizer.normalize(input)).isEqualTo(expected)
+    }
+
+    @Test
+    fun `the dotted capital I and the plain i meet the dotless one`() {
+        assertThat(TextNormalizer.normalize("İstanbul")).isEqualTo("istanbul")
+        assertThat(TextNormalizer.normalize("ıstanbul")).isEqualTo("istanbul")
+        assertThat(TextNormalizer.normalize("ISTANBUL")).isEqualTo("istanbul")
+    }
+
+    @Test
+    fun `halfwidth kana become the full forms, with their marks joined`() {
+        assertThat(TextNormalizer.normalize("ｶﾀｶﾅ")).isEqualTo("カタカナ")
+        assertThat(TextNormalizer.normalize("ﾄﾞﾗｺﾞﾝﾎﾞｰﾙ")).isEqualTo("ドラゴンボール")
+        assertThat(TextNormalizer.normalize("ﾊﾟﾝ")).isEqualTo("パン")
+    }
+
+    @Test
+    fun `a halfwidth mark joins a full kana, and a full mark joins a halfwidth kana`() {
+        assertThat(TextNormalizer.normalize("カﾞ")).isEqualTo("ガ")
+        assertThat(TextNormalizer.normalize("ｶ゙")).isEqualTo("ガ")
+    }
+
+    @Test
+    fun `halfwidth punctuation breaks words like any other`() {
+        assertThat(TextNormalizer.normalize("ｱ｡ｲ･ｳ")).isEqualTo("ア イ ウ")
+    }
+
     @Test
     fun `drops apostrophes so that both spellings meet`() {
         assertThat(TextNormalizer.normalize("Don't Stop")).isEqualTo("dont stop")
         assertThat(TextNormalizer.normalize("Don’t Stop")).isEqualTo("dont stop")
+    }
+
+    @Test
+    fun `the acute accent typed as an apostrophe is dropped too`() {
+        assertThat(TextNormalizer.normalize("Don´t Stop")).isEqualTo("dont stop")
     }
 
     @Test

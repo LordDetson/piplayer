@@ -1,10 +1,12 @@
 package io.github.lorddetson.piplayer.library.sync
 
-import android.provider.MediaStore
-import io.github.lorddetson.piplayer.identification.text.TextNormalizer
-import io.github.lorddetson.piplayer.library.search.SearchText
+import io.github.lorddetson.piplayer.library.values.IndexValues
+import io.github.lorddetson.piplayer.library.values.MergedValues
 
-/** What lists show and sort a file by, before the tag pass has read it (docs/library.md §1.2). */
+/**
+ * What lists show and sort a file by (docs/library.md §1.2). [reasons] are the missing-information reasons of
+ * [MergedValues], null until the tag pass has read the file.
+ */
 data class DisplayValues(
     val title: String,
     val artist: String?,
@@ -12,24 +14,17 @@ data class DisplayValues(
     val durationMs: Long?,
     val titleKey: String,
     val searchText: String,
+    val reasons: Int? = null,
 ) {
     companion object {
-        /** The values of an index row. */
-        fun of(row: IndexRow): DisplayValues {
-            val fileName = row.displayName.substringBeforeLast('.').ifEmpty { row.displayName }
-            val title = row.title.present() ?: fileName
-            val artist = row.artist.present()?.takeUnless { it == MediaStore.UNKNOWN_STRING }
-            val album = row.album.present()
-            return DisplayValues(
-                title = title,
-                artist = artist,
-                album = album,
-                durationMs = row.durationMs?.takeIf { it > 0 },
-                titleKey = TextNormalizer.normalize(title),
-                searchText = SearchText.of(title, artist, album, row.composer.present(), row.genre.present(), fileName),
-            )
-        }
+        /** The values of a file only the index has spoken of. */
+        fun of(index: IndexValues, displayName: String): DisplayValues =
+            MergedValues.of(displayName, index, tags = null, read = false)
 
-        private fun String?.present(): String? = this?.takeUnless { it.isBlank() }
+        /** The values of an index row. */
+        fun of(row: IndexRow): DisplayValues = of(
+            IndexValues(row.title, row.artist, row.album, row.composer, row.genre, row.durationMs),
+            row.displayName,
+        )
     }
 }

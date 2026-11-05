@@ -137,6 +137,7 @@ class OpenedFile private constructor(
 fun TaggerResult<TagRead>.tagsOrThrow(): TagReadResult = when (this) {
     is TaggerResult.Replied -> value.report.toResult()
     TaggerResult.Crashed -> throw TaggerFailure("the tag reader process crashed on this file")
+    TaggerResult.Unavailable -> throw TaggerFailure("the tag reader could not be reached")
     TaggerResult.TimedOut ->
         throw TaggerFailure("the tag reader did not answer within ${TagReadGuard.DEFAULT_TIMEOUT.inWholeSeconds} s")
     TaggerResult.Unsafe -> throw TaggerFailure("the file is marked unsafe: it crashed or hung the tag reader twice")

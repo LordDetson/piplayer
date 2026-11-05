@@ -154,7 +154,8 @@ is heard as a click. The becoming-noisy broadcast is protected, so emulator test
 - A row shows the title, the artist and the length. The index gives the file name without its extension as the title
   when the file has no title tag, `<unknown>` as the artist (shown as "Unknown artist"), the folder's name as the
   album, and no length, or 0, for files it could not read (shown as "--:--"); such rows stay in the list.
-- Order: by the title normalized as for search (TI §4.1: case, diacritics outside Cyrillic and "ё" folded, punctuation
+- Order: by the title normalized as for search (TI §4.1: case, diacritics outside Cyrillic, letters such as "ø" and
+  "ё" folded, punctuation
   as spaces), compared by code point (digits before Latin before Cyrillic), then by the index's ID, so that the list
   and the playback service always agree.
 - The list is read from the library when the screen starts and after every sync that changed it (library.md §1.4).
@@ -214,6 +215,16 @@ is heard as a click. The becoming-noisy broadcast is protected, so emulator test
   player is stopped instead, so that play prepares it, and checks it, again), and the service sends a message to its
   controllers (a non-fatal session error), which the screen shows. Pressing play again retries the song with a new
   count, so playback moves on from it if it fails again.
+
+### 2.6 What the session shows
+
+- The session's player shows the queue item's metadata and nothing of what the extractor finds in the stream, so that
+  fields PiPlayer leaves empty show nothing, not raw tags (TI §7.1). It stays a `ForwardingPlayer` that filters both the
+  value it gives and what its listeners hear, because the session keeps what it hears. The stream's cover stays until the
+  cover resolver of M2a step 13 takes over; before that every cover would vanish.
+- While the tag pass lands its batches (library.md §5), the playing item and the next one come up to date in place, each
+  when its values differ, with the same URI: playback does not prepare again. The next item after a transition catches up
+  at that transition. The other items of a queue wait, because each change costs every controller a new timeline.
 
 ### 2.5 Checks
 

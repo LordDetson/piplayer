@@ -7,9 +7,12 @@ import io.github.lorddetson.piplayer.library.db.OutsideFileEntity
  * The counts of failed reads in the library database (docs/library.md §4.4): library files in `audio_file`, other
  * files in `outside_file`.
  */
-class LibraryUnsafeCounts(database: LibraryDatabase) : UnsafeCounts {
+class LibraryUnsafeCounts(private val database: () -> LibraryDatabase) : UnsafeCounts {
 
-    private val dao = database.library()
+    constructor(database: LibraryDatabase) : this({ database })
+
+    /** Asked for each time: the library's database may be another one by now. */
+    private val dao get() = database().library()
 
     override suspend fun count(target: TagTarget): Int = when (target) {
         is TagTarget.LibraryFile -> dao.unsafeCount(target.fileId) ?: 0

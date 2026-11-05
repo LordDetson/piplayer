@@ -101,8 +101,8 @@ soon after 1.0, `later` is planned without a date. The items listed under Cut li
   headers. `M2a`
 - Locale-aware sorting using sort tags; per-list sort field, reverse order, list or grid view. `M2a`
 - A draggable scroll thumb with a letter or year bubble on long lists. `M2a`
-- Search over titles, artists, albums, composers, genres and file names, ignoring case, diacritics and the
-  difference between ё and е. `M2a`
+- Search over titles, artists, albums, composers, genres and file names, ignoring case, diacritics, letters such as
+  ø and ß, the difference between ё and е, and the width of kana; "acdc" finds "AC/DC". `M2a`
 - Queue: play next, add to queue, drag to reorder, remove; tapping a track plays the visible list from it. `M2a`
 - Browse Genres and Playlists. `M2b`
 - Legacy tag encodings (for example Windows-1251) detected and shown correctly in an automatic mode. `M2a`

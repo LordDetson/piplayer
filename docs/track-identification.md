@@ -282,15 +282,22 @@ track details, the media session and the player's time display (§7.1).
 another code page in practice, for example Windows-1251. Stage 0 decodes it with the legacy-encoding setting (M2b)
 before text search, scoring and the diff, so the "old" column shows readable text.
 
-- The bytes come from TagLib's Latin-1 strings (each character maps to one byte) for the frames the reader reports as
-  encoding 0, for ID3v1 and for RIFF INFO. Vorbis comments, MP4 items and APE tags are always Unicode.
-- Automatic mode (default): the candidates are ISO-8859-1 and, when a device or app language is Russian, Belarusian
-  or Ukrainian, Windows-1251. The choice is made per file, over all its legacy fields together: Windows-1251 is chosen
-  when at least one word (a run of letters) of its result is entirely Cyrillic and no word mixes Latin and Cyrillic
-  letters; otherwise ISO-8859-1. The choice is stored in `audio_file.tag_encoding`.
+- The bytes come from TagLib's string handlers for ID3v1, encoding-0 ID3v2 frames and RIFF INFO: during a read they
+  mark each byte at or above 0x80 as a private-use character, so the main process decides per file and can decide again
+  without reading the file. Vorbis comments, MP4 items and APE tags are always Unicode.
+- Automatic mode (default), per file over all its legacy fields together, in this order:
+  1. No field holds a byte above ASCII: nothing to decide.
+  2. Every such field is valid UTF-8: UTF-8, written into a Latin-1 field by some taggers.
+  3. When a device or app language is Russian, Belarusian or Ukrainian, Windows-1251 if its result has more real
+     Cyrillic words than words that mix scripts. A real word is a run of letters, all Cyrillic, at least two of them,
+     with a vowel or all in upper case; so `é` read as `й` counts for nothing.
+  4. Otherwise ISO-8859-1, with Windows-1252's punctuation in the range 0x80 to 0x9F.
+- The choice is stored in `audio_file.tag_encoding`. Without the language condition other legacy text would pass the
+  rule (`Þú`, `ÅÄÖ`, and GBK or EUC-KR names), so that condition stays; a lone `Я` stays ISO-8859-1, and a Russian
+  speaker on a phone with no such language keeps the old text. The manual choice of M2b covers both.
 - A manual choice in settings overrides the automatic mode for the whole library.
-- Writes (§7.2) store changed fields in Unicode and leave unchanged legacy frames as they are; converting those is a
-  reviewed fix in v1.x.
+- Writes (§7.2) store changed fields in Unicode and leave unchanged legacy frames as they are, read without marks;
+  converting those is a reviewed fix in v1.x.
 
 **ID3v1.** Read only for fields that the ID3v2 and APE tags lack, decoded as above. For writes (M4b) a setting
 decides, and the diff shows the ID3v1 change as its own line:
@@ -436,7 +443,9 @@ Definitions:
 
 - Duration credit: 1 up to a difference of 2 s, falling linearly to 0 at 30 s.
 - Similarity: Levenshtein ratio on strings normalized like search (case, diacritics, ё and е; Cyrillic, kana, Han and
-  Hangul letters are kept whole). Bracketed suffixes at the end of a title (remix, live, edit; ASCII or full-width
+  Hangul letters are kept whole; Latin letters without a decomposition take their plain spelling: ø as o, ł as l, đ and
+  ð as d, æ as ae, œ as oe, ß as ss, ı as i, þ as th, ħ as h, ŧ as t, ŋ as ng; halfwidth kana become full kana).
+  Bracketed suffixes at the end of a title (remix, live, edit; ASCII or full-width
   brackets) are compared separately: a suffix on only one side lowers the title similarity by 0.2, two different
   suffixes by 0.2 to 0.4. A featured artist or a remaster note in brackets is not a suffix, and brackets earlier in the
   title belong to the name, as in "(Don't Fear) The Reaper".
@@ -602,12 +611,13 @@ re-checked before release (M5); in M4a they also drive automatic preparation.
   car displays, voice requests and the widget. After Apply and Undo the playing item and the queued items of the same
   tracks are refreshed in place (Media3 `replaceMediaItem`) without restarting playback; verify on devices that the
   player does not prepare the file again.
-- **System surfaces.** The player given to the media session is wrapped (`ForwardingSimpleBasePlayer`) so that its
+- **System surfaces.** The player given to the media session is wrapped (a `ForwardingPlayer`, playback.md §2.6) so that its
   metadata is only the MediaItem's metadata built from the merged values, with `artworkUri` pointing to the cover the
   resolver chose (§5.2), and each item's duration is the stored exact duration (§3.1) whenever one is stored.
   Metadata that Media3's extractors read from the stream (tag frames, the embedded picture as `artworkData`) is never
   shown: otherwise fields PiPlayer leaves empty would show raw tags, and the session's bitmap loader would prefer the
-  old embedded picture to a saved cover. Verify on the pinned Media3 version (M2a).
+  old embedded picture to a saved cover. Checked on the pinned Media3 version in M2a; until the cover resolver arrives
+  in step 13 the stream's picture stays, because nothing else would show a cover.
 - **Undo for changes saved only in PiPlayer** (M3). Apply and Edit fields store the values they set; Keep as-is and
   Skip store no values. Undo marks a decision undone and re-resolves the winners, so undoing an older decision
   changes only the fields where it still wins: after two identifications in a row, undoing the older one changes
@@ -688,7 +698,7 @@ how far it got.
       process). A larger result, or any single value over 16 KB (embedded lyrics, large binary frames, raw tags), is
       written to a file in app storage and only its path crosses. Cover bytes never cross: images travel through
       files in app storage or pipes.
-    - Settings that affect reading or writing (legacy encoding, ID3v1 policy, cover preset) travel as call
+    - Settings that affect reading or writing (ID3v1 policy, cover preset) travel as call
       parameters, because DataStore exists only in the main process.
 12. **Playing files.** PiPlayer never writes the current item or the next item in playback order
     (`Player.getNextMediaItemIndex()`), which may already be preloaded for gapless playback. By default such a write
@@ -909,30 +919,37 @@ made live in the user database.
 - `audio_file(id, media_store_id, volume_name, relative_path, display_name, document_uri, size, mtime,
   generation_modified, mime_type, <media kinds>, format, codec, sample_rate, bit_depth, channels, bitrate, duration_ms, duration_source,
   content_key, tag_encoding, embedded_cover_present, embedded_cover_width, embedded_cover_height,
-  embedded_cover_bytes, embedded_cover_hash, unsafe_count, tag_pass_at)`
+  embedded_cover_bytes, embedded_cover_hash, unsafe_count, tag_pass_at, reader_version, tag_failure, tag_length_ms)`:
+  `tag_length_ms` is TagLib's length, an estimate for a VBR MP3 without a header, used only while no better one is known
 - `outside_file(uri, size, mtime, unsafe_count)`: the count of failed reads (§7.2 step 11) of files outside the
   library, such as files opened from other apps; a row exists only while its count is above 0 (library.md §4.4).
   The media kinds are the index's flags: music, podcast, audiobook, ringtone, notification, alarm and recording (the
   last unknown on Android 11); every audio row is stored, and lists hide kinds by setting (library.md §1.3).
 - `media_index_entry(file_id, title, artist, album, album_artist, composer, genre, year, track_number, duration_ms)`:
   media index values, precedence level 4, used only while `tag_pass_at` is null (§7.1).
-- `track(id, file_id, track_key, start_ms, end_ms, <typed tag columns>, raw_tags_json)`: values from PiPlayer's
-  reader, precedence level 3. Typed columns: title, artist, artists, album, album artist, album artists, sort names,
+- `track(id, file_id, track_key, start_ms, end_ms, album_id, <typed tag columns>, raw_tags_json)`: values from
+  PiPlayer's reader, precedence level 3. `track_key` stays empty until the content key is computed. Typed columns: title,
+  artist, artists, album, album artist, album artists, composers, genres, sort names,
   date, original date, track and disc numbers and totals, disc subtitle, compilation, label, catalog number, barcode,
   ISRC, MusicBrainz IDs, ReplayGain values.
 - `album`, `artist`, `track_artist(track_id, artist_id, role, position, join_phrase)`, `genre`, `track_genre`:
   grouping by release MBID, otherwise normalized title + album artist + folder, plus the compilation flag, the
   mirrored album favorite and the result of the album's thumbnail probe (§1).
-- `track_display(track_id, <merged values>, <normalized search columns>, missing_info_reasons,
+- `track_display(file_id, <merged values>, <normalized search columns>, missing_info_reasons,
   missing_info_decision, favorite, play_count, last_played_at, badge_state)`: merged values (§7.1) and the mirrored
-  user fields, for lists, sorting, smart lists and search. Search (M0 spike): one `search_text` column holds the
-  title, artists, album, composer, genre and file name, each normalized like §4.1 and joined by spaces; a query is
+  user fields, for lists, sorting, smart lists and search. It is keyed by file, because a file has a display row before
+  the tag pass has made a `track` row of it; CUE sheets will change that. The reasons are empty until the file is read,
+  because the index fills albums with folder names. Search (M0 spike): one `search_text` column holds the
+  title, artists, album, composer, genre and file name, each normalized like §4.1 and joined by spaces. Each field also
+  keeps its names glued, inside that field only: a word with punctuation inside ("AC/DC" as "ac dc acdc"; an underscore
+  separates words) and a run of neighbouring words of up to two letters ("AC DC" as "ac dc acdc"), so "acdc" finds both.
+  Longer words written apart stay apart: "blink182" does not find "Blink 182", and "theend" does not find "The End".
+  A query is
   normalized the same way and split into words (no repeats, longest first, at most 8), and every word must occur in
   the text, tested with `instr()` (in the M0 spike on the platform's SQLite, LIKE went through ICU and was two to three
   times slower). The library database uses the SQLite bundled with the app (library.md §1.1).
   An index on (`title_key`, `search_text`) lets a search walk the titles in order and stop at the first page of 50.
-  Known gaps for M2a: letters without a decomposition (ø, ł, đ, æ, œ, ß, ı) and halfwidth kana are not folded yet,
-  and a name typed without its punctuation ("acdc" for "AC/DC") is not found. `missing_info_reasons` is the set of §1 reasons, written by
+  `missing_info_reasons` is the set of §1 reasons, written by
   the precedence resolver; `missing_info_decision` is none, keep_as_is or skipped.
 - `fingerprint(content_key, fingerprint, acoustid_id, decoder_path, computed_at)`: a cache for identification and
   re-attachment, kept by content key, so the fingerprint of a file that left the media index stays available for
