@@ -1,6 +1,8 @@
 package io.github.lorddetson.piplayer.library.db
 
 import androidx.room3.Dao
+import androidx.room3.Embedded
+import androidx.room3.Insert
 import androidx.room3.Query
 import androidx.room3.Upsert
 import io.github.lorddetson.piplayer.library.sync.StoredFile
@@ -67,7 +69,10 @@ interface LibraryDao {
     @Query("SELECT COALESCE((SELECT mirrored_user_counter FROM library_meta WHERE id = 1), 0)")
     suspend fun mirroredUserCounter(): Long
 
-    @Query("INSERT OR REPLACE INTO library_meta (id, mirrored_user_counter) VALUES (1, :counter)")
+    @Query(
+        "INSERT INTO library_meta (id, mirrored_user_counter) VALUES (1, :counter) " +
+            "ON CONFLICT(id) DO UPDATE SET mirrored_user_counter = :counter",
+    )
     suspend fun setMirroredUserCounter(counter: Long)
 
     @Query("SELECT * FROM audio_file")
@@ -94,13 +99,106 @@ interface LibraryDao {
 
     @Query("SELECT * FROM track_display")
     suspend fun displays(): List<TrackDisplayEntity>
+
+    @Insert
+    suspend fun addTrack(track: TrackEntity): Long
+
+    @Query("SELECT * FROM track")
+    suspend fun tracks(): List<TrackEntity>
+
+    @Query("SELECT COALESCE((SELECT display_version FROM library_meta WHERE id = 1), 0)")
+    suspend fun displayVersion(): Int
+
+    @Query(
+        "INSERT INTO library_meta (id, mirrored_user_counter, display_version) VALUES (1, 0, :version) " +
+            "ON CONFLICT(id) DO UPDATE SET display_version = :version",
+    )
+    suspend fun setDisplayVersion(version: Int)
+
+    /** What the tag pass found in a file. */
+    @Query(
+        "UPDATE audio_file SET tag_pass_at = :at, reader_version = :readerVersion, tag_failure = NULL, format = :format, " +
+            "codec = :codec, sample_rate = :sampleRate, bit_depth = :bitDepth, channels = :channels, bitrate = :bitrate, " +
+            "tag_encoding = :tagEncoding, embedded_cover_present = :coverPresent, embedded_cover_bytes = :coverBytes, " +
+            "tag_length_ms = :tagLengthMs WHERE id = :fileId",
+    )
+    suspend fun markRead(
+        fileId: Long,
+        at: Long,
+        readerVersion: Int,
+        format: String?,
+        codec: String?,
+        sampleRate: Int?,
+        bitDepth: Int?,
+        channels: Int?,
+        bitrate: Int?,
+        tagEncoding: String?,
+        coverPresent: Boolean,
+        coverBytes: Long?,
+        tagLengthMs: Long?,
+    )
+
+    /** The tracks the pass has read in [volume], with what the display needs of their files. */
+    @Query("$READ_FILES WHERE f.volume_name = :volume AND f.tag_pass_at IS NOT NULL")
+    suspend fun readFilesIn(volume: String): List<ReadFileRow>
+
+    @Query("$READ_FILES WHERE f.tag_pass_at IS NOT NULL")
+    suspend fun readFiles(): List<ReadFileRow>
+
+    @Query("$READ_FILES WHERE f.tag_pass_at IS NOT NULL AND f.id IN (:fileIds)")
+    suspend fun readFilesOf(fileIds: List<Long>): List<ReadFileRow>
+
+    @Query(INDEX_INPUTS)
+    suspend fun indexInputs(): List<IndexInputRow>
+
+    @Query("$INDEX_INPUTS WHERE f.id IN (:fileIds)")
+    suspend fun indexInputsOf(fileIds: List<Long>): List<IndexInputRow>
+
+    @Query("DELETE FROM track_artist WHERE track_id IN (SELECT id FROM track WHERE file_id IN (:fileIds))")
+    suspend fun deleteTrackArtists(fileIds: List<Long>)
+
+    @Query("DELETE FROM track_genre WHERE track_id IN (SELECT id FROM track WHERE file_id IN (:fileIds))")
+    suspend fun deleteTrackGenres(fileIds: List<Long>)
+
+    @Query("DELETE FROM track WHERE file_id IN (:fileIds)")
+    suspend fun deleteTracks(fileIds: List<Long>)
 }
+
+/** A read track with what the display needs of its file. */
+data class ReadFileRow(
+    @Embedded val track: TrackEntity,
+    val size: Long,
+    val mtime: Long,
+    val displayName: String,
+    val embeddedCover: Boolean?,
+    val tagLengthMs: Long?,
+    val exactDurationMs: Long?,
+)
+
+/** What the display needs of a file's index values. */
+data class IndexInputRow(
+    val fileId: Long,
+    val displayName: String,
+    val title: String?,
+    val artist: String?,
+    val album: String?,
+    val composer: String?,
+    val genre: String?,
+    val durationMs: Long?,
+)
 
 /** A folder of a volume, as the media index gives its path. */
 data class FolderKey(val volume: String, val relativePath: String)
 
 /** A folder with a rule its files carry. */
 data class FolderRuleRow(val volume: String, val relativePath: String, val rule: Int)
+
+private const val READ_FILES = "SELECT t.*, f.size, f.mtime, f.display_name AS displayName, " +
+    "f.embedded_cover_present AS embeddedCover, f.tag_length_ms AS tagLengthMs, f.duration_ms AS exactDurationMs " +
+    "FROM track t JOIN audio_file f ON f.id = t.file_id"
+
+private const val INDEX_INPUTS = "SELECT f.id AS fileId, f.display_name AS displayName, e.title, e.artist, e.album, " +
+    "e.composer, e.genre, e.duration_ms AS durationMs FROM audio_file f LEFT JOIN media_index_entry e ON e.file_id = f.id"
 
 // Excluded folders never; included folders whole; elsewhere every file but the hidden kinds and short files. A file
 // whose length is unknown is never short (docs/library.md §3.5).

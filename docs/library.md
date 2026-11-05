@@ -69,6 +69,14 @@ The data model it implements is sketched in track-identification.md §10 (TI bel
   that changes no file writes no file rows. A sync that fails is logged and leaves the database as it was. Rows go in
   as `INSERT OR REPLACE` of up to 2 000 rows per statement, each statement taking its rows as one JSON parameter that
   `json_each` unpacks; a changed file is written again under its row ID, a new one takes the next free ID.
+- **What the tag pass found stays.** A file stored again with the same size and modification time, also after a
+  rename or an index rebuild, keeps what the tag pass found: its technical columns and `track` row, its failure, its
+  content key and its count of failed reads. Its display values are resolved again, so a new name counts where the name
+  is used. A change of size or modification time forgets all that, and the next pass reads the file again.
+- **New display rules.** `library_meta.display_version` records the rules `track_display` was derived by. When the
+  app's differ, the next sync derives every display row again from the stored values, without reading any file.
+- **Journal mode.** The database is set to WAL explicitly, because the automatic choice gives a single connection on a
+  device with little memory and lists would wait for writes.
 - **When it runs.** In the main process only, one sync at a time, on a background thread:
     - when the process starts, if the app holds the audio permission;
     - when the permission is granted while the process runs;

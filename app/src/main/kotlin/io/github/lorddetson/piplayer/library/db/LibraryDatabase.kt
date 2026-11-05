@@ -43,6 +43,31 @@ data class AudioFileEntity(
     @ColumnInfo(name = "folder_rule") val folderRule: Int,
     /** Reads of the file that crashed or hung `:tagger`; at 2 it is not read any more (docs/library.md §4.4). */
     @ColumnInfo(name = "unsafe_count", defaultValue = "0") val unsafeCount: Int = 0,
+    /** When the tag pass read the file; null until then. The values below hold while size and mtime stay the same. */
+    @ColumnInfo(name = "tag_pass_at") val tagPassAt: Long? = null,
+    /** The reader's version that last tried the file; a higher one tries it again. */
+    @ColumnInfo(name = "reader_version") val readerVersion: Int? = null,
+    /** Why the last read failed, if it did. */
+    @ColumnInfo(name = "tag_failure") val tagFailure: String? = null,
+    val format: String? = null,
+    val codec: String? = null,
+    @ColumnInfo(name = "sample_rate") val sampleRate: Int? = null,
+    @ColumnInfo(name = "bit_depth") val bitDepth: Int? = null,
+    val channels: Int? = null,
+    val bitrate: Int? = null,
+    /** The legacy encoding the file's tags were read in (TI §3.6). */
+    @ColumnInfo(name = "tag_encoding") val tagEncoding: String? = null,
+    @ColumnInfo(name = "embedded_cover_present") val embeddedCoverPresent: Boolean? = null,
+    @ColumnInfo(name = "embedded_cover_bytes") val embeddedCoverBytes: Long? = null,
+    @ColumnInfo(name = "embedded_cover_width") val embeddedCoverWidth: Int? = null,
+    @ColumnInfo(name = "embedded_cover_height") val embeddedCoverHeight: Int? = null,
+    @ColumnInfo(name = "embedded_cover_hash") val embeddedCoverHash: String? = null,
+    /** The length TagLib gives, an estimate for a VBR MP3 without a header. */
+    @ColumnInfo(name = "tag_length_ms") val tagLengthMs: Long? = null,
+    /** Written by the content key stage (TI §2). */
+    @ColumnInfo(name = "content_key") val contentKey: String? = null,
+    @ColumnInfo(name = "duration_ms") val durationMs: Long? = null,
+    @ColumnInfo(name = "duration_source") val durationSource: String? = null,
 )
 
 /** The user database's change counter that the folder rules of `audio_file` mirror (docs/library.md §3.4). */
@@ -50,6 +75,8 @@ data class AudioFileEntity(
 data class LibraryMetaEntity(
     @PrimaryKey val id: Int = 1,
     @ColumnInfo(name = "mirrored_user_counter") val mirroredUserCounter: Long,
+    /** The version of the rules `track_display` was derived by (`TrackDisplayWriter.VERSION`). */
+    @ColumnInfo(name = "display_version", defaultValue = "0") val displayVersion: Int = 0,
 )
 
 /** The media index's values for a file, as it gives them (TI §10.1, precedence level 4). */
@@ -79,6 +106,8 @@ data class TrackDisplayEntity(
     @ColumnInfo(name = "duration_ms") val durationMs: Long?,
     @ColumnInfo(name = "title_key") val titleKey: String,
     @ColumnInfo(name = "search_text") val searchText: String,
+    /** The reasons of `MergedValues`, null until the tag pass has read the file. */
+    @ColumnInfo(name = "missing_info_reasons") val missingInfoReasons: Int? = null,
 )
 
 /**
@@ -113,8 +142,14 @@ data class VolumeSyncStateEntity(
         VolumeSyncStateEntity::class,
         LibraryMetaEntity::class,
         OutsideFileEntity::class,
+        TrackEntity::class,
+        AlbumEntity::class,
+        ArtistEntity::class,
+        TrackArtistEntity::class,
+        GenreEntity::class,
+        TrackGenreEntity::class,
     ],
-    version = 4,
+    version = 5,
     exportSchema = false,
 )
 abstract class LibraryDatabase : RoomDatabase() {
@@ -134,6 +169,9 @@ abstract class LibraryDatabase : RoomDatabase() {
             return builder
                 .setDriver(BundledSQLiteDriver())
                 .setQueryCoroutineContext(Dispatchers.IO)
+                // Not left to the device: on one with little memory the automatic choice gives a single connection, and
+                // lists would wait for each batch of the tag pass.
+                .setJournalMode(RoomDatabase.JournalMode.WRITE_AHEAD_LOGGING)
                 .fallbackToDestructiveMigration(dropAllTables = true)
                 .build()
         }

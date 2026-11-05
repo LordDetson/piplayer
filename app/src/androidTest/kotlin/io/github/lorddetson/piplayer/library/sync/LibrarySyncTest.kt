@@ -8,7 +8,11 @@ import io.github.lorddetson.piplayer.library.rules.FolderRule
 import io.github.lorddetson.piplayer.library.rules.FolderRuleState
 import io.github.lorddetson.piplayer.library.FakeMediaIndex.Companion.PRIMARY
 import io.github.lorddetson.piplayer.library.FakeMediaIndex.Companion.row
+import androidx.room3.useReaderConnection
+import androidx.room3.withWriteTransaction
 import io.github.lorddetson.piplayer.library.db.LibraryDatabase
+import io.github.lorddetson.piplayer.library.db.TrackEntity
+import io.github.lorddetson.piplayer.library.values.TrackTags
 import java.util.concurrent.CountDownLatch
 import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.flow.first
@@ -360,6 +364,199 @@ class LibrarySyncTest {
         sync.sync()
 
         assertThat(files().keys).containsExactlyInAnyOrder(1L, 2L, 3L)
+    }
+
+    /** What the tag pass stores for a file. */
+    private suspend fun readByThePass(mediaStoreId: Long, tags: Map<String, List<String>>) {
+        val fileId = files().getValue(mediaStoreId).id
+        dao.addTrack(TrackEntity.of(fileId, TrackTags.from(tags)))
+        dao.markRead(
+            fileId, at = 1_000, readerVersion = 1, format = "mpeg", codec = "mp3", sampleRate = 44_100, bitDepth = null,
+            channels = 2, bitrate = 320, tagEncoding = "windows-1251", coverPresent = true, coverBytes = 5, tagLengthMs = 7,
+        )
+        TrackDisplayWriter(database).refresh(listOf(fileId))
+    }
+
+    private fun display(mediaStoreId: Long) = runBlocking {
+        val fileId = dao.files().single { it.mediaStoreId == mediaStoreId }.id
+        dao.displays().single { it.fileId == fileId }
+    }
+
+    private val tagged = mapOf("TITLE" to listOf("Tag title"), "ARTIST" to listOf("Tag artist"), "ALBUM" to listOf("Tag album"))
+
+    @Test
+    fun whatThePassReadShowsOnceItIsStored() = runBlocking<Unit> {
+        index.volume().rows = listOf(row(1, title = "Index title"))
+        sync.sync()
+
+        readByThePass(1, tagged)
+
+        with(display(1)) {
+            assertThat(title).isEqualTo("Tag title")
+            assertThat(artist).isEqualTo("Tag artist")
+            assertThat(album).isEqualTo("Tag album")
+            assertThat(titleKey).isEqualTo("tag title")
+            assertThat(missingInfoReasons).isNotNull()
+        }
+    }
+
+    @Test
+    fun aFileStoredAgainWithTheSameSizeAndTimeKeepsWhatThePassRead() = runBlocking<Unit> {
+        index.volume().rows = listOf(row(1, title = "Index title", name = "old.mp3", generation = 1))
+        sync.sync()
+        readByThePass(1, tagged)
+
+        index.volume().rows = listOf(row(1, title = "New index title", name = "new.mp3", generation = 2))
+        assertThat(sync.sync()).isTrue()
+
+        with(files().getValue(1)) {
+            assertThat(displayName).isEqualTo("new.mp3")
+            assertThat(tagPassAt).isEqualTo(1_000)
+            assertThat(readerVersion).isEqualTo(1)
+            assertThat(format).isEqualTo("mpeg")
+            assertThat(codec).isEqualTo("mp3")
+            assertThat(sampleRate).isEqualTo(44_100)
+            assertThat(channels).isEqualTo(2)
+            assertThat(bitrate).isEqualTo(320)
+            assertThat(tagEncoding).isEqualTo("windows-1251")
+            assertThat(embeddedCoverPresent).isTrue()
+            assertThat(embeddedCoverBytes).isEqualTo(5)
+            assertThat(tagLengthMs).isEqualTo(7)
+        }
+        assertThat(dao.tracks()).hasSize(1)
+        with(display(1)) {
+            assertThat(title).isEqualTo("Tag title")
+            assertThat(searchText).contains("tag title").contains("new").doesNotContain("old").doesNotContain("index")
+        }
+    }
+
+    @Test
+    fun aFileWithoutATitleTagTakesTheNewNameWhenItIsRenamed() = runBlocking<Unit> {
+        index.volume().rows = listOf(row(1, name = "Artist - Old.mp3", generation = 1))
+        sync.sync()
+        readByThePass(1, emptyMap())
+        assertThat(display(1).title).isEqualTo("Old")
+
+        index.volume().rows = listOf(row(1, name = "Artist - New.mp3", generation = 2))
+        sync.sync()
+
+        assertThat(display(1).title).isEqualTo("New")
+    }
+
+    @Test
+    fun aChangedFileForgetsWhatThePassRead() = runBlocking<Unit> {
+        index.volume().rows = listOf(row(1, title = "Index title", generation = 1))
+        sync.sync()
+        readByThePass(1, tagged)
+        val replaced = row(1, title = "Index title", generation = 2)
+
+        index.volume().rows = listOf(replaced.copy(size = replaced.size + 1))
+        sync.sync()
+
+        with(files().getValue(1)) {
+            assertThat(tagPassAt).isNull()
+            assertThat(readerVersion).isNull()
+            assertThat(format).isNull()
+            assertThat(embeddedCoverPresent).isNull()
+            assertThat(tagLengthMs).isNull()
+        }
+        assertThat(dao.tracks()).isEmpty()
+        with(display(1)) {
+            assertThat(title).isEqualTo("Index title")
+            assertThat(missingInfoReasons).isNull()
+        }
+    }
+
+    @Test
+    fun anIndexRebuildKeepsWhatThePassRead() = runBlocking<Unit> {
+        index.volume().rows = listOf(row(1, title = "Index title", name = "a.mp3"))
+        sync.sync()
+        readByThePass(1, tagged)
+
+        // The same file under a new index ID and a new version of the index.
+        index.volumes.getValue(PRIMARY).version = "2"
+        index.volume(version = "2").rows = listOf(row(7, title = "Index title", name = "a.mp3").copy(size = 1_001, modifiedSeconds = 1_700_000_001))
+        sync.sync()
+
+        assertThat(files().getValue(7).tagPassAt).isEqualTo(1_000)
+        assertThat(dao.tracks()).hasSize(1)
+        assertThat(display(7).title).isEqualTo("Tag title")
+    }
+
+    @Test
+    fun aRemovedFileLeavesNothingForTheNextFileOfItsId() = runBlocking<Unit> {
+        index.volume().rows = listOf(row(1), row(2))
+        sync.sync()
+        readByThePass(2, tagged)
+        val removedId = files().getValue(2).id
+
+        index.volume().rows = listOf(row(1))
+        sync.sync()
+        assertThat(dao.tracks()).isEmpty()
+
+        // New files take the next free ID, which is the removed file's again.
+        index.volume().rows = listOf(row(1), row(3, title = "Third", generation = 3))
+        sync.sync()
+
+        assertThat(files().getValue(3).id).isEqualTo(removedId)
+        assertThat(files().getValue(3).tagPassAt).isNull()
+        assertThat(display(3).title).isEqualTo("Third")
+    }
+
+    @Test
+    fun aNewDisplayVersionDerivesTheDisplaysAgainFromTheStoredValues() = runBlocking<Unit> {
+        index.volume().rows = listOf(row(1, title = "Index one"), row(2, title = "Index two"))
+        sync.sync()
+        readByThePass(1, tagged)
+        database.withWriteTransaction {
+            usePrepared("UPDATE track_display SET title = 'stale', title_key = 'stale'") { it.step() }
+        }
+        dao.setDisplayVersion(TrackDisplayWriter.VERSION - 1)
+        val revision = sync.status.value.revision
+
+        assertThat(sync.sync()).isTrue()
+
+        assertThat(display(1).title).isEqualTo("Tag title")
+        assertThat(display(2).title).isEqualTo("Index two")
+        assertThat(dao.displayVersion()).isEqualTo(TrackDisplayWriter.VERSION)
+        assertThat(sync.status.value.revision).isGreaterThan(revision)
+    }
+
+    @Test
+    fun aFirstSyncRecordsTheDisplayVersionAndALaterOneChangesNothing() = runBlocking<Unit> {
+        index.volume().rows = listOf(row(1))
+        sync.sync()
+        assertThat(dao.displayVersion()).isEqualTo(TrackDisplayWriter.VERSION)
+
+        assertThat(sync.sync()).isFalse()
+    }
+
+    @Test
+    fun mirroringTheRulesKeepsTheDisplayVersion() = runBlocking<Unit> {
+        index.volume().rows = listOf(row(1))
+        sync.sync()
+
+        rules.set(FolderRule(PRIMARY, "Music/", include = false))
+        sync.sync()
+
+        assertThat(dao.displayVersion()).isEqualTo(TrackDisplayWriter.VERSION)
+    }
+
+    @Test
+    fun theDatabaseIsWrittenAheadOfTheLogSoListsReadDuringAWrite() = runBlocking<Unit> {
+        val file = java.io.File(context.cacheDir, "journal-mode-test.db")
+        val onDisk = LibraryDatabase.open(context, file)
+        try {
+            val mode = onDisk.useReaderConnection { connection ->
+                connection.usePrepared("PRAGMA journal_mode") { it.step(); it.getText(0) }
+            }
+            assertThat(mode).isEqualToIgnoringCase("wal")
+        } finally {
+            onDisk.close()
+            file.delete()
+            java.io.File("${file.path}-wal").delete()
+            java.io.File("${file.path}-shm").delete()
+        }
     }
 
     @Test

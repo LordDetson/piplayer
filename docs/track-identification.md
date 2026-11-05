@@ -875,23 +875,27 @@ made live in the user database.
 - `audio_file(id, media_store_id, volume_name, relative_path, display_name, document_uri, size, mtime,
   generation_modified, mime_type, <media kinds>, format, codec, sample_rate, bit_depth, channels, bitrate, duration_ms, duration_source,
   content_key, tag_encoding, embedded_cover_present, embedded_cover_width, embedded_cover_height,
-  embedded_cover_bytes, embedded_cover_hash, unsafe_count, tag_pass_at)`
+  embedded_cover_bytes, embedded_cover_hash, unsafe_count, tag_pass_at, reader_version, tag_failure, tag_length_ms)`:
+  `tag_length_ms` is TagLib's length, an estimate for a VBR MP3 without a header, used only while no better one is known
 - `outside_file(uri, size, mtime, unsafe_count)`: the count of failed reads (§7.2 step 11) of files outside the
   library, such as files opened from other apps; a row exists only while its count is above 0 (library.md §4.4).
   The media kinds are the index's flags: music, podcast, audiobook, ringtone, notification, alarm and recording (the
   last unknown on Android 11); every audio row is stored, and lists hide kinds by setting (library.md §1.3).
 - `media_index_entry(file_id, title, artist, album, album_artist, composer, genre, year, track_number, duration_ms)`:
   media index values, precedence level 4, used only while `tag_pass_at` is null (§7.1).
-- `track(id, file_id, track_key, start_ms, end_ms, <typed tag columns>, raw_tags_json)`: values from PiPlayer's
-  reader, precedence level 3. Typed columns: title, artist, artists, album, album artist, album artists, sort names,
+- `track(id, file_id, track_key, start_ms, end_ms, album_id, <typed tag columns>, raw_tags_json)`: values from
+  PiPlayer's reader, precedence level 3. `track_key` stays empty until the content key is computed. Typed columns: title,
+  artist, artists, album, album artist, album artists, composers, genres, sort names,
   date, original date, track and disc numbers and totals, disc subtitle, compilation, label, catalog number, barcode,
   ISRC, MusicBrainz IDs, ReplayGain values.
 - `album`, `artist`, `track_artist(track_id, artist_id, role, position, join_phrase)`, `genre`, `track_genre`:
   grouping by release MBID, otherwise normalized title + album artist + folder, plus the compilation flag, the
   mirrored album favorite and the result of the album's thumbnail probe (§1).
-- `track_display(track_id, <merged values>, <normalized search columns>, missing_info_reasons,
+- `track_display(file_id, <merged values>, <normalized search columns>, missing_info_reasons,
   missing_info_decision, favorite, play_count, last_played_at, badge_state)`: merged values (§7.1) and the mirrored
-  user fields, for lists, sorting, smart lists and search. Search (M0 spike): one `search_text` column holds the
+  user fields, for lists, sorting, smart lists and search. It is keyed by file, because a file has a display row before
+  the tag pass has made a `track` row of it; CUE sheets will change that. The reasons are empty until the file is read,
+  because the index fills albums with folder names. Search (M0 spike): one `search_text` column holds the
   title, artists, album, composer, genre and file name, each normalized like §4.1 and joined by spaces. Each field also
   keeps its names glued, inside that field only: a word with punctuation inside ("AC/DC" as "ac dc acdc"; an underscore
   separates words) and a run of neighbouring words of up to two letters ("AC DC" as "ac dc acdc"), so "acdc" finds both.

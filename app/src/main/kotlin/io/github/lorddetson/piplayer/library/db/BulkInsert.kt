@@ -79,19 +79,20 @@ internal class JsonRows {
  * Writes [rows] into [table] with `INSERT OR REPLACE`, [ROWS_PER_STATEMENT] rows per statement, each statement taking
  * its rows as one JSON parameter: binding every value on its own made up most of a first sync of 20 000 files (docs/
  * library.md §1.7). [values] gives one row's [columns] in order. [computed] adds columns whose values are SQL
- * expressions; they may read the row's values as `value->>i` (i its index in [columns]) and the rows the table held
- * before the statement.
+ * expressions; they may read the row's values as `value->>i` (i its index in [columns]) and, through [join], the rows
+ * the table held before the statement.
  */
 internal suspend fun <T> PooledConnection.replaceAll(
     table: String,
     columns: List<String>,
     rows: List<T>,
     computed: Map<String, String> = emptyMap(),
+    join: String = "",
     values: JsonRows.Row.(T) -> Unit,
 ) {
     // `->>` gives the SQL value of each JSON value: integer, text or null.
     val sql = "INSERT OR REPLACE INTO $table (${(columns + computed.keys).joinToString(",")}) " +
-        "SELECT ${(columns.indices.map { "value->>$it" } + computed.values).joinToString(",")} FROM json_each(?)"
+        "SELECT ${(columns.indices.map { "value->>$it" } + computed.values).joinToString(",")} FROM json_each(?) $join"
     for (chunk in rows.chunked(ROWS_PER_STATEMENT)) {
         val json = JsonRows().apply { chunk.forEach { row -> row { values(row) } } }.toString()
         usePrepared(sql) { statement ->
