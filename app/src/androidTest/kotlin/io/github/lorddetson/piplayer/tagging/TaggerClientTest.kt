@@ -50,6 +50,19 @@ class TaggerClientTest {
     private fun client(timeout: Duration = SHORT_TIMEOUT, idle: Duration = TaggerClient.IDLE) =
         TaggerTesting.client(database, timeout, idle).also { clients += it }
 
+    @Test
+    fun aBackgroundCallRunsAtBackgroundPriorityAndLeavesNoTraceForTheNext() = runBlocking<Unit> {
+        val guard = TagReadGuard(counts)
+        val target = TagTarget.Outside("uri", 1, 1)
+        val priority = { Process.getThreadPriority(Process.myTid()) }
+
+        val background = guard.run(target, kill = {}, background = true, call = priority)
+        val foreground = guard.run(target, kill = {}, call = priority)
+
+        assertThat(background).isEqualTo(TaggerResult.Replied(Process.THREAD_PRIORITY_BACKGROUND))
+        assertThat(foreground).isEqualTo(TaggerResult.Replied(Process.THREAD_PRIORITY_DEFAULT))
+    }
+
     @After
     fun close() {
         controller?.stopAndRelease()

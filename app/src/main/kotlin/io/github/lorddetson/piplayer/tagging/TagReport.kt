@@ -4,6 +4,7 @@ import io.github.lorddetson.piplayer.nativelib.taglib.AudioProperties
 import io.github.lorddetson.piplayer.nativelib.taglib.Picture
 import io.github.lorddetson.piplayer.nativelib.taglib.TagReadError
 import io.github.lorddetson.piplayer.nativelib.taglib.TagReadResult
+import io.github.lorddetson.piplayer.tagging.contentkey.DurationPlan
 import kotlinx.serialization.Serializable
 
 /**
@@ -16,7 +17,15 @@ data class TagReport(
     val properties: Map<String, List<String>> = emptyMap(),
     val audio: Audio? = null,
     val pictures: List<PictureInfo> = emptyList(),
+    val container: String? = null,
+    val codec: String? = null,
+    val bitDepth: Int? = null,
+    val content: Content? = null,
 ) {
+
+    /** The content key in hex, its format token and how far the file's header settles its length (TI §3.1). */
+    @Serializable
+    data class Content(val key: String, val token: String, val duration: DurationPlan)
 
     @Serializable
     data class Audio(val lengthMs: Int, val bitrateKbps: Int, val sampleRate: Int, val channels: Int)
@@ -32,6 +41,9 @@ data class TagReport(
             properties = properties,
             audio = audio?.let { AudioProperties(it.lengthMs, it.bitrateKbps, it.sampleRate, it.channels) },
             pictures = pictures.map { Picture(null, it.sizeBytes, it.mimeType, it.pictureType, it.description) },
+            container = container,
+            codec = codec,
+            bitDepth = bitDepth,
         )
     }
 
@@ -42,6 +54,9 @@ data class TagReport(
                 properties = result.properties,
                 audio = result.audio?.let { Audio(it.lengthMs, it.bitrateKbps, it.sampleRate, it.channels) },
                 pictures = result.pictures.map { PictureInfo(it.pictureType, it.mimeType, it.description, it.sizeBytes) },
+                container = result.container,
+                codec = result.codec,
+                bitDepth = result.bitDepth,
             )
         }
     }

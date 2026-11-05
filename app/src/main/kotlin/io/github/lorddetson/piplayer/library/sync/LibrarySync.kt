@@ -5,9 +5,11 @@ import androidx.room3.TransactionScope
 import androidx.room3.withWriteTransaction
 import io.github.lorddetson.piplayer.library.db.LibraryDao
 import io.github.lorddetson.piplayer.library.db.LibraryDatabase
+import io.github.lorddetson.piplayer.library.db.ReadFileRow
 import io.github.lorddetson.piplayer.library.db.VolumeSyncStateEntity
 import io.github.lorddetson.piplayer.library.db.JsonRows
 import io.github.lorddetson.piplayer.library.db.replaceAll
+import io.github.lorddetson.piplayer.library.values.IndexValues
 import io.github.lorddetson.piplayer.library.rules.FolderRuleMatcher
 import io.github.lorddetson.piplayer.library.rules.Recordings
 import io.github.lorddetson.piplayer.library.rules.RulesSource
@@ -16,11 +18,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -47,6 +46,7 @@ class LibrarySync(
 ) {
 
     private val dao: LibraryDao = database.library()
+    private val displays = TrackDisplayWriter(database)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val running = Mutex()
 
@@ -109,6 +109,9 @@ class LibrarySync(
         }
     }
 
+    /** Runs [block] while no sync runs, so that it never sees or writes a file under a sync's feet. */
+    suspend fun <T> exclusive(block: suspend () -> T): T = running.withLock { block() }
+
     /** Waits until no sync runs and none is asked for. */
     suspend fun awaitIdle() {
         synchronized(this) { soon }?.join()
@@ -138,7 +141,9 @@ class LibrarySync(
 
     /**
      * What a sync writes for one volume. [rows] are the rows to store, the updated ones first; the added ones get their
-     * IDs when they are written. [displays] are their display values, in the same order.
+     * IDs when they are written. [displays] are their display values, in the same order. [changedFiles] are read files
+     * that changed since, so that what the pass read of them no longer holds. [movedFiles] are read files in another
+     * folder now: their albums need a new look, so the next pass reads them again.
      */
     private class VolumePlan(
         val state: VolumeSyncStateEntity,
@@ -146,6 +151,8 @@ class LibrarySync(
         val changes: FileChanges,
         val rows: List<IndexRow>,
         val displays: List<DisplayValues>,
+        val changedFiles: List<Long>,
+        val movedFiles: List<Long>,
     )
 
     /** Reads the whole index first and writes everything in one transaction, so a failed read writes nothing. */
@@ -163,12 +170,21 @@ class LibrarySync(
         val detached = SyncPlanner.detached(stored.keys, attached)
         val detachedFiles = detached.flatMap { volume -> dao.storedFiles(volume).map { it.fileId } }
 
-        val filesChanged = plans.any { !it.changes.isEmpty } || detachedFiles.isNotEmpty() || rulesChanged
-        if (!filesChanged && plans.none { it.stateChanged } && detached.isEmpty()) {
+        // Derived before the writes below, which then replace what they change themselves.
+        val newDisplayVersion = dao.displayVersion() != TrackDisplayWriter.VERSION
+        val allInputs = if (newDisplayVersion) displays.allInputs() else emptyList()
+        val derived = TrackDisplayWriter.resolve(allInputs)
+
+        val filesChanged = plans.any { !it.changes.isEmpty } || detachedFiles.isNotEmpty() || rulesChanged || allInputs.isNotEmpty()
+        if (!filesChanged && !newDisplayVersion && plans.none { it.stateChanged } && detached.isEmpty()) {
             markKnown()
             return false
         }
         database.withWriteTransaction {
+            if (newDisplayVersion) {
+                with(TrackDisplayWriter) { write(allInputs.map { it.fileId }, derived) }
+                dao.setDisplayVersion(TrackDisplayWriter.VERSION)
+            }
             delete(detachedFiles)
             detached.forEach { dao.forgetVolume(it) }
             for (plan in plans) {
@@ -210,36 +226,66 @@ class LibrarySync(
         }
         val state = VolumeSyncStateEntity(volume, version, generation)
         val rows = changes.updated.map { it.row } + changes.added
-        return VolumePlan(state, stateChanged = state != stored, changes, rows, displayValues(rows))
+        // A file stored again keeps what the pass read of it, unless its size or modification time changed.
+        val reads = if (changes.updated.isEmpty()) emptyMap() else dao.readFilesIn(volume).associateBy { it.fileId }
+        val changedFiles = changes.updated.filter { update ->
+            reads[update.fileId]?.let { !it.holdsFor(update.row) } == true
+        }.map { it.fileId }
+        val movedFiles = changes.updated.filter { update ->
+            reads[update.fileId]?.let { it.holdsFor(update.row) && it.relativePath != update.row.relativePath } == true
+        }.map { it.fileId }
+        val inputs = changes.updated.map { update ->
+            input(update.fileId, update.row, reads[update.fileId]?.takeIf { it.holdsFor(update.row) })
+        } + changes.added.map { input(fileId = 0, it, read = null) }
+        return VolumePlan(state, stateChanged = state != stored, changes, rows, TrackDisplayWriter.resolve(inputs), changedFiles, movedFiles)
     }
 
-    /** Normalizing 20 000 titles and search texts takes about a second on one core, so the cores share it. */
-    private suspend fun displayValues(rows: List<IndexRow>): List<DisplayValues> = coroutineScope {
-        rows.chunked(DISPLAY_CHUNK)
-            .map { chunk -> async(Dispatchers.Default) { chunk.map(DisplayValues::of) } }
-            .awaitAll()
-            .flatten()
-    }
+    private fun ReadFileRow.holdsFor(row: IndexRow) = size == row.size && mtime == row.modifiedSeconds
+
+    private fun input(fileId: Long, row: IndexRow, read: ReadFileRow?) = DisplayInput(
+        fileId,
+        row.displayName,
+        IndexValues(row.title, row.artist, row.album, row.composer, row.genre, row.durationMs),
+        read,
+    )
 
     /** Updated files keep their row IDs and added ones take the next free IDs; each table is written in bulk. */
     private suspend fun TransactionScope<*>.write(plan: VolumePlan) {
         val changes = plan.changes
         delete(changes.removed)
+        deleteTracks(plan.changedFiles)
         if (plan.rows.isEmpty()) return
         val first = dao.lastFileId() + 1
         val ids = changes.updated.map { it.fileId } + List(changes.added.size) { first + it }
         val indices = plan.rows.indices.toList()
-        replaceAll("audio_file", FILE_COLUMNS, indices, KEPT_UNSAFE_COUNT) { i -> file(ids[i], plan.rows[i]) }
+        if (changes.updated.isEmpty()) {
+            // Only new files, as in a first sync: nothing to keep, and no reading of the table being written.
+            replaceAll("audio_file", FILE_COLUMNS, indices) { i -> file(ids[i], plan.rows[i]) }
+        } else {
+            replaceAll("audio_file", FILE_COLUMNS, indices, KEPT_COLUMNS, SAME_FILE) { i -> file(ids[i], plan.rows[i]) }
+        }
         replaceAll("media_index_entry", ENTRY_COLUMNS, indices) { i -> entry(ids[i], plan.rows[i]) }
-        replaceAll("track_display", DISPLAY_COLUMNS, indices) { i -> display(ids[i], plan.displays[i]) }
+        with(TrackDisplayWriter) { write(ids, plan.displays) }
+        for (chunk in plan.movedFiles.chunked(DELETE_CHUNK)) dao.readAgain(chunk)
     }
 
     /** In chunks, so that no statement takes thousands of parameters. */
     private suspend fun delete(fileIds: List<Long>) {
         for (chunk in fileIds.chunked(DELETE_CHUNK)) {
+            dao.deleteTrackArtists(chunk)
+            dao.deleteTrackGenres(chunk)
+            dao.deleteTracks(chunk)
             dao.deleteDisplays(chunk)
             dao.deleteEntries(chunk)
             dao.deleteFiles(chunk)
+        }
+    }
+
+    private suspend fun deleteTracks(fileIds: List<Long>) {
+        for (chunk in fileIds.chunked(DELETE_CHUNK)) {
+            dao.deleteTrackArtists(chunk)
+            dao.deleteTrackGenres(chunk)
+            dao.deleteTracks(chunk)
         }
     }
 
@@ -277,21 +323,10 @@ class LibrarySync(
         long(row.durationMs)
     }
 
-    private fun JsonRows.Row.display(id: Long, values: DisplayValues) {
-        long(id)
-        text(values.title)
-        text(values.artist)
-        text(values.album)
-        long(values.durationMs)
-        text(values.titleKey)
-        text(values.searchText)
-    }
-
     private companion object {
         const val TAG = "LibrarySync"
         const val CHANGE_DELAY_MS = 1_000L
         const val DELETE_CHUNK = 500
-        const val DISPLAY_CHUNK = 2_000
 
         // The columns of the entities in LibraryDatabase.kt, in the order the writers above give their values.
         val FILE_COLUMNS = listOf(
@@ -303,16 +338,19 @@ class LibrarySync(
             "file_id", "title", "artist", "album", "album_artist", "composer", "genre", "year", "track_number",
             "duration_ms",
         )
-        val DISPLAY_COLUMNS = listOf("file_id", "title", "artist", "album", "duration_ms", "title_key", "search_text")
 
         /**
-         * A file stored again keeps its count of failed tag reads while its size and modification time stay the same;
-         * a changed file starts again from 0 (docs/library.md §4.4). SQLite reads the old rows before it replaces them.
+         * A file stored again keeps its count of failed tag reads and all the tag pass found while its size and
+         * modification time stay the same; a changed file starts again (docs/library.md §1.3, §4.4). SQLite reads the
+         * old rows before it replaces them.
          */
-        val KEPT_UNSAFE_COUNT = mapOf(
-            "unsafe_count" to "COALESCE((SELECT o.unsafe_count FROM audio_file o WHERE " +
-                "o.id = value->>${FILE_COLUMNS.indexOf("id")} AND o.size = value->>${FILE_COLUMNS.indexOf("size")} " +
-                "AND o.mtime = value->>${FILE_COLUMNS.indexOf("mtime")}), 0)",
-        )
+        val KEPT_COLUMNS = listOf(
+            "tag_pass_at", "reader_version", "tag_failure", "format", "codec", "sample_rate", "bit_depth", "channels",
+            "bitrate", "tag_encoding", "embedded_cover_present", "embedded_cover_bytes", "embedded_cover_width",
+            "embedded_cover_height", "embedded_cover_hash", "tag_length_ms", "content_key", "duration_ms", "duration_source",
+        ).associateWith { "o.$it" } + ("unsafe_count" to "COALESCE(o.unsafe_count, 0)")
+
+        val SAME_FILE = "LEFT JOIN audio_file o ON o.id = value->>${FILE_COLUMNS.indexOf("id")} " +
+            "AND o.size = value->>${FILE_COLUMNS.indexOf("size")} AND o.mtime = value->>${FILE_COLUMNS.indexOf("mtime")}"
     }
 }

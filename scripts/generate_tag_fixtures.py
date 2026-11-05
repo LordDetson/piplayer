@@ -8,6 +8,7 @@ Run from the repository root: python scripts/generate_tag_fixtures.py
 """
 import pathlib
 import shutil
+import struct
 import subprocess
 import sys
 import tempfile
@@ -43,6 +44,10 @@ FIXTURES = [
     ("vorbis.ogg", ["-c:a", "libvorbis", "-q:a", "1"], LATIN, False),
     ("opus.opus", ["-c:a", "libopus", "-b:a", "32k"], LATIN, False),
     ("riff-info.wav", ["-c:a", "pcm_s16le"], LATIN, False),
+    # An AAC stream without a container holds no tags.
+    ("adts.aac", ["-c:a", "aac", "-b:a", "128k", "-f", "adts"], {}, False),
+    # A lossy coding in a WAV file.
+    ("adpcm.wav", ["-c:a", "adpcm_ima_wav"], {}, False),
     ("cyrillic.flac", ["-c:a", "flac"], CYRILLIC, False),
     ("cyrillic-id3v23.mp3", ["-c:a", "libmp3lame", "-b:a", "64k", "-id3v2_version", "3"], CYRILLIC, False),
 ]
@@ -60,6 +65,46 @@ def strip_id3v2(path):
     size = (data[6] << 21) | (data[7] << 14) | (data[8] << 7) | data[9]
     end = 10 + size + (10 if data[5] & 0x10 else 0)
     path.write_bytes(data[end:])
+
+
+def id3v1(title="", artist="", album="", pad=b"\0"):
+    """An ID3v1 tag; its text is Windows-1251, as an old tagger on a Russian Windows wrote it."""
+    def field(text, size):
+        return text.encode("cp1251").ljust(size, pad)
+    return b"TAG" + field(title, 30) + field(artist, 30) + field(album, 30) + b"1990" + b"\0" * 30 + bytes([255])
+
+
+def id3v23(*frames):
+    body = b"".join(name.encode() + struct.pack(">I", len(data)) + b"\0\0" + data for name, data in frames)
+    size = len(body)
+    synchsafe = bytes([(size >> 21) & 0x7F, (size >> 14) & 0x7F, (size >> 7) & 0x7F, size & 0x7F])
+    return b"ID3\x03\0\0" + synchsafe + body
+
+
+def make_legacy_fixtures():
+    """Text in legacy encodings, which ffmpeg does not write: built from the audio of the fixtures made above."""
+    audio = (OUT / "id3v1.mp3").read_bytes()[:-128]
+    legacy = lambda text: b"\0" + text.encode("cp1251")
+    utf16 = lambda text: b"\x01\xff\xfe" + text.encode("utf-16-le")
+    (OUT / "legacy-id3v1.mp3").write_bytes(audio + id3v1("Кино", "Цой", "Чёрный альбом", pad=b" "))
+    (OUT / "legacy-id3v23.mp3").write_bytes(
+        id3v23(("TIT2", legacy("Группа крови")), ("TPE1", utf16("Кино")), ("TALB", legacy("Ёж"))) + audio)
+    # A frame with only its encoding byte says nothing, whatever an older tag holds.
+    (OUT / "empty-frame-id3v1.mp3").write_bytes(
+        id3v23(("TIT2", b"\0"), ("TPE1", b"\0V2 artist")) + audio + id3v1("V1 title", "V1 artist"))
+    (OUT / "fallback-id3v1.mp3").write_bytes(
+        id3v23(("TIT2", b"\0V2 title")) + audio + id3v1("V1 title", "V1 artist", "V1 album"))
+    pcm = b"\0\0" * 4410
+    fmt = b"fmt " + struct.pack("<IHHIIHH", 16, 1, 1, 44100, 88200, 2, 16)
+    data = b"data" + struct.pack("<I", len(pcm)) + pcm
+    def chunk(name, text):
+        payload = text.encode("cp1251") + b"\0"
+        payload += b"\0" * (len(payload) % 2)
+        return name + struct.pack("<I", len(payload)) + payload
+    info = b"INFO" + chunk(b"INAM", "Кино") + chunk(b"IART", "Цой")
+    listing = b"LIST" + struct.pack("<I", len(info)) + info
+    body = b"WAVE" + fmt + data + listing
+    (OUT / "legacy-riff.wav").write_bytes(b"RIFF" + struct.pack("<I", len(body)) + body)
 
 
 def main():
@@ -82,6 +127,7 @@ def main():
             if name == "id3v1.mp3":
                 strip_id3v2(OUT / name)
             print(f"{name}: {(OUT / name).stat().st_size} bytes")
+    make_legacy_fixtures()
 
 
 if __name__ == "__main__":

@@ -34,6 +34,18 @@ class SimilarityTest {
     }
 
     @Test
+    fun `text meets the plain spelling of letters without a decomposition`() {
+        assertThat(Similarity.text("MØ", "Mo")).isEqualTo(1.0)
+        assertThat(Similarity.text("Straße", "Strasse")).isEqualTo(1.0)
+        assertThat(Similarity.text("Með", "Med")).isEqualTo(1.0)
+    }
+
+    @Test
+    fun `text meets the full forms of halfwidth kana`() {
+        assertThat(Similarity.text("ﾄﾞﾗｺﾞﾝ", "ドラゴン")).isEqualTo(1.0)
+    }
+
+    @Test
     fun `title with the same suffix on both sides is a full match`() {
         assertThat(Similarity.title("Night Work (Original Mix)", "night work (original mix)")).isEqualTo(1.0)
     }

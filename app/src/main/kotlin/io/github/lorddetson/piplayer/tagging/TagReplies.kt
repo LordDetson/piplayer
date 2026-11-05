@@ -1,6 +1,8 @@
 package io.github.lorddetson.piplayer.tagging
 
+import io.github.lorddetson.piplayer.nativelib.taglib.TagReadError
 import java.io.File
+import java.io.IOException
 import kotlinx.serialization.json.Json
 
 /** How a reply crosses from `:tagger`: inline, or as the path of a file that holds it (docs/library.md §4.2). */
@@ -27,10 +29,17 @@ object TagReplies {
         if (json.size <= MAX_INLINE_BYTES && strings(report).all { utf8Size(it) <= MAX_VALUE_BYTES }) {
             return TagReplyBody.Inline(json)
         }
-        spillDir.mkdirs()
-        val file = File.createTempFile("reply", ".json", spillDir)
-        file.writeBytes(json)
-        return TagReplyBody.InFile(file.path)
+        var file: File? = null
+        return try {
+            spillDir.mkdirs()
+            val spilled = File.createTempFile("reply", ".json", spillDir).also { file = it }
+            spilled.writeBytes(json)
+            TagReplyBody.InFile(spilled.path)
+        } catch (_: IOException) {
+            // A full disk, say. An exception here would cross the binder as an empty reply.
+            file?.delete()
+            TagReplyBody.Inline(Json.encodeToString(TagReport(error = TagReadError.IO_ERROR)).encodeToByteArray())
+        }
     }
 
     /** The report [body] holds; a file is read and deleted, and only files directly in [spillDir] are accepted. */
@@ -51,7 +60,8 @@ object TagReplies {
 
     private fun strings(report: TagReport): Sequence<String> =
         report.properties.asSequence().flatMap { (key, values) -> sequenceOf(key) + values } +
-            report.pictures.asSequence().flatMap { sequenceOf(it.pictureType, it.mimeType, it.description) }
+            report.pictures.asSequence().flatMap { sequenceOf(it.pictureType, it.mimeType, it.description) } +
+            sequenceOf(report.container, report.codec).filterNotNull()
 
     /** The length of [text] in UTF-8, as encodeToByteArray gives it (an unpaired surrogate becomes U+FFFD). */
     private fun utf8Size(text: String): Int {

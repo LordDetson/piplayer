@@ -2,6 +2,7 @@ package io.github.lorddetson.piplayer.nativelib.taglib
 
 import android.app.Application
 import io.github.lorddetson.piplayer.nativelib.NativeLibrary
+import java.io.IOException
 
 /** Why a file's tags could not be read. */
 enum class TagReadError {
@@ -47,13 +48,41 @@ enum class Pictures {
     DATA,
 }
 
+/**
+ * Where TagLib found the audio of an MPEG file, MP3 or raw AAC ([adts]). Offsets are -1 when no frame was found:
+ * TagLib only accepts a frame followed by another frame of the same kind, so a file needs at least two.
+ */
+data class MpegLayout(
+    val adts: Boolean,
+    val firstFrame: Long,
+    val firstFrameLength: Int,
+    /** The first frame holds the ASCII string Xing, Info or VBRI: it describes the stream and carries no audio. */
+    val serviceFrame: Boolean,
+    val lastFrame: Long,
+    val lastFrameLength: Int,
+    /** Where the ID3v1 and APE tags at the end of the file start; the file's size without such tags. */
+    val audioEnd: Long,
+    val frameCount: FrameCountHeader?,
+    val firstFrameBitrateKbps: Int,
+)
+
+/** A valid Xing, Info or VBRI header; [constantBitrate] means its name is Info, which encoders write for CBR files. */
+data class FrameCountHeader(val constantBitrate: Boolean, val frames: Long, val bytes: Long)
+
 sealed interface TagReadResult {
 
-    /** [properties] is TagLib's property map: upper-case keys such as TITLE, each with its list of values. */
+    /**
+     * [properties] is TagLib's property map: upper-case keys such as TITLE, each with its list of values. [container]
+     * names what holds the audio, such as `mpeg`, `adts` or `ogg-opus` (docs/library.md §4.2). [codec] names its coding
+     * and [bitDepth] its sample size, the latter for lossless codings only.
+     */
     data class Success(
         val properties: Map<String, List<String>>,
         val audio: AudioProperties?,
         val pictures: List<Picture>,
+        val container: String? = null,
+        val codec: String? = null,
+        val bitDepth: Int? = null,
     ) : TagReadResult
 
     data class Failure(val error: TagReadError) : TagReadResult
@@ -79,15 +108,16 @@ object TagReader {
 
     /**
      * [fileName] helps TagLib pick the format by extension; without it the format is detected from the content.
-     * Throws IllegalStateException outside the `:tagger` process.
+     * [markLegacy] marks each byte at or above 0x80 of text in a legacy encoding as 0xE000 plus the byte, so that the
+     * caller can decode it (TI §3.6). Throws IllegalStateException outside the `:tagger` process.
      */
-    fun read(fd: Int, fileName: String? = null, pictures: Pictures = Pictures.NONE): TagReadResult {
+    fun read(fd: Int, fileName: String? = null, pictures: Pictures = Pictures.NONE, markLegacy: Boolean = false): TagReadResult {
         check(anyProcess || Application.getProcessName().endsWith(TAGGER_SUFFIX)) {
             "TagReader reads only in the $TAGGER_SUFFIX process"
         }
         if (fd < 0) return TagReadResult.Failure(TagReadError.INVALID_FD)
         val sink = TagSink()
-        return when (nativeRead(fd, fileName, pictures.ordinal, sink)) {
+        return when (nativeRead(fd, fileName, pictures.ordinal, markLegacy, sink)) {
             0 -> sink.result()
             1 -> TagReadResult.Failure(TagReadError.INVALID_FD)
             2 -> TagReadResult.Failure(TagReadError.NOT_SEEKABLE)
@@ -98,11 +128,28 @@ object TagReader {
     }
 
     /**
+     * Where the audio of an MPEG file is, whatever its name: null without three frames in a row within 1 MiB after a
+     * leading ID3v2 tag. Throws IOException when reading fails and IllegalStateException outside the `:tagger` process.
+     */
+    fun mpegLayout(fd: Int): MpegLayout? {
+        check(anyProcess || Application.getProcessName().endsWith(TAGGER_SUFFIX)) {
+            "TagReader reads only in the $TAGGER_SUFFIX process"
+        }
+        val sink = TagSink()
+        if (nativeMpegLayout(fd, sink) != 0) throw IOException("The MPEG frames of the file could not be read")
+        return sink.mpegLayout
+    }
+
+    /** Status: 0 done (the sink has a layout when frames were found), anything else a failure. */
+    @JvmStatic
+    private external fun nativeMpegLayout(fd: Int, sink: TagSink): Int
+
+    /**
      * [pictures] is the ordinal of [Pictures]. Status: 0 read, 1 invalid descriptor, 2 not a regular file, 3 unknown
      * format, 4 native error, 5 read error.
      */
     @JvmStatic
-    private external fun nativeRead(fd: Int, fileName: String?, pictures: Int, sink: TagSink): Int
+    private external fun nativeRead(fd: Int, fileName: String?, pictures: Int, markLegacy: Boolean, sink: TagSink): Int
 }
 
 /** Collects what the native reader finds; its methods are called from native code by name. */
@@ -111,6 +158,33 @@ internal class TagSink {
     private val properties = LinkedHashMap<String, List<String>>()
     private var audio: AudioProperties? = null
     private val pictures = mutableListOf<Picture>()
+    private var container: String? = null
+    private var codec: String? = null
+    private var bitDepth: Int? = null
+
+    var mpegLayout: MpegLayout? = null
+        private set
+
+    /** [headerFrames] is negative without a frame count header. */
+    fun mpeg(
+        adts: Boolean,
+        firstFrame: Long,
+        firstFrameLength: Int,
+        serviceFrame: Boolean,
+        lastFrame: Long,
+        lastFrameLength: Int,
+        audioEnd: Long,
+        constantBitrate: Boolean,
+        headerFrames: Long,
+        headerBytes: Long,
+        firstFrameBitrateKbps: Int,
+    ) {
+        val frameCount = if (headerFrames < 0) null else FrameCountHeader(constantBitrate, headerFrames, headerBytes)
+        mpegLayout = MpegLayout(
+            adts, firstFrame, firstFrameLength, serviceFrame, lastFrame, lastFrameLength, audioEnd, frameCount,
+            firstFrameBitrateKbps,
+        )
+    }
 
     fun property(key: String, values: Array<String>) {
         properties[key] = values.toList()
@@ -125,5 +199,15 @@ internal class TagSink {
         pictures += Picture(data, sizeBytes, mimeType, pictureType, description)
     }
 
-    fun result() = TagReadResult.Success(properties.toMap(), audio, pictures.toList())
+    fun container(name: String) {
+        container = name
+    }
+
+    /** [bitDepth] is 0 when it says nothing. */
+    fun technical(codec: String?, bitDepth: Int) {
+        this.codec = codec
+        this.bitDepth = bitDepth.takeIf { it > 0 }
+    }
+
+    fun result() = TagReadResult.Success(properties.toMap(), audio, pictures.toList(), container, codec, bitDepth)
 }

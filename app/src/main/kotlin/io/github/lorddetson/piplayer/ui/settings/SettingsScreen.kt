@@ -74,6 +74,16 @@ fun SettingsScreen(onBack: () -> Unit, onOpenFolders: () -> Unit, viewModel: Set
                 stringResource(R.string.settings_library_folders_summary),
                 onOpenFolders,
             )
+            TextRow(
+                stringResource(R.string.settings_refresh_library),
+                stringResource(R.string.settings_refresh_library_summary),
+                viewModel::refreshLibrary,
+            )
+            TextRow(
+                stringResource(R.string.settings_reread_tags),
+                stringResource(R.string.settings_reread_tags_summary),
+                viewModel::readAllTagsAgain,
+            )
             SectionTitle(stringResource(R.string.settings_appearance))
             ThemeChoice(theme, viewModel::setTheme)
         }

@@ -14,7 +14,8 @@ The data model it implements is sketched in track-identification.md §10 (TI bel
   emulator it wrote the 20 000 rows of a table in 0.11 s instead of 2 s on the platform's SQLite, which has no JSON
   functions there and pays for every bound value, and it read them three times as fast.
 - It has no migrations: when its schema version changes, Room drops every table and the next sync fills them again
-  (§1.3). Its schema is not exported, as nothing outside the app reads it.
+  (§1.3). Its schema is not exported, as nothing outside the app reads it. The version also changes when the stored
+  text changes without a change of schema, as with the search normalization in version 4 (TI §4.1, §10.1).
 - Only the main process opens it (§1.5).
 
 ### 1.2 Tables in step 1
@@ -27,12 +28,17 @@ The data model it implements is sketched in track-identification.md §10 (TI bel
   track number, length), as the index gives them. Later steps use them only until the tag pass has read the file
   (TI §7.1).
 - `track_display`: what lists show and sort by: title, artist, album and length, the title key and the search text.
-    - The title is the index's title, or the display name without its extension when the index has none.
-    - The artist is empty when the index gives none or its placeholder `<unknown>`; the album and the length are empty
-      when the index gives none (a length of 0 counts as none).
+    - One resolver computes these values from the precedence levels of TI §7.1. The title is the first of: the file's
+      tag once the tag pass has read it, the index's title until then, the file name parsed as in TI §3.3, the display
+      name without its extension. The artist goes the same way, without the last step.
+    - Before the read, the index's placeholder `<unknown>` and blanks count as empty. After it, an empty tag stays
+      empty: the index no longer fills it, only the file name.
+    - The album is the tag or, until the read, the index's value. The length is the exact one once measured (step 7),
+      then the index's, then the tag reader's estimate (a length of 0 counts as none).
     - The title key is the title normalized as for search (TI §4.1).
-    - The search text joins the normalized title, artist, album, composer, genre and display name without its extension
-      with spaces (TI §10.1), leaving out empty values. Search itself arrives in step 12; the column and its index exist now, so that
+    - The search text joins the normalized title, all artists, album, composers, genres and display name without its
+      extension with spaces, leaving out empty values, and keeps the glued forms of each field's names (TI §10.1).
+      Search itself arrives in step 12; the column and its index exist now, so that
       search can be measured on the real schema early.
 - `volume_sync_state`: per volume, the index version and generation the last sync reached.
 
@@ -63,6 +69,14 @@ The data model it implements is sketched in track-identification.md §10 (TI bel
   that changes no file writes no file rows. A sync that fails is logged and leaves the database as it was. Rows go in
   as `INSERT OR REPLACE` of up to 2 000 rows per statement, each statement taking its rows as one JSON parameter that
   `json_each` unpacks; a changed file is written again under its row ID, a new one takes the next free ID.
+- **What the tag pass found stays.** A file stored again with the same size and modification time, also after a
+  rename or an index rebuild, keeps what the tag pass found: its technical columns and `track` row, its failure, its
+  content key and its count of failed reads. Its display values are resolved again, so a new name counts where the name
+  is used. A change of size or modification time forgets all that, and the next pass reads the file again.
+- **New display rules.** `library_meta.display_version` records the rules `track_display` was derived by. When the
+  app's differ, the next sync derives every display row again from the stored values, without reading any file.
+- **Journal mode.** The database is set to WAL explicitly, because the automatic choice gives a single connection on a
+  device with little memory and lists would wait for writes.
 - **When it runs.** In the main process only, one sync at a time, on a background thread:
     - when the process starts, if the app holds the audio permission;
     - when the permission is granted while the process runs;
@@ -258,6 +272,16 @@ the way the main process calls it and the count of failed reads; the tag pass of
 - TagLib's property map (keys with their lists of values), the audio properties (length, bitrate, sample rate,
   channels) and, for each embedded picture, its type, MIME type, description and size in bytes. Picture bytes never
   cross the process boundary; the files of covers arrive with step 13.
+- For the tag pass, the text of ID3v1, encoding-0 ID3v2 frames and RIFF INFO with each byte at or above 0x80 marked as
+  a private-use character, so that the main process decides on the encoding (TI §3.6). Any other reader gets TagLib's
+  own strings; a write never sees marks.
+- The tags of one format fill in what another lacks: ID3v2 first, then APE, then ID3v1.
+- The audio's coding (`mp3`, `aac`, `alac`, `flac`, `vorbis`, `opus`, `pcm` and so on) and, for lossless codings, its bit
+  depth.
+- The name of the container that holds the audio: `mpeg`, `adts`, `flac`, `mp4`, `ogg-vorbis`, `ogg-opus`, `ogg-flac`,
+  `ogg-speex`, `wav`, `aiff`, `asf`, `ape`, `wavpack`, `mpc`, `tta`, `dsf`, `dsdiff`, `shorten` or `matroska`; none for
+  tracker modules. TagLib opens an AAC stream without a container as an MPEG file, so `adts` comes from its audio
+  properties.
 - A read that TagLib cannot do returns the reason, as in M0: invalid descriptor, not a regular file, unknown format,
   read error, native error.
 - The reply travels as UTF-8 JSON. It crosses inline when it is at most 120 KiB and no single string in it (a key, a
@@ -266,8 +290,6 @@ the way the main process calls it and the count of failed reads; the tag pass of
   writes the JSON to a file under the app's cache directory (`tagger/`) and only the file's path crosses; the main
   process reads the file, deletes it, and accepts only paths inside that directory. Files left there by a process that
   died are deleted when the main process next connects.
-- Settings that will affect reading (legacy encoding, from step 5) travel as call parameters, because DataStore
-  exists only in the main process.
 
 ### 4.3 Calls from the main process
 
@@ -339,3 +361,126 @@ Instrumented tests on the API 30, 36 and 37 emulators:
 Crash tests, opt-in with `-e crashTests true` like the crash reports' end-to-end tests (Android counts repeated
 crashes against the app): a file that aborts the reader is counted as a crash, a second abort makes it unsafe, a song
 keeps playing meanwhile, and the crash leaves a native crash report of `:tagger`.
+
+## 5. The tag pass (M2a step 5)
+
+### 5.1 What it reads
+
+- Each file of the library that no reader version has settled yet or only an older one has, except those in excluded
+  folders and those marked unsafe. Hidden kinds and short files are read too, for their tags.
+- A run takes its list when it starts, visible songs in list order first, then the kinds lists hide, so that the first
+  screens get better first. A file that arrives later waits for the next run.
+
+### 5.2 What it stores
+
+- Results go into the database in batches of up to 200 files, 1 MiB of raw tags or one second, whichever comes first,
+  one transaction each, while no sync runs. Everything is written where it is: a run stopped at any point loses at most
+  one batch, and the next run goes on, reading nothing that was committed.
+- A file the sync replaced while it was being read keeps nothing of that read, by its size and modification time. A file
+  renamed meanwhile keeps the read and shows its new name where the name counts.
+- A read file has `tag_pass_at`, its technical columns and a `track` row with its typed values and raw tags. Values over
+  16 KiB, such as lyrics, stay out of the raw tags. Albums, artists and genres are filled from the track; those left
+  without tracks go when the run ends. A file moved to another folder is read again, because its album depends on the
+  folder.
+- An album is one by its release ID, or else by its normalized title and album artist within a folder, plus the
+  compilation flag. A last folder named like a disc (`CD1`, `Disc 2`, `Диск 1`) does not count.
+
+### 5.3 What can go wrong
+
+| Case | Stored | Lists show | Tried again |
+|---|---|---|---|
+| Read | `tag_pass_at`, reader version | Tags, then the file name | When the file or the reader version changes |
+| TagLib does not know the format, or fails on it | `tag_failure` `unsupported` or `read`, reader version | Index values | When the file or the reader version changes |
+| The file cannot be opened, or the device fails during the read (a full disk) | `tag_failure` `open` | Index values | In a later process |
+| `:tagger` cannot be reached | Nothing, it says nothing about the file | Index values | The run waits a minute and tries the same file again |
+| `:tagger` crashes or hangs | `tag_failure` `crash`, the count of §4.4 | Index values | In a later process, until the count marks it unsafe; the run waits a minute first, because Android gives up on a process that crashes twice a minute |
+
+### 5.4 Lists during and after a pass
+
+- A batch changes rows in place: title, artist, album and length change where they are, the order and the membership do
+  not, so that nothing moves under the user's finger. The screen and the playback service share one list, so a tap plays
+  what is visible.
+- While the pass runs, a sync that adds or removes files keeps the order: rows stay where they are, removed ones go, and
+  a new one goes after the kept row before it in title order.
+- The list is sorted anew at a new entry to the screen or a start of the process, and once more at the first return from
+  the background after a pass that changed rows ended, on the same song; if another pass is running by then, that sort
+  waits for its end. Other returns read nothing unless the library changed. A row whose new length crosses the short-file
+  limit stays until the next read of the list.
+- A line over the top of the list shows the progress of a run of at least 50 files, without moving any row.
+
+### 5.5 When it runs
+
+- In the main process, one run at a time, on a thread of background priority: a few seconds after the process starts,
+  after a sync that changed the library or its folder rules, and when asked (§5.6). It needs a library that knows its files.
+- It reads while the app shows or music plays, also with the screen off and no charger; otherwise Android soon freezes the
+  process, and a read frozen in the middle could count as a hang. So a library opened rarely and never played may stay unread
+  for long; lists show the index's values meanwhile.
+- A run waits between files when that no longer holds, and for a minute after an underrun of the audio or after a device
+  has been hot (thermal status moderate or above). Nothing is cancelled for that, because cancelling a read kills `:tagger`.
+- The pass takes no wake lock of its own and no WorkManager: quotas apply to that even during playback. The reads run at
+  background priority too, which the binder call carries over to `:tagger`.
+- Checks: a pass over the 20 000 generated files on the phone, with the FLAC album on repeat, the screen off and no
+  charger: no underrun, no stall, no new audio output, and the worst lateness of the playback thread's looper compared
+  with a minute of playback without the pass (`TagPassScreenOffTest`).
+
+### 5.6 What the settings offer
+
+- **Refresh the library**: a sync now, and a run of the pass after it, for what the sync found. Nothing else: a sync also
+  runs by itself when the index reports a change (§1.3), so this is for when something seems to be missing.
+- **Read all tags again**: every file is read again, those that failed before too. `tag_pass_at` stays set, so lists keep
+  showing what they show until the new values land.
+- A rebuild that keeps the user data comes after step 8, because it relies on re-attachment (TI §6).
+
+## 7. Content key and exact duration (M2a step 7)
+
+The layout of the key and the rules for lengths are in TI §3.1. This step builds them behind `:tagger`.
+
+### 7.1 What a read returns
+
+- A read of `:tagger` (§4.2) also returns the file's content key in hex, its format token and a duration plan: the
+  length to store for now, if the header gives one, and what is left to do: nothing, a check of FLAC's end, or a walk.
+- The key depends on the content alone, not on the name and not on whether TagLib took the tags. A file TagLib calls
+  unknown still gets a key, from its whole bytes unless its first bytes or its MPEG frames say otherwise. A read that
+  failed for a reason that may pass (a read error, a native error) gives no key, and neither does an empty file.
+- The walks of the formats are Kotlin, tested on the JVM against synthetic files and against the keys of an independent
+  reference (`scripts/content_key_reference.py`). Only MPEG frame offsets come from TagLib.
+
+### 7.2 The frame walk
+
+- `audio_file.content_key`, `duration_ms` and `duration_source` hold what a read and the walks found, and the sync clears
+  them when a file's size or modification time changes. The source says how far the length is settled: `header`, `walk`,
+  `unknown`, or waiting with `pending-walk` (no length yet: lists show the index's) or `pending-flac-end` (the header's for
+  now). A read of the same file again keeps what a walk settled. `track.track_key` is the content key and the track's
+  start, `<key>:0` until CUE sheets arrive.
+- `walkDuration` is a call of its own, for files whose plan asks for one, and runs last, after the tag pass, in the pass's
+  order. A run the pass is asked for goes first: the walks stop between files, and what is left waits for the next run.
+- The gate of the pass (§5.5) applies, but a walk may read for long, so it does not wait for the next file: 3 s after the
+  gate closes it is cancelled, which kills `:tagger`, and its file comes again after the others.
+- Results go in batches of at most 50 or 1 s. The list gets the new lengths in place, and no order waits for them.
+- A crash or a timeout skips the file until the process starts anew or a full read is asked for, and counts as in §4.3.
+- It runs in `:tagger` and not in the main process: it shares no heap with the player, and it can be ended at once by
+  killing the process, as any call whose caller gives up (§4.3). Its thread runs at background priority. It goes on
+  while music plays; the 0 underrun measurement of the tag pass covers it.
+- It reads no sample data, only the samples' times, and takes the last time plus one frame. On the API 36 emulator
+  63 MiB of raw AAC take 1.4 to 4 s.
+- It counts against the file like any call of `:tagger`, with a timeout of its own, 2 minutes or 1 s per MiB,
+  whichever is longer. A file the extractors cannot read has no length, which is not a failure.
+- FLAC is checked instead of walked: the extractor seeks to 2 s before the STREAMINFO length and goes on to the last
+  frame. Only when that frame ends more than 2 s too early is the file walked from the start.
+- A WAV that is cut off comes out within a tenth of a second, the size of the extractor's samples.
+
+### 7.3 Checks
+
+JVM tests: the layout against reference keys, with the limits at 131 071 and 196 607 bytes; the walk of each format on
+synthetic files; the bounded Ogg walk (page sizes, CRC, chains, a cut or junk at the end, bytes read); golden keys of
+real files in the walked formats; the table of duration rules; the sample clock.
+
+Instrumented tests on the emulators, through the real `:tagger`: golden keys of every format; tag edits in every
+format, also by real tools (a copy with a new Xing frame, `moov` moved, comments rewritten); any file name and no name;
+a file TagLib refuses; the walked length of headerless VBR and CBR MP3 and raw ADTS against the decoded length within
+one frame; truncated WAV, MP4 and FLAC files; an interrupted walk.
+
+On the phone (`TagPassScreenOffTest`, which waits for the walks too): after a pass over the 21 368 files the walks settled
+19 499 lengths in 1 155 s (17 a second) with the FLAC album on repeat, the screen off and no charger: no underrun, no
+stall, no new audio output, and a worst lateness of the playback thread's looper of 71 ms during the walks (116 ms during
+the pass; the earlier control minute without either measured 82 ms).

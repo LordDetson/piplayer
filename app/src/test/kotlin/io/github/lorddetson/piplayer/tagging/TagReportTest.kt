@@ -13,6 +13,9 @@ class TagReportTest {
         properties = mapOf("TITLE" to listOf("Ёжик в тумане"), "ARTIST" to listOf("PiPlayer Fixtures")),
         audio = AudioProperties(lengthMs = 2_000, bitrateKbps = 128, sampleRate = 44_100, channels = 2),
         pictures = listOf(Picture(data = ByteArray(3), sizeBytes = 3, "image/jpeg", "Back Cover", "back")),
+        container = "flac",
+        codec = "flac",
+        bitDepth = 24,
     )
 
     @Test
@@ -23,6 +26,18 @@ class TagReportTest {
         assertThat(report.properties).isEqualTo(read.properties)
         assertThat(report.audio).isEqualTo(TagReport.Audio(2_000, 128, 44_100, 2))
         assertThat(report.pictures).containsExactly(TagReport.PictureInfo("Back Cover", "image/jpeg", "back", 3))
+        assertThat(report.container).isEqualTo("flac")
+        assertThat(report.codec).isEqualTo("flac")
+        assertThat(report.bitDepth).isEqualTo(24)
+    }
+
+    @Test
+    fun `the technical data survives the way back`() {
+        val result = TagReport.of(read).toResult() as TagReadResult.Success
+
+        assertThat(result.container).isEqualTo("flac")
+        assertThat(result.codec).isEqualTo("flac")
+        assertThat(result.bitDepth).isEqualTo(24)
     }
 
     @Test

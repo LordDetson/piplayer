@@ -13,11 +13,14 @@ import android.os.ParcelFileDescriptor
 import android.os.Process
 import android.system.Os
 import io.github.lorddetson.piplayer.library.Library
+import io.github.lorddetson.piplayer.tagging.contentkey.DurationCheck
+import io.github.lorddetson.piplayer.tagging.contentkey.DurationPlan
 import java.io.File
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 
@@ -73,24 +76,55 @@ class TaggerClient(
     /** Whether the client holds a binding to the service now. */
     val isBound: Boolean get() = synchronized(lock) { connection != null }
 
-    /** Reads the tags of [file], which stays open and the caller's, for [target]. */
-    suspend fun read(target: TagTarget, file: ParcelFileDescriptor, fileName: String?): TaggerResult<TagRead> {
+    /**
+     * Reads the tags of [file], which stays open and the caller's, for [target]. With [markLegacy] the caller decodes the
+     * text in legacy encodings (`LegacyText`). With [background] the read runs at background priority.
+     */
+    suspend fun read(
+        target: TagTarget,
+        file: ParcelFileDescriptor,
+        fileName: String?,
+        markLegacy: Boolean = false,
+        background: Boolean = false,
+    ): TaggerResult<TagRead> = call(target) { tagger, kill ->
+        guard.run(target, kill, background) {
+            val reply = reaching { tagger.read(file, fileName, markLegacy) }
+            TagRead(TagReplies.unpack(reply.body, spillDir), viaFile = reply.body is TagReplyBody.InFile)
+        }
+    }
+
+    /**
+     * Carries out what [plan] leaves to do for [file], which stays open and the caller's (docs/library.md §7). The
+     * length, or null when no extractor can read the file. Cancelling the call ends it at once: it kills `:tagger`.
+     */
+    suspend fun walkDuration(target: TagTarget, file: ParcelFileDescriptor, plan: DurationPlan): TaggerResult<Long?> =
+        call(target) { tagger, kill ->
+            guard.run(target, kill, TagReadGuard.walkTimeout(file.statSize)) {
+                val flacEndOf = if (plan.check == DurationCheck.FLAC_END) plan.headerMs ?: NO_HEADER else NO_HEADER
+                reaching { tagger.walkDuration(file, flacEndOf) }.takeIf { it >= 0 }
+            }
+        }
+
+    /** One call of `:tagger` for [target], given the service and how to end its process. */
+    private suspend fun <T> call(
+        target: TagTarget,
+        block: suspend (ITagger, kill: () -> Unit) -> TaggerResult<T>,
+    ): TaggerResult<T> {
         // Not even a binding for an unsafe file.
         if (guard.isUnsafe(target)) return TaggerResult.Unsafe
         handler.removeCallbacks(unbindWhenIdle)
         try {
-            val (tagger, pid) = connected()
-            return guard.run(target, kill = { Process.killProcess(pid) }) {
-                val reply = try {
-                    tagger.read(file, fileName)
-                } catch (e: DeadObjectException) {
-                    throw TaggerDiedException(e)
-                }
-                TagRead(TagReplies.unpack(reply.body, spillDir), viaFile = reply.body is TagReplyBody.InFile)
-            }
+            val (tagger, pid) = connected() ?: return TaggerResult.Unavailable
+            return block(tagger) { Process.killProcess(pid) }
         } finally {
             handler.postDelayed(unbindWhenIdle, idle.inWholeMilliseconds)
         }
+    }
+
+    private inline fun <T> reaching(binderCall: () -> T): T = try {
+        binderCall()
+    } catch (e: DeadObjectException) {
+        throw TaggerDiedException(e)
     }
 
     /** Unbinds now; a later call binds again. */
@@ -102,15 +136,22 @@ class TaggerClient(
         }
     }
 
-    /** The service and its process ID; once more if `:tagger` died just before. */
-    private suspend fun connected(): Pair<ITagger, Int> {
+    /**
+     * The service and its process ID; once more if `:tagger` died just before. Null when it cannot be reached in time.
+     * A timeout must end here: as a cancellation it would look to the caller as if it had been stopped itself.
+     */
+    private suspend fun connected(): Pair<ITagger, Int>? = try {
         val tagger = service()
-        return try {
+        try {
             tagger to withContext(Dispatchers.IO) { tagger.pid() }
         } catch (_: DeadObjectException) {
             val again = service()
             again to withContext(Dispatchers.IO) { again.pid() }
         }
+    } catch (_: TimeoutCancellationException) {
+        null
+    } catch (_: DeadObjectException) {
+        null
     }
 
     /** The live service, bound anew when there is no binding or Android gave up on it. */
@@ -136,16 +177,15 @@ class TaggerClient(
             cleaned = true
         }
         val fresh = Connection()
-        check(app.bindService(Intent(app, TaggerService::class.java), fresh, Context.BIND_AUTO_CREATE)) {
-            "Cannot bind the tag reader service"
-        }
-        connection = fresh
+        // When the system refuses, the wait for the service times out.
+        if (app.bindService(Intent(app, TaggerService::class.java), fresh, Context.BIND_AUTO_CREATE)) connection = fresh
         return fresh
     }
 
     companion object {
         val IDLE = 30.seconds
         private val BIND_TIMEOUT = 10.seconds
+        private const val NO_HEADER = -1L
 
         /** Where `:tagger` writes replies too large to cross inline. */
         fun spillDir(context: Context) = File(context.cacheDir, "tagger")
@@ -167,6 +207,6 @@ object Tagger {
     private var client: TaggerClient? = null
 
     fun client(context: Context): TaggerClient = client ?: synchronized(this) {
-        client ?: TaggerClient(context, LibraryUnsafeCounts(Library.database(context))).also { client = it }
+        client ?: TaggerClient(context, LibraryUnsafeCounts { Library.database(context) }).also { client = it }
     }
 }

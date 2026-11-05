@@ -6,6 +6,7 @@
     <string name="songs_denied_explanation">Доступ к музыке для PiPlayer выключен. Включите его в настройках приложения, чтобы увидеть песни.</string>
     <string name="songs_open_settings">Открыть настройки</string>
     <string name="songs_try_again">Попробовать снова</string>
+    <string name="songs_tag_progress">Чтение тегов: %1$d из %2$d</string>
     <string name="songs_empty">На устройстве не найдено музыки.</string>
     <string name="songs_unknown_artist">Неизвестный исполнитель</string>
     <string name="songs_play">Воспроизвести</string>
@@ -105,6 +106,10 @@
     <string name="settings_min_length_off">Нет</string>
     <string name="settings_min_length_value">Короче %1$d с</string>
     <string name="settings_dialog_cancel">Отмена</string>
+    <string name="settings_refresh_library">Обновить библиотеку</string>
+    <string name="settings_refresh_library_summary">Найти новые и изменённые файлы сейчас</string>
+    <string name="settings_reread_tags">Перечитать все теги</string>
+    <string name="settings_reread_tags_summary">Заново прочитать теги всех файлов в фоне</string>
     <string name="settings_library_folders">Папки библиотеки</string>
     <string name="settings_library_folders_summary">Выберите папки, которые входят в библиотеку</string>
     <string name="folders_empty">Папок с аудио пока нет</string>
