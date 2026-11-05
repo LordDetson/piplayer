@@ -1,7 +1,7 @@
 name: Instrumented tests
 
 on:
-  # Only while the workflow is being tried out: workflow_dispatch works only once the file is on the default branch.
+  # TEMPORARY while the workflow is tried out on its branch: workflow_dispatch works only from the default branch.
   push:
     branches: [claude/kind-bohr-9a9c27]
   workflow_dispatch:
@@ -13,7 +13,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: instrumented-${{ github.ref }}-${{ github.sha }}
+  group: instrumented-${{ github.ref }}
   cancel-in-progress: true
 
 env:
@@ -25,13 +25,6 @@ env:
   FPCALC_SHA256: "c968ad4a0821592a79b158fb2e1f46cbe0a22a0a1dbc0743c67d68e75d15d2bb"
   # The emulators are x86_64, so the native code need not be built for arm64 as well.
   ABI_ARG: "-Pandroid.injected.build.abi=x86_64"
-  EMULATOR_OPTIONS: "-no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none"
-  # The tests with a time limit: shared runners make their times noisy, so CI leaves them out (notClass syntax).
-  # GeneratedLibraryTest skips itself here, since the 20 000-file library is not on the CI emulators.
-  EXCLUDED_TESTS: >-
-    io.github.lorddetson.piplayer.playback.PlaybackQueueTest#aQueueOf20000SongsStartsWithinASecond,
-    io.github.lorddetson.piplayer.playback.QueueNavigationTest#turningShuffleOnInAQueueOf20000SongsIsQuick,
-    io.github.lorddetson.piplayer.library.search.LibrarySearchSpikeTest#searchAsYouTypeAnswersWithinFiftyMillisecondsOnThePlatformSqlite
 
 jobs:
   changes:
@@ -57,15 +50,17 @@ jobs:
           echo "run=$run" >> "$GITHUB_OUTPUT"
 
   instrumented:
-    name: API ${{ matrix.api-level }}
+    name: API ${{ matrix.api-level }} (${{ matrix.repeat }})
     needs: changes
     if: needs.changes.outputs.run == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 150
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
         api-level: [30, 36]
+        # TEMPORARY: three runs of the same commit side by side, to see which tests are flaky.
+        repeat: [1, 2, 3]
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -96,12 +91,23 @@ jobs:
           (yes || true) | "$SDKMANAGER" --licenses > /dev/null
           "$SDKMANAGER" --install "platforms;android-37.0" "ndk;${NDK_VERSION}" "cmake;${CMAKE_VERSION}"
 
-      - name: Install ffmpeg and fpcalc
+      # An apt mirror once took 14 minutes here; a hung attempt is cut off and tried again.
+      - name: Install ffmpeg
+        timeout-minutes: 20
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq --no-install-recommends ffmpeg > /dev/null
+          for attempt in 1 2 3; do
+            if timeout 300 sudo apt-get update -qq &&
+               timeout 300 sudo apt-get install -y -qq --no-install-recommends ffmpeg > /dev/null; then
+              break
+            fi
+            echo "apt attempt $attempt failed or took too long"
+          done
+          ffmpeg -version | head -1
+
+      - name: Install fpcalc
+        run: |
           NAME="chromaprint-fpcalc-${FPCALC_VERSION}-linux-x86_64"
-          curl -fsSL -o "$RUNNER_TEMP/fpcalc.tar.gz" \
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/fpcalc.tar.gz" \
             "https://github.com/acoustid/chromaprint/releases/download/v${FPCALC_VERSION}/${NAME}.tar.gz"
           echo "${FPCALC_SHA256}  $RUNNER_TEMP/fpcalc.tar.gz" | sha256sum -c -
           tar -xzf "$RUNNER_TEMP/fpcalc.tar.gz" -C "$RUNNER_TEMP"
@@ -121,31 +127,8 @@ jobs:
           :app:assembleDebug :app:assembleDebugAndroidTest :nativelib:assembleDebugAndroidTest
           --stacktrace
 
-      - name: Restore the emulator
-        id: avd-cache
-        uses: actions/cache@v6
-        with:
-          path: |
-            ~/.android/avd/*
-            ~/.android/adb*
-          key: avd-api${{ matrix.api-level }}-google_apis-pixel_6-v1
-
-      - name: Create the emulator and its snapshot
-        if: steps.avd-cache.outputs.cache-hit != 'true'
-        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
-        with:
-          api-level: ${{ matrix.api-level }}
-          target: google_apis
-          arch: x86_64
-          profile: pixel_6
-          cores: 3
-          ram-size: 4096M
-          disk-size: 6144M
-          force-avd-creation: false
-          emulator-options: ${{ env.EMULATOR_OPTIONS }}
-          disable-animations: false
-          script: echo "The snapshot is ready."
-
+      # No AVD cache: restoring it saved under a minute against a cold boot and took 4 to 11 GB on disk, from a
+      # repository cache limit of 10 GB that the build workflow also uses.
       - name: Run the instrumented tests
         uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
         with:
@@ -156,22 +139,16 @@ jobs:
           cores: 3
           ram-size: 4096M
           disk-size: 6144M
-          force-avd-creation: false
-          emulator-options: -no-snapshot-save ${{ env.EMULATOR_OPTIONS }}
+          emulator-options: -no-window -no-snapshot -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           disable-animations: true
           script: bash scripts/ci_instrumented_tests.sh
-
-      - name: Report disk use
-        if: always()
-        run: |
-          echo "::notice title=Disk::$(df -h / | tail -1 | awk '{print $3 " used, " $4 " free"}'); AVD $(du -sh ~/.android/avd 2>/dev/null | cut -f1); recordings $(du -sh ~/.cache/piplayer/fingerprint-samples 2>/dev/null | cut -f1)"
 
       # No APKs here: the test APKs contain the recordings.
       - name: Upload the test results and logcat
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: instrumented-api${{ matrix.api-level }}
+          name: instrumented-api${{ matrix.api-level }}-${{ strategy.job-index }}
           path: build/ci-results/
           retention-days: 7
           if-no-files-found: ignore
