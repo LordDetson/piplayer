@@ -1,9 +1,6 @@
 name: Instrumented tests
 
 on:
-  # TEMPORARY while the workflow is tried out on its branch: workflow_dispatch works only from the default branch.
-  push:
-    branches: [claude/kind-bohr-9a9c27]
   workflow_dispatch:
   # Nightly, 04:30 in Minsk; the run stops after the first job when main has no commit from the last 25 hours.
   schedule:
@@ -53,7 +50,7 @@ jobs:
           echo "run=$run" >> "$GITHUB_OUTPUT"
 
   instrumented:
-    name: API ${{ matrix.api-level }} (${{ matrix.repeat }})
+    name: API ${{ matrix.api-level }}
     needs: changes
     if: needs.changes.outputs.run == 'true'
     runs-on: ubuntu-24.04
@@ -62,8 +59,6 @@ jobs:
       fail-fast: false
       matrix:
         api-level: [30, 36]
-        # TEMPORARY: three runs of the same commit side by side, to see which tests are flaky.
-        repeat: [1, 2, 3]
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -151,7 +146,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: instrumented-api${{ matrix.api-level }}-${{ strategy.job-index }}
+          name: instrumented-api${{ matrix.api-level }}
           path: build/ci-results/
           retention-days: 7
           if-no-files-found: ignore
