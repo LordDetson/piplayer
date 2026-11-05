@@ -61,7 +61,8 @@ data class TrackTags(
 
             val artistValues = values("ARTIST")
             val artists = list("ARTISTS").ifEmpty { artistValues }
-            val albumArtistValues = values("ALBUMARTIST")
+            // Some taggers of Vorbis comments write these spellings, and TagLib passes them on as they are.
+            val albumArtistValues = values("ALBUMARTIST").ifEmpty { values("ALBUM ARTIST") }
             val albumArtists = list("ALBUMARTISTS").ifEmpty { albumArtistValues }
             val track = Position.of(single("TRACKNUMBER"))
             val disc = Position.of(single("DISCNUMBER"))
@@ -81,9 +82,9 @@ data class TrackTags(
                 date = single("DATE"),
                 originalDate = single("ORIGINALDATE"),
                 trackNumber = track.number,
-                trackTotal = Position.count(single("TRACKTOTAL")) ?: track.total,
+                trackTotal = Position.count(single("TRACKTOTAL")) ?: Position.count(single("TOTALTRACKS")) ?: track.total,
                 discNumber = disc.number,
-                discTotal = Position.count(single("DISCTOTAL")) ?: disc.total,
+                discTotal = Position.count(single("DISCTOTAL")) ?: Position.count(single("TOTALDISCS")) ?: disc.total,
                 discSubtitle = single("DISCSUBTITLE"),
                 compilation = single("COMPILATION")?.lowercase() in trueValues,
                 label = single("LABEL"),

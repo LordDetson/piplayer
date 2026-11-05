@@ -168,6 +168,16 @@ class TrackTagsTest {
     }
 
     @Test
+    fun `the other spellings of Vorbis comments count`() {
+        val tags = tags("ALBUM ARTIST" to listOf("Band"), "TOTALTRACKS" to listOf("12"), "TOTALDISCS" to listOf("2"))
+
+        assertThat(tags.albumArtist).isEqualTo("Band")
+        assertThat(tags.albumArtists).containsExactly("Band")
+        assertThat(tags.trackTotal).isEqualTo(12)
+        assertThat(tags.discTotal).isEqualTo(2)
+    }
+
+    @Test
     fun `no tags at all give an empty value`() {
         val tags = tags()
 

@@ -64,6 +64,7 @@ fun SongsScreen(
         modifier = modifier,
         passProgress = passProgress,
         onFirstVisibleSong = { viewModel.firstVisibleSong = it },
+        onScrolled = viewModel::onScrolled,
     )
 }
 

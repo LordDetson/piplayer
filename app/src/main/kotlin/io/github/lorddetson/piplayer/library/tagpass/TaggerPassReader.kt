@@ -20,10 +20,11 @@ class TaggerPassReader(
     override suspend fun read(file: PassFile): PassRead {
         val descriptor = open(file) ?: return PassRead.OpenFailed
         return descriptor.use {
-            when (val result = client.read(TagTarget.LibraryFile(file.fileId), it, file.displayName, markLegacy = true)) {
+            when (val result = client.read(TagTarget.LibraryFile(file.fileId), it, file.displayName, markLegacy = true, background = true)) {
                 is TaggerResult.Replied -> PassRead.Replied(result.value.report)
                 TaggerResult.Crashed, TaggerResult.TimedOut -> PassRead.Crashed
                 TaggerResult.Unsafe -> PassRead.Unsafe
+                TaggerResult.Unavailable -> PassRead.Unavailable
             }
         }
     }

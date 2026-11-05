@@ -49,6 +49,9 @@ sealed interface PassRead {
 
     /** The file has failed too often to be read at all. */
     data object Unsafe : PassRead
+
+    /** `:tagger` could not be reached: nothing was read, and it says nothing about the file. */
+    data object Unavailable : PassRead
 }
 
 fun interface PassReader {
@@ -103,21 +106,28 @@ class TagPass(
                 pendingBytes = 0
             }
             for (file in files) {
-                gate()
-                val answer = reader.read(file)
+                var answer: PassRead
+                while (true) {
+                    gate()
+                    answer = reader.read(file)
+                    if (answer !is PassRead.Unavailable) break
+                    flush()
+                    delay(crashBackoff)
+                }
                 val item = Pending(file, answer, if (answer is PassRead.Replied) parse(answer.report) else null)
                 if (pending.isEmpty()) oldest = TimeSource.Monotonic.markNow()
                 pending += item
                 pendingBytes += item.parsed?.rawTags?.length ?: 0
                 if (item.parsed != null) read++ else failed++
-                if (answer !is PassRead.Replied) failedHere += file.key()
+                if (answer !is PassRead.Replied || answer.report.error == TagReadError.IO_ERROR) failedHere += file.key()
                 mutableProgress.update { it.copy(done = it.done + 1) }
                 if (pending.size >= batchSize || pendingBytes >= MAX_BATCH_BYTES || oldest.elapsedNow() >= MAX_BATCH_AGE) flush()
                 if (answer is PassRead.Crashed) delay(crashBackoff)
                 if (pause.isPositive()) delay(pause)
             }
             flush()
-            if (files.isNotEmpty()) removeOrphans()
+            // Also when there was nothing to read: a sync may have removed the last tracks of an album.
+            removeOrphans()
         } finally {
             mutableProgress.update { it.copy(running = false) }
         }
@@ -169,13 +179,19 @@ class TagPass(
         val fileId = item.file.fileId
         when (val answer = item.answer) {
             is PassRead.Replied -> {
-                // TagLib's answer holds until the file or the reader changes.
-                val failure = if (answer.report.error == TagReadError.UNSUPPORTED_FORMAT) UNSUPPORTED else READ_ERROR
-                dao.markFailed(fileId, failure, readerVersion)
+                when (answer.report.error) {
+                    // The device's fault, such as a full disk: not the file's.
+                    TagReadError.IO_ERROR -> dao.markFailed(fileId, OPEN_ERROR, readerVersion = null)
+                    // TagLib's answer holds until the file or the reader changes.
+                    TagReadError.UNSUPPORTED_FORMAT -> dao.markFailed(fileId, UNSUPPORTED, readerVersion)
+                    else -> dao.markFailed(fileId, READ_ERROR, readerVersion)
+                }
             }
             PassRead.OpenFailed -> dao.markFailed(fileId, OPEN_ERROR, readerVersion = null)
             PassRead.Crashed -> dao.markFailed(fileId, CRASH, readerVersion = null)
             PassRead.Unsafe -> dao.markFailed(fileId, UNSAFE, readerVersion = null)
+            // Not stored: the run tries the file again itself.
+            PassRead.Unavailable -> Unit
         }
     }
 
@@ -188,6 +204,8 @@ class TagPass(
         dao.deleteTracks(ids)
         val albumId = AlbumKey.of(tags, state.volume, state.relativePath)?.let { key ->
             dao.addAlbum(key, tags.album.orEmpty(), tags.albumArtist, tags.releaseMbid, tags.compilation)
+            // The newest spelling: a file tagged again keeps its key, but not its old name.
+            dao.updateAlbum(key, tags.album.orEmpty(), tags.albumArtist, tags.compilation)
             dao.albumId(key)
         }
         val trackId = dao.addTrack(TrackEntity.of(fileId, tags, parsed.rawTags, albumId))
@@ -230,6 +248,7 @@ class TagPass(
         val mbid = mbids.getOrNull(position).takeIf { mbids.size == names.size }
         val key = mbid?.let { "mbid:$it" } ?: keyOf(name)
         dao.addArtist(key, name, sort.takeIf { names.size == 1 }, mbid)
+        dao.updateArtist(key, name, sort.takeIf { names.size == 1 })
         TrackArtistEntity(trackId, dao.artistId(key), role, position)
     }
 

@@ -12,6 +12,7 @@ import io.github.lorddetson.piplayer.macrobenchmark.TheApp.NOW_PLAYING
 import io.github.lorddetson.piplayer.macrobenchmark.TheApp.PACKAGE
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.After
+import org.junit.Assume.assumeTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -72,6 +73,7 @@ class SmokeTest {
     /** `:tagger`, its JSON replies and the database writes of the pass under R8 (docs/library.md §5.5). */
     @Test
     fun theTagPassReadsTheLibrary() {
+        assumeTrue("Needs the generated library, for a long enough run", TheApp.generatedFiles(device) >= TheApp.GENERATED_FILES)
         // A library already read has nothing for the pass to do.
         device.executeShellCommand("am force-stop $PACKAGE")
         device.executeShellCommand("pm clear $PACKAGE")

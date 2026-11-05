@@ -13,16 +13,19 @@ object AlbumKey {
 
     /** Null for a track without an album. */
     fun of(tags: TrackTags, volume: String, relativePath: String): String? {
-        tags.releaseMbid?.let { return "mbid:$it" }
         val album = tags.album ?: return null
+        tags.releaseMbid?.let { return "mbid:$it" }
         return listOf(
-            TextNormalizer.normalize(album),
-            tags.albumArtist?.let(TextNormalizer::normalize).orEmpty(),
+            keyOf(album),
+            tags.albumArtist?.let(::keyOf).orEmpty(),
             volume,
             albumFolder(relativePath).lowercase(),
             if (tags.compilation) "1" else "0",
         ).joinToString(SEPARATOR)
     }
+
+    /** The normalized text; a name of punctuation alone, such as `+`, normalizes to nothing and keeps itself. */
+    private fun keyOf(text: String) = TextNormalizer.normalize(text).ifEmpty { text.lowercase() }
 
     /** [relativePath] without a last folder named like a disc, unless that is all it holds. */
     private fun albumFolder(relativePath: String): String {

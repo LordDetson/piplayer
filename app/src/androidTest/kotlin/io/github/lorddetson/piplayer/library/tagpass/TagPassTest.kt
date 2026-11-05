@@ -257,6 +257,72 @@ class TagPassTest {
     }
 
     @Test
+    fun aReaderThatCannotBeReachedBlamesNoFileAndTheRunGoesOnAfterAWhile() = runBlocking<Unit> {
+        library(1)
+        var calls = 0
+        val answers = reader.answers
+        reader.before = { if (++calls == 1) answers[1] = PassRead.Unavailable else answers.remove(1) }
+
+        val result = pass().run()
+
+        assertThat(calls).isEqualTo(2)
+        assertThat(result.read).isEqualTo(1)
+        assertThat(result.failed).isZero()
+        assertThat(files().getValue(1).tagFailure).isNull()
+        assertThat(files().getValue(1).tagPassAt).isNotNull()
+    }
+
+    @Test
+    fun aReadErrorOfTheDeviceIsTriedInALaterProcessNotKeptAsTheFilesFault() = runBlocking<Unit> {
+        library(1)
+        reader.answers[1] = PassRead.Replied(TagReport(error = TagReadError.IO_ERROR))
+        val pass = pass()
+
+        pass.run()
+        assertThat(files().getValue(1).tagFailure).isEqualTo("open")
+        assertThat(files().getValue(1).readerVersion).isNull()
+        reader.reads.set(0)
+        pass.run()
+        assertThat(reader.reads.get()).isZero()
+
+        reader.answers.remove(1)
+        pass().run()
+        assertThat(files().getValue(1).tagPassAt).isNotNull()
+    }
+
+    @Test
+    fun filesRemovedByASyncTakeTheirAlbumsArtistsAndGenresWithThemAlsoWhenNothingIsLeftToRead() = runBlocking<Unit> {
+        library(1)
+        reader.answers[1] = tagged("TITLE" to "t", "ALBUM" to "One", "ARTISTS" to "Kino", "GENRE" to "Rock")
+        pass().run()
+        assertThat(dao.albums()).hasSize(1)
+
+        index.volume().rows = emptyList()
+        sync.sync()
+        pass().run()
+
+        assertThat(dao.albums()).isEmpty()
+        assertThat(dao.artists()).isEmpty()
+        assertThat(dao.genres()).isEmpty()
+    }
+
+    @Test
+    fun aNewSpellingReachesTheAlbumAndTheArtist() = runBlocking<Unit> {
+        library(1)
+        reader.answers[1] = tagged("ALBUM" to "one", "ALBUMARTIST" to "band", "ARTISTS" to "the kino")
+        pass(readerVersion = 1).run()
+
+        reader.answers[1] = tagged("ALBUM" to "One", "ALBUMARTIST" to "Band", "ARTISTS" to "The Kino", "ARTISTSORT" to "Kino, The")
+        pass(readerVersion = 2).run()
+
+        assertThat(dao.albums().single().title).isEqualTo("One")
+        assertThat(dao.albums().single().albumArtist).isEqualTo("Band")
+        val artist = dao.artists().single { it.name.lowercase() == "the kino" }
+        assertThat(artist.name).isEqualTo("The Kino")
+        assertThat(artist.sortName).isEqualTo("Kino, The")
+    }
+
+    @Test
     fun aCrashIsRecordedAndTheRunGoesOn() = runBlocking<Unit> {
         library(1, 2)
         reader.answers[1] = PassRead.Crashed

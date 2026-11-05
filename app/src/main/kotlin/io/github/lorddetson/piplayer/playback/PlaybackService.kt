@@ -100,7 +100,7 @@ class PlaybackService : MediaLibraryService() {
         // notification (§2.3, §4.5).
         addSession(session)
         saver.start()
-        val refresher = SessionItemRefresher(sessionPlayer) { id -> SongList.current()?.firstOrNull { it.id == id } }
+        val refresher = SessionItemRefresher(sessionPlayer, SongList::keptSong)
         refresher.start()
         passBatches = mainScope.launch { SongList.batches.drop(1).collect { refresher.refresh() } }
         isRunningForTests = true

@@ -86,6 +86,19 @@ class TagReaderLegacyTest {
     }
 
     @Test
+    fun aFrameThatSaysNothingLeavesTheFieldToTheOlderTag() {
+        val properties = read("empty-frame-id3v1.mp3").properties
+
+        assertThat(properties["TITLE"]).containsExactly("V1 title")
+        assertThat(properties["ARTIST"]).containsExactly("V2 artist")
+    }
+
+    @Test
+    fun aLossyCodingInAWavFileHasNoBitDepth() {
+        assertThat(read("adpcm.wav", markLegacy = false).bitDepth).isNull()
+    }
+
+    @Test
     fun theReaderNamesTheCodecAndBitDepth() {
         val expected = mapOf(
             "id3v23.mp3" to ("mp3" to null),

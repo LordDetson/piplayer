@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -36,6 +37,14 @@ class SongsViewModel(application: Application) : AndroidViewModel(application) {
 
     /** A new screen sorts its list anew. */
     private var firstLoadDone = false
+
+    /** A sort whose list has not reached the screen, for instance because the screen stopped during the read. */
+    private var sortToShow = false
+
+    /** The list has been brought to the song it asked for; a later composition must not do that again. */
+    fun onScrolled() {
+        mutableState.update { state -> if (state is SongsState.Loaded) state.copy(scrollTo = null) else state }
+    }
 
     private var watching: Job? = null
     private var started = false
@@ -85,14 +94,20 @@ class SongsViewModel(application: Application) : AndroidViewModel(application) {
             launch {
                 // A batch of the tag pass: the screen takes the shared list, so that a tap plays what it shows.
                 SongList.batches.drop(1).collect {
-                    if (mutableState.value is SongsState.Loaded) SongList.current()?.let { mutableState.value = SongsState.Loaded(it) }
+                    // Not over a first page, which would jump back to an older order.
+                    if (firstLoadDone && mutableState.value is SongsState.Loaded) {
+                        SongList.current()?.let { songs ->
+                            mutableState.update { state -> if (state is SongsState.Loaded) state.copy(songs = songs) else state }
+                        }
+                    }
                 }
             }
             SongList.changes(app).collectLatest { key ->
                 val resort = SongList.resortDue()
                 val kept = if (firstLoadDone && !resort) SongList.keptFor(key) else null
                 if (kept != null) {
-                    mutableState.value = SongsState.Loaded(kept)
+                    mutableState.value = SongsState.Loaded(kept, scrollTo = firstVisibleSong.takeIf { sortToShow })
+                    sortToShow = false
                     return@collectLatest
                 }
                 // Before the list is first shown, its first page comes ahead of the whole list: 20 000 songs take a
@@ -101,10 +116,12 @@ class SongsViewModel(application: Application) : AndroidViewModel(application) {
                     val page = withContext(Dispatchers.IO) { SongList.firstPage(app, FIRST_PAGE) }
                     if (page.isNotEmpty()) mutableState.value = SongsState.Loaded(page)
                 }
-                val anchor = firstVisibleSong.takeIf { resort }
+                if (resort) sortToShow = true
                 val songs = withContext(Dispatchers.IO) { SongList.load(app, fresh = resort || !firstLoadDone) }
                 firstLoadDone = true
-                mutableState.value = SongsState.Loaded(songs, scrollTo = anchor)
+                // The song at the top now: the user may have scrolled during the read.
+                mutableState.value = SongsState.Loaded(songs, scrollTo = firstVisibleSong.takeIf { sortToShow })
+                sortToShow = false
             }
         }
     }

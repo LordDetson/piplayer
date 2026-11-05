@@ -1,5 +1,6 @@
 package io.github.lorddetson.piplayer.tagging
 
+import android.os.Process
 import java.util.concurrent.Executors
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.time.Duration
@@ -44,6 +45,9 @@ sealed interface TaggerResult<out T> {
 
     /** The file has failed [TagReadGuard.UNSAFE_COUNT] times; it was not read. */
     data object Unsafe : TaggerResult<Nothing>
+
+    /** `:tagger` could not be reached, so nothing was read; it says nothing about the file. */
+    data object Unavailable : TaggerResult<Nothing>
 }
 
 /**
@@ -86,6 +90,22 @@ class TagReadGuard(private val counts: UnsafeCounts, private val timeout: Durati
         val value = result.getOrElse { e -> if (e is TaggerDiedException) return TaggerResult.Crashed else throw e }
         counts.reset(target)
         TaggerResult.Replied(value)
+    }
+
+    /**
+     * [run] with the call at background priority, which a binder call carries over to `:tagger`, and back afterwards: the
+     * threads are shared with calls of normal priority.
+     */
+    suspend fun <T> run(target: TagTarget, kill: () -> Unit, background: Boolean, call: () -> T): TaggerResult<T> {
+        if (!background) return run(target, kill, call)
+        return run(target, kill) {
+            Process.setThreadPriority(Process.THREAD_PRIORITY_BACKGROUND)
+            try {
+                call()
+            } finally {
+                Process.setThreadPriority(Process.THREAD_PRIORITY_DEFAULT)
+            }
+        }
     }
 
     companion object {

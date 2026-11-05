@@ -64,6 +64,7 @@ fun SongsContent(
     modifier: Modifier = Modifier,
     passProgress: PassProgress = PassProgress(),
     onFirstVisibleSong: (Long?) -> Unit = {},
+    onScrolled: () -> Unit = {},
 ) {
     when (state) {
         SongsState.Loading -> Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -86,6 +87,7 @@ fun SongsContent(
                 val song = state.scrollTo ?: return@LaunchedEffect
                 val row = state.songs.indexOfFirst { it.id == song }
                 if (row >= 0) list.scrollToItem(row)
+                onScrolled()
             }
             // Over the list, so that its coming and going moves no row.
             Box(modifier.fillMaxSize()) {

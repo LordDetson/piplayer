@@ -46,6 +46,8 @@ FIXTURES = [
     ("riff-info.wav", ["-c:a", "pcm_s16le"], LATIN, False),
     # An AAC stream without a container holds no tags.
     ("adts.aac", ["-c:a", "aac", "-b:a", "128k", "-f", "adts"], {}, False),
+    # A lossy coding in a WAV file.
+    ("adpcm.wav", ["-c:a", "adpcm_ima_wav"], {}, False),
     ("cyrillic.flac", ["-c:a", "flac"], CYRILLIC, False),
     ("cyrillic-id3v23.mp3", ["-c:a", "libmp3lame", "-b:a", "64k", "-id3v2_version", "3"], CYRILLIC, False),
 ]
@@ -87,6 +89,9 @@ def make_legacy_fixtures():
     (OUT / "legacy-id3v1.mp3").write_bytes(audio + id3v1("Кино", "Цой", "Чёрный альбом", pad=b" "))
     (OUT / "legacy-id3v23.mp3").write_bytes(
         id3v23(("TIT2", legacy("Группа крови")), ("TPE1", utf16("Кино")), ("TALB", legacy("Ёж"))) + audio)
+    # A frame with only its encoding byte says nothing, whatever an older tag holds.
+    (OUT / "empty-frame-id3v1.mp3").write_bytes(
+        id3v23(("TIT2", b"\0"), ("TPE1", b"\0V2 artist")) + audio + id3v1("V1 title", "V1 artist"))
     (OUT / "fallback-id3v1.mp3").write_bytes(
         id3v23(("TIT2", b"\0V2 title")) + audio + id3v1("V1 title", "V1 artist", "V1 album"))
     pcm = b"\0\0" * 4410

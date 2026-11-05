@@ -1,5 +1,6 @@
 package io.github.lorddetson.piplayer.library.tagpass
 
+import android.os.SystemClock
 import kotlin.math.max
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -11,7 +12,7 @@ import kotlinx.coroutines.flow.first
  * the process soon and a read frozen in the middle could count as a hang. An underrun of the audio or a hot device holds it
  * for a minute more. A run waits here between files; nothing is cancelled, because cancelling a read kills `:tagger`.
  */
-class PassGate(private val now: () -> Long = System::currentTimeMillis) {
+class PassGate(private val now: () -> Long = SystemClock::elapsedRealtime) {
 
     private val uiVisible = MutableStateFlow(false)
     private val playing = MutableStateFlow(false)

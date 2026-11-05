@@ -2,15 +2,19 @@ package io.github.lorddetson.piplayer.ui.songs
 
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
+import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToIndex
 import androidx.lifecycle.Lifecycle
+import androidx.test.espresso.Espresso
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.github.lorddetson.piplayer.MainActivity
+import io.github.lorddetson.piplayer.R
 import io.github.lorddetson.piplayer.TestFiles
 import io.github.lorddetson.piplayer.library.FakeMediaIndex
 import io.github.lorddetson.piplayer.library.FakeMediaIndex.Companion.row
@@ -21,8 +25,10 @@ import io.github.lorddetson.piplayer.library.tagpass.PassProgress
 import io.github.lorddetson.piplayer.library.tagpass.PassRead
 import io.github.lorddetson.piplayer.library.tagpass.TagPass
 import io.github.lorddetson.piplayer.library.tagpass.TagPassState
+import io.github.lorddetson.piplayer.playback.PlaybackTesting
 import io.github.lorddetson.piplayer.tagging.TagReport
 import io.github.lorddetson.piplayer.ui.GrantAudioPermission
+import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.After
@@ -72,6 +78,9 @@ class SongsInPlaceScreenTest {
 
     private fun top(text: String) = compose.onNodeWithText(text).getUnclippedBoundsInRoot().top
 
+    /** The list is read off the main thread, which waiting for idle does not cover. */
+    private fun holdsFor(what: String, condition: () -> Boolean) = PlaybackTesting.throughout(what, 1.seconds, condition)
+
     private fun goToBackgroundAndBack() {
         compose.activityRule.scenario.moveToState(Lifecycle.State.CREATED)
         compose.waitForIdle()
@@ -112,30 +121,71 @@ class SongsInPlaceScreenTest {
         compose.waitUntilExactlyOneExists(hasText("Tag 399"), timeoutMillis = 10_000)
 
         goToBackgroundAndBack()
-        compose.waitForIdle()
 
+        holdsFor("the order stays") { SongList.current()!!.first().id == 1L }
+        compose.waitForIdle()
         compose.onNodeWithText("Tag 399").assertExists()
-        assertThat(SongList.current()!!.first().id).isEqualTo(1L)
     }
 
     @Test
     fun theFirstReturnAfterThePassSortsOnceAndStaysOnTheSameSong() {
         listShown()
-        compose.onNodeWithTag(SongsTags.LIST).performScrollToIndex(150)
+        // Row 21 goes from index 20 to index 279: far enough that the list could not follow it by its key alone.
+        compose.onNodeWithTag(SongsTags.LIST).performScrollToIndex(20)
         compose.waitForIdle()
+        val before = top("Song 021")
         landAPass(finish = true) { "Tag %03d".format(400 - it) }
-        compose.waitUntilExactlyOneExists(hasText("Tag 249"), timeoutMillis = 10_000)
+        compose.waitUntilExactlyOneExists(hasText("Tag 379"), timeoutMillis = 10_000)
 
         goToBackgroundAndBack()
 
         compose.waitUntil(10_000) { SongList.current()?.first()?.id == 300L }
-        compose.waitUntilExactlyOneExists(hasText("Tag 249"), timeoutMillis = 10_000)
+        compose.waitUntilExactlyOneExists(hasText("Tag 379"), timeoutMillis = 10_000)
+        compose.waitForIdle()
+        assertThat(top("Tag 379")).describedAs("the same song where it was, near the top").isLessThanOrEqualTo(before)
         val sorted = SongList.current()
 
         goToBackgroundAndBack()
-        compose.waitForIdle()
 
-        assertThat(SongList.current()).isSameAs(sorted)
+        holdsFor("no second sort") { SongList.current() === sorted }
+    }
+
+    @Test
+    fun theListStaysWhereTheUserScrolledAfterTheSortWhenTheScreenComesBack() {
+        listShown()
+        compose.onNodeWithTag(SongsTags.LIST).performScrollToIndex(20)
+        compose.waitForIdle()
+        landAPass(finish = true) { "Tag %03d".format(400 - it) }
+        compose.waitUntilExactlyOneExists(hasText("Tag 379"), timeoutMillis = 10_000)
+        goToBackgroundAndBack()
+        compose.waitUntil(10_000) { SongList.current()?.first()?.id == 300L }
+        compose.waitUntilExactlyOneExists(hasText("Tag 379"), timeoutMillis = 10_000)
+
+        // Far from where the sort put it; then the screen leaves the composition and comes back.
+        compose.onNodeWithTag(SongsTags.LIST).performScrollToIndex(0)
+        compose.waitUntilExactlyOneExists(hasText("Tag 100"), timeoutMillis = 5_000)
+        compose.onNode(hasContentDescription(context.getString(R.string.settings_open))).performClick()
+        compose.waitUntilExactlyOneExists(hasText(context.getString(R.string.settings_appearance)), timeoutMillis = 5_000)
+        Espresso.pressBack()
+
+        compose.waitUntilExactlyOneExists(hasText("Tag 100"), timeoutMillis = 5_000)
+        compose.waitForIdle()
+        compose.onNodeWithText("Tag 100").assertExists()
+        assertThat(compose.onAllNodes(hasText("Tag 379")).fetchSemanticsNodes()).isEmpty()
+    }
+
+    @Test
+    fun aNewEntryToTheScreenSortsAlsoDuringThePass() {
+        listShown()
+        landAPass(finish = false) { "Tag %03d".format(400 - it) }
+        compose.waitUntilExactlyOneExists(hasText("Tag 399"), timeoutMillis = 10_000)
+        assertThat(SongList.current()!!.first().id).isEqualTo(1L)
+
+        // A new screen: another view model, as a new task has.
+        compose.activityRule.scenario.onActivity { it.viewModelStore.clear() }
+        compose.activityRule.scenario.recreate()
+
+        compose.waitUntil(15_000) { SongList.current()?.first()?.id == 300L }
     }
 
     @Test
@@ -144,9 +194,8 @@ class SongsInPlaceScreenTest {
         val list = SongList.current()
 
         goToBackgroundAndBack()
-        compose.waitForIdle()
 
-        assertThat(SongList.current()).isSameAs(list)
+        holdsFor("no new read") { SongList.current() === list }
     }
 
     @Test

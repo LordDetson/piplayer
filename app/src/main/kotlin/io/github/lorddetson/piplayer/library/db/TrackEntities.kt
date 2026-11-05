@@ -137,6 +137,17 @@ data class TrackEntity(
         private fun List<String>.joined(): String? = if (isEmpty()) null else joinToString(SEPARATOR)
 
         private fun String?.values(): List<String> = this?.split(SEPARATOR).orEmpty()
+
+        /** What the display needs of [row]'s tags. */
+        fun tagsOf(row: ReadFileRow) = TrackTags(
+            title = row.title,
+            artist = row.artist,
+            artists = row.artists.values(),
+            album = row.album,
+            composers = row.composers.values(),
+            genres = row.genres.values(),
+            recordingMbid = row.recordingMbid,
+        )
     }
 }
 

@@ -13,6 +13,8 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -82,7 +84,9 @@ class TagPassRunner(
             val result = pass.run()
             Log.i(TAG, "The tag pass read ${result.read} files, ${result.failed} failed")
         } catch (e: CancellationException) {
-            throw e
+            // Only when this runner is being stopped; a timeout from further down is one more failure.
+            currentCoroutineContext().ensureActive()
+            Log.w(TAG, "The tag pass failed", e)
         } catch (e: Exception) {
             // The database or the reader gave up: what is committed stays, and the next run goes on from there.
             Log.w(TAG, "The tag pass failed", e)

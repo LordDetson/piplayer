@@ -227,7 +227,7 @@ class LibrarySync(
         val state = VolumeSyncStateEntity(volume, version, generation)
         val rows = changes.updated.map { it.row } + changes.added
         // A file stored again keeps what the pass read of it, unless its size or modification time changed.
-        val reads = if (changes.updated.isEmpty()) emptyMap() else dao.readFilesIn(volume).associateBy { it.track.fileId }
+        val reads = if (changes.updated.isEmpty()) emptyMap() else dao.readFilesIn(volume).associateBy { it.fileId }
         val changedFiles = changes.updated.filter { update ->
             reads[update.fileId]?.let { !it.holdsFor(update.row) } == true
         }.map { it.fileId }

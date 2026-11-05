@@ -46,6 +46,7 @@ object SongList {
     private var changedByPass = false
     private var resortPending = false
     private var activeReads = 0
+    private var batchCount = 0L
 
     /** Values the tag pass gave while a read was under way. */
     private val racing = HashMap<Long, SongRow>()
@@ -90,8 +91,10 @@ object SongList {
      */
     @VisibleForTesting
     internal fun load(source: SongSource, key: Pair<Long?, HiddenFiles>? = null, fresh: Boolean = false): List<Song> {
+        var batchesAtStart = 0L
         val read = synchronized(lock) {
             activeReads++
+            batchesAtStart = batchCount
             started.incrementAndGet()
         }
         var list = emptyList<Song>()
@@ -106,13 +109,15 @@ object SongList {
             val patched = if (racing.isEmpty()) list else list.withValues(racing)
             readEnded()
             val shown = kept?.songs.takeIf { frozen && !fresh }?.let { FrozenOrder.merge(it, patched) } ?: patched
-            if (fresh && !passRunning) {
+            // A batch during the read: this order is older than its titles, so the sort stays due.
+            if (fresh && !passRunning && batchCount == batchesAtStart) {
                 frozen = false
                 changedByPass = false
                 resortPending = false
             }
-            if (read > keptRead) {
-                keptRead = read
+            // A fresh read ends the order that a newer read may have been merged against, so it replaces that one too.
+            if (fresh || read > keptRead) {
+                keptRead = maxOf(keptRead, read)
                 kept = Kept(shown, key)
             }
             shown
@@ -140,6 +145,12 @@ object SongList {
         return kept.songs.takeIf { kept.key == key }
     }
 
+    /**
+     * The song as the kept list holds it, also when that list is out of date since a sync: a batch's values hold whichever
+     * revision it was read at, and with the screen off nothing reads the list again.
+     */
+    fun keptSong(id: Long): Song? = kept?.songs?.firstOrNull { it.id == id }
+
     /** Raised after each batch of the tag pass that [applyInPlace] took. */
     val batches: StateFlow<Long> get() = mutableBatches
 
@@ -152,6 +163,7 @@ object SongList {
         synchronized(lock) {
             changedByPass = true
             frozen = true
+            batchCount++
             if (activeReads > 0) rows.forEach { racing[it.mediaStoreId] = it }
             kept = kept?.let { current ->
                 val byId = rows.associateBy { it.mediaStoreId }
@@ -173,8 +185,8 @@ object SongList {
         if (changedByPass) resortPending = true else frozen = false
     }
 
-    /** Whether the list should be sorted anew; the fresh read ends that. */
-    fun resortDue(): Boolean = synchronized(lock) { resortPending }
+    /** Whether the list should be sorted anew; the fresh read ends that, and another pass running makes it wait. */
+    fun resortDue(): Boolean = synchronized(lock) { resortPending && !passRunning }
 
     /** Forgets the list and all that a tag pass left, so that the next request reads it again. */
     @VisibleForTesting

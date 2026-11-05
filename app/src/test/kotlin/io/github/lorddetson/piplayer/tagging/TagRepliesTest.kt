@@ -37,6 +37,17 @@ class TagRepliesTest {
     }
 
     @Test
+    fun `a reply that cannot be written to its file comes back as a read error`() {
+        val notADirectory = File(dir, "occupied").apply { writeText("") }
+        val large = reportOf(TagReplies.MAX_INLINE_BYTES + 1)
+
+        val body = TagReplies.pack(large, notADirectory)
+
+        assertThat(body).isInstanceOf(TagReplyBody.Inline::class.java)
+        assertThat(TagReplies.unpack(body, notADirectory).error).isEqualTo(TagReadError.IO_ERROR)
+    }
+
+    @Test
     fun `a failure crosses inline`() {
         val failure = TagReport(error = TagReadError.UNSUPPORTED_FORMAT)
 

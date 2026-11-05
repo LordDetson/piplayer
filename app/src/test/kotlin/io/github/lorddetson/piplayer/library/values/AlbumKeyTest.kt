@@ -18,6 +18,16 @@ class AlbumKeyTest {
     }
 
     @Test
+    fun `a release ID without an album title is no key`() {
+        assertThat(key(tags(album = null, release = "abc"))).isNull()
+    }
+
+    @Test
+    fun `titles of punctuation alone stay apart`() {
+        assertThat(key(tags(album = "+"))).isNotEqualTo(key(tags(album = "×")))
+    }
+
+    @Test
     fun `the same title, album artist and folder are one album, in any spelling`() {
         assertThat(key(tags(album = "СКАЗКИ", albumArtist = "кино"))).isEqualTo(key(tags()))
         assertThat(key(tags(album = "Skazki!"))).isEqualTo(key(tags(album = "skazki")))

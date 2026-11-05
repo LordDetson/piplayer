@@ -34,6 +34,9 @@
 #include <mpcfile.h>
 #include <mpegfile.h>
 #include <mpegproperties.h>
+#include <flacproperties.h>
+#include <shortenproperties.h>
+#include <trueaudioproperties.h>
 #include <oggflacfile.h>
 #include <opusfile.h>
 #include <shortenfile.h>
@@ -289,7 +292,10 @@ int bitDepthOf(TagLib::File *file) {
     return audio != nullptr && audio->codec() == TagLib::MP4::Properties::ALAC ? audio->bitsPerSample() : 0;
   }
   if (auto *wav = dynamic_cast<TagLib::RIFF::WAV::File *>(file)) {
-    return wav->audioProperties() != nullptr ? wav->audioProperties()->bitsPerSample() : 0;
+    const TagLib::RIFF::WAV::Properties *audio = wav->audioProperties();
+    if (audio == nullptr) return 0;
+    // PCM and IEEE float; anything else there, such as ADPCM, is lossy.
+    return audio->format() == 1 || audio->format() == 3 ? audio->bitsPerSample() : 0;
   }
   if (auto *aiff = dynamic_cast<TagLib::RIFF::AIFF::File *>(file)) {
     return aiff->audioProperties() != nullptr ? aiff->audioProperties()->bitsPerSample() : 0;
@@ -299,6 +305,15 @@ int bitDepthOf(TagLib::File *file) {
   }
   if (auto *wavPack = dynamic_cast<TagLib::WavPack::File *>(file)) {
     return wavPack->audioProperties() != nullptr ? wavPack->audioProperties()->bitsPerSample() : 0;
+  }
+  if (auto *trueAudio = dynamic_cast<TagLib::TrueAudio::File *>(file)) {
+    return trueAudio->audioProperties() != nullptr ? trueAudio->audioProperties()->bitsPerSample() : 0;
+  }
+  if (auto *shorten = dynamic_cast<TagLib::Shorten::File *>(file)) {
+    return shorten->audioProperties() != nullptr ? shorten->audioProperties()->bitsPerSample() : 0;
+  }
+  if (auto *oggFlac = dynamic_cast<TagLib::Ogg::FLAC::File *>(file)) {
+    return oggFlac->audioProperties() != nullptr ? oggFlac->audioProperties()->bitsPerSample() : 0;
   }
   return 0;
 }
@@ -315,10 +330,19 @@ bool sendTechnical(JNIEnv *env, jobject sink, TagLib::File *file) {
   return !env->ExceptionCheck();
 }
 
+/** Whether a field says anything: a frame may hold only its encoding byte. */
+bool saysSomething(const TagLib::StringList &values) {
+  for (const auto &value : values) {
+    if (!value.stripWhiteSpace().isEmpty()) return true;
+  }
+  return false;
+}
+
 void fillMissing(TagLib::PropertyMap &properties, const TagLib::Tag *tag) {
   if (tag == nullptr) return;
   for (const auto &[key, values] : tag->properties()) {
-    if (!properties.contains(key)) properties.insert(key, values);
+    if (!saysSomething(values)) continue;
+    if (!properties.contains(key) || !saysSomething(properties[key])) properties.replace(key, values);
   }
 }
 

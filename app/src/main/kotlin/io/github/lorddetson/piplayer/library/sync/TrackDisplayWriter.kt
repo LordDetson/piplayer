@@ -7,6 +7,7 @@ import io.github.lorddetson.piplayer.library.db.JsonRows
 import io.github.lorddetson.piplayer.library.db.LibraryDao
 import io.github.lorddetson.piplayer.library.db.LibraryDatabase
 import io.github.lorddetson.piplayer.library.db.ReadFileRow
+import io.github.lorddetson.piplayer.library.db.TrackEntity
 import io.github.lorddetson.piplayer.library.db.replaceAll
 import io.github.lorddetson.piplayer.library.values.IndexValues
 import io.github.lorddetson.piplayer.library.values.MergedValues
@@ -26,7 +27,7 @@ internal class DisplayInput(
     fun resolve(): DisplayValues = MergedValues.of(
         displayName,
         index,
-        read?.track?.toTags(),
+        read?.let(TrackEntity::tagsOf),
         read = read != null,
         exactDurationMs = read?.exactDurationMs,
         tagLengthMs = read?.tagLengthMs,
@@ -51,13 +52,13 @@ class TrackDisplayWriter(private val database: LibraryDatabase) {
 
     /** The inputs of [fileIds]. */
     internal suspend fun inputsOf(fileIds: List<Long>): List<DisplayInput> = fileIds.chunked(CHUNK).flatMap { chunk ->
-        val reads = dao.readFilesOf(chunk).associateBy { it.track.fileId }
+        val reads = dao.readFilesOf(chunk).associateBy { it.fileId }
         dao.indexInputsOf(chunk).map { it.toInput(reads[it.fileId]) }
     }
 
     /** The inputs of every file. */
     internal suspend fun allInputs(): List<DisplayInput> {
-        val reads = dao.readFiles().associateBy { it.track.fileId }
+        val reads = dao.readFiles().associateBy { it.fileId }
         return dao.indexInputs().map { it.toInput(reads[it.fileId]) }
     }
 

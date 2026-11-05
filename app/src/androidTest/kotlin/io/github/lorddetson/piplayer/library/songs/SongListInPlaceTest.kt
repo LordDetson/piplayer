@@ -2,6 +2,7 @@ package io.github.lorddetson.piplayer.library.songs
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.github.lorddetson.piplayer.library.db.SongRow
+import io.github.lorddetson.piplayer.settings.HiddenFiles
 import java.util.concurrent.CountDownLatch
 import kotlin.concurrent.thread
 import org.assertj.core.api.Assertions.assertThat
@@ -129,6 +130,87 @@ class SongListInPlaceTest {
 
         SongList.load(SongSource { listOf(song(1, "Z")) }, fresh = true)
         assertThat(SongList.resortDue()).describedAs("after the sort").isFalse()
+    }
+
+    @Test
+    fun aSortStillDueWaitsWhileAnotherPassRuns() {
+        SongList.load(SongSource { listOf(song(1, "A")) })
+        SongList.passStarted()
+        SongList.applyInPlace(listOf(row(1, "Z")))
+        SongList.passFinished()
+        assertThat(SongList.resortDue()).isTrue()
+
+        SongList.passStarted()
+        assertThat(SongList.resortDue()).describedAs("while the second pass runs").isFalse()
+
+        SongList.passFinished()
+        assertThat(SongList.resortDue()).describedAs("after it").isTrue()
+    }
+
+    @Test
+    fun aBatchDuringTheSortLeavesTheNextSortDue() {
+        SongList.load(SongSource { listOf(song(1, "A"), song(2, "B")) })
+        SongList.passStarted()
+        val reading = CountDownLatch(1)
+        val goOn = CountDownLatch(1)
+        val reader = thread {
+            SongList.load(
+                SongSource {
+                    reading.countDown()
+                    goOn.await()
+                    listOf(song(1, "A"), song(2, "B"))
+                },
+                fresh = true,
+            )
+        }
+        reading.await()
+
+        // The read holds the old order; the last batch and the end of the pass come while it runs.
+        SongList.applyInPlace(listOf(row(1, "Z")))
+        SongList.passFinished()
+        goOn.countDown()
+        reader.join()
+
+        assertThat(SongList.resortDue()).isTrue()
+    }
+
+    @Test
+    fun aFreshReadOvertakenByAnotherIsTheOneKept() {
+        SongList.load(SongSource { listOf(song(1, "A"), song(2, "B")) })
+        SongList.passStarted()
+        SongList.applyInPlace(listOf(row(1, "Z")))
+        SongList.passFinished()
+        val reading = CountDownLatch(1)
+        val goOn = CountDownLatch(1)
+        val fresh = thread {
+            SongList.load(
+                SongSource {
+                    reading.countDown()
+                    goOn.await()
+                    listOf(song(2, "B"), song(1, "Z"))
+                },
+                fresh = true,
+            )
+        }
+        reading.await()
+
+        // The playback service reads meanwhile and is done first, in the frozen order.
+        SongList.load(SongSource { listOf(song(2, "B"), song(1, "Z")) })
+        goOn.countDown()
+        fresh.join()
+
+        assertThat(SongList.current()!!.map { it.id }).containsExactly(2L, 1L)
+    }
+
+    @Test
+    fun aKeptSongIsFoundAlsoWhenTheListIsOutOfDate() {
+        SongList.load(SongSource { listOf(song(1, "A")) }, key = -1L to HiddenFiles())
+        assertThat(SongList.current()).describedAs("the list of another revision").isNull()
+
+        SongList.applyInPlace(listOf(row(1, "Z")))
+
+        assertThat(SongList.keptSong(1)!!.title).isEqualTo("Z")
+        assertThat(SongList.keptSong(9)).isNull()
     }
 
     @Test

@@ -391,7 +391,8 @@ keeps playing meanwhile, and the crash leaves a native crash report of `:tagger`
 |---|---|---|---|
 | Read | `tag_pass_at`, reader version | Tags, then the file name | When the file or the reader version changes |
 | TagLib does not know the format, or fails on it | `tag_failure` `unsupported` or `read`, reader version | Index values | When the file or the reader version changes |
-| The file cannot be opened | `tag_failure` `open` | Index values | In a later process |
+| The file cannot be opened, or the device fails during the read (a full disk) | `tag_failure` `open` | Index values | In a later process |
+| `:tagger` cannot be reached | Nothing, it says nothing about the file | Index values | The run waits a minute and tries the same file again |
 | `:tagger` crashes or hangs | `tag_failure` `crash`, the count of §4.4 | Index values | In a later process, until the count marks it unsafe; the run waits a minute first, because Android gives up on a process that crashes twice a minute |
 
 ### 5.4 Lists during and after a pass
@@ -402,8 +403,9 @@ keeps playing meanwhile, and the crash leaves a native crash report of `:tagger`
 - While the pass runs, a sync that adds or removes files keeps the order: rows stay where they are, removed ones go, and
   a new one goes after the kept row before it in title order.
 - The list is sorted anew at a new entry to the screen or a start of the process, and once more at the first return from
-  the background after a pass that changed rows ended, on the same song. Other returns read nothing unless the library
-  changed. A row whose new length crosses the short-file limit stays until then.
+  the background after a pass that changed rows ended, on the same song; if another pass is running by then, that sort
+  waits for its end. Other returns read nothing unless the library changed. A row whose new length crosses the short-file
+  limit stays until the next read of the list.
 - A line over the top of the list shows the progress of a run of at least 50 files, without moving any row.
 
 ### 5.5 When it runs
@@ -415,7 +417,8 @@ keeps playing meanwhile, and the crash leaves a native crash report of `:tagger`
   for long; lists show the index's values meanwhile.
 - A run waits between files when that no longer holds, and for a minute after an underrun of the audio or after a device
   has been hot (thermal status moderate or above). Nothing is cancelled for that, because cancelling a read kills `:tagger`.
-- The pass takes no wake lock of its own and no WorkManager: quotas apply to that even during playback.
+- The pass takes no wake lock of its own and no WorkManager: quotas apply to that even during playback. The reads run at
+  background priority too, which the binder call carries over to `:tagger`.
 - Checks: a pass over the 20 000 generated files on the phone, with the FLAC album on repeat, the screen off and no
   charger: no underrun, no stall, no new audio output, and the worst lateness of the playback thread's looper compared
   with a minute of playback without the pass (`TagPassScreenOffTest`).

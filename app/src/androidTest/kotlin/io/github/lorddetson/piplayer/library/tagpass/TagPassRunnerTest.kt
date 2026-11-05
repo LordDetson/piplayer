@@ -6,7 +6,10 @@ import io.github.lorddetson.piplayer.library.FakeMediaIndex
 import io.github.lorddetson.piplayer.library.FakeMediaIndex.Companion.row
 import io.github.lorddetson.piplayer.library.FakeRules
 import io.github.lorddetson.piplayer.library.db.LibraryDatabase
+import io.github.lorddetson.piplayer.library.songs.Song
 import io.github.lorddetson.piplayer.library.songs.SongList
+import io.github.lorddetson.piplayer.library.songs.SongSource
+import io.github.lorddetson.piplayer.library.sync.LibraryStatus
 import io.github.lorddetson.piplayer.library.sync.LibrarySync
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.eventually
 import io.github.lorddetson.piplayer.tagging.TagReport
@@ -15,7 +18,12 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Duration.Companion.seconds
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.After
 import org.junit.Test
@@ -39,9 +47,13 @@ class TagPassRunnerTest {
     }
 
     private val pass by lazy {
-        TagPass(database, sync, { reader.read(it) }, cyrillicLanguage = { false }, gate = gate::awaitOpen, batchSize = 1)
+        TagPass(
+            database, sync, { reader.read(it) }, cyrillicLanguage = { false }, gate = gate::awaitOpen, batchSize = 1,
+            crashBackoff = 1.milliseconds, onBatch = SongList::applyInPlace,
+        )
     }
-    private val runner by lazy { TagPassRunner(pass, sync.status, gate, startDelay = 10.milliseconds) }
+    private var status: Flow<LibraryStatus>? = null
+    private val runner by lazy { TagPassRunner(pass, status ?: sync.status, gate, startDelay = 10.milliseconds) }
 
     @After
     fun close() = runBlocking {
@@ -62,11 +74,14 @@ class TagPassRunnerTest {
     @Test
     fun nothingIsReadUntilTheLibraryKnowsItsFiles() = runBlocking<Unit> {
         gate.setUiVisible(true)
+        library(1, 2)
+        val known = MutableStateFlow(LibraryStatus(ready = true, known = false))
+        status = known
         runner.start()
         Thread.sleep(300)
         assertThat(reads.get()).isZero()
 
-        library(1, 2)
+        known.value = LibraryStatus(ready = true, known = true)
 
         read(2)
     }
@@ -88,7 +103,11 @@ class TagPassRunnerTest {
         library(1, 2, 3)
         reader = PassReader {
             try {
-                if (reads.get() == 0) gate.setUiVisible(false)
+                if (reads.get() == 0) {
+                    gate.setUiVisible(false)
+                    // A cancellation would land here.
+                    delay(200)
+                }
                 read()
             } catch (e: CancellationException) {
                 cancelled.set(true)
@@ -105,6 +124,8 @@ class TagPassRunnerTest {
 
         gate.setUiVisible(true)
         read(3)
+        Thread.sleep(200)
+        assertThat(reads.get()).describedAs("no file read twice").isEqualTo(3)
     }
 
     @Test
@@ -122,20 +143,54 @@ class TagPassRunnerTest {
     @Test
     fun aRequestDuringARunBringsOneMoreAfterIt() = runBlocking<Unit> {
         gate.setUiVisible(true)
-        library(1)
+        library(1, 2)
+        val entered = CountDownLatch(1)
         val hold = CountDownLatch(1)
         reader = PassReader {
-            hold.await()
+            if (reads.get() == 1) {
+                entered.countDown()
+                hold.await()
+            }
             read()
         }
         runner.start()
-        Thread.sleep(100)
+        entered.await()
 
-        library(1, 2)
+        // During the read of the second file; no sync moves anything.
+        dao().readAgain(listOf(dao().files().first().id))
         runner.runAgain()
         hold.countDown()
 
-        read(2)
+        read(3)
+    }
+
+    @Test
+    fun aReadOfEverythingAgainAlsoTakesWhatFailedInThisProcess() = runBlocking<Unit> {
+        gate.setUiVisible(true)
+        library(1)
+        reader = PassReader { PassRead.OpenFailed }
+        runner.start()
+        eventually("the run ended") { TagPassState.progress.value.let { it.total == 1 && !it.running } }
+        reader = PassReader { read() }
+
+        dao().forgetReaderVersions()
+        runner.readAllAgain()
+
+        read(1)
+    }
+
+    @Test
+    fun aTimeoutInsideARunIsNotTakenForTheRunnerBeingStopped() = runBlocking<Unit> {
+        gate.setUiVisible(true)
+        library(1)
+        reader = PassReader { withTimeout(1) { delay(1_000) }; read() }
+        runner.start()
+        Thread.sleep(300)
+        reader = PassReader { read() }
+
+        runner.runAgain()
+
+        read(1)
     }
 
     @Test
@@ -201,12 +256,48 @@ class TagPassRunnerTest {
     @Test
     fun theOrderIsFreeAgainAfterARunThatChangedNothing() = runBlocking<Unit> {
         gate.setUiVisible(true)
-        library(1)
+        library(1, 2)
+        SongList.load(SongSource { listOf(song(1, "A"), song(2, "B")) })
         reader = PassReader { PassRead.OpenFailed }
         runner.start()
 
-        eventually("the run ended") { TagPassState.progress.value.let { it.total == 1 && !it.running } }
-
-        assertThat(SongList.resortDue()).isFalse()
+        // The runner ends the freeze after the progress says the run ended.
+        eventually("the order is free", 5.seconds) {
+            TagPassState.progress.value.let { it.total == 2 && !it.running } &&
+                SongList.load(SongSource { listOf(song(2, "A"), song(1, "B")) }).first().id == 2L
+        }
     }
+
+    @Test
+    fun aRunFreezesTheOrderFromItsStart() = runBlocking<Unit> {
+        gate.setUiVisible(true)
+        library(1)
+        SongList.load(SongSource { listOf(song(1, "A"), song(2, "B")) })
+        var order = emptyList<Long>()
+        reader = PassReader {
+            // Before the first batch: a read now keeps the order of the list.
+            order = SongList.load(SongSource { listOf(song(2, "A"), song(1, "B")) }).map { it.id }
+            read()
+        }
+        runner.start()
+
+        read(1)
+
+        assertThat(order).containsExactly(1L, 2L)
+    }
+
+    @Test
+    fun aRunThatChangedRowsLeavesASortDue() = runBlocking<Unit> {
+        gate.setUiVisible(true)
+        library(1)
+        SongList.load(SongSource { listOf(song(1, "A")) })
+        assertThat(SongList.resortDue()).isFalse()
+        runner.start()
+
+        read(1)
+
+        eventually("a sort is due") { SongList.resortDue() }
+    }
+
+    private fun song(id: Long, title: String) = Song(id, "uri$id", title, null, null, null)
 }

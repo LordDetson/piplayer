@@ -1,7 +1,6 @@
 package io.github.lorddetson.piplayer.library.db
 
 import androidx.room3.Dao
-import androidx.room3.Embedded
 import androidx.room3.Insert
 import androidx.room3.Query
 import androidx.room3.Upsert
@@ -219,11 +218,23 @@ interface LibraryDao {
     )
     suspend fun addAlbum(key: String, title: String, albumArtist: String?, releaseMbid: String?, compilation: Boolean)
 
+    @Query(
+        "UPDATE album SET title = :title, album_artist = :albumArtist, compilation = :compilation " +
+            "WHERE album_key = :key AND (title != :title OR album_artist IS NOT :albumArtist OR compilation != :compilation)",
+    )
+    suspend fun updateAlbum(key: String, title: String, albumArtist: String?, compilation: Boolean)
+
     @Query("SELECT id FROM album WHERE album_key = :key")
     suspend fun albumId(key: String): Long
 
     @Query("INSERT OR IGNORE INTO artist (artist_key, name, sort_name, mbid) VALUES (:key, :name, :sortName, :mbid)")
     suspend fun addArtist(key: String, name: String, sortName: String?, mbid: String?)
+
+    @Query(
+        "UPDATE artist SET name = :name, sort_name = COALESCE(:sortName, sort_name) " +
+            "WHERE artist_key = :key AND (name != :name OR (:sortName IS NOT NULL AND sort_name IS NOT :sortName))",
+    )
+    suspend fun updateArtist(key: String, name: String, sortName: String?)
 
     @Query("SELECT id FROM artist WHERE artist_key = :key")
     suspend fun artistId(key: String): Long
@@ -253,9 +264,16 @@ interface LibraryDao {
 /** A file's size, modification time and place as the database holds them now. */
 data class FileState(val id: Long, val size: Long, val mtime: Long, val volume: String, val relativePath: String)
 
-/** A read track with what the display needs of its file. */
+/** A read track as the display needs it; no raw tags, because a sync may read this for every file. */
 data class ReadFileRow(
-    @Embedded val track: TrackEntity,
+    val fileId: Long,
+    val title: String?,
+    val artist: String?,
+    val artists: String?,
+    val album: String?,
+    val composers: String?,
+    val genres: String?,
+    val recordingMbid: String?,
     val size: Long,
     val mtime: Long,
     val displayName: String,
@@ -283,7 +301,8 @@ data class FolderKey(val volume: String, val relativePath: String)
 /** A folder with a rule its files carry. */
 data class FolderRuleRow(val volume: String, val relativePath: String, val rule: Int)
 
-private const val READ_FILES = "SELECT t.*, f.size, f.mtime, f.display_name AS displayName, " +
+private const val READ_FILES = "SELECT t.file_id AS fileId, t.title, t.artist, t.artists, t.album, t.composers, t.genres, " +
+    "t.recording_mbid AS recordingMbid, f.size, f.mtime, f.display_name AS displayName, " +
     "f.relative_path AS relativePath, " +
     "f.embedded_cover_present AS embeddedCover, f.tag_length_ms AS tagLengthMs, f.duration_ms AS exactDurationMs " +
     "FROM track t JOIN audio_file f ON f.id = t.file_id"
