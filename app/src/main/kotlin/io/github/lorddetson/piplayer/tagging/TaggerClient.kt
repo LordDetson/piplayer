@@ -13,6 +13,8 @@ import android.os.ParcelFileDescriptor
 import android.os.Process
 import android.system.Os
 import io.github.lorddetson.piplayer.library.Library
+import io.github.lorddetson.piplayer.tagging.contentkey.DurationCheck
+import io.github.lorddetson.piplayer.tagging.contentkey.DurationPlan
 import java.io.File
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
@@ -74,20 +76,38 @@ class TaggerClient(
     val isBound: Boolean get() = synchronized(lock) { connection != null }
 
     /** Reads the tags of [file], which stays open and the caller's, for [target]. */
-    suspend fun read(target: TagTarget, file: ParcelFileDescriptor, fileName: String?): TaggerResult<TagRead> {
+    suspend fun read(target: TagTarget, file: ParcelFileDescriptor, fileName: String?): TaggerResult<TagRead> =
+        call(target, timeout = null) { tagger ->
+            val reply = tagger.read(file, fileName)
+            TagRead(TagReplies.unpack(reply.body, spillDir), viaFile = reply.body is TagReplyBody.InFile)
+        }
+
+    /**
+     * Carries out what [plan] leaves to do for [file], which stays open and the caller's (docs/library.md §7). The
+     * length, or null when no extractor can read the file. Cancelling the call ends it at once: it kills `:tagger`.
+     */
+    suspend fun walkDuration(target: TagTarget, file: ParcelFileDescriptor, plan: DurationPlan): TaggerResult<Long?> =
+        call(target, TagReadGuard.walkTimeout(file.statSize)) { tagger ->
+            val flacEndOf = if (plan.check == DurationCheck.FLAC_END) plan.headerMs ?: NO_HEADER else NO_HEADER
+            tagger.walkDuration(file, flacEndOf).takeIf { it >= 0 }
+        }
+
+    /** One guarded call of `:tagger`; [timeout] is the guard's when null. */
+    private suspend fun <T> call(target: TagTarget, timeout: Duration?, block: (ITagger) -> T): TaggerResult<T> {
         // Not even a binding for an unsafe file.
         if (guard.isUnsafe(target)) return TaggerResult.Unsafe
         handler.removeCallbacks(unbindWhenIdle)
         try {
             val (tagger, pid) = connected()
-            return guard.run(target, kill = { Process.killProcess(pid) }) {
-                val reply = try {
-                    tagger.read(file, fileName)
+            val kill = { Process.killProcess(pid) }
+            val guarded = {
+                try {
+                    block(tagger)
                 } catch (e: DeadObjectException) {
                     throw TaggerDiedException(e)
                 }
-                TagRead(TagReplies.unpack(reply.body, spillDir), viaFile = reply.body is TagReplyBody.InFile)
             }
+            return if (timeout == null) guard.run(target, kill, call = guarded) else guard.run(target, kill, timeout, guarded)
         } finally {
             handler.postDelayed(unbindWhenIdle, idle.inWholeMilliseconds)
         }
@@ -146,6 +166,7 @@ class TaggerClient(
     companion object {
         val IDLE = 30.seconds
         private val BIND_TIMEOUT = 10.seconds
+        private const val NO_HEADER = -1L
 
         /** Where `:tagger` writes replies too large to cross inline. */
         fun spillDir(context: Context) = File(context.cacheDir, "tagger")

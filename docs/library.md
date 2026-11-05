@@ -339,3 +339,42 @@ Instrumented tests on the API 30, 36 and 37 emulators:
 Crash tests, opt-in with `-e crashTests true` like the crash reports' end-to-end tests (Android counts repeated
 crashes against the app): a file that aborts the reader is counted as a crash, a second abort makes it unsafe, a song
 keeps playing meanwhile, and the crash leaves a native crash report of `:tagger`.
+
+## 7. Content key and exact duration (M2a step 7)
+
+The layout of the key and the rules for lengths are in TI §3.1. This step builds them behind `:tagger`.
+
+### 7.1 What a read returns
+
+- A read of `:tagger` (§4.2) also returns the file's content key in hex, its format token and a duration plan: the
+  length to store for now, if the header gives one, and what is left to do: nothing, a check of FLAC's end, or a walk.
+- The key depends on the content alone, not on the name and not on whether TagLib took the tags. A file TagLib calls
+  unknown still gets a key, from its whole bytes unless its first bytes or its MPEG frames say otherwise. A read that
+  failed for a reason that may pass (a read error, a native error) gives no key, and neither does an empty file.
+- The walks of the formats are Kotlin, tested on the JVM against synthetic files and against the keys of an independent
+  reference (`scripts/content_key_reference.py`). Only MPEG frame offsets come from TagLib.
+
+### 7.2 The frame walk
+
+- `walkDuration` is a call of its own, for files whose plan asks for one, and runs last, after the tag pass.
+- It runs in `:tagger` and not in the main process: it shares no heap with the player, and it can be ended at once by
+  killing the process, as any call whose caller gives up (§4.3). Its thread runs at background priority. It goes on
+  while music plays; the 0 underrun measurement of the tag pass covers it.
+- It reads no sample data, only the samples' times, and takes the last time plus one frame. On the API 36 emulator
+  63 MiB of raw AAC take 1.4 to 4 s.
+- It counts against the file like any call of `:tagger`, with a timeout of its own, 2 minutes or 1 s per MiB,
+  whichever is longer. A file the extractors cannot read has no length, which is not a failure.
+- FLAC is checked instead of walked: the extractor seeks to 2 s before the STREAMINFO length and goes on to the last
+  frame. Only when that frame ends more than 2 s too early is the file walked from the start.
+- A WAV that is cut off comes out within a tenth of a second, the size of the extractor's samples.
+
+### 7.3 Checks
+
+JVM tests: the layout against reference keys, with the limits at 131 071 and 196 607 bytes; the walk of each format on
+synthetic files; the bounded Ogg walk (page sizes, CRC, chains, a cut or junk at the end, bytes read); golden keys of
+real files in the walked formats; the table of duration rules; the sample clock.
+
+Instrumented tests on the emulators, through the real `:tagger`: golden keys of every format; tag edits in every
+format, also by real tools (a copy with a new Xing frame, `moov` moved, comments rewritten); any file name and no name;
+a file TagLib refuses; the walked length of headerless VBR and CBR MP3 and raw ADTS against the decoded length within
+one frame; truncated WAV, MP4 and FLAC files; an interrupted walk.

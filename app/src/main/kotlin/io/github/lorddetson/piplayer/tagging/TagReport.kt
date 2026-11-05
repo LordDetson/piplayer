@@ -4,6 +4,7 @@ import io.github.lorddetson.piplayer.nativelib.taglib.AudioProperties
 import io.github.lorddetson.piplayer.nativelib.taglib.Picture
 import io.github.lorddetson.piplayer.nativelib.taglib.TagReadError
 import io.github.lorddetson.piplayer.nativelib.taglib.TagReadResult
+import io.github.lorddetson.piplayer.tagging.contentkey.DurationPlan
 import kotlinx.serialization.Serializable
 
 /**
@@ -16,7 +17,12 @@ data class TagReport(
     val properties: Map<String, List<String>> = emptyMap(),
     val audio: Audio? = null,
     val pictures: List<PictureInfo> = emptyList(),
+    val content: Content? = null,
 ) {
+
+    /** The content key in hex, its format token and how far the file's header settles its length (TI §3.1). */
+    @Serializable
+    data class Content(val key: String, val token: String, val duration: DurationPlan)
 
     @Serializable
     data class Audio(val lengthMs: Int, val bitrateKbps: Int, val sampleRate: Int, val channels: Int)
