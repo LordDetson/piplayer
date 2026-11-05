@@ -272,6 +272,12 @@ the way the main process calls it and the count of failed reads; the tag pass of
 - TagLib's property map (keys with their lists of values), the audio properties (length, bitrate, sample rate,
   channels) and, for each embedded picture, its type, MIME type, description and size in bytes. Picture bytes never
   cross the process boundary; the files of covers arrive with step 13.
+- For the tag pass, the text of ID3v1, encoding-0 ID3v2 frames and RIFF INFO with each byte at or above 0x80 marked as
+  a private-use character, so that the main process decides on the encoding (TI §3.6). Any other reader gets TagLib's
+  own strings; a write never sees marks.
+- The tags of one format fill in what another lacks: ID3v2 first, then APE, then ID3v1.
+- The audio's coding (`mp3`, `aac`, `alac`, `flac`, `vorbis`, `opus`, `pcm` and so on) and, for lossless codings, its bit
+  depth.
 - The name of the container that holds the audio: `mpeg`, `adts`, `flac`, `mp4`, `ogg-vorbis`, `ogg-opus`, `ogg-flac`,
   `ogg-speex`, `wav`, `aiff`, `asf`, `ape`, `wavpack`, `mpc`, `tta`, `dsf`, `dsdiff`, `shorten` or `matroska`; none for
   tracker modules. TagLib opens an AAC stream without a container as an MPEG file, so `adts` comes from its audio
@@ -284,8 +290,6 @@ the way the main process calls it and the count of failed reads; the tag pass of
   writes the JSON to a file under the app's cache directory (`tagger/`) and only the file's path crosses; the main
   process reads the file, deletes it, and accepts only paths inside that directory. Files left there by a process that
   died are deleted when the main process next connects.
-- Settings that will affect reading (legacy encoding, from step 5) travel as call parameters, because DataStore
-  exists only in the main process.
 
 ### 4.3 Calls from the main process
 

@@ -260,8 +260,8 @@ before text search, scoring and the diff, so the "old" column shows readable tex
   rule (`Þú`, `ÅÄÖ`, and GBK or EUC-KR names), so that condition stays; a lone `Я` stays ISO-8859-1, and a Russian
   speaker on a phone with no such language keeps the old text. The manual choice of M2b covers both.
 - A manual choice in settings overrides the automatic mode for the whole library.
-- Writes (§7.2) store changed fields in Unicode and leave unchanged legacy frames as they are; converting those is a
-  reviewed fix in v1.x.
+- Writes (§7.2) store changed fields in Unicode and leave unchanged legacy frames as they are, read without marks;
+  converting those is a reviewed fix in v1.x.
 
 **ID3v1.** Read only for fields that the ID3v2 and APE tags lack, decoded as above. For writes (M4b) a setting
 decides, and the diff shows the ID3v1 change as its own line:
@@ -661,7 +661,7 @@ how far it got.
       process). A larger result, or any single value over 16 KB (embedded lyrics, large binary frames, raw tags), is
       written to a file in app storage and only its path crosses. Cover bytes never cross: images travel through
       files in app storage or pipes.
-    - Settings that affect reading or writing (legacy encoding, ID3v1 policy, cover preset) travel as call
+    - Settings that affect reading or writing (ID3v1 policy, cover preset) travel as call
       parameters, because DataStore exists only in the main process.
 12. **Playing files.** PiPlayer never writes the current item or the next item in playback order
     (`Player.getNextMediaItemIndex()`), which may already be preloaded for gapless playback. By default such a write

@@ -15,8 +15,8 @@ class TaggerService : Service() {
     private val binder = object : ITagger.Stub() {
         override fun pid(): Int = Process.myPid()
 
-        override fun read(file: ParcelFileDescriptor, fileName: String?): TaggerReply = file.use {
-            val report = TagReport.of(TagReader.read(it.fd, fileName, Pictures.SIZES))
+        override fun read(file: ParcelFileDescriptor, fileName: String?, markLegacy: Boolean): TaggerReply = file.use {
+            val report = TagReport.of(TagReader.read(it.fd, fileName, Pictures.SIZES, markLegacy))
             TaggerReply(TagReplies.pack(report, TaggerClient.spillDir(this@TaggerService)))
         }
     }

@@ -8,6 +8,9 @@ interface ITagger {
     /** The ID of the `:tagger` process, which the main process kills when a call takes too long. */
     int pid();
 
-    /** Reads the tags of [file], which the service closes; [fileName] helps TagLib pick the format. */
-    TaggerReply read(in ParcelFileDescriptor file, @nullable String fileName);
+    /**
+     * Reads the tags of [file], which the service closes; [fileName] helps TagLib pick the format. [markLegacy] leaves the
+     * bytes of text in a legacy encoding for the caller to decode (TI §3.6).
+     */
+    TaggerReply read(in ParcelFileDescriptor file, @nullable String fileName, boolean markLegacy);
 }

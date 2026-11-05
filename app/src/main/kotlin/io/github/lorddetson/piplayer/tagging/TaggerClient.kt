@@ -73,8 +73,16 @@ class TaggerClient(
     /** Whether the client holds a binding to the service now. */
     val isBound: Boolean get() = synchronized(lock) { connection != null }
 
-    /** Reads the tags of [file], which stays open and the caller's, for [target]. */
-    suspend fun read(target: TagTarget, file: ParcelFileDescriptor, fileName: String?): TaggerResult<TagRead> {
+    /**
+     * Reads the tags of [file], which stays open and the caller's, for [target]. With [markLegacy] the caller decodes the
+     * text in legacy encodings (`LegacyText`).
+     */
+    suspend fun read(
+        target: TagTarget,
+        file: ParcelFileDescriptor,
+        fileName: String?,
+        markLegacy: Boolean = false,
+    ): TaggerResult<TagRead> {
         // Not even a binding for an unsafe file.
         if (guard.isUnsafe(target)) return TaggerResult.Unsafe
         handler.removeCallbacks(unbindWhenIdle)
@@ -82,7 +90,7 @@ class TaggerClient(
             val (tagger, pid) = connected()
             return guard.run(target, kill = { Process.killProcess(pid) }) {
                 val reply = try {
-                    tagger.read(file, fileName)
+                    tagger.read(file, fileName, markLegacy)
                 } catch (e: DeadObjectException) {
                     throw TaggerDiedException(e)
                 }

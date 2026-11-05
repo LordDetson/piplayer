@@ -16,6 +16,9 @@ data class TagReport(
     val properties: Map<String, List<String>> = emptyMap(),
     val audio: Audio? = null,
     val pictures: List<PictureInfo> = emptyList(),
+    val container: String? = null,
+    val codec: String? = null,
+    val bitDepth: Int? = null,
 ) {
 
     @Serializable
@@ -32,6 +35,9 @@ data class TagReport(
             properties = properties,
             audio = audio?.let { AudioProperties(it.lengthMs, it.bitrateKbps, it.sampleRate, it.channels) },
             pictures = pictures.map { Picture(null, it.sizeBytes, it.mimeType, it.pictureType, it.description) },
+            container = container,
+            codec = codec,
+            bitDepth = bitDepth,
         )
     }
 
@@ -42,6 +48,9 @@ data class TagReport(
                 properties = result.properties,
                 audio = result.audio?.let { Audio(it.lengthMs, it.bitrateKbps, it.sampleRate, it.channels) },
                 pictures = result.pictures.map { PictureInfo(it.pictureType, it.mimeType, it.description, it.sizeBytes) },
+                container = result.container,
+                codec = result.codec,
+                bitDepth = result.bitDepth,
             )
         }
     }
