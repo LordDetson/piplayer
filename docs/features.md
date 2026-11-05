@@ -211,7 +211,6 @@ soon after 1.0, `later` is planned without a date. The items listed under Cut li
 - Local crash capture, offered for sharing on the next start. `M1`
 - Settings: Library folders, Playback, Appearance, Identification and privacy, Storage and write access, About;
   sections fill in as their milestones land. `M2a`
-- Optional own AcoustID application key (TI §9). `M3`
 - Android backup and device transfer of user data (decisions, edits, favorites, playlists, statistics); the
   rebuildable library database and caches are excluded, and restored data is re-attached to files by content
   key. `M5`
@@ -229,9 +228,8 @@ Sizes are rough estimates of part-time work by one developer who is new to Andro
 weeks, L 7 to 12 weeks. They are re-estimated after M0 and again after M1. Together they add up to roughly a year.
 
 Between milestones, 0.x pre-releases on GitHub put the app into real use: after M2a a player without online
-features, after M3 and M4a identification with results saved in PiPlayer only. Public pre-releases get online
-identification only after AcoustID and MetaBrainz confirm the terms in writing (TI §9), or with a separate test
-application key.
+features, after M3 and M4a identification with results saved in PiPlayer only. AcoustID and MetaBrainz confirmed
+their terms in writing, so public pre-releases may use online identification (TI §9).
 
 ### M0 Project skeleton and identification spike
 

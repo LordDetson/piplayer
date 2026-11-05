@@ -385,7 +385,9 @@ PiPlayer never adds an ID3v1 tag to a file that has none; §7.5 lists the TagLib
 - An empty result is not final (server-side search timeouts look like "no match"): the file is marked "retry later"
   and falls back to text search. The lookup is retried once after 1 hour and once in the next batch; after that the
   empty result is final. A text-search candidate scoring at least 0.50 (§4.1) cancels the retry.
-- Do not use undocumented parameters (`batch`, `maxdurationdiff`) unless AcoustID confirms them in writing.
+- `batch` (several fingerprints in one request) is meant for clients, as AcoustID confirmed in writing on 2026-11-05:
+  batch mode (M4a) may send 10 to 20 fingerprints per request, never more, because larger requests time out.
+  `maxdurationdiff` is a legacy flag that will likely be removed or replaced, so PiPlayer does not use it.
 
 ### 3.3 Stage 4: text search fallback
 
@@ -831,9 +833,9 @@ Phases (a) to (c) land in M4a, with accepted results saved in PiPlayer only; pha
 - Rate limits (process-wide token bucket per provider, last-request time persisted):
   - MusicBrainz: one request per ≥ 1.1 s per device; exponential backoff with jitter on 503, 429, 502 and 504 (§9);
     pause batch on repeated 503.
-  - AcoustID: ≤ 3 req/s documented (the server enforces 4 per IP and, by default, 10 per application key, over a
-    20 s window); single lookups start at least 0.35 s apart, but the per-application bucket is shared by **all**
-    installs, so background batches use ≤ 1 req/s; global backoff on 429 / error 14.
+  - AcoustID: ≤ 3 req/s documented. The limit counts per IP address, not per application key (AcoustID in writing,
+    2026-11-05), so installs do not share a budget. Single lookups start at least 0.35 s apart; background batches
+    use ≤ 1 req/s, because a device may share its IP address with others; global backoff on 429 / error 14.
   - Cover Art Archive: no documented limit, but handle 503 with backoff (§5.2).
 - Random jitter; no jobs at fixed clock times; no polling MusicBrainz for changes.
 
@@ -841,7 +843,7 @@ Phases (a) to (c) land in M4a, with accepted results saved in PiPlayer only; pha
 
 | Service | Use | Notes |
 |---------|-----|-------|
-| AcoustID + Chromaprint | 1.0 (core, M3) | free for non-commercial use; register the app key; ask AcoustID OÜ in writing whether a free, open-source, donation-supported app qualifies; paid plans from EUR 50/month |
+| AcoustID + Chromaprint | 1.0 (core, M3) | free Open Source plan: AcoustID confirmed in writing on 2026-11-05 that a free GPL app without ads or paid features qualifies, with donations through an external link; register the app key |
 | MusicBrainz ws/2 | 1.0 (core, M3) | no key; 1 req/s per IP; mandatory User-Agent; core data CC0, genres/tags CC BY-NC-SA; register PiPlayer at metabrainz.org (non-profit tier) and confirm before the Play release (M5) |
 | Cover Art Archive | 1.0 (core, M3) | images remain copyrighted by rights holders ("use at your own risk"); depends on Internet Archive uptime |
 | GitHub Releases API | 1.0 (M5), opt-in update check, GitHub build only | sends no library data; disclosed like the services above |
@@ -869,11 +871,9 @@ Rules:
 - Only CC0 core fields are written into files as text; embedded covers follow §5.2. Attribution in About (M5):
   "Identification: AcoustID / Chromaprint · Metadata: MusicBrainz (CC0) · Covers: Cover Art Archive".
 - API keys shipped in the APK are not secrets (established open-source taggers publish theirs); document that forks
-  must register their own key; optional setting for a user's own AcoustID application key (M3), kept on the device
-  only (§10.3).
-- Public 0.x pre-releases on GitHub use online identification only after AcoustID and MetaBrainz confirm the terms
-  in writing, or with a separate test application key; the application key's rate limit is shared by every install,
-  test builds included.
+  must register their own key. Users need no key of their own: the AcoustID limit counts per IP address (§8).
+- Public 0.x pre-releases on GitHub may use online identification: AcoustID (2026-11-05) and MetaBrainz (2026-10-30)
+  confirmed the terms in writing.
 - Privacy: online lookup is opt-in with a clear explanation. Every online service is disclosed in the app before its
   first use, in the privacy policy and in Play Data safety, which must declare what is **shared** with whom:
   - AcoustID: fingerprints and durations;
@@ -902,8 +902,8 @@ Where things live:
 - `user.db` lives in the default database directory.
 - Settings live in DataStore in the main process (`files/datastore/`), in two files: `settings` (legacy-encoding
   mode, ID3v1 policy, unmetered-only, protected-fields list, cover preset and the other options) is backed up;
-  `device_state` (the user's own AcoustID application key, rate-limiter last-request times, and from M2a "stop after
-  current track" and the permission flag of library.md §3.2) is not.
+  `device_state` (rate-limiter last-request times, and from M2a "stop after current track" and the permission flag
+  of library.md §3.2) is not.
 - Library folder rules are user decisions and live in the user database.
 - The persisted queue (M1) lives in its own DataStore file, `playback_state`, which the backup rules leave out: it
   refers to track identities and, for files opened from other apps, to their URIs, which do not carry over to another
@@ -1034,8 +1034,7 @@ used, never through a stored content URI, which goes stale after a media index r
   date (§7.2 step 7).
 - Auto Backup and device transfer include `user.db` with its WAL file, so the copy is consistent, and the `settings`
   DataStore file. Everything else stays out: `library.db` with its WAL and SHM files, all caches, the fingerprint
-  cache, saved cover files, undo snapshots, working copies, the persisted queue and the `device_state` DataStore file,
-  so the user's own AcoustID key is entered again after a restore.
+  cache, saved cover files, undo snapshots, working copies, the persisted queue and the `device_state` DataStore file.
 - The rules exist in both forms: `android:fullBackupContent` for API 30 and `android:dataExtractionRules` (cloud
   backup and device transfer) for API 31+; they list the included files explicitly, and a JVM test checks both
   files.
