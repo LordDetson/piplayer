@@ -479,3 +479,8 @@ Instrumented tests on the emulators, through the real `:tagger`: golden keys of 
 format, also by real tools (a copy with a new Xing frame, `moov` moved, comments rewritten); any file name and no name;
 a file TagLib refuses; the walked length of headerless VBR and CBR MP3 and raw ADTS against the decoded length within
 one frame; truncated WAV, MP4 and FLAC files; an interrupted walk.
+
+On the phone (`TagPassScreenOffTest`, which waits for the walks too): after a pass over the 21 368 files the walks settled
+19 499 lengths in 1 155 s (17 a second) with the FLAC album on repeat, the screen off and no charger: no underrun, no
+stall, no new audio output, and a worst lateness of the playback thread's looper of 71 ms during the walks (116 ms during
+the pass; the earlier control minute without either measured 82 ms).
