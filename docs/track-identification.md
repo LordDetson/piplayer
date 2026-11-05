@@ -158,38 +158,66 @@ apps do not change it.
   2. a format token in ASCII followed by a zero byte: `mp3`, `flac`, `mp4`, `wav`, `ogg-vorbis`, `opus`, `adts` or
      `file`;
   3. the length of the audio payload as an 8-byte big-endian integer (Ogg Vorbis and Opus: the final granule
-     position instead);
-  4. the first 64 KB and the last 64 KB of the payload, or the whole payload once when it is shorter than 128 KB.
+     position instead, as a two's complement number);
+  4. the windows of the payload, each of 64 KiB (65 536 bytes):
+     - Ogg Vorbis and Opus: the first and the last window, or the whole payload once when it is shorter than
+       128 KiB (131 072 bytes);
+     - every other token: the first window, the window at offset `(length - 65536) / 2` rounded down, and the last
+       window, or the whole payload once when it is shorter than 192 KiB (196 608 bytes).
+- The middle window is there because 64 KiB can be very little music: 0.37 s of CD audio in a WAV file, 1.6 to 4 s of
+  a CBR MP3. Two different songs of one length with silent ends would otherwise share a key, and with it favorites,
+  statistics and decided values. Ogg goes without it: a middle window would cost a walk over the whole file, and
+  silence compresses to almost nothing there, so the two windows reach the music.
+- The format comes from the file's content, never from its name or from whether TagLib accepted its tags, so a rename
+  or a repair of broken metadata does not change a key:
+  - `OggS` at the start: Ogg; the first packet tells Vorbis from Opus, and anything else takes `file`;
+  - `fLaC`, after a leading ID3v2 tag if there is one: `flac`;
+  - `ftyp` at offset 4: `mp4`;
+  - `RIFF` and `WAVE` at offset 8: `wav`;
+  - otherwise MPEG, when three frames in a row start within 1 MiB after a leading ID3v2 tag. A frame's header says
+    whether it is MPEG audio (`mp3`, also for layers I and II) or raw AAC (`adts`).
+  - A format whose payload cannot be found, or that turns out empty, takes `file`.
 - Audio payload per format:
   - MP3: from the first MPEG frame to the end of the last one, so ID3v2 (with its padding), ID3v1 and APE tags stay
-    outside. TagLib's `lastFrameOffset()` is where the last frame starts; the payload ends after that frame's length
-    as given by its header;
-  - FLAC: the frames after the last metadata block;
-  - MP4/M4A (and 3GP): the contents of the `mdat` atom(s) in file order; the `moov` atom, which holds the tags, may
-    sit before or after them;
-  - WAV: the `data` chunk;
+    outside. A frame counts when the next frame's header follows it with the same sync, version, layer and sample
+    rate (TagLib's check). The first frame is the first that counts, searched from the end of the first ID3v2 tag.
+    Searching back from the end of the file, or from the ID3v1 or APE tag, the frame after the last one that counts
+    is the last frame; this is TagLib's `lastFrameOffset()`. The payload ends after that frame's length as given by
+    its header, at the end of the file or at the trailing tags at the latest. A first frame that holds the ASCII
+    string `Xing`, `Info` or `VBRI` carries counters instead of audio and stays outside, so that rebuilding that
+    header does not change the key. Junk between frames stays inside;
+  - FLAC: the frames after the last metadata block, up to the ID3v1 and APE tags that some taggers add at the end;
+  - MP4/M4A (and 3GP): the contents of the `mdat` atom(s) in file order, cut at the end of the file; the `moov` atom,
+    which holds the tags, may sit before or after them;
+  - WAV: the first `data` chunk, cut at the end of the file;
   - Ogg Vorbis and Opus: the bodies of all pages after the last header page, without the page headers, whose
     sequence numbers and CRCs change when comments are rewritten (both formats start audio data on a new page:
     Vorbis after its three header packets, Opus after its two);
-  - raw AAC (ADTS): the file without leading ID3v2 and trailing ID3v1/APE tags;
+  - raw AAC (ADTS): from the first frame, so after a leading ID3v2 tag, up to the trailing ID3v1 and APE tags;
   - formats without known payload offsets (for example Matroska/WebM): the whole file, token `file`; PiPlayer writes
     no tags into them (§7.5).
 - Offsets come from TagLib in `:tagger` where it exposes them (for example the first and last MPEG frame offsets).
   Where it does not, a walk over top-level structures (FLAC metadata block headers, MP4 atoms, RIFF chunks, Ogg page
   headers) without parsing their contents is enough; no other own parsers.
-- The layout never changes between app versions: golden-value tests freeze it (§11.1, M2a). A different layout would
-  need a new key version and a migration that re-keys every identity.
-- Ogg Vorbis and Opus use a bounded page walk (decision D10), so the key needs no more reading than for other
-  formats and stays the same when another app rewrites the comments:
+- The layout never changes between app versions: golden-value tests freeze it (§11.1, M2a), with expected keys from
+  an independent reference (`scripts/content_key_reference.py`). A different layout would need a new key version and
+  a migration that re-keys every identity.
+- Ogg Vorbis and Opus use a bounded page walk (decision D10), so the key reads about as much as for other formats
+  (about 215 KB, against 197 KB) and stays the same when another app rewrites the comments. What it hashes does not
+  depend on how far it read:
   - the header pages are skipped by adding up their segment tables; their bodies (which may hold a large embedded
     cover) are not read;
-  - the first 64 KB of the payload are collected from the bodies of the pages that follow the last header page;
-  - for the last 64 KB, PiPlayer reads the tail of the file (64 KB plus one maximum page size, 65 307 bytes), searches
-    backward for the capture pattern `OggS`, accepts a page start only when its CRC matches, and walks forward to the
-    end of the file; the final granule position comes from the last page;
-  - when the payload is shorter than 128 KB, the whole file is walked page by page;
+  - from the last header page on, only page headers are read until the bodies add up to 128 KiB, which tells a short
+    payload exactly, however small its pages; the walk stops at the first thing that is not a whole page;
+  - the first 64 KiB of the payload are read from the bodies of the pages that follow the last header page;
+  - for the last 64 KiB, PiPlayer reads the tail of the file, accepts a page start only when its CRC matches, skips
+    whatever is not such a page, and reads further back until the bodies reach 64 KiB; the final granule position is
+    that of the last such page that has one. Over 1 MiB of tail without enough pages takes `file`;
+  - when the payload is shorter than 128 KiB, it is hashed whole, and its final granule comes from the page headers;
   - a file with more than one logical stream (chained or multiplexed Ogg) takes the whole-file token `file`, and
-    PiPlayer writes no tags into it (§7.5).
+    PiPlayer writes no tags into it (§7.5). The walk sees another serial number or a beginning-of-stream flag only
+    in what it reads, so a chain whose first and last links share a serial number and that hides the others in the
+    middle goes unseen; its key is still stable.
 - Not a hash of the whole file: it changes with every tag edit and would require reading the whole library once
   (hundreds of GB of lossless files). The cheap key of v0.1 (size plus the first and last 64 KB of the file) is
   dropped for the same reason: tags sit at the start (ID3v2, FLAC metadata, MP4 `moov` before `mdat`) or at the end
@@ -212,6 +240,13 @@ apps do not change it.
   A file is unattached when no identity holds its key. Re-attachment runs after media index rebuilds, SD card
   changes, moves, library rebuilds and restores from backup. Favorites, statistics, playlists, identification results
   and undo records depend on it.
+- Known limits of the layout, accepted when it was frozen:
+  - The same master with a short edit in a place no window covers shares a key in WAV, in CBR MP3 and in Opus, whose
+    length field does not see the bytes. Someone must own both editions for this to matter.
+  - QuickTime chapter text lives in `mdat`, so editing the chapters of an M4B or M4A changes the key.
+  - Lossless gain tools (MP3Gain, foobar2000) rewrite a field in every MP3 frame: the key changes, and undoing the
+    gain restores it. Users may see this as a tag edit; re-attachment step 2 recovers the file unless it also moved.
+  - A WAV `data` chunk or an MP4 `mdat` that declares an open end takes in whatever is appended later.
 - Limits: a library rebuild or a restore leaves no cached fingerprints, so a file whose key changed (its audio was
   re-encoded or trimmed by another app) and that also moved re-attaches only through step 3 or a playlist hint. Otherwise its identity stays unattached and keeps its data until a matching file appears; PiPlayer never
   attaches user data through a weaker guess.
@@ -228,7 +263,8 @@ track details, the media session and the player's time display (§7.1).
 - Taken from the header where it is reliable: FLAC STREAMINFO sample count, MP4 track duration, Ogg final granule
   position (minus the Opus pre-skip), WAV data size, MP3 with a Xing/Info or VBRI frame count. ID3 `TLEN` is never
   used.
-- Walked frame by frame with Media3's `MediaExtractorCompat` (the extractors of playback, §3.2), without decoding:
+- Walked frame by frame with Media3's `MediaExtractorCompat` (the extractors of playback, §3.2), without decoding, in
+  `:tagger`, last, at low priority and also while music plays (library.md §7):
   - MP3 without a frame-count header, and raw AAC (ADTS), always;
   - MP3 whose Xing or VBRI byte count differs from the payload length by more than 2 %, and CBR MP3 whose header
     duration differs by more than 2 s from the payload length divided by the first frame's bitrate: VBR headers can
@@ -349,7 +385,9 @@ PiPlayer never adds an ID3v1 tag to a file that has none; §7.5 lists the TagLib
 - An empty result is not final (server-side search timeouts look like "no match"): the file is marked "retry later"
   and falls back to text search. The lookup is retried once after 1 hour and once in the next batch; after that the
   empty result is final. A text-search candidate scoring at least 0.50 (§4.1) cancels the retry.
-- Do not use undocumented parameters (`batch`, `maxdurationdiff`) unless AcoustID confirms them in writing.
+- `batch` (several fingerprints in one request) is meant for clients, as AcoustID confirmed in writing on 2026-11-05:
+  batch mode (M4a) may send 10 to 20 fingerprints per request, never more, because larger requests time out.
+  `maxdurationdiff` is a legacy flag that will likely be removed or replaced, so PiPlayer does not use it.
 
 ### 3.3 Stage 4: text search fallback
 
@@ -650,8 +688,8 @@ how far it got.
     snapshot image (§10.3).
 11. **Process isolation.** Tag I/O runs in a separate process (`:tagger`) so a native crash on a malformed file
     cannot kill playback.
-    - A bound service declared with `android:process=":tagger"` exposes an AIDL interface. It runs native calls only
-      and never opens the databases; only the main process opens them (§12 D9).
+    - A bound service declared with `android:process=":tagger"` exposes an AIDL interface. It runs native calls and
+      the walks of §3.1, and never opens the databases; only the main process opens them (§12 D9).
     - The main process opens each file (`ContentResolver.openFileDescriptor`, or the working copy) and passes the
       `ParcelFileDescriptor`; `:tagger` never resolves URIs. One file per native call.
     - Before each call the main process increments `audio_file.unsafe_count` (for files outside the library,
@@ -795,9 +833,9 @@ Phases (a) to (c) land in M4a, with accepted results saved in PiPlayer only; pha
 - Rate limits (process-wide token bucket per provider, last-request time persisted):
   - MusicBrainz: one request per ≥ 1.1 s per device; exponential backoff with jitter on 503, 429, 502 and 504 (§9);
     pause batch on repeated 503.
-  - AcoustID: ≤ 3 req/s documented (the server enforces 4 per IP and, by default, 10 per application key, over a
-    20 s window); single lookups start at least 0.35 s apart, but the per-application bucket is shared by **all**
-    installs, so background batches use ≤ 1 req/s; global backoff on 429 / error 14.
+  - AcoustID: ≤ 3 req/s documented. The limit counts per IP address, not per application key (AcoustID in writing,
+    2026-11-05), so installs do not share a budget. Single lookups start at least 0.35 s apart; background batches
+    use ≤ 1 req/s, because a device may share its IP address with others; global backoff on 429 / error 14.
   - Cover Art Archive: no documented limit, but handle 503 with backoff (§5.2).
 - Random jitter; no jobs at fixed clock times; no polling MusicBrainz for changes.
 
@@ -805,7 +843,7 @@ Phases (a) to (c) land in M4a, with accepted results saved in PiPlayer only; pha
 
 | Service | Use | Notes |
 |---------|-----|-------|
-| AcoustID + Chromaprint | 1.0 (core, M3) | free for non-commercial use; register the app key; ask AcoustID OÜ in writing whether a free, open-source, donation-supported app qualifies; paid plans from EUR 50/month |
+| AcoustID + Chromaprint | 1.0 (core, M3) | free Open Source plan: AcoustID confirmed in writing on 2026-11-05 that a free GPL app without ads or paid features qualifies, with donations through an external link; register the app key |
 | MusicBrainz ws/2 | 1.0 (core, M3) | no key; 1 req/s per IP; mandatory User-Agent; core data CC0, genres/tags CC BY-NC-SA; register PiPlayer at metabrainz.org (non-profit tier) and confirm before the Play release (M5) |
 | Cover Art Archive | 1.0 (core, M3) | images remain copyrighted by rights holders ("use at your own risk"); depends on Internet Archive uptime |
 | GitHub Releases API | 1.0 (M5), opt-in update check, GitHub build only | sends no library data; disclosed like the services above |
@@ -833,11 +871,9 @@ Rules:
 - Only CC0 core fields are written into files as text; embedded covers follow §5.2. Attribution in About (M5):
   "Identification: AcoustID / Chromaprint · Metadata: MusicBrainz (CC0) · Covers: Cover Art Archive".
 - API keys shipped in the APK are not secrets (established open-source taggers publish theirs); document that forks
-  must register their own key; optional setting for a user's own AcoustID application key (M3), kept on the device
-  only (§10.3).
-- Public 0.x pre-releases on GitHub use online identification only after AcoustID and MetaBrainz confirm the terms
-  in writing, or with a separate test application key; the application key's rate limit is shared by every install,
-  test builds included.
+  must register their own key. Users need no key of their own: the AcoustID limit counts per IP address (§8).
+- Public 0.x pre-releases on GitHub may use online identification: AcoustID (2026-11-05) and MetaBrainz (2026-10-30)
+  confirmed the terms in writing.
 - Privacy: online lookup is opt-in with a clear explanation. Every online service is disclosed in the app before its
   first use, in the privacy policy and in Play Data safety, which must declare what is **shared** with whom:
   - AcoustID: fingerprints and durations;
@@ -866,8 +902,8 @@ Where things live:
 - `user.db` lives in the default database directory.
 - Settings live in DataStore in the main process (`files/datastore/`), in two files: `settings` (legacy-encoding
   mode, ID3v1 policy, unmetered-only, protected-fields list, cover preset and the other options) is backed up;
-  `device_state` (the user's own AcoustID application key, rate-limiter last-request times, and from M2a "stop after
-  current track" and the permission flag of library.md §3.2) is not.
+  `device_state` (rate-limiter last-request times, and from M2a "stop after current track" and the permission flag
+  of library.md §3.2) is not.
 - Library folder rules are user decisions and live in the user database.
 - The persisted queue (M1) lives in its own DataStore file, `playback_state`, which the backup rules leave out: it
   refers to track identities and, for files opened from other apps, to their URIs, which do not carry over to another
@@ -998,8 +1034,7 @@ used, never through a stored content URI, which goes stale after a media index r
   date (§7.2 step 7).
 - Auto Backup and device transfer include `user.db` with its WAL file, so the copy is consistent, and the `settings`
   DataStore file. Everything else stays out: `library.db` with its WAL and SHM files, all caches, the fingerprint
-  cache, saved cover files, undo snapshots, working copies, the persisted queue and the `device_state` DataStore file,
-  so the user's own AcoustID key is entered again after a restore.
+  cache, saved cover files, undo snapshots, working copies, the persisted queue and the `device_state` DataStore file.
 - The rules exist in both forms: `android:fullBackupContent` for API 30 and `android:dataExtractionRules` (cloud
   backup and device transfer) for API 31+; they list the included files explicitly, and a JVM test checks both
   files.
@@ -1062,7 +1097,7 @@ tests, and a high-band error rate within the threshold of §11.4.
 | M0 | Resampler: a 9 kHz tone at 44.1, 48 and 96 kHz comes out at least 40 dB below a 1 kHz tone of the same level (9 kHz would alias to about 2 kHz, inside the band Chromaprint uses); 1 kHz keeps its level within 0.5 dB and its phase; the output length is exact and does not depend on how the input is cut |
 | M0 | Decoding fixtures (2 s of 1 kHz): MP3, AAC, Vorbis, Opus, FLAC 96 kHz/24-bit, FLAC 5.1, FLAC with frames larger than 64 KiB and no frame size in its header, WAV in 16-bit, 24-bit and float, WAV at 11 025 Hz; each at its own rate and channel count, never shorter than 2 s (encoder delay and Opus pre-skip are trimmed to the sample) and at most one frame longer (the platform trims MP3 padding, but AAC padding and the last Vorbis and Opus packets stay, which does not move the fingerprint), and still 1 kHz at the same level after the whole fingerprint path. Edge cases: an MP3 whose sample rate rises halfway reaches the consumer in both rates; a FLAC file cut off in its last frame keeps what was decoded; a single-frame FLAC is decoded once; a 64-bit float WAV is refused |
 | M0 | TagLib reads the tag fixtures of every format |
-| M2a | Content key through the real reader: unchanged after tag edits in every format (ID3v2 growing past its padding, ID3v1 and APE added or removed, FLAC metadata blocks, MP4 with `moov` before and after `mdat`), changed when the audio changes. Ogg Vorbis and Opus: unchanged after comments are rewritten across page boundaries, also when the number of header pages changes and when a large embedded cover is added; the bounded page walk (D10) reads no more of a file than the key of other formats, measured on the generated library; a chained Ogg file takes the token `file` |
+| M2a | Content key through the real reader: unchanged after tag edits in every format (ID3v2 growing past its padding, a doubled ID3v2 tag, ID3v1 and APE added or removed, FLAC metadata blocks, MP4 with `moov` before and after `mdat`, a rebuilt Xing frame), unchanged under any file name and without one, changed when the audio changes. Ogg Vorbis and Opus: unchanged after comments are rewritten across page boundaries, also when the number of header pages changes and when a large embedded cover is added; the bounded page walk (D10) reads about as much of a file as the key of other formats and none of its cover; a chained Ogg file takes the token `file` |
 | M2a | Exact duration of VBR MP3 without a frame-count header and of raw ADTS matches the decoded length within one frame; truncated WAV, MP4 and FLAC files report the length of what is left |
 | M2a | Re-attachment (§3.1): a moved or renamed file and a media index rebuild with new IDs keep their track identity, which favorites, playlists and statistics refer to from M2b; a moved Ogg file whose comments an external tool rewrote keeps its content key and re-attaches by it |
 | M2a | `:tagger` isolation: a fixture that crashes the native reader and a call that hangs for more than 30 s are counted; the second time the file is marked unsafe; playback continues |
@@ -1117,5 +1152,5 @@ trash dialog joins the checklist in v1.x.
 | D6 | Database files | **Decided 2026-10-18:** two files, `library.db` (rebuildable, excluded from backup) and `user.db` (backed up whole), fixed before the M2a schema (§10) |
 | D7 | Tag writing path in 1.0 | **Decided 2026-10-18:** MediaStore write requests only, one consent per apply where the platform accepts the whole selection, otherwise as few as possible (§8); the write-access interface exists from day one, its folder-grant implementation follows in v1.x (§7.3, §7.4) |
 | D8 | Track identity | **Decided 2026-10-18:** a content key from audio data only, with a layout frozen by golden tests and checked before every own write; re-attachment by location and duration, by recording MBID, and, while the library database survives, by a cached fingerprint (§3.1) |
-| D9 | Database access from `:tagger` | **Decided 2026-10-18:** only the main process opens the databases; `:tagger` runs native calls and returns results over IPC (§7.2 step 11) |
-| D10 | Ogg content key | **Decided 2026-10-18:** a bounded page walk (§3.1): header pages skipped by their segment tables, the first 64 KB of the payload from the following page bodies, the last 64 KB from the tail of the file located through CRC-checked page starts, the length from the final granule position; chained or multiplexed files take the whole-file token `file` |
+| D9 | Database access from `:tagger` | **Decided 2026-10-18:** only the main process opens the databases; `:tagger` runs native calls and the walks of §3.1 and returns results over IPC (§7.2 step 11) |
+| D10 | Ogg content key | **Decided 2026-10-18:** a bounded page walk (§3.1): header pages skipped by their segment tables, the first 64 KiB of the payload from the following page bodies, the last 64 KiB from the tail of the file located through CRC-checked page starts, the length from the final granule position; chained or multiplexed files take the whole-file token `file`. Ogg has no middle window, unlike the other formats |

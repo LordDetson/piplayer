@@ -160,9 +160,20 @@ object SongList {
      */
     fun applyInPlace(rows: List<SongRow>) {
         if (rows.isEmpty()) return
-        synchronized(lock) {
+        applyRows(rows) {
             changedByPass = true
             frozen = true
+        }
+    }
+
+    /** New lengths for rows of the kept list, from the walks after a pass: no order depends on them (docs/library.md §7.2). */
+    fun applyLengths(rows: List<SongRow>) {
+        if (rows.isNotEmpty()) applyRows(rows) {}
+    }
+
+    private inline fun applyRows(rows: List<SongRow>, marking: () -> Unit) {
+        synchronized(lock) {
+            marking()
             batchCount++
             if (activeReads > 0) rows.forEach { racing[it.mediaStoreId] = it }
             kept = kept?.let { current ->

@@ -52,7 +52,7 @@ class MediaCodecPcmSource(private val context: Context, private val fd: FileDesc
             val mimeType = requireNotNull(format.getString(MediaFormat.KEY_MIME))
             val durationUs = format.takeIf { it.containsKey(MediaFormat.KEY_DURATION) }
                 ?.getLong(MediaFormat.KEY_DURATION)?.takeIf { it > 0 }
-            val samples = SampleReader(extractor, repeatsLastFrame = mimeType == MIME_FLAC, durationUs = durationUs)
+            val samples = SampleReader(extractor, repeatsLastFrame = mimeType == MIME_FLAC)
             if (mimeType == MIME_RAW) {
                 readPcm(samples, rawPcmFormat(format), consumer)
                 return SourceInfo(mimeType, NO_DECODER, durationUs)
@@ -174,15 +174,14 @@ class MediaCodecPcmSource(private val context: Context, private val fd: FileDesc
      * 1.11.1's extractor does not end a FLAC stream that way: past the last frame it hands out that frame again and
      * again, with the same time, while advance() keeps returning true, and reading such a repeat fails inside the
      * extractor once the frame is larger than 64 KiB. So when [repeatsLastFrame], a sample with the time of the one
-     * before ends the stream before it is read, if it lies within the last seconds of [durationUs] (or the duration is
-     * unknown). Other formats may legitimately repeat a time (laced Matroska frames) or step back (an MP3 whose sample
+     * before ends the stream before it is read, wherever it lies: a file cut off may end long before the length in its
+     * header. Other formats may legitimately repeat a time (laced Matroska frames) or step back (an MP3 whose sample
      * rate rises), and MP4 priming samples have negative times; all of those are read as they come.
      */
     @OptIn(UnstableApi::class)
     private class SampleReader(
         private val extractor: MediaExtractorCompat,
         private val repeatsLastFrame: Boolean,
-        private val durationUs: Long?,
     ) {
         private var ended = false
         private var lastTimeUs: Long? = null
@@ -195,8 +194,7 @@ class MediaCodecPcmSource(private val context: Context, private val fd: FileDesc
         fun read(buffer: ByteBuffer): Int {
             if (ended || extractor.sampleTrackIndex < 0) return end()
             val time = extractor.sampleTime
-            val nearEnd = durationUs == null || time >= durationUs - END_WINDOW_US
-            if (repeatsLastFrame && time == lastTimeUs && nearEnd) return end()
+            if (repeatsLastFrame && time == lastTimeUs) return end()
             val size = extractor.readSampleData(buffer, 0)
             if (size < 0) return end()
             lastTimeUs = time
@@ -208,10 +206,6 @@ class MediaCodecPcmSource(private val context: Context, private val fd: FileDesc
         private fun end(): Int {
             ended = true
             return -1
-        }
-
-        private companion object {
-            const val END_WINDOW_US = 2_000_000L
         }
     }
 

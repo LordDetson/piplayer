@@ -8,6 +8,7 @@ import android.provider.MediaStore
 import io.github.lorddetson.piplayer.tagging.TagTarget
 import io.github.lorddetson.piplayer.tagging.TaggerClient
 import io.github.lorddetson.piplayer.tagging.TaggerResult
+import io.github.lorddetson.piplayer.tagging.contentkey.DurationPlan
 import java.io.FileNotFoundException
 
 /** Reads files of the library through `:tagger`, which gets an open file and never its name in the file system. */
@@ -15,7 +16,7 @@ class TaggerPassReader(
     private val context: Context,
     private val client: TaggerClient,
     private val uriOf: (PassFile) -> Uri = { ContentUris.withAppendedId(MediaStore.Audio.Media.getContentUri(it.volume), it.mediaStoreId) },
-) : PassReader {
+) : PassReader, DurationWalker {
 
     override suspend fun read(file: PassFile): PassRead {
         val descriptor = open(file) ?: return PassRead.OpenFailed
@@ -25,6 +26,18 @@ class TaggerPassReader(
                 TaggerResult.Crashed, TaggerResult.TimedOut -> PassRead.Crashed
                 TaggerResult.Unsafe -> PassRead.Unsafe
                 TaggerResult.Unavailable -> PassRead.Unavailable
+            }
+        }
+    }
+
+    override suspend fun walk(file: PassFile, plan: DurationPlan): WalkAnswer {
+        val descriptor = open(file) ?: return WalkAnswer.OpenFailed
+        return descriptor.use {
+            when (val result = client.walkDuration(TagTarget.LibraryFile(file.fileId), it, plan)) {
+                is TaggerResult.Replied -> WalkAnswer.Measured(result.value)
+                TaggerResult.Crashed, TaggerResult.TimedOut -> WalkAnswer.Crashed
+                TaggerResult.Unsafe -> WalkAnswer.Unsafe
+                TaggerResult.Unavailable -> WalkAnswer.Unavailable
             }
         }
     }

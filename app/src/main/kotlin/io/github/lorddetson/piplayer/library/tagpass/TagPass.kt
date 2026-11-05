@@ -164,7 +164,7 @@ class TagPass(
                     if (item.parsed != null) {
                         store(item.file.fileId, item.parsed, states.getValue(item.file.fileId))
                     } else {
-                        fail(item)
+                        fail(item, states)
                     }
                 }
                 val inputs = displays.inputsOf(read)
@@ -175,10 +175,12 @@ class TagPass(
         if (rows.isNotEmpty()) onBatch(rows)
     }
 
-    private suspend fun fail(item: Pending) {
+    private suspend fun fail(item: Pending, states: Map<Long, FileState>) {
         val fileId = item.file.fileId
         when (val answer = item.answer) {
             is PassRead.Replied -> {
+                // A file TagLib does not know still has a key, and maybe a length to walk.
+                storeContent(fileId, answer.report, states.getValue(fileId))
                 when (answer.report.error) {
                     // The device's fault, such as a full disk: not the file's.
                     TagReadError.IO_ERROR -> dao.markFailed(fileId, OPEN_ERROR, readerVersion = null)
@@ -208,7 +210,8 @@ class TagPass(
             dao.updateAlbum(key, tags.album.orEmpty(), tags.albumArtist, tags.compilation)
             dao.albumId(key)
         }
-        val trackId = dao.addTrack(TrackEntity.of(fileId, tags, parsed.rawTags, albumId))
+        val trackKey = report.content?.let { "${it.key}:$TRACK_START_MS" }
+        val trackId = dao.addTrack(TrackEntity.of(fileId, tags, parsed.rawTags, albumId).copy(trackKey = trackKey))
         val credits = artists(trackId, ROLE_ARTIST, tags.artists, tags.artistMbids, tags.artistSort) +
             artists(trackId, ROLE_ALBUM_ARTIST, tags.albumArtists, tags.albumArtistMbids, tags.albumArtistSort) +
             artists(trackId, ROLE_COMPOSER, tags.composers, emptyList(), sort = null)
@@ -235,6 +238,14 @@ class TagPass(
             coverBytes = cover?.sizeBytes?.toLong(),
             tagLengthMs = report.audio?.lengthMs?.takeIf { it > 0 }?.toLong(),
         )
+        storeContent(fileId, report, state)
+    }
+
+    private suspend fun storeContent(fileId: Long, report: TagReport, state: FileState) {
+        val content = report.content ?: return
+        val previous = state.durationSource?.let { StoredDuration(state.durationMs, it) }
+        val stored = StoredDuration.afterRead(content.duration, previous)
+        dao.setContent(fileId, content.key, stored.ms, stored.source)
     }
 
     /** The IDs of MusicBrainz go with the names only when each name has one; [sort] only with a single name. */
@@ -266,7 +277,10 @@ class TagPass(
 
     companion object {
         /** A change that makes old reads worth redoing raises this. */
-        const val READER_VERSION = 1
+        const val READER_VERSION = 2
+
+        /** The part of a track key after the content key: where the track starts, 0 until CUE sheets arrive (TI §10). */
+        private const val TRACK_START_MS = 0
 
         const val BATCH_SIZE = 200
         private const val MAX_BATCH_BYTES = 1024 * 1024

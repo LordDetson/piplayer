@@ -41,7 +41,7 @@ class TagReadGuardTest {
     private val guard = TagReadGuard(counts, timeout = 300.milliseconds)
 
     private fun read(target: TagTarget = file, kill: () -> Unit = { kills.incrementAndGet() }, call: () -> String) =
-        runBlocking { guard.run(target, kill, call) }
+        runBlocking { guard.run(target, kill, call = call) }
 
     private fun crash(): Nothing = throw TaggerDiedException()
 
@@ -160,6 +160,39 @@ class TagReadGuardTest {
 
         assertThat(kills.get()).isEqualTo(1)
         assertThat(counts.count(file)).isZero()
+    }
+
+    @Test
+    fun `a call may take longer than the usual timeout when it says so`() {
+        val result = runBlocking {
+            guard.run(file, { kills.incrementAndGet() }, timeout = 5.seconds) {
+                Thread.sleep(600)
+                "walked"
+            }
+        }
+
+        assertThat(result).isEqualTo(TaggerResult.Replied("walked"))
+        assertThat(kills).hasValue(0)
+    }
+
+    @Test
+    fun `a call past its own timeout is killed and counted`() {
+        val result = runBlocking {
+            guard.run(file, { kills.incrementAndGet() }, timeout = 50.milliseconds) {
+                Thread.sleep(250)
+                "late"
+            }
+        }
+
+        assertThat(result).isEqualTo(TaggerResult.TimedOut)
+        assertThat(kills).hasValue(1)
+        assertThat(counts.counts[file]).isEqualTo(1)
+    }
+
+    @Test
+    fun `a walk may take 2 minutes, and longer for a file over 120 MiB`() {
+        assertThat(TagReadGuard.walkTimeout(1_000_000)).isEqualTo(120.seconds)
+        assertThat(TagReadGuard.walkTimeout(1_048_576L * 1_000)).isEqualTo(1_000.seconds)
     }
 
     @Test
