@@ -59,6 +59,32 @@ class DecodingEdgeCasesTest {
     }
 
     @Test
+    fun aFlacCutOffLongBeforeItsStatedLengthEndsAtItsLastFrame() {
+        var seconds = 0.0
+        val info = withSource(CUT_EARLY) { source ->
+            source.decode { pcm, format ->
+                seconds += (pcm.remaining() / format.bytesPerFrame).toDouble() / format.sampleRate
+                // A stream that does not end must fail the test instead of running forever.
+                seconds < CUT_EARLY_GIVE_UP_SECONDS
+            }
+        }
+
+        assertThat(seconds).isCloseTo(CUT_EARLY_SECONDS, within(0.001))
+        // The header still states the whole 4 s: only the decoded audio tells the real length.
+        assertThat(info.durationUs).isEqualTo(4_000_000L)
+    }
+
+    @Test
+    fun theFingerprintOfAFlacCutOffLongBeforeItsStatedLengthTakesOnlyWhatIsLeft() {
+        val result = withSource(CUT_EARLY) { source ->
+            runBlocking { NativeFingerprinting.calculator().fingerprint(source) }
+        }
+
+        assertThat(result.fedSeconds).isCloseTo(CUT_EARLY_SECONDS, within(0.001))
+        assertThat(result.reachedEnd).isTrue()
+    }
+
+    @Test
     fun aFlacOfASingleFrameIsDecodedOnce() {
         val decoded = decode("flac-44100-16bit-mono-one-frame.flac")
 
@@ -69,5 +95,12 @@ class DecodingEdgeCasesTest {
     fun aWavOfSixtyFourBitFloatsIsRefusedInsteadOfReadAsNoise() {
         assertThatThrownBy { decode("wav-44100-double-mono.wav") }
             .isInstanceOf(DecodingException.UnsupportedFormat::class.java)
+    }
+
+    private companion object {
+        /** States 4 s in its header but was cut between two frames, after 30 frames of 1024 samples at 44.1 kHz. */
+        const val CUT_EARLY = "flac-44100-16bit-mono-cut-early.flac"
+        const val CUT_EARLY_SECONDS = 30 * 1024 / 44_100.0
+        const val CUT_EARLY_GIVE_UP_SECONDS = 30.0
     }
 }

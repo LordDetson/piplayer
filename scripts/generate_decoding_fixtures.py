@@ -5,8 +5,9 @@ that the fingerprint decoder must handle (TI §3.2): MP3, AAC, Ogg Vorbis, Opus,
 whose frames are larger than the platform decoder's default input buffer and whose header does not say so (written
 to a pipe, with a little noise so that the frames do not compress, and their sizes cleared in STREAMINFO), WAV in
 16-bit, 24-bit and float, and 11025 Hz mono WAV, which needs no resampling. Edge cases: a FLAC file cut off in the
-middle of its last frame, a FLAC file of a single frame, an MP3 whose sample rate rises halfway, and a WAV of 64-bit
-floats, which Android has no encoding for. The files are made by ffmpeg from synthetic sound, so they carry no
+middle of its last frame, a FLAC file cut off between two frames long before the length in its header, a FLAC file of
+a single frame, an MP3 whose sample rate rises halfway, and a WAV of 64-bit floats, which Android has no encoding
+for. The files are made by ffmpeg from synthetic sound, so they carry no
 third-party rights. The expected values live in the tests (app/src/androidTest/.../DecodingFixturesTest.kt and
 DecodingEdgeCasesTest.kt); keep them in step.
 
@@ -74,11 +75,30 @@ def clear_frame_sizes(path):
     path.write_bytes(data)
 
 
+def cut_early(scratch):
+    """A FLAC file of 4 s by its header, cut between two frames at about a quarter of its bytes.
+
+    The cut must fall between frames: the last frame stays whole, so the decoder takes it every time the extractor
+    hands it out. A frame cut in the middle may stop the decoder with an error instead.
+    """
+    whole = scratch / "cut-early-whole.flac"
+    encode(whole, 44100, "mono", ["-c:a", "flac", "-sample_fmt", "s16"], seconds=4)
+    packets = subprocess.run(
+        ["ffprobe", "-v", "error", "-show_entries", "packet=pos", "-of", "csv=p=0", str(whole)],
+        check=True, capture_output=True, text=True,
+    ).stdout.split()
+    data = whole.read_bytes()
+    cut = min((int(position.strip(",")) for position in packets), key=lambda position: abs(position - len(data) // 4))
+    (OUT / "flac-44100-16bit-mono-cut-early.flac").write_bytes(data[:cut])
+
+
 def edge_cases(scratch):
     # A FLAC file cut off in the middle of its last frame, as an interrupted copy leaves it.
     whole = scratch / "whole.flac"
     encode(whole, 44100, "mono", ["-c:a", "flac", "-sample_fmt", "s16"])
     (OUT / "flac-44100-16bit-mono-truncated.flac").write_bytes(whole.read_bytes()[:-300])
+
+    cut_early(scratch)
 
     # A FLAC file of a single frame: 50 ms is shorter than one block of 4096 samples.
     encode(OUT / "flac-44100-16bit-mono-one-frame.flac", 44100, "mono", ["-c:a", "flac", "-sample_fmt", "s16"],
