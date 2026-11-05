@@ -23,6 +23,9 @@ env:
   # The reference fingerprints come from this fpcalc (buildSrc/src/main/kotlin/PrepareFingerprintSamples.kt).
   FPCALC_VERSION: "1.6.2"
   FPCALC_SHA256: "c968ad4a0821592a79b158fb2e1f46cbe0a22a0a1dbc0743c67d68e75d15d2bb"
+  # imageio-ffmpeg 0.6.0, which carries ffmpeg 7.0.2 for Linux x86_64.
+  FFMPEG_WHEEL_URL: "https://files.pythonhosted.org/packages/a0/2d/43c8522a2038e9d0e7dbdf3a61195ecc31ca576fb1527a528c877e87d973/imageio_ffmpeg-0.6.0-py3-none-manylinux2014_x86_64.whl"
+  FFMPEG_WHEEL_SHA256: "c7e46fcec401dd990405049d2e2f475e2b397779df2519b544b8aab515195282"
   # The emulators are x86_64, so the native code need not be built for arm64 as well.
   ABI_ARG: "-Pandroid.injected.build.abi=x86_64"
 
@@ -91,18 +94,18 @@ jobs:
           (yes || true) | "$SDKMANAGER" --licenses > /dev/null
           "$SDKMANAGER" --install "platforms;android-37.0" "ndk;${NDK_VERSION}" "cmake;${CMAKE_VERSION}"
 
-      # An apt mirror once took 14 minutes here; a hung attempt is cut off and tried again.
+      # Only the nativelib recordings (PCM) need ffmpeg. A static build from the imageio-ffmpeg wheel on PyPI: apt took
+      # 14 to 16 minutes in 3 of 15 jobs, once without installing anything.
       - name: Install ffmpeg
-        timeout-minutes: 20
         run: |
-          for attempt in 1 2 3; do
-            if timeout 300 sudo apt-get update -qq &&
-               timeout 300 sudo apt-get install -y -qq --no-install-recommends ffmpeg > /dev/null; then
-              break
-            fi
-            echo "apt attempt $attempt failed or took too long"
-          done
-          ffmpeg -version | head -1
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/ffmpeg.whl" "$FFMPEG_WHEEL_URL"
+          echo "${FFMPEG_WHEEL_SHA256}  $RUNNER_TEMP/ffmpeg.whl" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/ffmpeg"
+          unzip -q -j "$RUNNER_TEMP/ffmpeg.whl" 'imageio_ffmpeg/binaries/ffmpeg-linux-x86_64-*' -d "$RUNNER_TEMP/ffmpeg"
+          mv "$RUNNER_TEMP"/ffmpeg/ffmpeg-linux-x86_64-* "$RUNNER_TEMP/ffmpeg/ffmpeg"
+          chmod +x "$RUNNER_TEMP/ffmpeg/ffmpeg"
+          "$RUNNER_TEMP/ffmpeg/ffmpeg" -hide_banner -version | head -1
+          echo "$RUNNER_TEMP/ffmpeg" >> "$GITHUB_PATH"
 
       - name: Install fpcalc
         run: |
