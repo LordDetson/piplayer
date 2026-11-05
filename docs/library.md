@@ -447,7 +447,17 @@ The layout of the key and the rules for lengths are in TI §3.1. This step build
 
 ### 7.2 The frame walk
 
-- `walkDuration` is a call of its own, for files whose plan asks for one, and runs last, after the tag pass.
+- `audio_file.content_key`, `duration_ms` and `duration_source` hold what a read and the walks found, and the sync clears
+  them when a file's size or modification time changes. The source says how far the length is settled: `header`, `walk`,
+  `unknown`, or waiting with `pending-walk` (no length yet: lists show the index's) or `pending-flac-end` (the header's for
+  now). A read of the same file again keeps what a walk settled. `track.track_key` is the content key and the track's
+  start, `<key>:0` until CUE sheets arrive.
+- `walkDuration` is a call of its own, for files whose plan asks for one, and runs last, after the tag pass, in the pass's
+  order. A run the pass is asked for goes first: the walks stop between files, and what is left waits for the next run.
+- The gate of the pass (§5.5) applies, but a walk may read for long, so it does not wait for the next file: 3 s after the
+  gate closes it is cancelled, which kills `:tagger`, and its file comes again after the others.
+- Results go in batches of at most 50 or 1 s. The list gets the new lengths in place, and no order waits for them.
+- A crash or a timeout skips the file until the process starts anew or a full read is asked for, and counts as in §4.3.
 - It runs in `:tagger` and not in the main process: it shares no heap with the player, and it can be ended at once by
   killing the process, as any call whose caller gives up (§4.3). Its thread runs at background priority. It goes on
   while music plays; the 0 underrun measurement of the tag pass covers it.

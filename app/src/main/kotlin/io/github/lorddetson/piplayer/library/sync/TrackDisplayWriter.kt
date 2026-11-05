@@ -22,6 +22,7 @@ internal class DisplayInput(
     val displayName: String,
     val index: IndexValues?,
     val read: ReadFileRow? = null,
+    private val exactDurationMs: Long? = read?.exactDurationMs,
 ) {
     /** Normalizes, so not on a thread that playback or a list waits for. */
     fun resolve(): DisplayValues = MergedValues.of(
@@ -29,7 +30,7 @@ internal class DisplayInput(
         index,
         read?.let(TrackEntity::tagsOf),
         read = read != null,
-        exactDurationMs = read?.exactDurationMs,
+        exactDurationMs = exactDurationMs,
         tagLengthMs = read?.tagLengthMs,
         embeddedCover = read?.embeddedCover == true,
     )
@@ -67,6 +68,7 @@ class TrackDisplayWriter(private val database: LibraryDatabase) {
         displayName,
         IndexValues(title, artist, album, composer, genre, durationMs),
         read,
+        exactDurationMs,
     )
 
     companion object {

@@ -130,4 +130,60 @@ class PassGateTest {
 
         assertThat(through).isTrue()
     }
+
+    /** Whether a walk waiting for the gate to close would be told now. */
+    private fun TestScope.isClosed(gate: PassGate): Boolean {
+        var told = false
+        val job = launch {
+            gate.awaitClosed()
+            told = true
+        }
+        runCurrent()
+        job.cancel()
+        return told
+    }
+
+    @Test
+    fun `a walk hears when the app goes away and the music stops`() = runTest {
+        val gate = gate()
+        gate.setUiVisible(true)
+        assertThat(isClosed(gate)).isFalse()
+
+        gate.setUiVisible(false)
+        assertThat(isClosed(gate)).isTrue()
+    }
+
+    @Test
+    fun `a walk hears of an underrun and of heat while the rest stays open`() = runTest {
+        val gate = gate()
+        gate.setPlaying(true)
+        assertThat(isClosed(gate)).isFalse()
+
+        gate.audioUnderrun()
+        assertThat(isClosed(gate)).isTrue()
+        advanceTimeBy(60_001)
+        assertThat(isClosed(gate)).isFalse()
+
+        gate.setHot(true)
+        assertThat(isClosed(gate)).isTrue()
+    }
+
+    @Test
+    fun `a walk under way is told at the moment the gate closes`() = runTest {
+        val gate = gate()
+        gate.setUiVisible(true)
+        var told = false
+        val job = launch {
+            gate.awaitClosed()
+            told = true
+        }
+        runCurrent()
+        assertThat(told).isFalse()
+
+        gate.audioUnderrun()
+        runCurrent()
+
+        assertThat(told).isTrue()
+        job.cancel()
+    }
 }
