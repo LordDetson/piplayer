@@ -11,6 +11,7 @@ import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.github.lorddetson.piplayer.MainActivity
 import io.github.lorddetson.piplayer.TestFiles
+import io.github.lorddetson.piplayer.TimingTest
 import io.github.lorddetson.piplayer.library.search.LibrarySearchSpikeTest
 import io.github.lorddetson.piplayer.library.search.SearchTerms
 import io.github.lorddetson.piplayer.library.songs.LibrarySongSource
@@ -72,6 +73,7 @@ class GeneratedLibraryTest {
         compose.waitUntilAtLeastOneExists(hasAnyAncestor(hasTestTag(SongsTags.LIST)), timeoutMillis = 30_000)
 
     @Test
+    @TimingTest
     fun theFirstLaunchListsTheLibraryWithinSecondsAndSyncsItWithinTen() {
         ActivityScenario.launch(MainActivity::class.java).use {
             waitForTheFirstPage()
@@ -123,6 +125,7 @@ class GeneratedLibraryTest {
     }
 
     @Test
+    @TimingTest
     fun aLaterLaunchListsTheSyncedLibraryWithinASecond() {
         runBlocking { Library.sync(context).awaitIdle() }
 
@@ -142,6 +145,7 @@ class GeneratedLibraryTest {
     }
 
     @Test
+    @TimingTest
     fun searchAsYouTypeOnTheRealSchemaAnswersWithinFiftyMilliseconds() {
         runBlocking { Library.sync(context).awaitIdle() }
         val database = Library.database(context)

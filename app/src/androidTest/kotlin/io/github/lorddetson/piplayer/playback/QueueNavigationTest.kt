@@ -10,6 +10,7 @@ import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.github.lorddetson.piplayer.TestFiles
+import io.github.lorddetson.piplayer.TimingTest
 import io.github.lorddetson.piplayer.library.songs.SongList
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.connectController
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.onMain
@@ -158,6 +159,7 @@ class QueueNavigationTest {
     }
 
     @Test
+    @TimingTest
     fun turningShuffleOnInAQueueOf20000SongsIsQuick() {
         val template = SongSourceRule.song(0, "Song")
         songs.songs = List(SIZE) { index -> template.copy(id = index + 1L, title = "Song %05d".format(index + 1)) }
@@ -198,7 +200,7 @@ class QueueNavigationTest {
         val measured = times.drop(1).sorted()
         val median = measured[measured.size / 2]
         Log.i(TAG, "shuffle on in 20 000 songs: warm-up ${times.first()} ms, measured $measured ms, median $median ms")
-        // As for the queue start (§2.5): the emulator image with 16 KB pages is slower throughout, so there the time
+        // The emulator image with 16 KB pages is slower throughout, so there the time
         // is only logged.
         // An assumption would show up as a failure in this runner's report, so the test just stays empty here.
         if (isEmulatorWith16KbPages()) {

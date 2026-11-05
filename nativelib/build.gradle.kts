@@ -60,6 +60,18 @@ androidComponents {
     }
 }
 
+/**
+ * ccache for the debug native build, from -Ppiplayer.ccache=<path to ccache> (a development machine sets it in
+ * ~/.gradle/gradle.properties; CI never does): TagLib, most of the native build, then compiles once for every checkout
+ * and clean build. The release build always compiles from source. base_dir makes the paths relative to the checkout and
+ * hash_dir=false leaves the build folder out of the key, so that worktrees share the cache; the price is that a cached
+ * object's debug info may name another checkout's build folder.
+ */
+val ccacheLauncher: String? = providers.gradleProperty("piplayer.ccache").orNull?.let { ccache ->
+    listOf(ccache, "base_dir=${rootProject.layout.projectDirectory.asFile}", "hash_dir=false")
+        .joinToString(";") { it.replace('\\', '/') }
+}
+
 android {
     namespace = "io.github.lorddetson.piplayer.nativelib"
     compileSdk = 37
@@ -78,6 +90,16 @@ android {
             cmake {
                 // libtag.so, the JNI library and the app share C++ types, so they share one C++ runtime.
                 arguments += listOf("-DANDROID_STL=c++_shared")
+            }
+        }
+    }
+
+    buildTypes {
+        debug {
+            externalNativeBuild {
+                cmake {
+                    ccacheLauncher?.let { arguments += listOf("-DCMAKE_C_COMPILER_LAUNCHER=$it", "-DCMAKE_CXX_COMPILER_LAUNCHER=$it") }
+                }
             }
         }
     }

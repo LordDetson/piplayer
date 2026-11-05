@@ -9,6 +9,7 @@ import androidx.media3.session.MediaController
 import androidx.media3.session.SessionResult
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.github.lorddetson.piplayer.TestFiles
+import io.github.lorddetson.piplayer.TimingTest
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.LONG_FIXTURE
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.SHORT_FIXTURE
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.connectController
@@ -87,6 +88,7 @@ class SleepTimerServiceTest {
     private fun extras(): PlaybackExtras = PlaybackExtras.from(onMain { controller.sessionExtras })
 
     @Test
+    @TimingTest
     fun theVolumeFallsOverTheFadeAndPlaybackPausesAtTheTimeWithTheVolumeBack() {
         controller.play(LONG_FIXTURE)
         val started = timer(3_000)
