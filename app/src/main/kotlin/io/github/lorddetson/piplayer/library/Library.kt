@@ -21,6 +21,7 @@ import io.github.lorddetson.piplayer.library.sync.LibrarySync
 import io.github.lorddetson.piplayer.library.sync.MediaIndex
 import io.github.lorddetson.piplayer.library.sync.MediaStoreIndex
 import io.github.lorddetson.piplayer.library.tagpass.PassGate
+import io.github.lorddetson.piplayer.library.tagpass.DurationWalks
 import io.github.lorddetson.piplayer.library.tagpass.TagPass
 import io.github.lorddetson.piplayer.library.tagpass.TagPassRunner
 import io.github.lorddetson.piplayer.library.tagpass.TaggerPassReader
@@ -132,10 +133,11 @@ object Library {
     }
 
     private fun tagPassRunner(app: Context, library: Opened): TagPassRunner {
+        val reader = TaggerPassReader(app, Tagger.client(app))
         val pass = TagPass(
             library.database,
             library.sync,
-            TaggerPassReader(app, Tagger.client(app)),
+            reader,
             cyrillicLanguage = {
                 val locales = listOf(Resources.getSystem().configuration.locales, app.resources.configuration.locales)
                 LegacyText.isCyrillicLanguage(locales.flatMap { list -> List(list.size()) { list[it].language } })
@@ -143,7 +145,8 @@ object Library {
             gate = passGate::awaitOpen,
             onBatch = SongList::applyInPlace,
         )
-        return TagPassRunner(pass, library.sync.status, passGate)
+        val walks = DurationWalks(library.database, library.sync, reader, passGate, onBatch = SongList::applyLengths)
+        return TagPassRunner(pass, library.sync.status, passGate, walks = walks)
     }
 
     /** A sync now, and a run of the tag pass after it; what the settings offer (docs/library.md §5.6). */

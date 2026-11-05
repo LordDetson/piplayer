@@ -17,6 +17,7 @@ class PassGate(private val now: () -> Long = SystemClock::elapsedRealtime) {
     private val uiVisible = MutableStateFlow(false)
     private val playing = MutableStateFlow(false)
     private val hot = MutableStateFlow(false)
+    private val holds = MutableStateFlow(0L)
 
     @Volatile
     private var heldUntil = 0L
@@ -48,8 +49,16 @@ class PassGate(private val now: () -> Long = SystemClock::elapsedRealtime) {
         }
     }
 
+    /** Returns once the gate is closed, at once if it is; a long walk does not wait for the next file. */
+    suspend fun awaitClosed() {
+        combine(uiVisible, playing, hot, holds) { visible, plays, isHot, _ ->
+            !(visible || plays) || isHot || heldUntil > now()
+        }.first { it }
+    }
+
     private fun hold() {
         heldUntil = max(heldUntil, now() + HOLD_MS)
+        holds.value++
     }
 
     private companion object {

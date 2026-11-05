@@ -20,6 +20,7 @@ import io.github.lorddetson.piplayer.playback.PlaybackTesting.fileItem
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.onMain
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.shell
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.stopAndRelease
+import io.github.lorddetson.piplayer.tagging.TagReadGuard
 import io.github.lorddetson.piplayer.ui.GrantAudioPermission
 import kotlin.time.Duration.Companion.hours
 import kotlin.time.Duration.Companion.minutes
@@ -35,8 +36,8 @@ import org.junit.runner.RunWith
 
 /**
  * The criterion of M2a step 5 (docs/library.md §5.5): a pass over the whole library while music plays with the screen off
- * and no charger: no underrun, no stall, one audio output. The FLAC album, because the generated files are mono at 8 kHz
- * and would prove little. Opt-in, with `-e screenOff true`, for the phone: it turns the screen off and takes a long time.
+ * and no charger: no underrun, no stall, one audio output, also while the walks of step 7 follow the pass (§7.2). The FLAC
+ * album, because the generated files are mono at 8 kHz and would prove little. Opt-in, with `-e screenOff true`, for the phone: it turns the screen off and takes a long time.
  */
 @RunWith(AndroidJUnit4::class)
 class TagPassScreenOffTest {
@@ -112,6 +113,17 @@ class TagPassScreenOffTest {
         val seconds = (SystemClock.elapsedRealtime() - startedAt) / 1_000.0
         val progress = TagPassState.progress.value
         Log.i(TAG, "Worst lateness during the pass: $during ms; ${progress.done} files in $seconds s, ${progress.done / seconds} a second")
+
+        val dao = Library.database(context).library()
+        val pending = runBlocking { dao.pendingDurations(TagReadGuard.UNSAFE_COUNT).size }
+        val walksStartedAt = SystemClock.elapsedRealtime()
+        val duringWalks = worstLatenessMs {
+            eventually("the walks have settled every length", LIMIT) {
+                runBlocking { dao.pendingDurations(TagReadGuard.UNSAFE_COUNT).isEmpty() }
+            }
+        }
+        val walkSeconds = (SystemClock.elapsedRealtime() - walksStartedAt) / 1_000.0
+        Log.i(TAG, "Worst lateness during the walks: $duringWalks ms; $pending lengths in $walkSeconds s, ${pending / walkSeconds} a second")
 
         val events = AudioJournal.events
         assertThat(progress.done).describedAs("files read").isGreaterThan(MIN_FILES)

@@ -5,6 +5,7 @@ import android.util.Log
 import io.github.lorddetson.piplayer.library.songs.SongList
 import io.github.lorddetson.piplayer.library.sync.LibraryStatus
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
@@ -23,6 +24,7 @@ import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
@@ -35,7 +37,10 @@ class TagPassRunner(
     private val status: Flow<LibraryStatus>,
     private val gate: PassGate,
     private val startDelay: Duration = START_DELAY,
+    private val walks: DurationWalks? = null,
 ) {
+    /** Whether something asked for a run since the last one started; the walks make way for it. */
+    private val runAsked = AtomicBoolean()
     private val dispatcher = Executors.newSingleThreadExecutor { task ->
         Thread({
             Process.setThreadPriority(Process.THREAD_PRIORITY_BACKGROUND)
@@ -56,7 +61,10 @@ class TagPassRunner(
             delay(startDelay)
             combine(status.filter { it.known }.map { it.revision }.distinctUntilChanged(), requests) { revision, request ->
                 revision to request
-            }.conflate().collect { runOnce() }
+            }.onEach { runAsked.set(true) }.conflate().collect {
+                runAsked.set(false)
+                runOnce()
+            }
         }
     }
 
@@ -66,6 +74,7 @@ class TagPassRunner(
     /** One more run over every file, those that failed in this process too. */
     fun readAllAgain() {
         pass.forgetFailures()
+        walks?.forgetFailures()
         runAgain()
     }
 
@@ -92,6 +101,21 @@ class TagPassRunner(
             Log.w(TAG, "The tag pass failed", e)
         } finally {
             SongList.passFinished()
+        }
+        runWalks()
+    }
+
+    /** What the pass could not take from headers, last (docs/library.md §7.2). */
+    private suspend fun runWalks() {
+        val walks = walks ?: return
+        try {
+            val settled = walks.run(stopWhen = runAsked::get)
+            if (settled > 0) Log.i(TAG, "The walks settled $settled lengths")
+        } catch (e: CancellationException) {
+            currentCoroutineContext().ensureActive()
+            Log.w(TAG, "The walks failed", e)
+        } catch (e: Exception) {
+            Log.w(TAG, "The walks failed", e)
         }
     }
 

@@ -5,7 +5,10 @@ import androidx.room3.Insert
 import androidx.room3.Query
 import androidx.room3.Upsert
 import io.github.lorddetson.piplayer.library.sync.StoredFile
+import io.github.lorddetson.piplayer.library.tagpass.DurationSource
 import io.github.lorddetson.piplayer.library.tagpass.PassFile
+import io.github.lorddetson.piplayer.tagging.contentkey.DurationCheck
+import io.github.lorddetson.piplayer.tagging.contentkey.DurationPlan
 
 /** A song as lists show it, with the media index's ID. */
 data class SongRow(
@@ -177,8 +180,26 @@ interface LibraryDao {
     suspend fun unreadFiles(readerVersion: Int, unsafeCount: Int): List<PassFile>
 
     /** The current size and modification time and place of [fileIds]. */
-    @Query("SELECT id, size, mtime, volume_name AS volume, relative_path AS relativePath FROM audio_file WHERE id IN (:fileIds)")
+    @Query("SELECT id, size, mtime, volume_name AS volume, relative_path AS relativePath, duration_ms AS durationMs, duration_source AS durationSource FROM audio_file WHERE id IN (:fileIds)")
     suspend fun fileStates(fileIds: List<Long>): List<FileState>
+
+    /** The content key of a file a read has just measured, and what is stored of its length (docs/library.md §7.1). */
+    @Query("UPDATE audio_file SET content_key = :key, duration_ms = :durationMs, duration_source = :source WHERE id = :fileId")
+    suspend fun setContent(fileId: Long, key: String, durationMs: Long?, source: String)
+
+    @Query("UPDATE audio_file SET duration_ms = :durationMs, duration_source = :source WHERE id = :fileId")
+    suspend fun setDuration(fileId: Long, durationMs: Long?, source: String)
+
+    /** The lengths the walks have still to settle, in the order of the tag pass (docs/library.md §7.2). */
+    @Query(
+        "SELECT f.id AS fileId, f.media_store_id AS mediaStoreId, f.volume_name AS volume, f.display_name AS displayName, " +
+            "f.size, f.mtime, f.duration_ms AS durationMs, f.duration_source AS durationSource " +
+            "FROM audio_file f LEFT JOIN track_display d ON d.file_id = f.id " +
+            "WHERE f.duration_source IN ('${DurationSource.PENDING_WALK}', '${DurationSource.PENDING_FLAC_END}') " +
+            "AND f.unsafe_count < :unsafeCount AND f.folder_rule != 2 " +
+            "ORDER BY (f.is_ringtone OR f.is_notification OR f.is_alarm OR f.recording), d.title_key, f.id",
+    )
+    suspend fun pendingDurations(unsafeCount: Int): List<PendingDuration>
 
     @Query("UPDATE audio_file SET tag_failure = :failure, reader_version = :readerVersion WHERE id = :fileId")
     suspend fun markFailed(fileId: Long, failure: String, readerVersion: Int?)
@@ -262,7 +283,15 @@ interface LibraryDao {
 }
 
 /** A file's size, modification time and place as the database holds them now. */
-data class FileState(val id: Long, val size: Long, val mtime: Long, val volume: String, val relativePath: String)
+data class FileState(
+    val id: Long,
+    val size: Long,
+    val mtime: Long,
+    val volume: String,
+    val relativePath: String,
+    val durationMs: Long?,
+    val durationSource: String?,
+)
 
 /** A read track as the display needs it; no raw tags, because a sync may read this for every file. */
 data class ReadFileRow(
@@ -293,12 +322,34 @@ data class IndexInputRow(
     val composer: String?,
     val genre: String?,
     val durationMs: Long?,
+    val exactDurationMs: Long?,
 )
 
 /** A folder of a volume, as the media index gives its path. */
 data class FolderKey(val volume: String, val relativePath: String)
 
 /** A folder with a rule its files carry. */
+/** A file with a length still to settle; [durationSource] says what is left to do. */
+data class PendingDuration(
+    val fileId: Long,
+    val mediaStoreId: Long,
+    val volume: String,
+    val displayName: String,
+    val size: Long,
+    val mtime: Long,
+    val durationMs: Long?,
+    val durationSource: String,
+) {
+    val file get() = PassFile(fileId, mediaStoreId, volume, displayName, size, mtime)
+
+    val plan
+        get() = if (durationSource == DurationSource.PENDING_FLAC_END) {
+            DurationPlan(durationMs, DurationCheck.FLAC_END)
+        } else {
+            DurationPlan(null, DurationCheck.WALK)
+        }
+}
+
 data class FolderRuleRow(val volume: String, val relativePath: String, val rule: Int)
 
 private const val READ_FILES = "SELECT t.file_id AS fileId, t.title, t.artist, t.artists, t.album, t.composers, t.genres, " +
@@ -308,7 +359,8 @@ private const val READ_FILES = "SELECT t.file_id AS fileId, t.title, t.artist, t
     "FROM track t JOIN audio_file f ON f.id = t.file_id"
 
 private const val INDEX_INPUTS = "SELECT f.id AS fileId, f.display_name AS displayName, e.title, e.artist, e.album, " +
-    "e.composer, e.genre, e.duration_ms AS durationMs FROM audio_file f LEFT JOIN media_index_entry e ON e.file_id = f.id"
+    "e.composer, e.genre, e.duration_ms AS durationMs, f.duration_ms AS exactDurationMs " +
+    "FROM audio_file f LEFT JOIN media_index_entry e ON e.file_id = f.id"
 
 // Excluded folders never; included folders whole; elsewhere every file but the hidden kinds and short files. A file
 // whose length is unknown is never short (docs/library.md §3.5).

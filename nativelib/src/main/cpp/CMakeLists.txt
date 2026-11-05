@@ -86,6 +86,7 @@ add_library(piplayer_jni SHARED
   jni_onload.cpp
   fd_stream.cpp
   taglib_jni.cpp
+  mpeg_layout_jni.cpp
   chromaprint_jni.cpp
   resampler_jni.cpp
 )

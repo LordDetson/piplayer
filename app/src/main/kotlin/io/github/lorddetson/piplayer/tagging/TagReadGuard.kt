@@ -4,6 +4,7 @@ import android.os.Process
 import java.util.concurrent.Executors
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.time.Duration
+import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.NonCancellable
@@ -63,9 +64,14 @@ class TagReadGuard(private val counts: UnsafeCounts, private val timeout: Durati
 
     /**
      * Runs [call], which blocks and throws [TaggerDiedException] when `:tagger` dies, for [target]; [kill] ends
-     * `:tagger` when the call takes too long or its caller gives up.
+     * `:tagger` when the call takes longer than [timeout] or its caller gives up.
      */
-    suspend fun <T> run(target: TagTarget, kill: () -> Unit, call: () -> T): TaggerResult<T> = mutex.withLock {
+    suspend fun <T> run(
+        target: TagTarget,
+        kill: () -> Unit,
+        timeout: Duration = this.timeout,
+        call: () -> T,
+    ): TaggerResult<T> = mutex.withLock {
         if (isUnsafe(target)) return TaggerResult.Unsafe
         counts.raise(target)
         // On a thread of its own: a call that never returns must not hold up the caller or the next call.
@@ -97,7 +103,7 @@ class TagReadGuard(private val counts: UnsafeCounts, private val timeout: Durati
      * threads are shared with calls of normal priority.
      */
     suspend fun <T> run(target: TagTarget, kill: () -> Unit, background: Boolean, call: () -> T): TaggerResult<T> {
-        if (!background) return run(target, kill, call)
+        if (!background) return run(target, kill, call = call)
         return run(target, kill) {
             Process.setThreadPriority(Process.THREAD_PRIORITY_BACKGROUND)
             try {
@@ -110,6 +116,13 @@ class TagReadGuard(private val counts: UnsafeCounts, private val timeout: Durati
 
     companion object {
         val DEFAULT_TIMEOUT = 30.seconds
+
+        private val MIN_WALK_TIMEOUT = 2.minutes
+        private const val SLOWEST_WALK_BYTES_PER_SECOND = 1_048_576L
+
+        /** How long a walk over the frames of a file of [sizeBytes] may take, so that long files are not called hung. */
+        fun walkTimeout(sizeBytes: Long): Duration =
+            maxOf(MIN_WALK_TIMEOUT, (sizeBytes / SLOWEST_WALK_BYTES_PER_SECOND).seconds)
 
         /** Failures after which a file is not read any more. */
         const val UNSAFE_COUNT = 2

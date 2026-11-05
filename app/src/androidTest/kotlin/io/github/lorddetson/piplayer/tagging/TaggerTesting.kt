@@ -76,6 +76,8 @@ object TaggerTesting {
         return LibraryDatabase.open(context, file) to file
     }
 
+    fun counts(database: LibraryDatabase) = LibraryUnsafeCounts(database)
+
     fun client(database: LibraryDatabase, timeout: Duration, idle: Duration = TaggerClient.IDLE) =
         TaggerClient(context, LibraryUnsafeCounts(database), timeout, idle)
 }
