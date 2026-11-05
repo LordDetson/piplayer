@@ -14,6 +14,9 @@ import xml.etree.ElementTree as ElementTree
 # GitHub shows at most 10 error annotations per step; one more lists every failed test.
 MAX_FAILURE_ANNOTATIONS = 8
 MAX_MESSAGE_CHARS = 400
+# A group this small lists its tests by name, so that a run that stopped early shows which ones ran.
+MAX_NAMED_CASES = 5
+ASSUMPTION = "org.junit.AssumptionViolatedException"
 
 
 def escaped(text):
@@ -34,8 +37,11 @@ def read_group(directory):
             if problem is None:
                 problem = case.find("error")
             failure = None if problem is None else (problem.text or problem.get("message") or "no message")
-            cases.append((f"{case.get('classname')}#{case.get('name')}", float(case.get("time", "0")),
-                          case.find("skipped") is not None, failure))
+            skipped = case.find("skipped") is not None
+            # The connected test report writes a test that an assumption skipped as a failure.
+            if failure is not None and ASSUMPTION in failure:
+                failure, skipped = None, True
+            cases.append((f"{case.get('classname')}#{case.get('name')}", float(case.get("time", "0")), skipped, failure))
     return cases
 
 
@@ -52,8 +58,9 @@ def main():
         if not cases:
             annotate("error", f"{label}: no results", f"No TEST-*.xml under {directory}")
             failed_anywhere = True
+        names = f": {', '.join(name for name, _, _, _ in cases)}" if len(cases) <= MAX_NAMED_CASES else ""
         annotate("notice", f"{label}: {len(cases)} tests",
-                 f"{len(failures)} failed, {skipped} skipped, {seconds} s")
+                 f"{len(failures)} failed, {skipped} skipped, {seconds} s{names}")
         summary.append(f"| {label} | {len(cases)} | {len(failures)} | {skipped} | {seconds} |")
         all_failures += failures
 
