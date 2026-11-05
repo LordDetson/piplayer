@@ -72,6 +72,13 @@ class TextQueryBuilderTest {
     }
 
     @Test
+    fun `fuzzy terms fold letters without a decomposition and count the folded length`() {
+        val fuzzy = TextQueryBuilder.build(hint.copy(title = "Trentemøller Fuß Straße", artist = "MØ"))
+            .single { it.variant == QueryVariant.FUZZY_TITLE_ARTIST_DURATION }
+        assertThat(fuzzy.query).startsWith("recording:(+trentemoller~1 +fuss +strasse~1) AND artist:(mo)")
+    }
+
+    @Test
     fun `automatic queries ask for 25 results, manual ones for 50`() {
         assertThat(TextQueryBuilder.build(hint)).allSatisfy { assertThat(it.limit).isEqualTo(25) }
         assertThat(TextQueryBuilder.build(hint, TextQueryBuilder.MANUAL_LIMIT))

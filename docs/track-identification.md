@@ -400,7 +400,9 @@ Definitions:
 
 - Duration credit: 1 up to a difference of 2 s, falling linearly to 0 at 30 s.
 - Similarity: Levenshtein ratio on strings normalized like search (case, diacritics, ё and е; Cyrillic, kana, Han and
-  Hangul letters are kept whole). Bracketed suffixes at the end of a title (remix, live, edit; ASCII or full-width
+  Hangul letters are kept whole; Latin letters without a decomposition take their plain spelling: ø as o, ł as l, đ and
+  ð as d, æ as ae, œ as oe, ß as ss, ı as i, þ as th, ħ as h, ŧ as t, ŋ as ng; halfwidth kana become full kana).
+  Bracketed suffixes at the end of a title (remix, live, edit; ASCII or full-width
   brackets) are compared separately: a suffix on only one side lowers the title similarity by 0.2, two different
   suffixes by 0.2 to 0.4. A featured artist or a remaster note in brackets is not a suffix, and brackets earlier in the
   title belong to the name, as in "(Don't Fear) The Reaper".
@@ -890,13 +892,16 @@ made live in the user database.
 - `track_display(track_id, <merged values>, <normalized search columns>, missing_info_reasons,
   missing_info_decision, favorite, play_count, last_played_at, badge_state)`: merged values (§7.1) and the mirrored
   user fields, for lists, sorting, smart lists and search. Search (M0 spike): one `search_text` column holds the
-  title, artists, album, composer, genre and file name, each normalized like §4.1 and joined by spaces; a query is
+  title, artists, album, composer, genre and file name, each normalized like §4.1 and joined by spaces. Each field also
+  keeps its names glued, inside that field only: a word with punctuation inside ("AC/DC" as "ac dc acdc"; an underscore
+  separates words) and a run of neighbouring words of up to two letters ("AC DC" as "ac dc acdc"), so "acdc" finds both.
+  Longer words written apart stay apart: "blink182" does not find "Blink 182", and "theend" does not find "The End".
+  A query is
   normalized the same way and split into words (no repeats, longest first, at most 8), and every word must occur in
   the text, tested with `instr()` (in the M0 spike on the platform's SQLite, LIKE went through ICU and was two to three
   times slower). The library database uses the SQLite bundled with the app (library.md §1.1).
   An index on (`title_key`, `search_text`) lets a search walk the titles in order and stop at the first page of 50.
-  Known gaps for M2a: letters without a decomposition (ø, ł, đ, æ, œ, ß, ı) and halfwidth kana are not folded yet,
-  and a name typed without its punctuation ("acdc" for "AC/DC") is not found. `missing_info_reasons` is the set of §1 reasons, written by
+  `missing_info_reasons` is the set of §1 reasons, written by
   the precedence resolver; `missing_info_decision` is none, keep_as_is or skipped.
 - `fingerprint(content_key, fingerprint, acoustid_id, decoder_path, computed_at)`: a cache for identification and
   re-attachment, kept by content key, so the fingerprint of a file that left the media index stays available for

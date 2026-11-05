@@ -154,7 +154,8 @@ is heard as a click. The becoming-noisy broadcast is protected, so emulator test
 - A row shows the title, the artist and the length. The index gives the file name without its extension as the title
   when the file has no title tag, `<unknown>` as the artist (shown as "Unknown artist"), the folder's name as the
   album, and no length, or 0, for files it could not read (shown as "--:--"); such rows stay in the list.
-- Order: by the title normalized as for search (TI §4.1: case, diacritics outside Cyrillic and "ё" folded, punctuation
+- Order: by the title normalized as for search (TI §4.1: case, diacritics outside Cyrillic, letters such as "ø" and
+  "ё" folded, punctuation
   as spaces), compared by code point (digits before Latin before Cyrillic), then by the index's ID, so that the list
   and the playback service always agree.
 - The list is read from the library when the screen starts and after every sync that changed it (library.md §1.4).

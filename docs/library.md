@@ -14,7 +14,8 @@ The data model it implements is sketched in track-identification.md §10 (TI bel
   emulator it wrote the 20 000 rows of a table in 0.11 s instead of 2 s on the platform's SQLite, which has no JSON
   functions there and pays for every bound value, and it read them three times as fast.
 - It has no migrations: when its schema version changes, Room drops every table and the next sync fills them again
-  (§1.3). Its schema is not exported, as nothing outside the app reads it.
+  (§1.3). Its schema is not exported, as nothing outside the app reads it. The version also changes when the stored
+  text changes without a change of schema, as with the search normalization in version 4 (TI §4.1, §10.1).
 - Only the main process opens it (§1.5).
 
 ### 1.2 Tables in step 1
@@ -32,7 +33,8 @@ The data model it implements is sketched in track-identification.md §10 (TI bel
       when the index gives none (a length of 0 counts as none).
     - The title key is the title normalized as for search (TI §4.1).
     - The search text joins the normalized title, artist, album, composer, genre and display name without its extension
-      with spaces (TI §10.1), leaving out empty values. Search itself arrives in step 12; the column and its index exist now, so that
+      with spaces, leaving out empty values, and keeps the glued forms of each field's names (TI §10.1).
+      Search itself arrives in step 12; the column and its index exist now, so that
       search can be measured on the real schema early.
 - `volume_sync_state`: per volume, the index version and generation the last sync reached.
 
