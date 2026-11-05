@@ -246,10 +246,10 @@ Instrumented tests on the API 30, 36 and 37 emulators, the playback ones also on
   a row, a broken last song, an image as the last song and an all-broken queue with repeat stop with the message; play
   after a stop retries with a new count and moves on; a song that plays between broken ones resets the count; a
   failing audio output stops at once (on a player of the test's own).
-- A 20 000-song queue from a synthetic list starts within 1 s (the median of 5 runs after one warm-up run) on the phone
-  and the API 30 and 36 emulators. The devices run one at a time, since the start is bound by the main thread. The API
-  37 emulator image with 16 KB pages is slower throughout (1.3 to 1.9 s against 0.57 s on the phone); there the time
-  is only logged.
+- A 20 000-song queue from a synthetic list starts within 1 s (the median of 5 runs after one warm-up run) on the
+  phone (0.57 s). The devices run one at a time, since the start is bound by the main thread. The emulators only log
+  the time: the API 30 image sits at the bound even on a quiet host (0.8 to 1.2 s), and the API 37 image with 16 KB
+  pages is slower throughout (1.3 to 1.9 s).
 - The screen: the permission card, the denied-for-good card, the list in title order, a tap that starts playback at
   that row, and a change of the media index that makes the list be read again.
 
@@ -347,7 +347,7 @@ large queue, and a song from an SD card if there is one.
 - Turning shuffle on or off keeps the count of broken songs (§2.4); only a new queue starts a new count.
 - Turning shuffle on in a 20 000-song queue reaches the controllers within 0.25 s (the median of 5 runs: 0.1 s on
   the API 30 emulator, 0.2 s on API 36). The API 37 emulator image with 16 KB pages takes about 0.3 s; there the time
-  is only logged, as for the queue start (§2.5).
+  is only logged.
 
 ### 3.7 Notification and system controls
 
