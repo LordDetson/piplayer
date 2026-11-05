@@ -4,13 +4,12 @@ import android.content.ComponentName
 import android.media.browse.MediaBrowser
 import android.os.Build
 import android.os.SystemClock
-import android.system.Os
-import android.system.OsConstants
 import android.util.Log
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.github.lorddetson.piplayer.TestFiles
+import io.github.lorddetson.piplayer.TimingTest
 import io.github.lorddetson.piplayer.library.songs.SongList
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.compactItem
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.connectController
@@ -91,6 +90,7 @@ class PlaybackQueueTest {
     }
 
     @Test
+    @TimingTest
     fun aQueueOf20000SongsStartsWithinASecond() {
         val template = SongSourceRule.song(0, "Song")
         songs.songs = List(SIZE) { index ->
@@ -139,18 +139,17 @@ class PlaybackQueueTest {
         val measured = times.drop(1).sorted()
         val median = measured[measured.size / 2]
         Log.i(TAG, "20 000 songs: warm-up ${times.first()} ms, measured $measured ms, median $median ms")
-        // The owner's decision of 20.10: the emulator image with 16 KB pages is slower throughout (1.3 to 1.9 s here),
-        // so only the time is logged there; the bound holds on the phone and the API 30 and 36 emulators (§2.5).
+        // The owner's decision of 05.11: the bound holds on the phone only (§2.5). The API 30 image sits at it even on a
+        // quiet host, and the API 37 image with 16 KB pages is slower throughout, so the emulators only log the time.
         // An assumption would show up as a failure in this runner's report, so the test just stays empty here.
-        if (isEmulatorWith16KbPages()) {
-            Log.i(TAG, "16 KB page-size emulator: the start bound is not checked")
+        if (isEmulator()) {
+            Log.i(TAG, "Emulator: the start bound is not checked")
             return
         }
         assertThat(median).describedAs("median of $measured ms").isLessThanOrEqualTo(1_000L)
     }
 
-    private fun isEmulatorWith16KbPages() =
-        Build.HARDWARE == "ranchu" && Os.sysconf(OsConstants._SC_PAGESIZE) == 16_384L
+    private fun isEmulator() = Build.HARDWARE == "ranchu" || Build.HARDWARE == "goldfish"
 
     private companion object {
         const val TAG = "PlaybackQueueTest"

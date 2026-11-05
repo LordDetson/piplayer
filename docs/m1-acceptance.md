@@ -32,7 +32,7 @@ platform session code (it carries no package name).
 | K2 | The same after a kill while playing | A: `adb shell run-as io.github.lorddetson.piplayer kill -9 <pid>`, then `adb shell input keyevent KEYCODE_MEDIA_PLAY` | Plays the saved song from at most 5 s before the kill |
 | K3 | Playback resumes from the system media controls | H: after K1, play on the lock screen or quick settings card | As K1 |
 | B1 | A Bluetooth controller controls playback | H: play, pause, next and previous on the earbuds | Each takes effect |
-| Q1 | A 20 000-item queue starts within about 1 s | T: `PlaybackQueueTest` | Median at most 1 s (an image with 16 KB pages only logs it) |
+| Q1 | A 20 000-item queue starts within about 1 s | T: `PlaybackQueueTest` | Median at most 1 s on the phone (the emulators only log it) |
 | Q2 | With 20 000 songs the notification, lock screen and a Bluetooth controller stay responsive | T: `BigQueueHoldTest`, `-e bigQueueSeconds 180`, holds a queue of 20 000 songs; H: the controls meanwhile | No visible delay |
 
 Commands for the instrumented rows, from the repository root:

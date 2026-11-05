@@ -7,6 +7,7 @@ import androidx.sqlite.driver.AndroidSQLiteDriver
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.github.lorddetson.piplayer.TestFiles
+import io.github.lorddetson.piplayer.TimingTest
 import kotlin.random.Random
 import kotlin.time.Duration
 import kotlin.time.measureTime
@@ -194,6 +195,7 @@ class LibrarySearchSpikeTest {
     }
 
     @Test
+    @TimingTest
     fun searchAsYouTypeAnswersWithinFiftyMillisecondsOnThePlatformSqlite() {
         val p95 = mutableMapOf<Pair<Driver, Method>, Map<String, Long>>()
         eachVariant { driver, method, database ->
