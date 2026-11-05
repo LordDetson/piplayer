@@ -246,12 +246,19 @@ track details, the media session and the player's time display (§7.1).
 another code page in practice, for example Windows-1251. Stage 0 decodes it with the legacy-encoding setting (M2b)
 before text search, scoring and the diff, so the "old" column shows readable text.
 
-- The bytes come from TagLib's Latin-1 strings (each character maps to one byte) for the frames the reader reports as
-  encoding 0, for ID3v1 and for RIFF INFO. Vorbis comments, MP4 items and APE tags are always Unicode.
-- Automatic mode (default): the candidates are ISO-8859-1 and, when a device or app language is Russian, Belarusian
-  or Ukrainian, Windows-1251. The choice is made per file, over all its legacy fields together: Windows-1251 is chosen
-  when at least one word (a run of letters) of its result is entirely Cyrillic and no word mixes Latin and Cyrillic
-  letters; otherwise ISO-8859-1. The choice is stored in `audio_file.tag_encoding`.
+- The bytes come from TagLib's string handlers for ID3v1, encoding-0 ID3v2 frames and RIFF INFO: during a read they
+  mark each byte at or above 0x80 as a private-use character, so the main process decides per file and can decide again
+  without reading the file. Vorbis comments, MP4 items and APE tags are always Unicode.
+- Automatic mode (default), per file over all its legacy fields together, in this order:
+  1. No field holds a byte above ASCII: nothing to decide.
+  2. Every such field is valid UTF-8: UTF-8, written into a Latin-1 field by some taggers.
+  3. When a device or app language is Russian, Belarusian or Ukrainian, Windows-1251 if its result has more real
+     Cyrillic words than words that mix scripts. A real word is a run of letters, all Cyrillic, at least two of them,
+     with a vowel or all in upper case; so `é` read as `й` counts for nothing.
+  4. Otherwise ISO-8859-1, with Windows-1252's punctuation in the range 0x80 to 0x9F.
+- The choice is stored in `audio_file.tag_encoding`. Without the language condition other legacy text would pass the
+  rule (`Þú`, `ÅÄÖ`, and GBK or EUC-KR names), so that condition stays; a lone `Я` stays ISO-8859-1, and a Russian
+  speaker on a phone with no such language keeps the old text. The manual choice of M2b covers both.
 - A manual choice in settings overrides the automatic mode for the whole library.
 - Writes (§7.2) store changed fields in Unicode and leave unchanged legacy frames as they are; converting those is a
   reviewed fix in v1.x.
