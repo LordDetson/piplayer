@@ -6,25 +6,35 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.lorddetson.piplayer.R
 import io.github.lorddetson.piplayer.library.songs.Song
+import io.github.lorddetson.piplayer.library.tagpass.PassProgress
 import io.github.lorddetson.piplayer.ui.formatDuration
 
 /** What the song list shows (docs/playback.md §2.1, §2.2). */
@@ -34,12 +44,14 @@ sealed interface SongsState {
     /** No permission yet; [deniedForGood] once the system no longer shows its dialog. */
     data class NeedsPermission(val deniedForGood: Boolean) : SongsState
 
-    data class Loaded(val songs: List<Song>) : SongsState
+    /** [scrollTo] is the song to show at the top when the list has just been sorted anew. */
+    data class Loaded(val songs: List<Song>, val scrollTo: Long? = null) : SongsState
 }
 
 object SongsTags {
     const val LIST = "songs_list"
     const val LOADING = "songs_loading"
+    const val PROGRESS = "songs_progress"
 }
 
 /** The song list without its state holder: the permission card, the list or its empty state. */
@@ -50,6 +62,8 @@ fun SongsContent(
     onOpenSettings: () -> Unit,
     onSongClick: (row: Int, song: Song) -> Unit,
     modifier: Modifier = Modifier,
+    passProgress: PassProgress = PassProgress(),
+    onFirstVisibleSong: (Long?) -> Unit = {},
 ) {
     when (state) {
         SongsState.Loading -> Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -63,14 +77,41 @@ fun SongsContent(
                 modifier = modifier.padding(vertical = 16.dp),
             )
         } else {
-            LazyColumn(modifier.fillMaxSize().testTag(SongsTags.LIST)) {
-                itemsIndexed(state.songs, key = { _, song -> song.id }) { row, song ->
-                    SongRow(song, onClick = { onSongClick(row, song) })
+            val list = rememberLazyListState()
+            val songs by rememberUpdatedState(state.songs)
+            LaunchedEffect(list) {
+                snapshotFlow { songs.getOrNull(list.firstVisibleItemIndex)?.id }.collect(onFirstVisibleSong)
+            }
+            LaunchedEffect(state.scrollTo) {
+                val song = state.scrollTo ?: return@LaunchedEffect
+                val row = state.songs.indexOfFirst { it.id == song }
+                if (row >= 0) list.scrollToItem(row)
+            }
+            // Over the list, so that its coming and going moves no row.
+            Box(modifier.fillMaxSize()) {
+                LazyColumn(Modifier.fillMaxSize().testTag(SongsTags.LIST), state = list) {
+                    itemsIndexed(state.songs, key = { _, song -> song.id }) { row, song ->
+                        SongRow(song, onClick = { onSongClick(row, song) })
+                    }
+                }
+                if (passProgress.running && passProgress.total >= MIN_FILES_FOR_PROGRESS) {
+                    val description = stringResource(R.string.songs_tag_progress, passProgress.done, passProgress.total)
+                    LinearProgressIndicator(
+                        progress = { passProgress.done.toFloat() / passProgress.total },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .align(Alignment.TopCenter)
+                            .testTag(SongsTags.PROGRESS)
+                            .semantics { contentDescription = description },
+                    )
                 }
             }
         }
     }
 }
+
+/** A run over fewer files is too short to be worth a line (docs/library.md §5.4). */
+private const val MIN_FILES_FOR_PROGRESS = 50
 
 @Composable
 private fun PermissionCard(

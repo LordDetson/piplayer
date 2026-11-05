@@ -393,3 +393,15 @@ keeps playing meanwhile, and the crash leaves a native crash report of `:tagger`
 | TagLib does not know the format, or fails on it | `tag_failure` `unsupported` or `read`, reader version | Index values | When the file or the reader version changes |
 | The file cannot be opened | `tag_failure` `open` | Index values | In a later process |
 | `:tagger` crashes or hangs | `tag_failure` `crash`, the count of §4.4 | Index values | In a later process, until the count marks it unsafe; the run waits a minute first, because Android gives up on a process that crashes twice a minute |
+
+### 5.4 Lists during and after a pass
+
+- A batch changes rows in place: title, artist, album and length change where they are, the order and the membership do
+  not, so that nothing moves under the user's finger. The screen and the playback service share one list, so a tap plays
+  what is visible.
+- While the pass runs, a sync that adds or removes files keeps the order: rows stay where they are, removed ones go, and
+  a new one goes after the kept row before it in title order.
+- The list is sorted anew at a new entry to the screen or a start of the process, and once more at the first return from
+  the background after a pass that changed rows ended, on the same song. Other returns read nothing unless the library
+  changed. A row whose new length crosses the short-file limit stays until then.
+- A line over the top of the list shows the progress of a run of at least 50 files, without moving any row.

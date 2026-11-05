@@ -3,7 +3,11 @@ package io.github.lorddetson.piplayer.library.songs
 import android.content.Context
 import androidx.annotation.VisibleForTesting
 import io.github.lorddetson.piplayer.library.Library
+import io.github.lorddetson.piplayer.library.db.SongRow
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.update
 import io.github.lorddetson.piplayer.settings.HiddenFiles
 import io.github.lorddetson.piplayer.settings.LibrarySettings
 import kotlinx.coroutines.flow.combine
@@ -36,16 +40,30 @@ object SongList {
     private var keptRead = 0L
     private val lock = Any()
 
-    /** Reads the list again and keeps it. Blocks; call it off the main thread. */
-    fun load(context: Context): List<Song> {
-        sourceOverride?.let { return load(it) }
+    /** Whether a read keeps the order of the list, while the tag pass runs and until the list is sorted anew after it. */
+    private var frozen = false
+    private var passRunning = false
+    private var changedByPass = false
+    private var resortPending = false
+    private var activeReads = 0
+
+    /** Values the tag pass gave while a read was under way. */
+    private val racing = HashMap<Long, SongRow>()
+    private val mutableBatches = MutableStateFlow(0L)
+
+    /**
+     * Reads the list again and keeps it. While the tag pass has the order frozen it stays as it is, unless [fresh]. Blocks;
+     * call it off the main thread.
+     */
+    fun load(context: Context, fresh: Boolean = false): List<Song> {
+        sourceOverride?.let { return load(it, fresh = fresh) }
         val app = context.applicationContext
         // Without access the library is not listed, as the media index would list nothing (docs/playback.md §2.2).
-        if (!Library.mayRead(app)) return load(SongSource { emptyList() })
+        if (!Library.mayRead(app)) return load(SongSource { emptyList() }, fresh = fresh)
         // A saved queue restored while the first sync runs would otherwise find an empty library and be dropped.
         Library.awaitReady(app, READY_TIMEOUT_MS)
         val hidden = LibrarySettings(app).readHiddenFiles()
-        return Library.read(app) { database -> load(LibrarySongSource(database, hidden), Library.revision() to hidden) }
+        return Library.read(app) { database -> load(LibrarySongSource(database, hidden), Library.revision() to hidden, fresh) }
     }
 
     /**
@@ -71,16 +89,39 @@ object SongList {
      * already been kept: a slow older read would otherwise leave the playback service a list the screen no longer shows.
      */
     @VisibleForTesting
-    internal fun load(source: SongSource, key: Pair<Long?, HiddenFiles>? = null): List<Song> {
-        val read = started.incrementAndGet()
-        val list = source.songs()
-        synchronized(lock) {
+    internal fun load(source: SongSource, key: Pair<Long?, HiddenFiles>? = null, fresh: Boolean = false): List<Song> {
+        val read = synchronized(lock) {
+            activeReads++
+            started.incrementAndGet()
+        }
+        var list = emptyList<Song>()
+        var failed = true
+        try {
+            list = source.songs()
+            failed = false
+        } finally {
+            if (failed) synchronized(lock) { readEnded() }
+        }
+        return synchronized(lock) {
+            val patched = if (racing.isEmpty()) list else list.withValues(racing)
+            readEnded()
+            val shown = kept?.songs.takeIf { frozen && !fresh }?.let { FrozenOrder.merge(it, patched) } ?: patched
+            if (fresh && !passRunning) {
+                frozen = false
+                changedByPass = false
+                resortPending = false
+            }
             if (read > keptRead) {
                 keptRead = read
-                kept = Kept(list, key)
+                kept = Kept(shown, key)
             }
+            shown
         }
-        return list
+    }
+
+    private fun readEnded() {
+        activeReads--
+        if (activeReads == 0) racing.clear()
     }
 
     /**
@@ -93,10 +134,61 @@ object SongList {
         return kept.songs.takeIf { revision == Library.revision() && hidden == (LibrarySettings.latest ?: hidden) }
     }
 
-    /** Forgets the list, so that the next request reads it again. */
+    /** The list as it was last read with [key], unless it no longer holds; null for a test's own source. */
+    fun keptFor(key: Any): List<Song>? {
+        val kept = kept ?: return null
+        return kept.songs.takeIf { kept.key == key }
+    }
+
+    /** Raised after each batch of the tag pass that [applyInPlace] took. */
+    val batches: StateFlow<Long> get() = mutableBatches
+
+    /**
+     * New values for rows of the kept list: rows change in place, none moves or goes (docs/library.md §5.4). A read under
+     * way may hold the older values, so it gets these too when it is kept.
+     */
+    fun applyInPlace(rows: List<SongRow>) {
+        if (rows.isEmpty()) return
+        synchronized(lock) {
+            changedByPass = true
+            frozen = true
+            if (activeReads > 0) rows.forEach { racing[it.mediaStoreId] = it }
+            kept = kept?.let { current ->
+                val byId = rows.associateBy { it.mediaStoreId }
+                Kept(current.songs.withValues(byId), current.key)
+            }
+        }
+        mutableBatches.update { it + 1 }
+    }
+
+    /** The tag pass starts: from now on a read keeps the order of the list, unless asked for a fresh one. */
+    fun passStarted() = synchronized(lock) {
+        passRunning = true
+        frozen = true
+    }
+
+    /** The tag pass ended: if it changed rows, one fresh read is due at the next chance (docs/library.md §5.4). */
+    fun passFinished() = synchronized(lock) {
+        passRunning = false
+        if (changedByPass) resortPending = true else frozen = false
+    }
+
+    /** Whether the list should be sorted anew; the fresh read ends that. */
+    fun resortDue(): Boolean = synchronized(lock) { resortPending }
+
+    /** Forgets the list and all that a tag pass left, so that the next request reads it again. */
     @VisibleForTesting
     fun forget() = synchronized(lock) {
         kept = null
+        frozen = false
+        passRunning = false
+        changedByPass = false
+        resortPending = false
+        racing.clear()
+    }
+
+    private fun List<Song>.withValues(rows: Map<Long, SongRow>): List<Song> = map { song ->
+        rows[song.id]?.let { song.copy(title = it.title, artist = it.artist, album = it.album, durationMs = it.durationMs) } ?: song
     }
 
     /** Longer than a first sync of 20 000 files takes (docs/library.md §1.7). */
