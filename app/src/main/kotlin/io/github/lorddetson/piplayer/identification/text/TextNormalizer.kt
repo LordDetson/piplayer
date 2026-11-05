@@ -43,6 +43,10 @@ object TextNormalizer {
      * text it would also split characters that are handled on their own, such as the acute accent used as an apostrophe.
      */
     private val halfwidthKana = Regex("[\uFF61-\uFF9F]+")
+    private val HALFWIDTH_KANA = '\uFF61'..'\uFF9F'
+
+    /** All its letters are of the Cyrillic script, which keeps them whole. */
+    private val CYRILLIC = '\u0400'..'\u04FF'
 
     fun normalize(text: String): String {
         val out = StringBuilder(text.length)
@@ -54,10 +58,38 @@ object TextNormalizer {
             out.append(letters)
         }
 
-        val fullKana = halfwidthKana.replace(text) { Normalizer.normalize(it.value, Normalizer.Form.NFKC) }
-        val composed = Normalizer.normalize(fullKana, Normalizer.Form.NFC)
+        fun appendLetter(letter: Char) {
+            if (space && out.isNotEmpty()) out.append(' ')
+            space = false
+            out.append(letter)
+        }
+
+        // A first sync brings here every value of the library, so what most text is made of takes the short way.
+        val fullKana = if (text.any { it in HALFWIDTH_KANA }) {
+            halfwidthKana.replace(text) { Normalizer.normalize(it.value, Normalizer.Form.NFKC) }
+        } else {
+            text
+        }
+        val composed = if (fullKana.all { it.code < 0x80 }) fullKana else Normalizer.normalize(fullKana, Normalizer.Form.NFC)
         var i = 0
         while (i < composed.length) {
+            val char = composed[i]
+            if (char.code < 0x80) {
+                i++
+                when {
+                    char == '\'' || char == '`' -> Unit
+                    char in 'a'..'z' || char in '0'..'9' -> appendLetter(char)
+                    char in 'A'..'Z' -> appendLetter(char + ('a' - 'A'))
+                    else -> space = true
+                }
+                continue
+            }
+            if (char in CYRILLIC && char.isLetter()) {
+                i++
+                val lower = char.lowercaseChar()
+                appendLetter(if (lower == 'ё') 'е' else lower)
+                continue
+            }
             val codePoint = composed.codePointAt(i)
             i += Character.charCount(codePoint)
             when {

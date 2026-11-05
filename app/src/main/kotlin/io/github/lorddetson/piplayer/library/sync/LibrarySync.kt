@@ -258,7 +258,12 @@ class LibrarySync(
         val first = dao.lastFileId() + 1
         val ids = changes.updated.map { it.fileId } + List(changes.added.size) { first + it }
         val indices = plan.rows.indices.toList()
-        replaceAll("audio_file", FILE_COLUMNS, indices, KEPT_COLUMNS, SAME_FILE) { i -> file(ids[i], plan.rows[i]) }
+        if (changes.updated.isEmpty()) {
+            // Only new files, as in a first sync: nothing to keep, and no reading of the table being written.
+            replaceAll("audio_file", FILE_COLUMNS, indices) { i -> file(ids[i], plan.rows[i]) }
+        } else {
+            replaceAll("audio_file", FILE_COLUMNS, indices, KEPT_COLUMNS, SAME_FILE) { i -> file(ids[i], plan.rows[i]) }
+        }
         replaceAll("media_index_entry", ENTRY_COLUMNS, indices) { i -> entry(ids[i], plan.rows[i]) }
         with(TrackDisplayWriter) { write(ids, plan.displays) }
         for (chunk in plan.movedFiles.chunked(DELETE_CHUNK)) dao.readAgain(chunk)
