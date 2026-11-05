@@ -24,14 +24,18 @@ class SongListTest {
 
     @Test
     fun `an older read that ends last does not replace a newer one`() {
+        val reading = CountDownLatch(1)
         val release = CountDownLatch(1)
         val older = thread {
             SongList.load(SongSource {
+                reading.countDown()
                 release.await(5, TimeUnit.SECONDS)
                 listOf(song(1, "Deleted since"))
             })
         }
-        Thread.sleep(100)
+        // The source is asked only once the read has started, so the older read is then surely the older one; a sleep
+        // was not enough on a busy machine.
+        assertThat(reading.await(5, TimeUnit.SECONDS)).isTrue()
 
         SongList.load(SongSource { listOf(song(2, "Newer")) })
         release.countDown()
