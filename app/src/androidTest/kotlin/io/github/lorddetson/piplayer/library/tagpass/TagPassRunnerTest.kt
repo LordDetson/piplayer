@@ -199,6 +199,8 @@ class TagPassRunnerTest {
         library(1)
         runner.start()
         read(1)
+        // Once the read is stored; before that, storing it would settle the file again.
+        eventually("the run ended") { TagPassState.progress.value.let { it.total == 1 && !it.running } }
 
         dao().readAgain(listOf(dao().files().single().id))
         runner.runAgain()
