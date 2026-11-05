@@ -13,10 +13,27 @@
 #include <unistd.h>
 #endif
 
+#include <aifffile.h>
+#include <apefile.h>
+#include <asffile.h>
+#include <dsdifffile.h>
+#include <dsffile.h>
 #include <fileref.h>
+#include <flacfile.h>
+#include <matroskafile.h>
+#include <mp4file.h>
+#include <mpcfile.h>
 #include <mpegfile.h>
+#include <oggflacfile.h>
+#include <opusfile.h>
+#include <shortenfile.h>
+#include <speexfile.h>
 #include <tpropertymap.h>
+#include <trueaudiofile.h>
 #include <tvariant.h>
+#include <vorbisfile.h>
+#include <wavfile.h>
+#include <wavpackfile.h>
 
 #include "fd_stream.h"
 #include "jni_bridge.h"
@@ -43,6 +60,7 @@ jclass stringClass = nullptr;
 jmethodID sinkProperty = nullptr;
 jmethodID sinkAudio = nullptr;
 jmethodID sinkPicture = nullptr;
+jmethodID sinkContainer = nullptr;
 
 /**
  * Builds a Java string from TagLib's UTF-16 code units. Going through UTF-8 would lose a whole value that holds an
@@ -105,6 +123,45 @@ bool sendPictures(JNIEnv *env, jobject sink, TagLib::FileRef &file, bool withDat
     if (env->ExceptionCheck()) return false;
   }
   return true;
+}
+
+/**
+ * What holds the audio. TagLib opens an AAC stream without a container as an MPEG file, so the two are told apart by
+ * its audio properties. Null for the formats nothing in the library cares about, such as tracker modules.
+ */
+const char *containerOf(TagLib::File *file) {
+  if (auto *mpeg = dynamic_cast<TagLib::MPEG::File *>(file)) {
+    const TagLib::MPEG::Properties *audio = mpeg->audioProperties();
+    return audio != nullptr && audio->isADTS() ? "adts" : "mpeg";
+  }
+  if (dynamic_cast<TagLib::FLAC::File *>(file) != nullptr) return "flac";
+  if (dynamic_cast<TagLib::MP4::File *>(file) != nullptr) return "mp4";
+  if (dynamic_cast<TagLib::Ogg::Vorbis::File *>(file) != nullptr) return "ogg-vorbis";
+  if (dynamic_cast<TagLib::Ogg::Opus::File *>(file) != nullptr) return "ogg-opus";
+  if (dynamic_cast<TagLib::Ogg::FLAC::File *>(file) != nullptr) return "ogg-flac";
+  if (dynamic_cast<TagLib::Ogg::Speex::File *>(file) != nullptr) return "ogg-speex";
+  if (dynamic_cast<TagLib::RIFF::WAV::File *>(file) != nullptr) return "wav";
+  if (dynamic_cast<TagLib::RIFF::AIFF::File *>(file) != nullptr) return "aiff";
+  if (dynamic_cast<TagLib::ASF::File *>(file) != nullptr) return "asf";
+  if (dynamic_cast<TagLib::APE::File *>(file) != nullptr) return "ape";
+  if (dynamic_cast<TagLib::WavPack::File *>(file) != nullptr) return "wavpack";
+  if (dynamic_cast<TagLib::MPC::File *>(file) != nullptr) return "mpc";
+  if (dynamic_cast<TagLib::TrueAudio::File *>(file) != nullptr) return "tta";
+  if (dynamic_cast<TagLib::DSF::File *>(file) != nullptr) return "dsf";
+  if (dynamic_cast<TagLib::DSDIFF::File *>(file) != nullptr) return "dsdiff";
+  if (dynamic_cast<TagLib::Shorten::File *>(file) != nullptr) return "shorten";
+  if (dynamic_cast<TagLib::Matroska::File *>(file) != nullptr) return "matroska";
+  return nullptr;
+}
+
+bool sendContainer(JNIEnv *env, jobject sink, TagLib::File *file) {
+  const char *name = containerOf(file);
+  if (name == nullptr) return true;
+  jstring jName = env->NewStringUTF(name);
+  if (jName == nullptr) return false;
+  env->CallVoidMethod(sink, sinkContainer, jName);
+  env->DeleteLocalRef(jName);
+  return !env->ExceptionCheck();
 }
 
 bool hasMpegExtension(const std::string &fileName) {
@@ -174,6 +231,7 @@ jint read(JNIEnv *env, jclass, jint fd, jstring jFileName, jint pictures, jobjec
     if (stream.error() != 0) return IO_ERROR;
     if (file.isNull()) return UNSUPPORTED_FORMAT;
 
+    if (!sendContainer(env, sink, file.file())) return NATIVE_ERROR;
     if (!sendProperties(env, sink, file.properties())) return NATIVE_ERROR;
     if (const TagLib::AudioProperties *audio = file.audioProperties()) {
       env->CallVoidMethod(sink, sinkAudio, audio->lengthInMilliseconds(), audio->bitrate(), audio->sampleRate(),
@@ -201,7 +259,8 @@ bool registerTagReader(JNIEnv *env) {
   sinkProperty = env->GetMethodID(sink, "property", "(Ljava/lang/String;[Ljava/lang/String;)V");
   sinkAudio = env->GetMethodID(sink, "audio", "(IIII)V");
   sinkPicture = env->GetMethodID(sink, "picture", "([BILjava/lang/String;Ljava/lang/String;Ljava/lang/String;)V");
-  if (sinkProperty == nullptr || sinkAudio == nullptr || sinkPicture == nullptr) return false;
+  sinkContainer = env->GetMethodID(sink, "container", "(Ljava/lang/String;)V");
+  if (sinkProperty == nullptr || sinkAudio == nullptr || sinkPicture == nullptr || sinkContainer == nullptr) return false;
 
   static const JNINativeMethod methods[] = {
       {"nativeRead", "(ILjava/lang/String;ILio/github/lorddetson/piplayer/nativelib/taglib/TagSink;)I",

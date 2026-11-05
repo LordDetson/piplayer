@@ -43,6 +43,8 @@ FIXTURES = [
     ("vorbis.ogg", ["-c:a", "libvorbis", "-q:a", "1"], LATIN, False),
     ("opus.opus", ["-c:a", "libopus", "-b:a", "32k"], LATIN, False),
     ("riff-info.wav", ["-c:a", "pcm_s16le"], LATIN, False),
+    # An AAC stream without a container holds no tags.
+    ("adts.aac", ["-c:a", "aac", "-b:a", "128k", "-f", "adts"], {}, False),
     ("cyrillic.flac", ["-c:a", "flac"], CYRILLIC, False),
     ("cyrillic-id3v23.mp3", ["-c:a", "libmp3lame", "-b:a", "64k", "-id3v2_version", "3"], CYRILLIC, False),
 ]

@@ -49,11 +49,15 @@ enum class Pictures {
 
 sealed interface TagReadResult {
 
-    /** [properties] is TagLib's property map: upper-case keys such as TITLE, each with its list of values. */
+    /**
+     * [properties] is TagLib's property map: upper-case keys such as TITLE, each with its list of values. [container]
+     * names what holds the audio, such as `mpeg`, `adts` or `ogg-opus` (docs/library.md §4.2).
+     */
     data class Success(
         val properties: Map<String, List<String>>,
         val audio: AudioProperties?,
         val pictures: List<Picture>,
+        val container: String? = null,
     ) : TagReadResult
 
     data class Failure(val error: TagReadError) : TagReadResult
@@ -111,6 +115,7 @@ internal class TagSink {
     private val properties = LinkedHashMap<String, List<String>>()
     private var audio: AudioProperties? = null
     private val pictures = mutableListOf<Picture>()
+    private var container: String? = null
 
     fun property(key: String, values: Array<String>) {
         properties[key] = values.toList()
@@ -125,5 +130,9 @@ internal class TagSink {
         pictures += Picture(data, sizeBytes, mimeType, pictureType, description)
     }
 
-    fun result() = TagReadResult.Success(properties.toMap(), audio, pictures.toList())
+    fun container(name: String) {
+        container = name
+    }
+
+    fun result() = TagReadResult.Success(properties.toMap(), audio, pictures.toList(), container)
 }

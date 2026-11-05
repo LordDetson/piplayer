@@ -258,6 +258,10 @@ the way the main process calls it and the count of failed reads; the tag pass of
 - TagLib's property map (keys with their lists of values), the audio properties (length, bitrate, sample rate,
   channels) and, for each embedded picture, its type, MIME type, description and size in bytes. Picture bytes never
   cross the process boundary; the files of covers arrive with step 13.
+- The name of the container that holds the audio: `mpeg`, `adts`, `flac`, `mp4`, `ogg-vorbis`, `ogg-opus`, `ogg-flac`,
+  `ogg-speex`, `wav`, `aiff`, `asf`, `ape`, `wavpack`, `mpc`, `tta`, `dsf`, `dsdiff`, `shorten` or `matroska`; none for
+  tracker modules. TagLib opens an AAC stream without a container as an MPEG file, so `adts` comes from its audio
+  properties.
 - A read that TagLib cannot do returns the reason, as in M0: invalid descriptor, not a regular file, unknown format,
   read error, native error.
 - The reply travels as UTF-8 JSON. It crosses inline when it is at most 120 KiB and no single string in it (a key, a
