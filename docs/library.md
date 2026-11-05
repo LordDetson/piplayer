@@ -28,12 +28,16 @@ The data model it implements is sketched in track-identification.md §10 (TI bel
   track number, length), as the index gives them. Later steps use them only until the tag pass has read the file
   (TI §7.1).
 - `track_display`: what lists show and sort by: title, artist, album and length, the title key and the search text.
-    - The title is the index's title, or the display name without its extension when the index has none.
-    - The artist is empty when the index gives none or its placeholder `<unknown>`; the album and the length are empty
-      when the index gives none (a length of 0 counts as none).
+    - One resolver computes these values from the precedence levels of TI §7.1. The title is the first of: the file's
+      tag once the tag pass has read it, the index's title until then, the file name parsed as in TI §3.3, the display
+      name without its extension. The artist goes the same way, without the last step.
+    - Before the read, the index's placeholder `<unknown>` and blanks count as empty. After it, an empty tag stays
+      empty: the index no longer fills it, only the file name.
+    - The album is the tag or, until the read, the index's value. The length is the exact one once measured (step 7),
+      then the index's, then the tag reader's estimate (a length of 0 counts as none).
     - The title key is the title normalized as for search (TI §4.1).
-    - The search text joins the normalized title, artist, album, composer, genre and display name without its extension
-      with spaces, leaving out empty values, and keeps the glued forms of each field's names (TI §10.1).
+    - The search text joins the normalized title, all artists, album, composers, genres and display name without its
+      extension with spaces, leaving out empty values, and keeps the glued forms of each field's names (TI §10.1).
       Search itself arrives in step 12; the column and its index exist now, so that
       search can be measured on the real schema early.
 - `volume_sync_state`: per volume, the index version and generation the last sync reached.
@@ -260,6 +264,10 @@ the way the main process calls it and the count of failed reads; the tag pass of
 - TagLib's property map (keys with their lists of values), the audio properties (length, bitrate, sample rate,
   channels) and, for each embedded picture, its type, MIME type, description and size in bytes. Picture bytes never
   cross the process boundary; the files of covers arrive with step 13.
+- The name of the container that holds the audio: `mpeg`, `adts`, `flac`, `mp4`, `ogg-vorbis`, `ogg-opus`, `ogg-flac`,
+  `ogg-speex`, `wav`, `aiff`, `asf`, `ape`, `wavpack`, `mpc`, `tta`, `dsf`, `dsdiff`, `shorten` or `matroska`; none for
+  tracker modules. TagLib opens an AAC stream without a container as an MPEG file, so `adts` comes from its audio
+  properties.
 - A read that TagLib cannot do returns the reason, as in M0: invalid descriptor, not a regular file, unknown format,
   read error, native error.
 - The reply travels as UTF-8 JSON. It crosses inline when it is at most 120 KiB and no single string in it (a key, a
