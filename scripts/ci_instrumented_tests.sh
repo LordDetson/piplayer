@@ -28,8 +28,11 @@ adb logcat -v threadtime > "$results/logcat.txt" 2>/dev/null &
 logcat=$!
 
 exclusions=()
-if [ -n "${EXCLUDED_TESTS:-}" ]; then
-  exclusions+=("$runner_arg.notClass=$EXCLUDED_TESTS")
+# The workflow may wrap the list over several lines; the runner wants it without spaces.
+excluded="${EXCLUDED_TESTS:-}"
+excluded="${excluded// /}"
+if [ -n "$excluded" ]; then
+  exclusions+=("$runner_arg.notClass=$excluded")
 fi
 gradle "main run" :app:connectedDebugAndroidTest :nativelib:connectedDebugAndroidTest --continue "${exclusions[@]}"
 keep_results app app
@@ -42,11 +45,6 @@ for test in tagging.TaggerCrashTest crash.CrashEndToEndTest; do
 done
 
 kill "$logcat" 2>/dev/null
-# The measured times of the tests with a time limit, whether or not they are excluded.
-timings="$(grep -E '20 000 songs: warm-up|slowest p95 per method' "$results/logcat.txt" \
-  | sed -E 's/^[^ ]+ [^ ]+ +[0-9]+ +[0-9]+ . [^:]+: //' | paste -sd '|' -)"
-echo "::notice title=Timings::${timings}"
-
 python3 -I scripts/ci_test_report.py "app=$results/app" "nativelib=$results/nativelib" \
   "tagger crash=$results/tagging.TaggerCrashTest" "crash reports=$results/crash.CrashEndToEndTest" || status=1
 exit "$status"
