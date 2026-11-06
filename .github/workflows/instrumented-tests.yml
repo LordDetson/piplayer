@@ -1,0 +1,152 @@
+name: Instrumented tests
+
+on:
+  workflow_dispatch:
+  # Nightly, 04:30 in Minsk; the run stops after the first job when main has no commit from the last 25 hours.
+  schedule:
+    - cron: '30 1 * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: instrumented-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Must equal android.ndkVersion and the cmake version in nativelib/build.gradle.kts.
+  NDK_VERSION: "30.0.16248370"
+  CMAKE_VERSION: "3.31.6"
+  # The reference fingerprints come from this fpcalc (buildSrc/src/main/kotlin/PrepareFingerprintSamples.kt).
+  FPCALC_VERSION: "1.6.2"
+  FPCALC_SHA256: "c968ad4a0821592a79b158fb2e1f46cbe0a22a0a1dbc0743c67d68e75d15d2bb"
+  # imageio-ffmpeg 0.6.0, which carries ffmpeg 7.0.2 for Linux x86_64.
+  FFMPEG_WHEEL_URL: "https://files.pythonhosted.org/packages/a0/2d/43c8522a2038e9d0e7dbdf3a61195ecc31ca576fb1527a528c877e87d973/imageio_ffmpeg-0.6.0-py3-none-manylinux2014_x86_64.whl"
+  FFMPEG_WHEEL_SHA256: "c7e46fcec401dd990405049d2e2f475e2b397779df2519b544b8aab515195282"
+  # The emulators are x86_64, so the native code need not be built for arm64 as well.
+  ABI_ARG: "-Pandroid.injected.build.abi=x86_64"
+
+jobs:
+  changes:
+    name: New commits
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      run: ${{ steps.check.outputs.run }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Check for a commit from the last 25 hours
+        id: check
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          age=$(( $(date +%s) - $(git log -1 --format=%ct) ))
+          if [ "$EVENT" != schedule ] || [ "$age" -lt 90000 ]; then run=true; else run=false; fi
+          echo "Last commit $((age / 3600)) h ago, run=$run"
+          echo "run=$run" >> "$GITHUB_OUTPUT"
+
+  instrumented:
+    name: API ${{ matrix.api-level }}
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        api-level: [30, 36]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-provider: basic
+
+      - name: Install Android SDK packages
+        run: |
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          (yes || true) | "$SDKMANAGER" --licenses > /dev/null
+          "$SDKMANAGER" --install "platforms;android-37.0" "ndk;${NDK_VERSION}" "cmake;${CMAKE_VERSION}"
+
+      # Only the nativelib recordings (PCM) need ffmpeg. A static build from the imageio-ffmpeg wheel on PyPI: apt took
+      # 14 to 16 minutes in 3 of 15 jobs, once without installing anything.
+      - name: Install ffmpeg
+        run: |
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/ffmpeg.whl" "$FFMPEG_WHEEL_URL"
+          echo "${FFMPEG_WHEEL_SHA256}  $RUNNER_TEMP/ffmpeg.whl" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/ffmpeg"
+          unzip -q -j "$RUNNER_TEMP/ffmpeg.whl" 'imageio_ffmpeg/binaries/ffmpeg-linux-x86_64-*' -d "$RUNNER_TEMP/ffmpeg"
+          mv "$RUNNER_TEMP"/ffmpeg/ffmpeg-linux-x86_64-* "$RUNNER_TEMP/ffmpeg/ffmpeg"
+          chmod +x "$RUNNER_TEMP/ffmpeg/ffmpeg"
+          "$RUNNER_TEMP/ffmpeg/ffmpeg" -hide_banner -version | head -1
+          echo "$RUNNER_TEMP/ffmpeg" >> "$GITHUB_PATH"
+
+      - name: Install fpcalc
+        run: |
+          NAME="chromaprint-fpcalc-${FPCALC_VERSION}-linux-x86_64"
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/fpcalc.tar.gz" \
+            "https://github.com/acoustid/chromaprint/releases/download/v${FPCALC_VERSION}/${NAME}.tar.gz"
+          echo "${FPCALC_SHA256}  $RUNNER_TEMP/fpcalc.tar.gz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/fpcalc.tar.gz" -C "$RUNNER_TEMP"
+          echo "FPCALC=$RUNNER_TEMP/$NAME/fpcalc" >> "$GITHUB_ENV"
+
+      # The recordings are CC0 or public domain (nativelib/fingerprint-samples.json); they stay out of git and out of
+      # this workflow's artifacts, and the script checks their hashes after every download.
+      - name: Restore the fingerprint recordings
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/piplayer/fingerprint-samples
+          key: fingerprint-samples-${{ hashFiles('nativelib/fingerprint-samples.json') }}
+
+      - name: Build the app and its tests
+        run: >-
+          ./gradlew "$ABI_ARG"
+          :app:assembleDebug :app:assembleDebugAndroidTest :nativelib:assembleDebugAndroidTest
+          --stacktrace
+
+      # No AVD cache: restoring it saved under a minute against a cold boot and took 4 to 11 GB on disk, from a
+      # repository cache limit of 10 GB that the build workflow also uses.
+      - name: Run the instrumented tests
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
+        with:
+          api-level: ${{ matrix.api-level }}
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          cores: 3
+          ram-size: 4096M
+          disk-size: 6144M
+          emulator-options: -no-window -no-snapshot -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          disable-animations: true
+          script: bash scripts/ci_instrumented_tests.sh
+
+      # No APKs here: the test APKs contain the recordings.
+      - name: Upload the test results and logcat
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: instrumented-api${{ matrix.api-level }}
+          path: build/ci-results/
+          retention-days: 7
+          if-no-files-found: ignore
