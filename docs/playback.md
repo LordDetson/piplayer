@@ -85,10 +85,10 @@ the version PiPlayer builds with; sections 1 to 7 were written on 1.11.1 and the
   could read the titles, artists and albums of the whole library through PiPlayer.
 - What a controller may play: items from PiPlayer's own process may name a file by URI. Items from other apps may only
   name PiPlayer's own lists: the song list's compact request (§2.3) for controllers that may read the library, and
-  library items by media ID once the library tree arrives (M2a). The media notification's controller runs in PiPlayer's process but
+  library items by media ID from the library tree (§10). The media notification's controller runs in PiPlayer's process but
   never adds items; Media3 hands it to the session callback in place of a controller that says it is the system UI, so
   it counts as another app. Other apps never make PiPlayer open a file with PiPlayer's own permissions.
-- Browsing: the root is an empty folder (media ID `root`) until M2a.
+- Browsing: the library tree of §10 (since M2a step 10; until then the root was an empty folder).
 - The notification is Media3's, with PiPlayer's monochrome play icon and the channel "Playback" (ID `playback`);
   tapping it opens PiPlayer.
 - Playback resumption from the system media controls and from headset buttons after the service has stopped: M1
@@ -132,7 +132,7 @@ Instrumented tests on the API 30, 36 and 37 emulators:
 - PiPlayer and trusted controllers get every command; other apps get the playback commands without the setup ones; a
   controller naming PiPlayer's package from another app is refused; items that name files are refused from other apps
   and from the notification's controller, and items that are neither files nor compact requests (§2.3) are refused
-  for everyone; the library root is an empty folder.
+  for everyone. The library tree has its own checks (§10.7).
 - The process role from process names and the FLAC frame bound (JVM tests).
 
 The playback tests (without the UI ones) also run on the owner's phone. By hand on the phone: the notification and
@@ -983,3 +983,127 @@ gone with its entries, order and run; on the library database, songs by file ID;
 album, artist and folder menus, the queue screen in play order with the current song, a tap, a removal with undo, a
 swiped row undone that stays, a drag, and "Move up" and "Move down". An edit of a 20 000-song queue reaches the
 controllers within 0.25 s (the median of 5 runs, `@TimingTest`).
+
+## 10. The library tree for controllers (M2a step 10)
+
+Controllers that browse (Android Auto, Wear, Bluetooth AVRCP browsing, the system's media browsers) see the library
+through the media library service: a tree of nodes, each a folder or a song.
+
+### 10.1 Nodes
+
+- The root (media ID `root`) has exactly four browsable children, the app's tabs: Songs, Albums, Artists and Folders.
+  Android Auto shows at most four root children. Node IDs do not name their parent, so when M2b adds genres and playlists
+  under a node "More", a node can move under it and keep its ID.
+- What each node holds, in the order the app keeps for that kind of list (library.md §6.3), never with a search:
+
+| Node | Media ID | Children |
+|---|---|---|
+| Songs | `songs` | every song, in the Songs tab's order |
+| Albums | `albums` | the albums, in the Albums tab's order |
+| Artists | `artists` | the artists, in the Artists tab's order |
+| Folders | `folders` | the Folders tab's top level: with one volume, the subfolders of its root, then the songs right in it; with more, one node per volume |
+| An album | `album/<album key>` | its songs, in the album page's order |
+| An artist | `artist/<artist key>` | the artist's albums by year, then all their songs, in the artist page's order |
+| A folder | `folder/<volume>/<path>` | its subfolders by name, then its own songs, in the folder page's order |
+
+- The keys are those of the app's pages (library.md §6.5), percent-encoded as in queue requests (library.md §6.4): an
+  album by its album key, an artist by their artist key, a folder by its volume and relative path. They survive a rebuild
+  of the library database and a new media index.
+- A song's media ID is the compact request (§2.3) of the list it is shown in, starting at it: the song's file ID
+  (library.md §8.4), which survives a rebuild too, and its row as the fallback.
+- An item has its title and the media type of what it is (a folder of titles, albums, artists or mixed, an album, an
+  artist, music); an album also its artist and year, a song its artist, album and length, a volume the name the app
+  gives it. Browsable nodes are folders; songs and the nodes of §10.3 that play are playable.
+- No item carries artwork data. Media3 decodes it into a bitmap for every item it hands a legacy browser, and Android
+  Auto warns that such bitmaps can exceed the binder's 1 MB. The cover provider of step 13 gives songs, albums and artists
+  an artwork URI (a content URI) through one hook that the tree already asks; until then it gives none.
+
+### 10.2 Long lists
+
+- No node has more than 500 children, nor more than a legacy browser can take in one answer: Media3 cuts a legacy
+  browser's list without a word where it reaches 256 KB in parcel form (on the API 30 emulator after 489 songs of an album
+  with a long key), so the tree weighs every child from the lengths of its media ID and of the texts it shows (an upper
+  bound of its parcel, checked against the platform's own media item) and keeps a node under 240 KB.
+- A list of more than 500 entries, or of more weight, becomes bucket nodes, one for each section of the scroll thumb
+  (library.md §11.2) in list order: the letter for orders by name, title or file name, the year, the minute or the number
+  of songs for the others. A run of one section that is longer or heavier splits into parts, each as long as fits (at
+  most 500), titled `A (1)`, `A (2)` and so on. The same section can start two runs (pinyin, or an artist's albums and
+  songs of one year); its parts count on. With texts of usual length a bucket of songs holds about 400 to 450 of them.
+- A list whose entries have no section (disc and track order), or whose sections would make more than 500 buckets, splits
+  into runs of rows instead, cut the same way and titled by their rows (`1-420`).
+- A bucket's media ID is its node's ID, `!` and the section (percent-encoded; empty for runs of rows), then `!` and the
+  part from the second part on: `songs!A`, `songs!A!2`, `songs!!3`. It has the type of what it holds; a bucket of songs
+  is playable. A bucket's place depends on the lengths of the names before it, so a change of the library may move the
+  border between two parts; the section and its first part stay.
+- Controllers that page get the page they ask for out of a node's children. Legacy browsers that do not page ask for
+  everything at once (page 0 with the largest page size), which then fits. A node that is gone (a key that names nothing
+  any more, a section that the order no longer has) is an error.
+
+### 10.3 Playing and adding from the tree
+
+- A song plays the list it is shown in from that song, as a tap in the app: Songs in the tab's order, an album, an
+  artist's songs, a folder's own songs.
+- A playable node plays its list from the start: Songs, an album, an artist's songs, a folder with all its subfolders
+  (as "Play all, with subfolders"), and a bucket of songs its whole list from the bucket's first song. Albums, Artists,
+  Folders and the buckets of albums, artists and folders do not play.
+- The list is read when the request comes, in the order the app keeps for its kind at that moment. The request
+  becomes the queue's compact request, so the queue is saved and restored as one from the app's screen.
+- An add from a controller (Media3 `addMediaItems`, a legacy queue add) adds songs by their media IDs: a song of the tree
+  adds that song, a playable node the songs of its list (a bucket its own songs), a queue item (a file ID or an added
+  entry's ID) its song. They become added entries of the queue (§9.4) at the place the controller asks for, and while
+  shuffle is on at random places after the current song and the up-next run (§9.3). A set of several such items starts
+  a queue of added entries.
+- Search: a controller's search answers with the app's search (library.md §6.3: every word of the query, normalized as
+  the library is): up to 100 artists and 100 albums whose names hold it, then up to 300 songs of the Songs list filtered by
+  it, cut where a legacy answer is full (§10.2). A song found plays the filtered list from it, as the app's Songs tab
+  does while searching.
+- Voice: a play request with a search query and no media ID (how Media3 hands over a legacy `playFromSearch`, such as
+  "play X on PiPlayer" from the Assistant) plays the best match with its list. An artist whose name is the query (as
+  normalized) plays the artist's songs; else an album whose title is the query plays the album; else the Songs list
+  filtered by the query plays from its first song whose title is the query, or else from its first song; else the
+  first artist, then the first album, whose name holds the query. An empty query plays every song; when nothing is
+  found the request fails. An add with a search query adds the songs that the play would queue, from the match on.
+
+### 10.4 Who may browse
+
+- Only controllers that may read the library (§1.4: PiPlayer itself, the controllers Android trusts, and apps whose uid
+  holds the audio permission) get children, items and search results, and may play or add library items. Any other
+  controller gets the root, whose children are an empty list; every other node, item and search is refused with a
+  permission error, and a play or add of library items fails. The media notification's controller counts as another app
+  here too; Media3 also hands System UI's browsing to the callback as that controller, and serves System UI's recent root
+  for playback resumption itself.
+- Without PiPlayer's own access to music the library lists nothing, so every node is empty.
+
+### 10.5 When the tree is read
+
+- Nothing of the tree is read at start or in the first sync. A node is read when a controller asks for it, on a thread of
+  its own, from the library as the app reads it: the songs lists through the shared lists of library.md §6.4 (a list the
+  app shows serves the tree at once, and a list the tree reads serves the tap that follows), the albums, artists and
+  folders once for each revision of the library, hidden files, collation and order. The results of the last search are
+  kept the same way.
+- The Songs root and one of its buckets on the generated library of 20 000 songs answer within 300 ms on the API 30
+  emulator (the median of 5 after a warm-up, `@TimingTest`). A browse in the car should feel immediate, and step 6 read
+  the whole tree of the generated library in about 170 ms on that emulator, which leaves room for a busy host.
+
+### 10.6 Not yet
+
+- The content style hints of Android Auto (lists or grids, group titles in search results) are unstable Media3 API and
+  wait until the covers of step 13 make grids worth having. Media focus extras of voice requests (an artist or album
+  named apart from the query) are not read. A root children limit below four is not honoured.
+
+### 10.7 Checks
+
+JVM tests: node IDs for every kind with keys of every kind of character, malformed IDs refused; buckets by section, runs
+of one section split, sections that repeat, entries without a section, too many sections; pages of children, also with
+the largest page size; the weight of an item and buckets cut by weight; the best match of a voice query; an add at a
+row in the journal.
+
+Instrumented tests on the API 30 emulator, on a library database filled from a test index: the root and its four nodes;
+the children of every node in the app's order, with every ID they give resolving to the same item; buckets on a list
+longer than 500 and no node over 500 items with the largest page size; a legacy browser of the platform's protocol gets
+every node whole, also one of 450 songs with long titles, and no bitmaps; the weight of an item at least its parcel;
+no artwork data anywhere; a song of an album, an
+artist, a folder and the Songs list plays that list from it, a node plays its list from the start; search results and
+their songs playing the filtered list; a voice query playing an artist, an album and a song with its list; adds of tree
+items and queue items journaled as added entries; an app without access to music gets the root and nothing more, and
+cannot play or add library items. On the generated library, the timing check of §10.5.

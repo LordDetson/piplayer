@@ -38,6 +38,12 @@ class SessionPlayer(private val player: ExoPlayer) : ForwardingPlayer(player) {
 
         /** The entries from [from] to [to] are about to move to start at [newIndex]. */
         fun moving(from: Int, to: Int, newIndex: Int)
+
+        /**
+         * [items] are about to be added at [index] by someone other than the edits themselves: a controller's add
+         * (docs/playback.md §10.3).
+         */
+        fun inserting(index: Int, items: List<MediaItem>) {}
     }
 
     var edits: Edits? = null
@@ -144,21 +150,25 @@ class SessionPlayer(private val player: ExoPlayer) : ForwardingPlayer(player) {
 
     override fun addMediaItem(mediaItem: MediaItem) {
         placeJoining()
+        edits?.inserting(player.mediaItemCount, listOf(mediaItem))
         super.addMediaItem(mediaItem)
     }
 
     override fun addMediaItem(index: Int, mediaItem: MediaItem) {
         placeJoining()
+        edits?.inserting(index.coerceIn(0, player.mediaItemCount), listOf(mediaItem))
         super.addMediaItem(index, mediaItem)
     }
 
     override fun addMediaItems(mediaItems: List<MediaItem>) {
         placeJoining()
+        if (mediaItems.isNotEmpty()) edits?.inserting(player.mediaItemCount, mediaItems)
         super.addMediaItems(mediaItems)
     }
 
     override fun addMediaItems(index: Int, mediaItems: List<MediaItem>) {
         placeJoining()
+        if (mediaItems.isNotEmpty()) edits?.inserting(index.coerceIn(0, player.mediaItemCount), mediaItems)
         super.addMediaItems(index, mediaItems)
     }
 

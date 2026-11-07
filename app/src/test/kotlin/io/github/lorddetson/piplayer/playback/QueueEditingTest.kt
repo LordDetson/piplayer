@@ -337,4 +337,43 @@ class QueueEditingTest {
         assertThat(back.openItems).containsExactly(opened(0, "b"), opened(3, "a"))
         assertThat(back.edits.journal).containsExactly(QueueEdit.Move(Song(3), after = null, row = 0))
     }
+
+    @Test
+    fun songsAControllerAddsAreJournaledWhereMedia3PutsThemOutsideTheRun() {
+        val run = QueueEditing.insert(state(), QueueView(songs(1, 2, 3), current = 0), listOf(track(9)), next = true).state
+        val view = QueueView(listOf(Song(1), Added(1), Opened(0), Song(2), Song(3)), current = 0)
+        val withFile = run.copy(openItems = listOf(opened(2)))
+
+        val result = QueueEditing.insertAt(withFile, view, row = 4, keys = listOf(Added(5), Added(6)), tracks = listOf(track(7), track(8)))
+
+        assertThat(result.edits.journal.last()).isEqualTo(QueueEdit.Insert(Song(2), listOf(Added(5), Added(6)), row = 3))
+        assertThat(result.edits.added).endsWith(AddedEntry(5, track(7)), AddedEntry(6, track(8)))
+        assertThat(result.edits.upNext).containsExactly(Added(1))
+        assertThat(result.edits.nextNumber).isEqualTo(7)
+        // The opened file before the insert keeps its row; the library request stays.
+        assertThat(result.openItems).containsExactly(opened(2))
+        assertThat(result.library).isEqualTo(request)
+
+        val front = QueueEditing.insertAt(withFile, view, row = 0, keys = listOf(Added(2)), tracks = listOf(track(4)))
+        assertThat(front.edits.journal.last()).isEqualTo(QueueEdit.Insert(null, listOf(Added(2)), row = 0))
+        assertThat(front.openItems).containsExactly(opened(2).copy(index = 3))
+        assertThat(front.edits.nextNumber).isEqualTo(3)
+        // A number below the next one does not lower it.
+        val view2 = QueueView(listOf(Song(1), Added(1), Opened(0), Song(2), Added(5), Added(6), Song(3)), current = 0)
+        assertThat(QueueEditing.insertAt(result, view2, row = 7, keys = listOf(Added(3)), tracks = listOf(track(4))).edits.nextNumber).isEqualTo(7)
+    }
+
+    @Test
+    fun aControllersAddReplaysToTheSameQueue() {
+        val library = (1L..4L).map { LibrarySong(it, "content://$it", "s$it", null, null, null) }
+        val view = QueueView(songs(1, 2, 3, 4), current = 1)
+
+        val result = QueueEditing.insertAt(state(), view, row = 2, keys = listOf(Added(3)), tracks = listOf(track(9)))
+        val nine = LibrarySong(9, "content://9", "s9", null, null, null)
+
+        val entries = QueueRebuild.entries(library, result.edits, mapOf(3L to nine), songKeys = true)
+        assertThat(entries.map { slot -> (slot as? QueueSlot.Library)?.song?.id ?: (slot as QueueSlot.Added).number })
+            .containsExactly(1L, 2L, 3L, 3L, 4L)
+        assertThat(entries[2]).isEqualTo(QueueSlot.Added(3, nine))
+    }
 }

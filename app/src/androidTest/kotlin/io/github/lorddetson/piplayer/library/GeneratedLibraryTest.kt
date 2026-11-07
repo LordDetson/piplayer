@@ -20,6 +20,7 @@ import io.github.lorddetson.piplayer.library.lists.SongSort
 import io.github.lorddetson.piplayer.settings.HiddenFiles
 import io.github.lorddetson.piplayer.library.songs.LibrarySongSource
 import io.github.lorddetson.piplayer.library.songs.SongList
+import io.github.lorddetson.piplayer.playback.LibraryTree
 import io.github.lorddetson.piplayer.ui.GrantAudioPermission
 import io.github.lorddetson.piplayer.ui.songs.SongsTags
 import kotlin.time.Duration
@@ -195,6 +196,39 @@ class GeneratedLibraryTest {
         assertThat(albums.size).describedAs("albums").isGreaterThan(1_000)
         assertThat(artists.size).describedAs("artists").isGreaterThan(300)
         assertThat(folders.contains(FolderLevels.PRIMARY, ROOT)).isTrue()
+    }
+
+    /**
+     * The controller tree's Songs root and one of its buckets (docs/playback.md §10.5), each read with no list kept, as a
+     * controller's first browse after a start finds it; a bucket read right after its root is logged too.
+     */
+    @Test
+    @TimingTest
+    fun theControllerTreeAnswersTheSongsRootAndABucketWithin300Milliseconds() {
+        runBlocking { Library.sync(context).awaitIdle() }
+        val tree = LibraryTree(context)
+        fun median(name: String, read: () -> Unit): Duration {
+            repeat(WARM_UP) { read() }
+            val times = List(5) { measureTime { read() } }.sorted()
+            Log.i(TAG, "$name: median ${times[2]} (${times.joinToString()})")
+            return times[2]
+        }
+
+        val buckets = tree.children("songs", 0, Int.MAX_VALUE)!!
+        val bucket = buckets[buckets.size / 2].mediaId
+        val root = median("Tree: Songs root") {
+            SongList.forget()
+            assertThat(tree.children("songs", 0, Int.MAX_VALUE)!!.size).isBetween(2, LibraryTree.MAX_CHILDREN)
+        }
+        val coldBucket = median("Tree: a bucket of Songs") {
+            SongList.forget()
+            assertThat(tree.children(bucket, 0, Int.MAX_VALUE)!!.size).isBetween(1, LibraryTree.MAX_CHILDREN)
+        }
+        median("Tree: a bucket of Songs after its root") { tree.children(bucket, 0, Int.MAX_VALUE) }
+        assumeTimeLimitsApply()
+
+        assertThat(root.inWholeMilliseconds).describedAs("Songs root").isLessThanOrEqualTo(300L)
+        assertThat(coldBucket.inWholeMilliseconds).describedAs("a bucket").isLessThanOrEqualTo(300L)
     }
 
     private companion object {

@@ -9,6 +9,7 @@ import android.os.Looper
 import android.os.Process
 import android.util.Log
 import androidx.annotation.OptIn
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
@@ -23,6 +24,7 @@ import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionError
 import androidx.media3.session.SessionResult
 import com.google.common.collect.ImmutableList
+import com.google.common.util.concurrent.FutureCallback
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.MoreExecutors
@@ -39,6 +41,7 @@ import io.github.lorddetson.piplayer.library.songs.SongList
 import io.github.lorddetson.piplayer.settings.LibrarySettings
 import java.util.Random
 import java.util.concurrent.Executors
+import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
@@ -60,6 +63,8 @@ class PlaybackSessionCallback(
             null
         }
     },
+    /** The library tree that controllers browse (docs/playback.md §10). */
+    private val tree: LibraryTree = LibraryTree(context),
     private val onQueueRequest: (QueueState?) -> Unit,
 ) : MediaLibrarySession.Callback, SessionPlayer.Edits {
 
@@ -78,7 +83,21 @@ class PlaybackSessionCallback(
      */
     private val openExpansion = MoreExecutors.listeningDecorator(Executors.newSingleThreadExecutor())
 
+    /** Reads the library tree for browsing controllers, off the main thread and apart from the queue (§10.5). */
+    private val browse = MoreExecutors.listeningDecorator(Executors.newSingleThreadExecutor())
+
     private val mainHandler = Handler(Looper.getMainLooper())
+
+    /**
+     * The songs a controller's add resolved, by the media IDs given to Media3, until it puts them into the player (§10.3);
+     * only touched on the main thread.
+     */
+    private val pendingAdds = HashMap<String, PendingAdd>()
+
+    private class PendingAdd(val track: TrackRef, val libraryId: String?)
+
+    /** The next number an added entry of a controller's add may take; only touched on the main thread. */
+    private var nextAddNumber = 1L
 
     /** A restore or a queue change that is superseded stops before it touches the player. */
     private val restoreGeneration = AtomicInteger()
@@ -168,16 +187,20 @@ class PlaybackSessionCallback(
         session: MediaLibrarySession,
         browser: MediaSession.ControllerInfo,
         params: LibraryParams?,
-    ): ListenableFuture<LibraryResult<MediaItem>> = Futures.immediateFuture(LibraryResult.ofItem(ROOT, params))
+    ): ListenableFuture<LibraryResult<MediaItem>> = Futures.immediateFuture(LibraryResult.ofItem(tree.root(), params))
 
+    /** Every ID of the tree resolves, for controllers that may read the library (§10.1, §10.4). */
     override fun onGetItem(
         session: MediaLibrarySession,
         browser: MediaSession.ControllerInfo,
         mediaId: String,
-    ): ListenableFuture<LibraryResult<MediaItem>> = Futures.immediateFuture(
-        if (mediaId == ROOT_ID) LibraryResult.ofItem(ROOT, null) else LibraryResult.ofError(SessionError.ERROR_BAD_VALUE),
-    )
+    ): ListenableFuture<LibraryResult<MediaItem>> {
+        if (mediaId == ROOT_ID) return Futures.immediateFuture(LibraryResult.ofItem(tree.root(), null))
+        if (!mayReadLibrary(session, browser)) return Futures.immediateFuture(LibraryResult.ofError(SessionError.ERROR_PERMISSION_DENIED))
+        return browsed { tree.item(mediaId)?.let { LibraryResult.ofItem(it, null) } ?: LibraryResult.ofError(SessionError.ERROR_BAD_VALUE) }
+    }
 
+    /** Controllers that may not read the library see an empty root and nothing else (§10.4). */
     override fun onGetChildren(
         session: MediaLibrarySession,
         browser: MediaSession.ControllerInfo,
@@ -185,13 +208,62 @@ class PlaybackSessionCallback(
         page: Int,
         pageSize: Int,
         params: LibraryParams?,
-    ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> = Futures.immediateFuture(
-        if (parentId == ROOT_ID) {
-            LibraryResult.ofItemList(ImmutableList.of(), params)
-        } else {
-            LibraryResult.ofError(SessionError.ERROR_BAD_VALUE)
-        },
-    )
+    ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> {
+        if (!mayReadLibrary(session, browser)) {
+            return Futures.immediateFuture(
+                if (parentId == ROOT_ID) LibraryResult.ofItemList(ImmutableList.of(), params) else LibraryResult.ofError(SessionError.ERROR_PERMISSION_DENIED),
+            )
+        }
+        return browsed {
+            tree.children(parentId, page, pageSize)?.let { LibraryResult.ofItemList(it, params) } ?: LibraryResult.ofError(SessionError.ERROR_BAD_VALUE)
+        }
+    }
+
+    /** The app's search (§10.3); the browser then asks for the results. */
+    override fun onSearch(
+        session: MediaLibrarySession,
+        browser: MediaSession.ControllerInfo,
+        query: String,
+        params: LibraryParams?,
+    ): ListenableFuture<LibraryResult<Void>> {
+        if (!mayReadLibrary(session, browser)) return Futures.immediateFuture(LibraryResult.ofError(SessionError.ERROR_PERMISSION_DENIED))
+        return browsed {
+            val count = tree.search(query).size
+            mainHandler.post { if (!released) session.notifySearchResultChanged(browser, query, count, params) }
+            LibraryResult.ofVoid(params)
+        }
+    }
+
+    override fun onGetSearchResult(
+        session: MediaLibrarySession,
+        browser: MediaSession.ControllerInfo,
+        query: String,
+        page: Int,
+        pageSize: Int,
+        params: LibraryParams?,
+    ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> {
+        if (!mayReadLibrary(session, browser)) return Futures.immediateFuture(LibraryResult.ofError(SessionError.ERROR_PERMISSION_DENIED))
+        return browsed {
+            val found = tree.search(query)
+            LibraryResult.ofItemList(found.slice(TreeBuckets.page(found.size, page, pageSize)), params)
+        }
+    }
+
+    /** Runs [read] on the browsing thread; a failure to read the library is an error of the result, not of the future. */
+    private fun <T : Any> browsed(read: () -> LibraryResult<T>): ListenableFuture<LibraryResult<T>> =
+        try {
+            browse.submit<LibraryResult<T>> {
+                try {
+                    read()
+                } catch (e: Exception) {
+                    Log.w(TAG, "Could not read the library tree", e)
+                    LibraryResult.ofError(SessionError.ERROR_IO)
+                }
+            }
+        } catch (_: RejectedExecutionException) {
+            // The service is gone.
+            Futures.immediateFuture(LibraryResult.ofError(SessionError.ERROR_INVALID_STATE))
+        }
 
     /**
      * A single compact request (§2.3) becomes the whole song list, starting at the tapped song; it is built off the main
@@ -208,11 +280,19 @@ class PlaybackSessionCallback(
     ): ListenableFuture<MediaItemsWithStartPosition> {
         // The user changed the queue: a restore or an open still on its way must not overwrite it.
         val token = restoreGeneration.incrementAndGet()
-        val request = mediaItems.singleOrNull()?.let { QueueRequest.parse(it.mediaId) }
-        if (request != null && !mayReadLibrary(mediaSession, controller)) {
+        val single = mediaItems.singleOrNull()
+        val request = single?.let { QueueRequest.parse(it.mediaId) }
+        // A playable node of the library tree, or a voice request: a search query without a media ID (§10.3).
+        val node = single?.mediaId?.takeIf { request == null && TreeNode.parse(it) != null }
+        val voice = single?.takeIf { request == null && it.mediaId.isEmpty() }?.requestMetadata?.searchQuery
+        val names = request != null || node != null || voice != null
+        if (names && !mayReadLibrary(mediaSession, controller)) {
             return Futures.immediateFailedFuture(UnsupportedOperationException("This app may not read the song list"))
         }
-        if (request == null) {
+        if (!names) {
+            if (mediaItems.isNotEmpty() && mediaItems.all(::isLibraryItem) && mayReadLibrary(mediaSession, controller)) {
+                return setLibrarySongs(token, mediaItems, startIndex, startPositionMs)
+            }
             return Futures.transform(
                 onAddMediaItems(mediaSession, controller, mediaItems),
                 { items ->
@@ -227,6 +307,10 @@ class PlaybackSessionCallback(
             )
         }
         return expansion.submit<MediaItemsWithStartPosition> {
+            val request = request
+                ?: node?.let { tree.playRequest(it) ?: throw UnsupportedOperationException("This node does not play") }
+                ?: tree.voiceRequest(voice.orEmpty())
+                ?: throw UnsupportedOperationException("Nothing in the library matches the search")
             val libraryId = libraryIdNow()
             val songs = songsFor(request)
             val start = QueueRequest.startIndex(songs, request)
@@ -249,7 +333,7 @@ class PlaybackSessionCallback(
 
     /**
      * Only PiPlayer itself may name files: an item from another app would make PiPlayer open a file with PiPlayer's
-     * permissions. Other apps will name library items by media ID once the library exists (M2a). The media
+     * permissions. Controllers that may read the library name its items by media ID (§10.3). The media
      * notification's controller runs in PiPlayer's process but never adds items, and Media3 hands it to this callback in
      * place of a controller that says it is the system UI, so it counts as another app.
      */
@@ -258,15 +342,110 @@ class PlaybackSessionCallback(
         mediaSession: MediaSession,
         controller: MediaSession.ControllerInfo,
         mediaItems: List<MediaItem>,
-    ): ListenableFuture<List<MediaItem>> =
-        if (controller.uid == Process.myUid() &&
-            !mediaSession.isMediaNotificationController(controller) &&
-            mediaItems.all { it.localConfiguration != null }
-        ) {
-            Futures.immediateFuture(mediaItems)
-        } else {
-            Futures.immediateFailedFuture(UnsupportedOperationException("Only PiPlayer's own items can be played yet"))
+    ): ListenableFuture<List<MediaItem>> = when {
+        controller.uid == Process.myUid() && !mediaSession.isMediaNotificationController(controller) &&
+            mediaItems.all { it.localConfiguration != null } -> Futures.immediateFuture(mediaItems)
+        mediaItems.isNotEmpty() && mediaItems.all(::isLibraryItem) && mayReadLibrary(mediaSession, controller) -> addLibrarySongs(mediaItems)
+        else -> Futures.immediateFailedFuture(UnsupportedOperationException("Only PiPlayer's own items and library items can be played"))
+    }
+
+    /**
+     * Whether [item] names something of the library rather than a file: a queue request, a node of the tree, a song of
+     * the queue (a file ID or an added entry's ID), or a search query without a media ID (§10.3).
+     */
+    private fun isLibraryItem(item: MediaItem): Boolean {
+        if (item.localConfiguration != null) return false
+        val id = item.mediaId
+        if (id.isEmpty()) return item.requestMetadata.searchQuery != null
+        return QueueRequest.parse(id) != null || QueueIds.fileId(id) != null || TreeNode.parse(id) != null
+    }
+
+    /** The songs that library items name, with their track references and the library ID they were read under. */
+    private class ResolvedSongs(val songs: List<Song>, val tracks: List<TrackRef>, val libraryId: String?)
+
+    /** Reads the songs of [mediaItems] (§10.3); blocks, so call it on the expansion thread. */
+    private fun resolveSongs(mediaItems: List<MediaItem>): ResolvedSongs {
+        val songs = mediaItems.flatMap { item -> tree.songsToAdd(item).orEmpty() }
+        if (songs.isEmpty()) throw UnsupportedOperationException("The items name no song of the library")
+        val refs = trackRefs()
+        val libraryId = libraryIdNow(refs)
+        val tracks = songs.map { song -> refs.lookup { it.refOf(song.id) } ?: TrackRef(song.id, null, null, null, null) }
+        return ResolvedSongs(songs, tracks, libraryId)
+    }
+
+    /** A controller's add of library items: Media3 puts them in, and [inserting] journals them (§10.3). */
+    private fun addLibrarySongs(mediaItems: List<MediaItem>): ListenableFuture<List<MediaItem>> {
+        val result = SettableFuture.create<List<MediaItem>>()
+        val resolving = expansion.submit<Unit> {
+            val resolved = resolveSongs(mediaItems)
+            mainHandler.post {
+                if (released) {
+                    result.setException(IllegalStateException("The playback service is gone"))
+                    return@post
+                }
+                // Numbers no entry of the queue has, also when several adds are on their way.
+                val first = maxOf(nextAddNumber, currentOrigin?.edits?.nextNumber ?: 1L)
+                nextAddNumber = first + resolved.songs.size
+                val items = resolved.songs.mapIndexed { index, song -> mediaItem(song, first + index) }
+                items.forEachIndexed { index, item -> pendingAdds[item.mediaId] = PendingAdd(resolved.tracks[index], resolved.libraryId) }
+                result.set(items)
+            }
         }
+        Futures.addCallback(resolving, failureTo(result), MoreExecutors.directExecutor())
+        return result
+    }
+
+    /** A controller's set of library items other than one list: a queue of added entries (§10.3). */
+    private fun setLibrarySongs(token: Int, mediaItems: List<MediaItem>, startIndex: Int, startPositionMs: Long): ListenableFuture<MediaItemsWithStartPosition> =
+        expansion.submit<MediaItemsWithStartPosition> {
+            val resolved = resolveSongs(mediaItems)
+            if (token != restoreGeneration.get()) throw UnsupportedOperationException("The set was superseded")
+            // The item to start at stands for its first song.
+            val start = if (startIndex in mediaItems.indices) {
+                mediaItems.take(startIndex).sumOf { item -> tree.songsToAdd(item).orEmpty().size }.coerceAtMost(resolved.songs.lastIndex)
+            } else {
+                C.INDEX_UNSET
+            }
+            val state = QueueEditing.added(resolved.libraryId, resolved.tracks)
+            mainHandler.post {
+                if (token == restoreGeneration.get()) {
+                    currentOrigin = state
+                    openGrants.keepOnly(emptyList())
+                    lastRemoval = null
+                    report(state)
+                }
+            }
+            val items = resolved.songs.mapIndexed { index, song -> mediaItem(song, index + 1L) }
+            MediaItemsWithStartPosition(items, start, if (start == C.INDEX_UNSET) C.TIME_UNSET else startPositionMs)
+        }
+
+    private fun <T> failureTo(result: SettableFuture<T>) = object : FutureCallback<Any?> {
+        override fun onSuccess(value: Any?) = Unit
+
+        override fun onFailure(t: Throwable) {
+            result.setException(t)
+        }
+    }
+
+    /** Journals the songs of a controller's add as Media3 puts them in at [index] (§10.3). */
+    override fun inserting(index: Int, items: List<MediaItem>) {
+        if (items.isEmpty() || items.any { it.mediaId !in pendingAdds }) return
+        val adds = items.map { pendingAdds.remove(it.mediaId)!! }
+        val player = player ?: return
+        val keys = items.map { EntryKey.Added(QueueIds.addedNumber(it.mediaId)!!) }
+        val tracks = adds.map { it.track }
+        if (player.mediaItemCount == 0) {
+            // An empty player: the songs are the queue, as an add of PiPlayer's screen makes it (§9.1).
+            restoreGeneration.incrementAndGet()
+            val added = keys.zip(tracks) { key, track -> AddedEntry(key.number, track) }
+            lastRemoval = null
+            commit(QueueState(null, emptyList(), adds.first().libraryId, QueueEdits(added = added, nextNumber = keys.maxOf { it.number } + 1)))
+            return
+        }
+        val state = currentOrigin ?: return
+        val view = viewOf(player, state) ?: return
+        edited(QueueEditing.insertAt(state, view, index.coerceIn(0, view.keys.size), keys, tracks))
+    }
 
     /**
      * PiPlayer's screen asks the service to show the saved queue paused after the app was opened (docs/playback.md
@@ -720,6 +899,7 @@ class PlaybackSessionCallback(
     fun release() {
         released = true
         expansion.shutdown()
+        browse.shutdown()
         openExpansion.shutdown()
     }
 
@@ -1054,16 +1234,5 @@ class PlaybackSessionCallback(
 
         /** As long as a list read waits for the first sync (docs/library.md §1.4). */
         private const val READY_TIMEOUT_MS = 30_000L
-
-        private val ROOT = MediaItem.Builder()
-            .setMediaId(ROOT_ID)
-            .setMediaMetadata(
-                MediaMetadata.Builder()
-                    .setIsBrowsable(true)
-                    .setIsPlayable(false)
-                    .setMediaType(MediaMetadata.MEDIA_TYPE_FOLDER_MIXED)
-                    .build(),
-            )
-            .build()
     }
 }
