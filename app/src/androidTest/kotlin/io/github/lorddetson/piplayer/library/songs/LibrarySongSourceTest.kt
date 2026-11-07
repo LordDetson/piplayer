@@ -152,7 +152,8 @@ class LibrarySongSourceTest {
     @Test
     fun caseBreaksTiesAndEqualTitlesKeepTheOrderOfTheirIndexIds() {
         assertThat(songs(row(9, "Same"), row(3, "same"), row(5, "SAME")).map { it.mediaStoreId }).containsExactly(3L, 9L, 5L)
-        assertThat(songs(row(9, "Same"), row(3, "Same"), row(5, "Same")).map { it.mediaStoreId }).containsExactly(3L, 5L, 9L)
+        // New IDs, whose generations are newer, so that the sync reads them rather than keeping the titles above.
+        assertThat(songs(row(19, "Same"), row(13, "Same"), row(15, "Same")).map { it.mediaStoreId }).containsExactly(13L, 15L, 19L)
     }
 
     @Test
