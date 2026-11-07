@@ -114,6 +114,8 @@ class LibrarySongSourceTest {
                 album = "I Am... Sasha Fierce",
                 durationMs = null,
                 mediaStoreId = 42,
+                // The Songs list by title shows the title's letter in the scroll thumb (docs/library.md §11.2).
+                section = "H",
             ),
         )
     }
@@ -142,15 +144,15 @@ class LibrarySongSourceTest {
     }
 
     @Test
-    fun punctuationCountsAsASpace() {
-        assertThat(titles("AB", "A-C", "A B")).containsExactly("A B", "A-C", "AB")
+    fun spacesAndPunctuationAreIgnored() {
+        // "AB" and "A B" are one title to the collator (docs/library.md §11.1), so they keep the order of their index IDs.
+        assertThat(titles("AB", "A-C", "A B")).containsExactly("AB", "A B", "A-C")
     }
 
     @Test
-    fun equalTitlesKeepTheOrderOfTheirIndexIds() {
-        val songs = songs(row(9, "Same"), row(3, "same"), row(5, "SAME"))
-
-        assertThat(songs.map { it.mediaStoreId }).containsExactly(3L, 5L, 9L)
+    fun caseBreaksTiesAndEqualTitlesKeepTheOrderOfTheirIndexIds() {
+        assertThat(songs(row(9, "Same"), row(3, "same"), row(5, "SAME")).map { it.mediaStoreId }).containsExactly(3L, 9L, 5L)
+        assertThat(songs(row(9, "Same"), row(3, "Same"), row(5, "Same")).map { it.mediaStoreId }).containsExactly(3L, 5L, 9L)
     }
 
     @Test
