@@ -42,6 +42,34 @@ class CoverPipeTest {
     }
 
     @Test
+    fun aReaderThatTakesAPageNowAndThenDoesNotKeepTheWriterEither() {
+        val (source, sink) = ParcelFileDescriptor.createReliablePipe()
+        val reader = pool.submit {
+            ParcelFileDescriptor.AutoCloseInputStream(source).use { input ->
+                val page = ByteArray(CoverPipe.CHUNK)
+                while (input.read(page) > 0) Thread.sleep(150)
+            }
+        }
+        val started = System.nanoTime()
+
+        val written = sink.use { CoverPipe.write(it.fileDescriptor, bytes, idleTimeoutMs = 1_000, totalTimeoutMs = 600) }
+
+        assertThat(written).isFalse()
+        assertThat(TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started)).isLessThan(2_000)
+        reader.get(10, TimeUnit.SECONDS)
+    }
+
+    @Test
+    fun aGoneReaderIsSeenWithoutWaiting() {
+        val (source, sink) = ParcelFileDescriptor.createReliablePipe()
+        sink.use {
+            assertThat(CoverPipe.readerGone(it.fileDescriptor)).isFalse()
+            source.close()
+            assertThat(CoverPipe.readerGone(it.fileDescriptor)).isTrue()
+        }
+    }
+
+    @Test
     fun aReaderThatWentAwayEndsTheWriteAtOnce() {
         val (source, sink) = ParcelFileDescriptor.createReliablePipe()
         source.close()

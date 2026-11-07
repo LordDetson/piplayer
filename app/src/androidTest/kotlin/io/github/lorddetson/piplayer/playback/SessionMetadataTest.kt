@@ -229,20 +229,27 @@ class SessionMetadataTest {
     }
 
     @Test
-    fun anItemWithoutAPictureCarriesItsCoverUriAndAnOpenedFileNone() {
-        onMain { session.artworkUriOf = { id -> if (id.startsWith("content:")) null else Uri.parse("content://covers.test/s/$id/v1") } }
+    fun anItemWithoutAPictureCarriesItsCoverUriAnAddedEntryItsSongsAndAnOpenedFileNone() {
+        // The service's own mapping (docs/library.md §13.8.6).
+        onMain { session.artworkUriOf = { id -> ProviderArtwork.ofQueueItem(context, id) } }
         val opened = MediaItem.Builder()
             .setMediaId("content://test/opened")
             .setUri(Uri.fromFile(TestFiles.copy(LONG_FIXTURE)))
             .setMediaMetadata(MediaMetadata.Builder().setTitle("Opened").build())
             .build()
-        playFirst(item(1, LONG_FIXTURE), opened)
+        val added = item(1, LONG_FIXTURE).buildUpon().setMediaId(QueueIds.added(1, fileId = 7)).build()
+        playFirst(item(1, LONG_FIXTURE), added, opened)
         eventually("playback has started") { onMain { exo.playbackState == Player.STATE_READY } }
+        val uris = io.github.lorddetson.piplayer.covers.Covers.uris(context)
+        fun named(uri: Uri?) = uri?.let { uris.parse(it.authority, it.pathSegments) }
 
         onMain {
-            assertThat(session.mediaMetadata.artworkUri).isEqualTo(Uri.parse("content://covers.test/s/1/v1"))
+            assertThat(named(session.mediaMetadata.artworkUri)).isEqualTo(io.github.lorddetson.piplayer.covers.CoverRequest.Track(1))
             assertThat(session.mediaMetadata.artworkData).isNull()
             session.seekToNextMediaItem()
+            assertThat(named(session.mediaMetadata.artworkUri)).isEqualTo(io.github.lorddetson.piplayer.covers.CoverRequest.Track(7))
+            session.seekToNextMediaItem()
+            assertThat(session.currentMediaItem!!.mediaId).isEqualTo("content://test/opened")
             assertThat(session.mediaMetadata.artworkUri).isNull()
         }
     }
@@ -262,6 +269,9 @@ class SessionMetadataTest {
         playFirst(item(1, LONG_FIXTURE))
         eventually("playback has started") { onMain { exo.playbackState == Player.STATE_READY } }
         onMain { heard.clear() }
+        // At a transition the session looks for the picture again; with nothing new that is no news.
+        onMain { session.setArtwork("1", null) }
+        onMain { assertThat(heard).isEmpty() }
         version = 2
 
         // What SessionCovers does when own covers change: the picture is looked for again, and it is still none.

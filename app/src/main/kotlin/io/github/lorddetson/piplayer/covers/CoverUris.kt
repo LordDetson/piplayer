@@ -5,7 +5,8 @@ import java.security.SecureRandom
 /**
  * The content URIs of covers for controllers outside PiPlayer (docs/library.md §13.8.2), as text:
  * `content://<authority>/<kind>/<id>/<version>`. A song goes by its file ID, an album or an artist by a number this
- * process gives its key; the version is [tag], drawn when the process starts, and the cover [generation] in base 36.
+ * process gives its key; the version is [tag], drawn when the process starts, and the cover [generation] in base 36, at
+ * least [GENERATION_WIDTH] digits.
  * Safe to call from any thread.
  */
 class CoverUris(
@@ -45,7 +46,7 @@ class CoverUris(
             is CoverRequest.Album -> ALBUM to albums.number(request.key).toLong()
             is CoverRequest.Artist -> ARTIST to artists.number(request.key).toLong()
         }
-        return "$prefix$kind/$id/$tag${generation().toString(36)}"
+        return "$prefix$kind/$id/$tag${generation().toString(36).padStart(GENERATION_WIDTH, '0')}"
     }
 
     /**
@@ -54,9 +55,8 @@ class CoverUris(
      * every process and generation.
      */
     fun parse(authority: String?, segments: List<String>): CoverRequest? {
-        if (authority != this.authority || segments.size != 3) return null
+        if (!wellFormed(authority, segments)) return null
         val (kind, idText, version) = segments
-        if (version.length <= TAG_LENGTH || !version.all(::isVersionChar)) return null
         val id = canonicalNumber(idText) ?: return null
         return when (kind) {
             SONG -> CoverRequest.Track(id)
@@ -69,8 +69,21 @@ class CoverUris(
         }
     }
 
+    /** Whether a URI of [authority] with [segments] has the form of a cover URI, whatever it names; nothing is looked up. */
+    fun wellFormed(authority: String?, segments: List<String>): Boolean {
+        if (authority != this.authority || segments.size != 3) return false
+        val (kind, id, version) = segments
+        return kind in KINDS && canonicalNumber(id) != null && version.length > TAG_LENGTH && version.all(::isVersionChar)
+    }
+
     companion object {
         const val TAG_LENGTH = 4
+
+        /**
+         * The generation's digits at least: a new generation keeps a URI's length, which items weigh, so that the borders
+         * of buckets stay put (docs/playback.md §10.2) for the first 1 679 616 generations of a process.
+         */
+        const val GENERATION_WIDTH = 4
 
         /** The provider's authority for the app [packageName]. */
         fun authorityOf(packageName: String): String = "$packageName.covers"
@@ -84,6 +97,7 @@ class CoverUris(
         private const val SONG = "s"
         private const val ALBUM = "a"
         private const val ARTIST = "r"
+        private val KINDS = setOf(SONG, ALBUM, ARTIST)
 
         private fun isVersionChar(c: Char) = c in '0'..'9' || c in 'a'..'z'
 

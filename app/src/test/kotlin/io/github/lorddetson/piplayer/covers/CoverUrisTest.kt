@@ -21,9 +21,9 @@ class CoverUrisTest {
 
     @Test
     fun aSongGoesByItsFileIdAndTheVersion() {
-        assertThat(uris.of(CoverRequest.Track(1234))).isEqualTo("content://$AUTHORITY/s/1234/k3x90")
+        assertThat(uris.of(CoverRequest.Track(1234))).isEqualTo("content://$AUTHORITY/s/1234/k3x90000")
         generation = 36 * 36 + 35
-        assertThat(uris.of(CoverRequest.Track(1234))).isEqualTo("content://$AUTHORITY/s/1234/k3x910z")
+        assertThat(uris.of(CoverRequest.Track(1234))).isEqualTo("content://$AUTHORITY/s/1234/k3x9010z")
     }
 
     @Test
@@ -32,9 +32,9 @@ class CoverUrisTest {
         val artist = uris.of(CoverRequest.Artist("ann"))
         val other = uris.of(CoverRequest.Album("second"))
 
-        assertThat(album).isEqualTo("content://$AUTHORITY/a/1/k3x90")
-        assertThat(artist).isEqualTo("content://$AUTHORITY/r/1/k3x90")
-        assertThat(other).isEqualTo("content://$AUTHORITY/a/2/k3x90")
+        assertThat(album).isEqualTo("content://$AUTHORITY/a/1/k3x90000")
+        assertThat(artist).isEqualTo("content://$AUTHORITY/r/1/k3x90000")
+        assertThat(other).isEqualTo("content://$AUTHORITY/a/2/k3x90000")
         // The same key keeps its number.
         assertThat(uris.of(CoverRequest.Album("first\u0000ann\u0000/storage/emulated/0/Music/Ann/First/"))).isEqualTo(album)
         assertThat(listOf(album, artist, other)).allSatisfy { assertThat(it).doesNotContain("ann", "Music", "first") }
@@ -106,6 +106,10 @@ class CoverUrisTest {
         )
         for (uri in bad) assertThat(parse(uri)).describedAs(uri).isNull()
         assertThat(uris.parse(null, listOf("s", "1", "k3x90"))).isNull()
+        // The form alone, as getType asks it: the malformed ones fail, a number never given still has the form.
+        val formed: (String) -> Boolean = { uri -> split(uri).let { (authority, segments) -> uris.wellFormed(authority, segments) } }
+        for (uri in bad.filter { "/a/0/" !in it }) assertThat(formed(uri)).describedAs(uri).isFalse()
+        assertThat(formed("content://$AUTHORITY/a/7/zzzz0000")).isTrue()
     }
 
     @Test
@@ -117,6 +121,16 @@ class CoverUrisTest {
         assertThat(real.of(CoverRequest.Track(9_999_999_999))).hasSizeLessThanOrEqualTo(70)
         assertThat(real.of(CoverRequest.Album("x".repeat(500)))).hasSizeLessThanOrEqualTo(70)
         assertThat(authority).isEqualTo("io.github.lorddetson.piplayer.covers")
+    }
+
+    @Test
+    fun aNewGenerationKeepsTheLengthSoThatBucketBordersStay() {
+        // Items weigh their URIs (docs/playback.md §10.2): a URI one character longer could move a bucket's border.
+        val lengths = listOf(0L, 1L, 35L, 36L, 1_295L, 1_296L, 36L * 36 * 36 * 36 - 1).map { g ->
+            generation = g
+            uris.of(CoverRequest.Track(1234)).length
+        }
+        assertThat(lengths.toSet()).hasSize(1)
     }
 
     @Test

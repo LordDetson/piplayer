@@ -5,6 +5,7 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlin.coroutines.coroutineContext
@@ -25,6 +26,9 @@ interface ImageCodec<I : Any> {
     fun decode(bytes: ByteArray, size: Int): I?
 
     fun weight(image: I): Long
+
+    /** Whether [bytes] from the disk cache are a picture this codec wrote, before they are handed out undecoded. */
+    fun isEncoded(bytes: ByteArray): Boolean = true
 }
 
 /**
@@ -133,45 +137,72 @@ class CoverLoader<I : Any>(
 
     /**
      * The cover of [request] for a controller at [px] as the codec's bytes (docs/library.md §13.8.4), or null when no
-     * source has one or the library cannot be read now. A disk hit is served as stored, without decoding; memory is not
-     * asked, since encoding a decoded picture again costs more than reading the file.
+     * source has one, the library cannot be read now, the load took longer than [timeoutMs] once it had its permit, or
+     * [wanted] said no when it got the permit (the reader has gone). A disk hit is served as stored, without decoding,
+     * unless the codec does not take it for its own; memory only answers that a request has no cover, since encoding a
+     * decoded picture again costs more than reading the file.
      */
-    suspend fun encoded(request: CoverRequest, px: Int): ByteArray? {
+    suspend fun encoded(
+        request: CoverRequest,
+        px: Int,
+        timeoutMs: Long = Long.MAX_VALUE,
+        wanted: () -> Boolean = { true },
+    ): ByteArray? {
         val step = CoverSizes.step(px)
         val cached = CoverSizes.cached(step)
+        if (cached && memory.get(memoryKey(request, step))?.let { it.image == null } == true) return null
         return permits.withPermit {
-            withContext(dispatcher) {
-                val steps = try {
-                    plan(request)
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (e: Exception) {
-                    failures(e)
-                    return@withContext null
-                }
-                for (source in steps) {
-                    val bytes = try {
-                        bytesOf(source, step, cached)
-                    } catch (e: CancellationException) {
-                        throw e
-                    } catch (e: Exception) {
-                        failures(e)
-                        continue
-                    }
-                    if (bytes != null) return@withContext bytes
-                }
-                null
-            }
+            if (!wanted()) return@withPermit null
+            // The time counts from here: a wait in line behind the app's own loads is not the load's.
+            withTimeoutOrNull(timeoutMs) { withContext(dispatcher) { encodedNow(request, step, cached) } }
         }
     }
 
+    private suspend fun encodedNow(request: CoverRequest, step: Int, cached: Boolean): ByteArray? {
+        val steps = try {
+            plan(request)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            failures(e)
+            return null
+        }
+        for (source in steps) {
+            val result = try {
+                bytesOf(source, step, cached)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                failures(e)
+                continue
+            }
+            when (result) {
+                Encoded.None -> continue
+                Encoded.Unencodable -> return null
+                is Encoded.Bytes -> return result.bytes
+            }
+        }
+        return null
+    }
+
+    /** What a source gave a controller: a picture's bytes, none, or a picture the codec could not encode. */
+    private sealed interface Encoded {
+        class Bytes(val bytes: ByteArray) : Encoded
+
+        data object None : Encoded
+
+        /** The app would show this source's picture, so the search ends here as it does in [load]. */
+        data object Unencodable : Encoded
+    }
+
     /** The bytes of [source] at [step]: from the disk cache as stored, or loaded, encoded and stored. */
-    private suspend fun bytesOf(source: CoverStep, step: Int, cached: Boolean): ByteArray? {
+    private suspend fun bytesOf(source: CoverStep, step: Int, cached: Boolean): Encoded {
         val diskKey = "${source.key}@$step"
         if (cached && disk != null) {
             when (val hit = disk.read(diskKey)) {
-                Cached.Nothing -> return null
-                is Cached.Picture -> return hit.bytes
+                Cached.Nothing -> return Encoded.None
+                // A file that is no picture of the codec's is loaded again and replaced, as a failed decode is in the app.
+                is Cached.Picture -> if (codec.isEncoded(hit.bytes)) return Encoded.Bytes(hit.bytes)
                 null -> Unit
             }
         }
@@ -179,7 +210,11 @@ class CoverLoader<I : Any>(
         coroutineContext.ensureActive()
         val bytes = image?.let(codec::encode)
         if (cached && disk != null) remember(source, diskKey, image, bytes)
-        return bytes
+        return when {
+            bytes != null -> Encoded.Bytes(bytes)
+            image != null -> Encoded.Unencodable
+            else -> Encoded.None
+        }
     }
 
     /** Stores what [source] gave on disk: a picture's [bytes], or the absence of an embedded picture (see [picture]). */

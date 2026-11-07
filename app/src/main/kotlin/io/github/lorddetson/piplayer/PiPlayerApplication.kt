@@ -9,6 +9,8 @@ import io.github.lorddetson.piplayer.crash.CrashReports
 import io.github.lorddetson.piplayer.library.Library
 import io.github.lorddetson.piplayer.library.sort.SortKeys
 import kotlin.concurrent.thread
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.withTimeoutOrNull
 
 /** Tells the tag pass when the app shows (docs/library.md §5.5). */
 private object PassGateActivities : Application.ActivityLifecycleCallbacks {
@@ -55,6 +57,17 @@ class PiPlayerApplication : Application() {
             // The library follows the media index for as long as the process lives (docs/library.md §1.3).
             Library.start(this)
         }
+        started.complete(Unit)
+    }
+
+    companion object {
+        private val started = CompletableDeferred<Unit>()
+
+        /**
+         * Waits until [onCreate] has run, at most [timeoutMs]; whether it has. Android publishes content providers before
+         * it, so a cover asked for by a controller that started the process may come first (docs/library.md §13.8.7).
+         */
+        suspend fun awaitStarted(timeoutMs: Long): Boolean = withTimeoutOrNull(timeoutMs) { started.await() } != null
     }
 
     /** Another language of the app makes every sort key again, by a sync now (docs/library.md §11.1). */

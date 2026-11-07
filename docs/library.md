@@ -866,8 +866,9 @@ Covers for controllers outside PiPlayer (part B, §13.8): a content provider tha
   It also remembers that a source had no picture. A change of own covers empties it, and the covers on screen load again,
   each keeping its picture until the new one is there. A sync that changed the library and the end of a run of the tag
   pass empty it too (not every batch, so that scrolling back during a pass finds its covers), and so does an attach pass
-  that wrote identities, since an own cover follows its identity to another file (§8.2); views on screen then keep
-  what they show until they are drawn anew.
+  that wrote identities, since an own cover follows its identity to another file (§8.2), and a change of the hidden
+  files, which decide the albums of an artist (§13.1) and raise no revision; views on screen then keep what they show
+  until they are drawn anew.
 - A disk cache keeps the pictures of steps up to 768 px as JPEG at quality 90, and an empty file for an embedded picture
   that a file does not have, in `cache/covers/`. A missing thumbnail is not remembered on disk: an image put into the
   folder later changes neither the file's size nor its time, and a passing error of the media index must not stick. A
@@ -948,14 +949,16 @@ provider of its own, `CoverProvider`, with the sources, their order and the disk
 #### 13.8.2 The URI
 
 - `content://<application ID>.covers/<kind>/<id>/<version>`, for example
-  `content://io.github.lorddetson.piplayer.covers/s/1234/k3x90`:
+  `content://io.github.lorddetson.piplayer.covers/s/1234/k3x90000`:
   - kind `s`, a song, by its file ID (§8.4), which survives a rebuild and a new media index;
   - kind `a`, an album, and `r`, an artist, by a number that the process gives each album key or artist key the first
     time it builds a URI for it. The key itself never goes into the URI: album keys hold names and folder paths, and
     they are long;
   - the version: four random characters (`0-9`, `a-z`) drawn when the process starts, then the cover generation in base
-    36. The generation rises each time the loader's memory is emptied (§13.3): own covers changed, a sync changed the
-    library, a run of the tag pass ended, or an attach pass wrote identities.
+    36, at least four digits. The generation rises each time the loader's memory is emptied (§13.3): own covers
+    changed, a sync changed the library, a run of the tag pass ended, an attach pass wrote identities, or the hidden
+    files changed. A new generation keeps the URI's length, which browse items weigh, so that the borders between
+    buckets do not move under a controller that pages through a node (playback.md §10.2).
 - So a URI changes whenever the cover it names may have changed, and controllers that cache pictures by URI load it
   again. One generation for all URIs, not one per item: building a URI reads nothing (a list of 20 000 songs builds
   20 000 of them), and the events that raise it are rare. A new process gives new URIs, so a change while PiPlayer was
@@ -963,7 +966,9 @@ provider of its own, `CoverProvider`, with the sources, their order and the disk
   once more, from the disk cache.
 - No file path, title, key or other user data goes into a URI. A song URI shows a file ID, a number that means nothing
   outside PiPlayer's databases.
-- A URI is about 60 characters long; its length counts toward the weight of a browse item (playback.md §10.2).
+- A URI is about 60 characters long; its length counts toward the weight of a browse item (playback.md §10.2). The four
+  random characters make two processes give the same album and artist numbers under the same version about once in
+  1.7 million starts; a controller would then show the cached picture of another album until the next change.
 
 #### 13.8.3 Who may open a cover
 
@@ -971,9 +976,12 @@ provider of its own, `CoverProvider`, with the sources, their order and the disk
   and of browsing, §10.4): PiPlayer itself, the callers Android trusts for media control
   (`MediaSessionManager.isTrustedForMediaControl`: the system, holders of the media control permission, apps with an
   enabled notification listener), and apps whose uid holds the audio permission. The provider checks the caller of each
-  open by its uid and pid, as the session checks a controller; a package name alone is not enough. Anyone else gets a
-  security error. Covers are pictures of the user's music: an app that may not read music must not read them through
-  PiPlayer, just as it may not read the titles.
+  open by its uid and pid, as the session checks a controller; a package name alone is not enough, and a caller that
+  names no package (or one Android does not confirm as its own) is judged by its uid alone: the system or the media
+  control permission. Anyone else gets a security error. Covers are pictures of the user's music: an app that may not
+  read music must not read them through PiPlayer, just as it may not read the titles.
+- Display is not reading: another app may put a cover URI into its own session or notification, and System UI, which
+  may read covers, then shows that picture. The other app never gets the bytes.
 - The provider is exported without a manifest permission and without URI grants:
   - Exported, because the controllers live in other apps. No platform permission is held by Android Auto, Wear and
     Android Automotive and by no other app, so a manifest permission could not draw the line; the check in code draws
@@ -997,8 +1005,16 @@ provider of its own, `CoverProvider`, with the sources, their order and the disk
   before is served from `cache/covers/` without decoding; a new one is decoded from its source once and stored there.
 - A song URI serves the song's current cover, whatever its version: file IDs mean the same in every process. An album or
   artist URI of another process (its four characters differ) or with a number the process never gave is not found.
-- A load that takes longer than 10 seconds is given up, and so is a write when the reader takes nothing for 10 seconds:
-  a controller that never reads cannot keep a thread.
+- A disk hit is served as stored once it starts as a JPEG does; anything else is loaded again and replaced. A request
+  that memory already knows to have no cover (§13.3) is answered at once, without a plan.
+- Limits, so that a controller that scrolls fast or an app that opens thousands of URIs cannot hold PiPlayer down:
+  - at most 64 covers are served at a time, each holding two descriptors; more opens are not found;
+  - when a load gets its turn (one of the four, behind the app's own loads), it first looks whether the reader is still
+    there, and loads nothing for a reader that has gone;
+  - a load is given up when it takes longer than 10 seconds from its turn on (the wait in line does not count);
+  - a write is given up when the reader takes nothing for 10 seconds, or after 30 seconds in all;
+  - waits and writes run on four threads of their own, apart from the database's;
+  - whatever fails while a cover is served is logged, the reader gets an error, and the process goes on.
 
 #### 13.8.5 Without a picture
 
@@ -1016,6 +1032,10 @@ provider of its own, `CoverProvider`, with the sources, their order and the disk
   bitmaps of the platform session's metadata down, and controllers such as Android Auto prefer a URI for the playing
   item; Media3 controllers of other apps take it from the metadata as well. The picture stays, for the notification and
   for controllers that cannot load URIs.
+- Where the metadata has the URI and no picture (the stream's picture not read yet, or a song without one), Media3
+  loads the URI itself for the notification and the platform session, inside PiPlayer, through the provider. The
+  notification may then show a cover it showed nothing for before. For a song without any cover that load fails,
+  quickly once memory knows (§13.8.4), and Media3 logs it.
 - Only the playing item: the queue's items stay without artwork (a URI each would change every item of a queue of 20 000
   at each new generation, and no platform queue is published, playback.md §2.3).
 - When own covers change, the session looks again (§13.6), and its listeners hear the new URI even when the picture
@@ -1026,18 +1046,26 @@ provider of its own, `CoverProvider`, with the sources, their order and the disk
 
 - Nothing at start or in the first sync: the provider's `onCreate` does nothing, and the cover loader, the numbers of
   keys and the version come into being with the first URI or the first open.
+- Android publishes content providers before the application's own start has run, so an open from a controller that
+  started PiPlayer's process waits (off the binder thread, at most 10 seconds) until the application has set the library
+  up.
 
 #### 13.8.8 Checks
 
 JVM tests: the URI of each kind and its parsing back, malformed URIs and other authorities refused, the number of a key
-stable within a process and refused from another one, the version rising with the generation, the length bound; the
-access rule (own uid, trusted, audio permission, anyone else refused); the loader's encoded cover: a disk hit served
-without decoding or reading a source, a miss read once and stored, no picture, a plan that fails.
+stable within a process and refused from another one, the version rising with the generation and keeping the length,
+the length bound; the access rule (own uid, trusted, audio permission, anyone else refused); the limit of covers in
+flight; the loader's encoded cover: a disk hit served without decoding or reading a source, a disk entry that is no
+JPEG loaded again, a miss read once and stored, no picture, a cover memory knows to be none, a plan that fails, a
+picture that cannot be encoded, a load that takes too long, the time counted from the turn on, a reader gone before
+the turn; a change of the hidden files empties memory.
 
 Instrumented tests (API 30 and 36): a URI from the tree opened through the content resolver as a controller does gives
 a JPEG of the album's own cover at 512 px, also for its songs and its artist, and the shell (another uid) reads it as
 the rule decides for it; a caller that may not read music is refused, also when it claims PiPlayer's package; a write
 mode is refused; a cover without a picture fails to open; browse results of a Media3 browser and of a platform browser
-carry cover URIs and no artwork data or bitmaps; after an own cover changes, the tree gives a new URI that serves the
-new picture; the playing song's session metadata carries its URI next to its picture, and its listeners hear a new URI;
-a reader that never reads does not keep the writer; the weight of an item with a cover URI is at least its parcel.
+carry cover URIs and no artwork data or bitmaps, and so do search results; after an own cover changes, the tree gives
+a new URI that serves the new picture, and the playing song's URI changes through the service; the playing song's
+session metadata carries its URI next to its picture (an added entry its song's, an opened file none), its listeners
+hear a new URI, and the same again is no news; a reader that never reads, one that reads a page now and then, and
+one that has gone do not keep the writer; the weight of an item with a cover URI is at least its parcel.

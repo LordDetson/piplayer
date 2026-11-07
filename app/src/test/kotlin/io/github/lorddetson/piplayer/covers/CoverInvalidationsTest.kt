@@ -35,6 +35,18 @@ class CoverInvalidationsTest {
     }
 
     @Test
+    fun eachChangeOfTheHiddenFilesCounts() = runBlocking<Unit> {
+        // They decide which albums are an artist's (docs/library.md §13.1) and raise no revision of the library.
+        val count = CoverInvalidations.of(
+            emptyList<Long>().asFlow(),
+            emptyList<Boolean>().asFlow(),
+            hiddenFiles = listOf<Any>("a", "a", "b", "c", "c").asFlow(),
+        ).toList().size
+
+        assertThat(count).isEqualTo(2)
+    }
+
+    @Test
     fun bothCount() {
         assertThat(count(listOf(1, 2), listOf(true, false))).isEqualTo(2)
     }

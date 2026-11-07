@@ -1,5 +1,6 @@
 package io.github.lorddetson.piplayer.covers
 
+import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
 import android.media.session.MediaSessionManager
@@ -30,7 +31,9 @@ object CoverAccess {
 
     /** As Media3 asks it of a controller: by package, pid and uid together, so that a claimed name is not enough. */
     private fun trusted(context: Context, caller: Caller): Boolean {
-        val packageName = caller.packageName ?: return false
+        // Without a package the uid alone decides: the system, or the media control permission.
+        val packageName = caller.packageName ?: return caller.uid == Process.SYSTEM_UID ||
+            context.checkPermission(Manifest.permission.MEDIA_CONTENT_CONTROL, caller.pid, caller.uid) == PackageManager.PERMISSION_GRANTED
         val manager = context.getSystemService(MediaSessionManager::class.java) ?: return false
         return try {
             manager.isTrustedForMediaControl(MediaSessionManager.RemoteUserInfo(packageName, caller.pid, caller.uid))

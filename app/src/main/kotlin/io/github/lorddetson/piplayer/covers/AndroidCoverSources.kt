@@ -90,6 +90,10 @@ object BitmapCodec : ImageCodec<Bitmap> {
 
     override fun weight(image: Bitmap): Long = image.allocationByteCount.toLong()
 
+    /** A JPEG starts with its start-of-image marker. */
+    override fun isEncoded(bytes: ByteArray): Boolean =
+        bytes.size > 3 && bytes[0] == 0xFF.toByte() && bytes[1] == 0xD8.toByte() && bytes[2] == 0xFF.toByte()
+
     /** Decodes [file] for [size]; null if it is missing or no image. */
     fun decode(file: File, size: Int): Bitmap? = if (file.isFile) decode(ImageDecoder.createSource(file), size) else null
 

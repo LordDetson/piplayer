@@ -8,14 +8,16 @@ import android.net.Uri
 import android.os.Binder
 import android.os.ParcelFileDescriptor
 import android.util.Log
+import io.github.lorddetson.piplayer.PiPlayerApplication
 import java.io.FileNotFoundException
 import java.io.IOException
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * Serves covers to controllers outside PiPlayer by content URI (docs/library.md §13.8): read only, to the callers that
@@ -51,31 +53,49 @@ class CoverProvider : ContentProvider() {
         val context = checkNotNull(context) { "Not attached" }.applicationContext
         if (!CoverAccess.allows(context, caller)) throw SecurityException("This caller may not read the music library")
         val request = Covers.uris(context).parse(uri.authority, uri.pathSegments) ?: throw FileNotFoundException("No cover")
-        val (source, sink) = ParcelFileDescriptor.createReliablePipe()
-        scope.launch { serve(context, request, sink) }
+        // Each cover served holds two descriptors and a place in the loader's line until it is written.
+        if (!admission.tryEnter()) throw FileNotFoundException("Too many covers at once")
+        val (source, sink) = try {
+            ParcelFileDescriptor.createReliablePipe()
+        } catch (e: IOException) {
+            admission.exit()
+            throw FileNotFoundException("No pipe: ${e.message}")
+        }
+        scope.launch {
+            try {
+                serve(context, request, sink)
+            } finally {
+                admission.exit()
+            }
+        }
         return source
     }
 
-    /** Writes the cover of [request] into [sink] and closes it; with an error when there is none. */
+    /** Writes the cover of [request] into [sink] and closes it; with an error unless all of it was written. */
     private suspend fun serve(context: Context, request: CoverRequest, sink: ParcelFileDescriptor) {
+        var error = NO_COVER
         try {
-            val bytes = try {
-                withTimeoutOrNull(TIMEOUT_MS.toLong()) { Covers.loader(context).encoded(request, PX) }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                Log.w(TAG, "A cover could not be served", e)
-                null
-            }
-            if (bytes == null) {
-                sink.closeWithError(NO_COVER)
-                return
-            }
-            if (CoverPipe.write(sink.fileDescriptor, bytes, TIMEOUT_MS)) sink.close() else sink.closeWithError(NOT_READ)
-        } catch (_: IOException) {
-            // The reader has gone; nothing to tell.
+            // A call that started the process may come before the application has set the library up.
+            if (!PiPlayerApplication.awaitStarted(TIMEOUT_MS.toLong())) return
+            val bytes = Covers.loader(context).encoded(request, PX, TIMEOUT_MS.toLong()) { !CoverPipe.readerGone(sink.fileDescriptor) }
+                ?: return
+            error = NOT_READ
+            if (CoverPipe.write(sink.fileDescriptor, bytes, TIMEOUT_MS, TOTAL_WRITE_MS)) error = ""
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            // Whatever failed, the process must not go down for a cover, and the reader learns that there is none.
+            Log.w(TAG, "A cover could not be served", e)
         } finally {
-            // Closing twice does nothing; a sink left open would keep the reader waiting.
+            close(sink, error)
+        }
+    }
+
+    /** Closes [sink], with [error] for the reader unless it is empty; a reader that has gone needs no word. */
+    private fun close(sink: ParcelFileDescriptor, error: String) {
+        try {
+            if (error.isEmpty()) sink.close() else sink.closeWithError(error)
+        } catch (_: IOException) {
             try {
                 sink.close()
             } catch (_: IOException) {
@@ -85,10 +105,8 @@ class CoverProvider : ContentProvider() {
 
     /** Whether [uri] has the form of a cover URI, whatever it names. */
     private fun wellFormed(uri: Uri): Boolean {
-        val segments = uri.pathSegments
-        return uri.authority == context?.packageName?.let(CoverUris::authorityOf) && segments.size == 3 &&
-            segments[0] in KINDS && segments[1].isNotEmpty() && segments[1].all { it in '0'..'9' } &&
-            segments[2].length > CoverUris.TAG_LENGTH && segments[2].all { it in '0'..'9' || it in 'a'..'z' }
+        val context = context ?: return false
+        return Covers.uris(context).wellFormed(uri.authority, uri.pathSegments)
     }
 
     override fun query(uri: Uri, projection: Array<out String>?, selection: String?, selectionArgs: Array<out String>?, sortOrder: String?): Cursor? = null
@@ -103,17 +121,33 @@ class CoverProvider : ContentProvider() {
         /** The size controllers get (§13.8.4). */
         const val PX = 512
 
-        /** A load or an idle reader is given up after this long. */
+        /** A load (once it has its permit) or an idle reader is given up after this long. */
         const val TIMEOUT_MS = 10_000
+
+        /** A write that has taken this long in all is given up, however the reader keeps it going. */
+        const val TOTAL_WRITE_MS = 30_000
+
+        /** At most this many covers are served at a time; more opens are not found. */
+        const val MAX_IN_FLIGHT = 64
 
         const val MIME_TYPE = "image/jpeg"
 
         private const val TAG = "CoverProvider"
         private const val NO_COVER = "No cover"
         private const val NOT_READ = "The reader took nothing"
-        private val KINDS = setOf("s", "a", "r")
 
-        /** Lives as long as the process; the loads themselves run on the loader's threads, at most four at a time. */
-        private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        private val admission = CoverAdmission(MAX_IN_FLIGHT)
+
+        /**
+         * Lives as long as the process. The loads run on the loader's threads, at most four at a time; the waits and writes
+         * here on a few threads of their own, apart from the database's.
+         */
+        @OptIn(ExperimentalCoroutinesApi::class)
+        private val scope = CoroutineScope(
+            SupervisorJob() + Dispatchers.IO.limitedParallelism(WRITERS) +
+                CoroutineExceptionHandler { _, e -> Log.w(TAG, "A cover could not be served", e) },
+        )
+
+        private const val WRITERS = 4
     }
 }

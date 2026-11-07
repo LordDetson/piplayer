@@ -191,8 +191,9 @@ class CoverProviderTest {
                 onMain { platform.subscribe(node, callback) }
                 assertThat(loaded.await(30, TimeUnit.SECONDS)).describedAs("loaded $node").isTrue()
                 onMain { platform.unsubscribe(node, callback) }
-                assertThat(legacy.map { it.description.iconUri }).describedAs(node)
-                    .isEqualTo(children(node).map { it.mediaMetadata.artworkUri })
+                // What each URI names; their generation may differ between the two reads.
+                assertThat(legacy.map { it.description.iconUri?.let(::named) }).describedAs(node)
+                    .isEqualTo(children(node).map { named(uriOf(it)) })
                 assertThat(legacy).describedAs(node).allSatisfy { assertThat(it.description.iconBitmap).isNull() }
             }
         } finally {
@@ -288,9 +289,30 @@ class CoverProviderTest {
         // The fake index's files do not play, so the player may have skipped on: the URI is the current item's.
         val (mediaId, uri) = onMain { browser.currentMediaItem!!.mediaId to browser.mediaMetadata.artworkUri!! }
         val fileId = checkNotNull(QueueIds.fileId(mediaId)) { "Not a library song: $mediaId" }
-        assertThat(uri).isEqualTo(Uri.parse(Covers.uris(context).of(CoverRequest.Track(fileId))))
-        assertThat(uri.authority).isEqualTo(authority)
+        assertThat(named(uri)).isEqualTo(CoverRequest.Track(fileId))
+
+        // A new own cover: the session looks again and the browser hears a new URI for the same song.
+        runBlocking { Covers.own(context).setAlbum(albumKey(1), copy(TestImages.BLUE)) }
+
+        browser.waitUntil("the playing song carries a new cover URI") { mediaMetadata.artworkUri != uri }
+        val (nowId, now) = onMain { browser.currentMediaItem!!.mediaId to browser.mediaMetadata.artworkUri!! }
+        assertThat(named(now)).isEqualTo(CoverRequest.Track(QueueIds.fileId(nowId)!!))
     }
+
+    @Test
+    fun searchResultsCarryCoverUris() {
+        onMain { browser.search("Alpha", null) }.get(30, TimeUnit.SECONDS)
+        val found = onMain { browser.getSearchResult("Alpha", 0, Int.MAX_VALUE, null) }.get(30, TimeUnit.SECONDS).value!!
+
+        assertThat(found).isNotEmpty()
+        assertThat(found).allSatisfy {
+            assertThat(it.mediaMetadata.artworkData).isNull()
+            assertThat(named(uriOf(it))).isNotNull()
+        }
+    }
+
+    /** What a cover URI names, whatever its generation. */
+    private fun named(uri: Uri) = Covers.uris(context).parse(uri.authority, uri.pathSegments)
 
     private companion object {
         const val RED = 0xFFE53935.toInt()

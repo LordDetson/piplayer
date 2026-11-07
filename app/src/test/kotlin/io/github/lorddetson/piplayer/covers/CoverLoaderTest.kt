@@ -9,7 +9,9 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.currentTime
 import kotlinx.coroutines.test.runTest
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -39,11 +41,14 @@ class CoverLoaderTest {
         val reads = mutableListOf<CoverStep>()
         val failing = mutableSetOf<CoverStep>()
         var gate: CompletableDeferred<Unit>? = null
+        /** How long a load takes, cancellably, in the test's virtual time. */
+        var delayMs = 0L
 
         override suspend fun load(step: CoverStep, size: Int): String? {
             reads += step
             // Not cancellable, as a blocking call is not: it returns after the load was cancelled.
             gate?.let { withContext(NonCancellable) { it.await() } }
+            if (delayMs > 0) kotlinx.coroutines.delay(delayMs)
             if (step in failing) throw IOException("cannot open now")
             return pictures[step]?.let { "$it@$size" }
         }
@@ -247,9 +252,12 @@ class CoverLoaderTest {
     private class CountingCodec : ImageCodec<String> {
         var decodes = 0
         var encodes = 0
-        override fun encode(image: String): ByteArray { encodes++; return Codec.encode(image) }
+        /** A picture this codec cannot encode. */
+        var refuse: String? = null
+        override fun encode(image: String): ByteArray? { encodes++; return if (image == refuse) null else Codec.encode(image) }
         override fun decode(bytes: ByteArray, size: Int): String { decodes++; return Codec.decode(bytes, size) }
         override fun weight(image: String) = Codec.weight(image)
+        override fun isEncoded(bytes: ByteArray) = !String(bytes).startsWith("junk")
     }
 
     private fun TestScope.counting(codec: CountingCodec, plan: suspend () -> List<CoverStep> = { plans++; steps }) = CoverLoader(
@@ -314,6 +322,76 @@ class CoverLoaderTest {
         assertThat(loader.encoded(request, 512)?.let(::String)).isEqualTo("T@512")
         sources.failing.clear()
         assertThat(loader.encoded(request, 512)?.let(::String)).isEqualTo("E@512")
+    }
+
+    @Test
+    fun aControllersTimeOnlyStartsOnceItsLoadHasAPermit() = runTest {
+        // The app's own loads hold every permit for a while; the controller's waits in line, then loads at once.
+        sources.pictures[embedded] = "E"
+        sources.gate = CompletableDeferred()
+        val loader = counting(CountingCodec())
+        val busy = (1..CoverLoader.PARALLEL_LOADS).map { async { loader.load(CoverRequest.Track(100L + it), 96) } }
+        val controller = async { loader.encoded(request, 512, timeoutMs = 100) }
+        advanceTimeBy(1_000)
+
+        sources.gate!!.complete(Unit)
+        busy.forEach { it.await() }
+
+        assertThat(controller.await()?.let(::String)).isEqualTo("E@512")
+    }
+
+    @Test
+    fun aControllersLoadThatTakesTooLongIsGivenUp() = runTest {
+        sources.pictures[embedded] = "E"
+        sources.delayMs = 20_000
+        val loader = counting(CountingCodec())
+
+        assertThat(loader.encoded(request, 512, timeoutMs = 10_000)).isNull()
+        assertThat(currentTime).isLessThan(20_000)
+        // Nothing of it was stored.
+        assertThat(disk.read(embedded.key + "@512")).isNull()
+    }
+
+    @Test
+    fun aControllersCoverNoLongerWantedLoadsNothing() = runTest {
+        sources.pictures[embedded] = "E"
+        val loader = counting(CountingCodec())
+
+        assertThat(loader.encoded(request, 512, wanted = { false })).isNull()
+        assertThat(plans).isZero()
+        assertThat(sources.reads).isEmpty()
+    }
+
+    @Test
+    fun aCoverMemoryKnowsToBeNoneNeedsNoPlanForAController() = runTest {
+        val loader = counting(CountingCodec())
+        assertThat(loader.load(request, 512)).isNull()
+        val before = plans
+        sources.reads.clear()
+
+        assertThat(loader.encoded(request, 512)).isNull()
+        assertThat(plans).isEqualTo(before)
+        assertThat(sources.reads).isEmpty()
+    }
+
+    @Test
+    fun aDiskEntryThatIsNoPictureOfTheCodecIsLoadedAgain() = runTest {
+        sources.pictures[embedded] = "E"
+        disk.write(embedded.key + "@512", "junk".toByteArray())
+        val codec = CountingCodec()
+
+        assertThat(counting(codec).encoded(request, 512)?.let(::String)).isEqualTo("E@512")
+        assertThat(disk.read(embedded.key + "@512").let { (it as Cached.Picture).bytes.let(::String) }).isEqualTo("E@512")
+    }
+
+    @Test
+    fun aPictureThatCannotBeEncodedEndsTheSearchAsItWouldInTheApp() = runTest {
+        sources.pictures[embedded] = "E"
+        sources.pictures[thumbnail] = "T"
+        val codec = CountingCodec().apply { refuse = "E@512" }
+
+        assertThat(counting(codec).encoded(request, 512)).isNull()
+        assertThat(sources.reads).containsExactly(own, embedded)
     }
 
     @Test

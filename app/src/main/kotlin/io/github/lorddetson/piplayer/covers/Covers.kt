@@ -132,6 +132,7 @@ object Covers {
                         Library.status(app).map { it.revision },
                         TagPassState.progress.map { it.running },
                         IdentityAttacher.changes,
+                        LibrarySettings(app).hiddenFiles,
                     )
                         .collect { loader.invalidate() }
                 }
