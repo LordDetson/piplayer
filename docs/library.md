@@ -770,9 +770,9 @@ Instrumented tests on the API 30 emulator:
 - The sort menus of the Albums and Artists tabs have "Show as grid". The choice is kept per tab in the settings file
   that is backed up (§3.2); a list is the default. The albums of an artist page follow the Albums tab.
 - A grid has columns at least 150 dp wide, two on a phone held upright; an artist page's albums take as many columns as
-  the Albums tab. An album's tile is a square placeholder (covers
-  come with step 13), its title, then its artist and year; an artist's tile is a circle with the artist's letter, their
-  name, then the numbers of albums and songs. The thumb works over grids too.
+  the Albums tab. An album's tile is a square placeholder (covers come with step 13), its title, then its artist and
+  year; an artist's tile is a circle with the artist's letter, their name, then the numbers of albums and songs. A tile
+  has the menu of its row (step 9: play next, add to queue) beside its title. The thumb works over grids too.
 
 ### 11.4 Checks
 
