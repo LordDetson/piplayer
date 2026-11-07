@@ -86,7 +86,7 @@ private fun AudioAccess.update(context: Context, granted: Boolean) {
 
 /**
  * A song list bound to its [viewModel] and the shared [access]. A tap on a song goes to [onSongClick] with its row and
- * the list it was shown in.
+ * the list it was shown in. [onOpenLibrarySettings], on the library's tabs, makes an empty library offer the settings.
  */
 @Composable
 fun SongsScreen(
@@ -101,10 +101,12 @@ fun SongsScreen(
     discHeaders: Boolean = false,
     headerItems: Int = 0,
     headerSections: List<String?> = emptyList(),
+    onOpenLibrarySettings: (() -> Unit)? = null,
     header: LazyListScope.() -> Unit = {},
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val passProgress by viewModel.passProgress.collectAsStateWithLifecycle()
+    val scanning by viewModel.scanning.collectAsStateWithLifecycle()
 
     LifecycleStartEffect(viewModel) {
         viewModel.onStart(access.granted, access.deniedForGood)
@@ -131,6 +133,8 @@ fun SongsScreen(
         headerItems = headerItems,
         headerSections = headerSections,
         header = header,
+        scanning = scanning,
+        onOpenLibrarySettings = onOpenLibrarySettings,
     )
 }
 

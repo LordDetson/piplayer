@@ -23,6 +23,9 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -47,6 +50,10 @@ class SongsViewModel(
 
     /** How far the tag pass has come. */
     val passProgress: StateFlow<PassProgress> = TagPassState.progress
+
+    /** Whether the library's first sync is under way: it is not ready yet (docs/library.md §1.3, §14.1). */
+    val scanning: StateFlow<Boolean> = Library.status(application).map { !it.ready }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(), initialValue = !Library.ready())
 
     /** The order chosen for this kind of list. */
     val order: StateFlow<ListOrder> get() = mutableOrder

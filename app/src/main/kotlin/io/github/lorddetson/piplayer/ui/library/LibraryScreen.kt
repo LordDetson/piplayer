@@ -91,7 +91,9 @@ import io.github.lorddetson.piplayer.settings.ListName
 import io.github.lorddetson.piplayer.settings.ListOrder
 import io.github.lorddetson.piplayer.ui.player.MiniPlayer
 import io.github.lorddetson.piplayer.ui.songs.AudioAccess
+import io.github.lorddetson.piplayer.ui.songs.NoMusic
 import io.github.lorddetson.piplayer.ui.songs.PermissionCard
+import io.github.lorddetson.piplayer.ui.songs.Scanning
 import io.github.lorddetson.piplayer.ui.songs.SongMenu
 import io.github.lorddetson.piplayer.ui.player.QueueTarget
 import io.github.lorddetson.piplayer.ui.songs.SongsScreen
@@ -194,6 +196,9 @@ fun LibraryScreen(host: LibraryHost, onOpenSettings: () -> Unit) {
         snackbarHost = { SnackbarHost(host.snackbar) },
     ) { padding ->
         val modifier = Modifier.padding(padding).fillMaxSize()
+        // The empty states of the tabs (docs/library.md §14.1).
+        val scanning by songs.scanning.collectAsStateWithLifecycle()
+        val empty = TabEmptyStates(scanning, onOpenSettings)
         when (tab) {
             LibraryTab.SONGS -> SongsScreen(
                 access = access,
@@ -203,21 +208,28 @@ fun LibraryScreen(host: LibraryHost, onOpenSettings: () -> Unit) {
                 currentSongId = host.currentSongId,
                 menu = host.menu,
                 emptyText = if (search.isBlank()) null else stringResource(R.string.search_nothing_found),
+                onOpenLibrarySettings = onOpenSettings,
             )
             LibraryTab.ALBUMS -> Groups(
-                access, albums, modifier, search,
+                access, albums, modifier, search, empty,
                 sections = { list -> list.map { it.section } },
                 tiles = { list -> albumTiles(list, host) },
             ) { list -> albumItems(list, host) }
             LibraryTab.ARTISTS -> Groups(
-                access, artists, modifier, search,
+                access, artists, modifier, search, empty,
                 sections = { list -> list.map { it.section } },
                 tiles = { list -> artistTiles(list, host) },
             ) { list -> artistItems(list, host) }
-            LibraryTab.FOLDERS -> FolderContent(access, folders, folder = null, host, modifier, search)
+            LibraryTab.FOLDERS -> FolderContent(access, folders, folder = null, host, modifier, search, empty)
         }
     }
 }
+
+/**
+ * What a tab shows instead of an empty list (docs/library.md §14.1): while [scanning], the scan; once the library is ready
+ * and has nothing, "No music found" with [openSettings].
+ */
+internal class TabEmptyStates(val scanning: Boolean, val openSettings: () -> Unit)
 
 /**
  * A list or grid of groups bound to [viewModel] (docs/library.md §11.3), or the permission card without access; a long one
@@ -229,6 +241,7 @@ private fun <T : List<*>> Groups(
     viewModel: GroupsViewModel<T>,
     modifier: Modifier,
     search: String,
+    empty: TabEmptyStates,
     sections: (T) -> List<String?>,
     tiles: LazyGridScope.(T) -> Unit,
     items: LazyListScope.(T) -> Unit,
@@ -239,9 +252,9 @@ private fun <T : List<*>> Groups(
         onStopOrDispose { viewModel.onStop() }
     }
     when (val state = viewModel.state.collectAsStateWithLifecycle().value) {
-        GroupsState.Loading -> Loading(modifier)
+        GroupsState.Loading -> if (empty.scanning) Scanning(modifier) else Loading(modifier)
         is GroupsState.Loaded -> if (state.value.isEmpty()) {
-            Empty(stringResource(if (search.isBlank()) R.string.list_empty else R.string.search_nothing_found), modifier)
+            if (search.isBlank()) NoMusic(empty.openSettings, modifier) else Empty(stringResource(R.string.search_nothing_found), modifier)
         } else {
             val grid by viewModel.grid.collectAsStateWithLifecycle()
             val labels = remember(state.value) { sections(state.value) }
@@ -422,6 +435,7 @@ internal fun FolderContent(
     host: LibraryHost,
     modifier: Modifier,
     search: String,
+    empty: TabEmptyStates? = null,
 ) {
     if (!access.granted) return PermissionCard(access.deniedForGood, access.request, access.openSettings, modifier)
     val app = LocalContext.current.applicationContext as Application
@@ -430,7 +444,7 @@ internal fun FolderContent(
         onStopOrDispose { viewModel.onStop() }
     }
     val page = when (val state = viewModel.state.collectAsStateWithLifecycle().value) {
-        GroupsState.Loading -> return Loading(modifier)
+        GroupsState.Loading -> return if (empty?.scanning == true) Scanning(modifier) else Loading(modifier)
         is GroupsState.Loaded -> state.value
     }
     if (!page.exists) return Empty(stringResource(R.string.folder_not_found), modifier)
@@ -448,7 +462,10 @@ internal fun FolderContent(
     val at = page.folder ?: folder
     if (at == null) {
         // A top of volumes: no songs of its own.
-        if (page.entries.isEmpty()) return Empty(stringResource(if (search.isBlank()) R.string.list_empty else R.string.search_nothing_found), modifier)
+        if (page.entries.isEmpty()) {
+            if (search.isBlank() && empty != null) return NoMusic(empty.openSettings, modifier)
+            return Empty(stringResource(if (search.isBlank()) R.string.list_empty else R.string.search_nothing_found), modifier)
+        }
         return Box(modifier.fillMaxSize()) {
             val listState = rememberLazyListState()
             LazyColumn(Modifier.fillMaxSize().testTag(LibraryTags.LIST), state = listState) { folderItems() }

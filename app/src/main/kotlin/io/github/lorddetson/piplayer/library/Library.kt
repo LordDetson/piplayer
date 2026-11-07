@@ -255,6 +255,9 @@ object Library {
     /** How many syncs have changed the library in this process; null before it is opened. */
     fun revision(): Long? = opened.value?.sync?.status?.value?.revision
 
+    /** Whether the open library is ready (docs/library.md §1.3); false before it is opened. */
+    fun ready(): Boolean = opened.value?.sync?.status?.value?.ready ?: false
+
     /** The collation of the stored sort keys, once a sync has looked (docs/library.md §11.1). */
     fun collation(): String? = opened.value?.sync?.status?.value?.collation
 

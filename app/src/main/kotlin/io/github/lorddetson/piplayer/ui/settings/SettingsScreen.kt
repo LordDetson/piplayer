@@ -36,16 +36,22 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import io.github.lorddetson.piplayer.BuildConfig
 import io.github.lorddetson.piplayer.R
 import io.github.lorddetson.piplayer.settings.HiddenFiles
 import io.github.lorddetson.piplayer.settings.ThemeMode
 
 /**
- * The Settings screen (docs/library.md §3.6): sections fill in as their milestones land; M2a has Library and
- * Appearance.
+ * The Settings screen (docs/library.md §3.6, §14.3): sections fill in as their milestones land; M2a has Library,
+ * Appearance and About.
  */
 @Composable
-fun SettingsScreen(onBack: () -> Unit, onOpenFolders: () -> Unit, viewModel: SettingsViewModel = viewModel()) {
+fun SettingsScreen(
+    onBack: () -> Unit,
+    onOpenFolders: () -> Unit,
+    onOpenLicenses: () -> Unit = {},
+    viewModel: SettingsViewModel = viewModel(),
+) {
     val theme by viewModel.theme.collectAsStateWithLifecycle()
     val hidden by viewModel.hiddenFiles.collectAsStateWithLifecycle()
     SettingsScaffold(stringResource(R.string.settings_title), onBack) { padding ->
@@ -107,6 +113,17 @@ fun SettingsScreen(onBack: () -> Unit, onOpenFolders: () -> Unit, viewModel: Set
             }
             SectionTitle(stringResource(R.string.settings_appearance))
             ThemeChoice(theme, viewModel::setTheme)
+            SectionTitle(stringResource(R.string.settings_about))
+            Text(
+                text = stringResource(R.string.settings_version, BuildConfig.VERSION_NAME),
+                style = MaterialTheme.typography.bodyLarge,
+                modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp),
+            )
+            TextRow(
+                stringResource(R.string.settings_licenses),
+                stringResource(R.string.settings_licenses_summary),
+                onOpenLicenses,
+            )
         }
     }
 }
