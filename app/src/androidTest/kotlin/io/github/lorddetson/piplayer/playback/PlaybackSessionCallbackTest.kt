@@ -336,7 +336,7 @@ class PlaybackSessionCallbackTest {
 
         assertThat(result.mediaItems.map { it.mediaId }).containsExactly("3", "1")
         assertThat(result.startIndex).isEqualTo(1)
-        assertThat(queueRequests.last()).isEqualTo(QueueState(request, emptyList()))
+        assertThat(queueRequests.last()).isEqualTo(QueueState(request, emptyList(), libraryId()))
     }
 
     @Test
