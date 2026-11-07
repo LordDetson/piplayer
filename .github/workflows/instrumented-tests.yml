@@ -2,6 +2,9 @@ name: Instrumented tests
 
 on:
   workflow_dispatch:
+  # A step's full suite before it merges: push the step to a ci/<name> branch, and delete the branch afterwards.
+  push:
+    branches: ['ci/**']
   # Nightly, 04:30 in Minsk; the run stops after the first job when main has no commit from the last 25 hours.
   schedule:
     - cron: '30 1 * * *'
