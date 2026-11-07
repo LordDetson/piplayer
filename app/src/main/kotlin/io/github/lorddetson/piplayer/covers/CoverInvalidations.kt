@@ -3,6 +3,7 @@ package io.github.lorddetson.piplayer.covers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.merge
@@ -16,7 +17,7 @@ import kotlinx.coroutines.flow.scan
  */
 object CoverInvalidations {
 
-    fun of(revisions: Flow<Long>, passRunning: Flow<Boolean>): Flow<Unit> = merge(
+    fun of(revisions: Flow<Long>, passRunning: Flow<Boolean>, identityChanges: Flow<Long> = emptyFlow()): Flow<Unit> = merge(
         revisions.distinctUntilChanged().drop(1).map { },
         passRunning.distinctUntilChanged()
             .scan(false to false) { (_, was), now -> was to now }

@@ -121,6 +121,21 @@ class CoverDiskCacheTest {
     }
 
     @Test
+    fun eachFilesTimeIsReadOnceWhenTheCacheOpens() {
+        val first = CoverDiskCache(dir, 10_000_000, clock = { now })
+        repeat(200) {
+            now++
+            first.write("key $it", bytes(10))
+        }
+        var reads = 0
+        val again = CoverDiskCache(dir, 10_000_000, clock = { now }, modifiedAt = { file -> reads++; file.lastModified() })
+
+        assertThat(again.size).isEqualTo(200 * CoverDiskCache.MIN_FILE_BYTES)
+        // A sort that asked for the time at every comparison would read it some 1 500 times.
+        assertThat(reads).isEqualTo(200)
+    }
+
+    @Test
     fun clearingDeletesEveryFile() {
         val cache = cache()
         cache.write("a", bytes(100))

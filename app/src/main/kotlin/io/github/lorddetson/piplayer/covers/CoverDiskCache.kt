@@ -20,6 +20,8 @@ class CoverDiskCache(
     private val dir: File,
     private val maxBytes: Long = MAX_BYTES,
     private val clock: () -> Long = System::currentTimeMillis,
+    /** When a file was last used; read once per file when the cache opens. */
+    private val modifiedAt: (File) -> Long = File::lastModified,
 ) {
 
     /** File name to what it counts, least recently used first; read from the folder at the first call. */
@@ -103,7 +105,7 @@ class CoverDiskCache(
         val found = dir.listFiles().orEmpty().filter { it.isFile }
         // A write that died before its rename.
         found.filter { it.name.endsWith(".tmp") }.forEach { it.delete() }
-        for (file in found.filterNot { it.name.endsWith(".tmp") }.sortedBy { it.lastModified() }) {
+        for (file in found.filterNot { it.name.endsWith(".tmp") }.sortedBy { modifiedAt(it) }) {
             val weight = weightOf(file.length())
             files[file.name] = weight
             total += weight

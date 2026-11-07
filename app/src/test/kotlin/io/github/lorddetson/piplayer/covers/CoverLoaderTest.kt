@@ -216,6 +216,19 @@ class CoverLoaderTest {
     }
 
     @Test
+    fun aMissingThumbnailIsNotRememberedOnDisk() = runTest {
+        // An image put into the folder later changes neither the file's size nor its time.
+        loader().load(request, 96)
+        sources.reads.clear()
+
+        sources.pictures[thumbnail] = "T"
+
+        assertThat(disk.read(thumbnail.key + "@96")).isNull()
+        assertThat(loader().load(request, 96)).isEqualTo("T@96")
+        assertThat(sources.reads).containsExactly(own, thumbnail)
+    }
+
+    @Test
     fun clearingForgetsMemoryAndDisk() = runTest {
         sources.pictures[embedded] = "E"
         val loader = loader()

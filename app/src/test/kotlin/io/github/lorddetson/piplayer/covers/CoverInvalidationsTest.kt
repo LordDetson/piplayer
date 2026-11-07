@@ -27,6 +27,14 @@ class CoverInvalidationsTest {
     }
 
     @Test
+    fun eachAttachPassThatChangedIdentitiesCounts() = runBlocking<Unit> {
+        val count = CoverInvalidations.of(emptyList<Long>().asFlow(), emptyList<Boolean>().asFlow(), listOf(0L, 0L, 1L, 2L).asFlow())
+            .toList().size
+
+        assertThat(count).isEqualTo(2)
+    }
+
+    @Test
     fun bothCount() {
         assertThat(count(listOf(1, 2), listOf(true, false))).isEqualTo(2)
     }

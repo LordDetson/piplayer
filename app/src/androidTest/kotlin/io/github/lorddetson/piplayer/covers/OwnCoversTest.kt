@@ -168,6 +168,21 @@ class OwnCoversTest {
     }
 
     @Test
+    fun aReferenceWhoseCopyIsMissingCountsAsNone() = runBlocking<Unit> {
+        // After a restore: user.db came back, the copies in the no-backup files did not.
+        database.covers().putTrackCover(7, "restored-track.jpg", 100, 100, setAt = 1)
+        database.covers().putAlbumCover("album", "restored-album.jpg", 100, 100, setAt = 1)
+
+        covers.load()
+
+        assertThat(covers.track(7)).isNull()
+        assertThat(covers.album("album")).isNull()
+        assertThat(covers.identitiesWithCovers()).isEmpty()
+        assertThat(database.covers().trackCovers()).isEmpty()
+        assertThat(database.covers().albumCovers()).isEmpty()
+    }
+
+    @Test
     fun clearingForgetsEveryCover() = runBlocking<Unit> {
         covers.load()
         covers.setTrack(7, copyOf(image(100)))
