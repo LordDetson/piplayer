@@ -847,6 +847,7 @@ Phases (a) to (c) land in M4a, with accepted results saved in PiPlayer only; pha
 | MusicBrainz ws/2 | 1.0 (core, M3) | no key; 1 req/s per IP; mandatory User-Agent; core data CC0, genres/tags CC BY-NC-SA; register PiPlayer at metabrainz.org (non-profit tier) and confirm before the Play release (M5) |
 | Cover Art Archive | 1.0 (core, M3) | images remain copyrighted by rights holders ("use at your own risk"); depends on Internet Archive uptime |
 | GitHub Releases API | 1.0 (M5), opt-in update check, GitHub build only | sends no library data; disclosed like the services above |
+| Radio Browser | v1.x, user-triggered (internet radio) | free community directory of radio stations, no key; receives search terms; the streams come from the stations themselves; send a User-Agent and pick a server from its DNS list |
 | LRCLIB | v1.x, user-triggered | free, no key, synced lyrics; receives artist, title, album and duration; lyric texts are unlicensed, so never write them into files by default |
 | Discogs | later, display-only | CC0 text but API terms limit storage (6 h display rule); images restricted; no secret in the APK |
 | AudD / ACRCloud | later, bring-your-own-key | paid; audio upload must be disclosed |

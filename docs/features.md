@@ -32,7 +32,7 @@ out. Track identification is specified in [track-identification.md](track-identi
 - An own lock screen, screen overlays, changes to system settings, privileged-permission workarounds, vendor hooks.
 - An exported library database or settings provider for other apps; other apps use the standard media session.
 - All-files storage access (TI §7.3).
-- Streaming services, cloud and network library sources, internet radio in 1.0.
+- Streaming services, cloud and network library sources in 1.0. Internet radio comes right after 1.0 (`v1.x`).
 - In-app purchases, ads, analytics or crash-reporting SDKs, numeric audio quality ratings.
 - Writing anything into a file without the user's confirmation.
 
@@ -77,7 +77,12 @@ soon after 1.0, `later` is planned without a date. The items listed under Cut li
 - Crossfade that never fades inside continuous albums, using release data. `later`
 - Parametric EQ editor, per-device presets, headphone correction downloads, spectrum view, waveform seek bar. `later`
 - Bit-perfect USB output through the official platform API on Android 14+. `later`
-- CUE sheets, internet radio. `later`
+- CUE sheets. `later`
+- Internet radio: a station directory (Radio Browser) with search by country, genre and language, stations added by
+  their stream URL, favorites, and the current title from the stream (TI §9). `v1.x`
+- Own radio on the home network: what PiPlayer plays is encoded on the phone and served to listeners on the same
+  Wi-Fi, behind a password. No public broadcast, because streaming music to the public needs licences. Comes after
+  the radio receiver. `later`
 
 ### Library
 
@@ -371,20 +376,22 @@ planned for v1.x.
 
 v1.x, in planned order (items moved by the cut line come first):
 
-1. Car displays (Android Auto), voice requests and configurable notification buttons.
-2. Lyrics (TI §9) with timing offsets, together with folder grants: their health check and per-folder write
+1. Internet radio: station directory, own stream URLs, favorites, the current title (owner's decision of
+   2026-11-07: right after 1.0).
+2. Car displays (Android Auto), voice requests and configurable notification buttons.
+3. Lyrics (TI §9) with timing offsets, together with folder grants: their health check and per-folder write
    status, background tag writing, .lrc files and cover.jpg in the album folder.
-3. ReplayGain from tags, speed and pitch, silence skipping, then fades.
-4. Own equalizer with bass and treble, presets, text import and limiter.
-5. Home screen widget, configurable player buttons, launcher shortcuts, share target.
-6. User data export and import, storage screen, diagnostics with the command log.
-7. Bundled lossless decoders, loudness analysis, batch tag editing, Unicode conversion of legacy tags, derived
+4. ReplayGain from tags, speed and pitch, silence skipping, then fades.
+5. Own equalizer with bass and treble, presets, text import and limiter.
+6. Home screen widget, configurable player buttons, launcher shortcuts, share target.
+7. User data export and import, storage screen, diagnostics with the command log.
+8. Bundled lossless decoders, loudness analysis, batch tag editing, Unicode conversion of legacy tags, derived
    images, theme additions, command filters, resume on connect and the remaining library additions.
 
-Open decision for the owner: move the own equalizer up to item 2, or accept that devices without an effect panel
+Open decision for the owner: move the own equalizer up to item 3, or accept that devices without an effect panel
 have only the basic platform equalizer in 1.0 (and none if it falls below the cut line).
 
-Later: crossfade, CUE sheets, internet radio, casting (only if a GPL-compatible way is found), more lossless and
+Later: own radio on the home network (after the radio receiver), crossfade, CUE sheets, casting (only if a GPL-compatible way is found), more lossless and
 niche formats, parametric EQ and headphone presets, bit-perfect USB output, rule-based smart playlists, duplicate
 finder, rating tags, status broadcasts, ListenBrainz scrobbling, waveform seek bar, spectrum view, additional
 player layouts.
