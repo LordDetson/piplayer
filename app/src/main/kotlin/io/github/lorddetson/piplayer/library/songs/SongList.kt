@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.annotation.VisibleForTesting
 import io.github.lorddetson.piplayer.library.Library
 import io.github.lorddetson.piplayer.library.db.SongRow
+import io.github.lorddetson.piplayer.library.lists.LibraryLists
 import io.github.lorddetson.piplayer.library.lists.SongQuery
 import io.github.lorddetson.piplayer.settings.HiddenFiles
 import io.github.lorddetson.piplayer.settings.LibrarySettings
@@ -77,6 +78,22 @@ object SongList {
         return Library.read(app) { database ->
             load(LibrarySongSource(database, hidden, query), Library.revision() to hidden, fresh, query, Library.collation())
         }
+    }
+
+    /**
+     * The songs of the files [ids] by their file ID, read without being kept (docs/playback.md §9.1, §9.4); with a test's
+     * own source, those of its songs. Blocks; call it off the main thread.
+     */
+    fun songsById(context: Context, ids: Collection<Long>): Map<Long, Song> {
+        if (ids.isEmpty()) return emptyMap()
+        sourceOverride?.let { source ->
+            val wanted = ids.toHashSet()
+            return source.songs().filter { it.id in wanted }.associateBy { it.id }
+        }
+        val app = context.applicationContext
+        if (!Library.mayRead(app)) return emptyMap()
+        Library.awaitReady(app, READY_TIMEOUT_MS)
+        return Library.read(app) { database -> LibraryLists(database).songsById(ids) }
     }
 
     /**

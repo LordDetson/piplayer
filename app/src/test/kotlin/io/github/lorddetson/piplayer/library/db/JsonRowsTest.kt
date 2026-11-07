@@ -63,4 +63,36 @@ class JsonRowsTest {
 
         assertThat((Json.parseToJsonElement(json).jsonArray.single() as JsonArray).toList()).containsOnly(JsonNull)
     }
+
+    @Test
+    fun `text is written as the escaping of every character one by one writes it`() {
+        // Most values need no escape and go in whole (docs/library.md §1.3); the result must not depend on that.
+        val random = kotlin.random.Random(13)
+        val alphabet = "aZ09 ёЖ-_/'\"\\\n\r\t\u0001\u001F\u007F 🎵" + Char(0xD83D) + Char(0xDE00) + Char(0xDC00)
+        repeat(5_000) {
+            val value = String(CharArray(random.nextInt(0, 12)) { alphabet[random.nextInt(alphabet.length)] })
+            val json = JsonRows().apply { row { text(value) } }.toString()
+
+            assertThat(json).describedAs(value.map { it.code.toString(16) }.toString()).isEqualTo("[[${reference(value)}]]")
+        }
+    }
+
+    /** The escaping as JsonRows did it for every character, before plain text went in whole. */
+    private fun reference(value: String): String = buildString {
+        append('"')
+        for ((i, c) in value.withIndex()) {
+            when {
+                c == '"' -> append("\\\"")
+                c == '\\' -> append("\\\\")
+                c == '\n' -> append("\\n")
+                c == '\r' -> append("\\r")
+                c == '\t' -> append("\\t")
+                c < ' ' -> append("\\u").append(c.code.toString(16).padStart(4, '0'))
+                c.isHighSurrogate() && value.getOrNull(i + 1)?.isLowSurrogate() != true -> append('�')
+                c.isLowSurrogate() && value.getOrNull(i - 1)?.isHighSurrogate() != true -> append('�')
+                else -> append(c)
+            }
+        }
+        append('"')
+    }
 }

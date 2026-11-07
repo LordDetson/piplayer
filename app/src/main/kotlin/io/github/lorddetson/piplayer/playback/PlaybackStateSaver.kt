@@ -68,7 +68,14 @@ class PlaybackStateSaver(
         // May come from the callback's expansion thread; the main thread owns the last snapshot.
         handler.post {
             last = null
-            if (state != null) save()
+            if (state == null) {
+                // The saved queue may be gone with it (docs/playback.md §9.4): the next one writes its queue file anew.
+                savedOrder = null
+                savedOrderQueue = null
+                queueRevision = 0
+            } else {
+                save()
+            }
         }
     }
 
@@ -80,15 +87,18 @@ class PlaybackStateSaver(
         val item = player.currentMediaItem ?: return
         val row = player.currentMediaItemIndex
         if (row < 0) return
-        val songId = item.mediaId.toLongOrNull() ?: -1L
+        val songId = QueueIds.fileId(item.mediaId) ?: -1L
         val uri = item.localConfiguration?.uri?.toString()
         if (songId < 0) {
             // During an insertion the player can change before the new queue state arrives; do not save that moment.
             if (state.openItems.none { it.index == row && it.uri == uri }) return
-        } else if (state.library == null) {
+        } else if (state.library == null && state.edits.added.isEmpty()) {
             return
         }
-        saveOrder(state)
+        // While the player and the queue state disagree no snapshot is written: it would name a wrong queue file.
+        if (!saveQueueFile(state)) return
+        // A queue of added songs only lives in the queue file; without it there is nothing to name.
+        if (state.library == null && state.openItems.isEmpty() && queueRevision <= 0) return
         val metadata = item.mediaMetadata
         val position = if (player.playbackState == Player.STATE_ENDED) 0L else player.currentPosition.coerceAtLeast(0)
         val snapshot = PlaybackSnapshot(
@@ -113,46 +123,51 @@ class PlaybackStateSaver(
     }
 
     /**
-     * Writes the play order to the queue file when it changed while shuffle is on, before the snapshot that names the
-     * file's revision. Off, the snapshot names no queue file.
+     * Writes the queue file when the queue's edits or, while shuffle is on, its play order changed, before the snapshot
+     * that names the file's revision (docs/playback.md §4.8, §9.4). With neither, the snapshot names no queue file.
+     * False while the player and [state] disagree for a moment, when nothing may be saved.
      */
-    private fun saveOrder(state: QueueState) {
+    private fun saveQueueFile(state: QueueState): Boolean {
         val order = shuffleOrder()?.takeIf { player.shuffleModeEnabled } as? StartFirstShuffleOrder
-        if (order == null) {
+        if (order == null && state.edits.isEmpty) {
             savedOrder = null
+            savedOrderQueue = null
             queueRevision = 0
-            return
+            return true
         }
-        if (order === savedOrder && state === savedOrderQueue) return
+        if (order === savedOrder && state === savedOrderQueue) return true
         savedOrder = order
         savedOrderQueue = state
-        val indices = order.indices()
-        val keys = entryKeys(state)?.takeIf { indices.size == it.size }
-        if (keys == null) {
-            // The player and the queue state disagree for a moment; no snapshot may name an older queue's file. The
-            // next change of either tries again.
-            queueRevision = 0
-            return
+        val orderKeys = order?.let {
+            val indices = it.indices()
+            val keys = entryKeys(state)?.takeIf { keys -> indices.size == keys.size }
+            if (keys == null) {
+                // The player and the queue state disagree for a moment; no snapshot may name an older queue's file. The
+                // next change of either tries again.
+                savedOrder = null
+                return false
+            }
+            QueueOrder.keys(keys, indices)
         }
         queueRevision = maxOf(queueRevision + 1, System.currentTimeMillis())
-        store.enqueue(QueueFile(revision = queueRevision, libraryId = state.libraryId, order = QueueOrder.keys(keys, indices)))
+        val edits = state.edits
+        store.enqueue(
+            QueueFile(
+                revision = queueRevision,
+                libraryId = state.libraryId,
+                added = edits.added,
+                journal = edits.journal,
+                order = orderKeys,
+                nextNumber = edits.nextNumber,
+                upNext = edits.upNext,
+            ),
+        )
+        return true
     }
 
     /** The entries of the player's queue by their keys, or null while the player and [state] disagree. */
-    private fun entryKeys(state: QueueState): List<EntryKey>? {
-        val opened = state.openItems
-        return List(player.mediaItemCount) { row ->
-            val mediaId = player.getMediaItemAt(row).mediaId
-            val fileId = mediaId.toLongOrNull()
-            if (fileId != null) {
-                EntryKey.Song(fileId)
-            } else {
-                val index = opened.indexOfFirst { it.index == row && it.uri == mediaId }
-                if (index < 0) return null
-                EntryKey.Opened(index)
-            }
-        }
-    }
+    private fun entryKeys(state: QueueState): List<EntryKey>? =
+        QueueIds.keys(List(player.mediaItemCount) { player.getMediaItemAt(it).mediaId }, state.openItems)
 
     override fun onTimelineChanged(timeline: Timeline, reason: Int) = save()
 

@@ -454,7 +454,9 @@ keeps playing meanwhile, and the crash leaves a native crash report of `:tagger`
 - A tap on a song plays the list it was tapped in, from that song, in the order and with the search shown (§6.4).
 - The playing song is marked in every list. On Now Playing the artist and the album open their pages, as found at the
   tap. Each song row
-  has a menu with "Go to album", "Go to artist" (one entry per artist) and "Go to folder".
+  has a menu with "Play next" and "Add to queue" (playback.md §9.1), "Go to album", "Go to artist" (one entry per
+  artist) and "Go to folder"; album, artist and folder rows and the top bars of their pages have "Play next" and "Add
+  to queue".
 - The debug entry moves from the list into the top bar.
 
 ### 6.2 Grouping

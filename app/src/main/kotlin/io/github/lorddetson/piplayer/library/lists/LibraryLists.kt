@@ -103,6 +103,9 @@ class LibraryLists(private val database: LibraryDatabase, private val hidden: Hi
             section = section,
         )
 
+    /** A song read by its ID, in no list's order, so without a section. */
+    private fun songOf(row: ListSongRow) = song(row, section = null)
+
     /** How a row of [sort] finds its section from what the query selected for it. */
     private fun sectionOf(sort: SongSort): (ListSongRow) -> String? = when (sort) {
         SongSort.TITLE, SongSort.ARTIST, SongSort.ALBUM, SongSort.FILE_NAME -> {
@@ -224,6 +227,17 @@ class LibraryLists(private val database: LibraryDatabase, private val hidden: Hi
         )
     }
 
+    /**
+     * The songs of the files [ids], visible or hidden, by their file ID (docs/playback.md §9.1, §9.4): the songs added to
+     * a queue and the added entries of a restored one. A file that is gone is left out.
+     */
+    fun songsById(ids: Collection<Long>): Map<Long, Song> = ids.distinct().chunked(ID_CHUNK).flatMap { chunk ->
+        val sql = "SELECT f.id AS fileId, f.media_store_id AS mediaStoreId, d.title, d.artist, d.album, " +
+            "d.duration_ms AS durationMs, d.disc_number AS discNumber, f.relative_path AS relativePath " +
+            "FROM track_display d JOIN audio_file f ON f.id = d.file_id WHERE f.id IN (" + chunk.joinToString(",") { "?" } + ")"
+        run(RoomRawQuery(sql) { statement -> chunk.forEachIndexed { i, id -> statement.bindLong(i + 1, id) } })
+    }.associate { it.fileId to songOf(it) }
+
     private fun filterOf(query: SongQuery): Pair<String, List<Any>>? = when (query.kind) {
         ListKind.SONGS -> "1" to emptyList()
         ListKind.ALBUM -> "d.album_key = ?" to listOf(query.key)
@@ -339,6 +353,9 @@ class LibraryLists(private val database: LibraryDatabase, private val hidden: Hi
         private fun visible(f: String, d: String) = "$f.folder_rule != 2 AND ($f.folder_rule = 1 OR (" +
             "(? OR NOT ($f.is_ringtone OR $f.is_notification OR $f.is_alarm)) AND (? OR NOT $f.recording) " +
             "AND ($d.duration_ms IS NULL OR $d.duration_ms >= ?)))"
+
+        /** File IDs bound in one query, well under SQLite's limit of arguments. */
+        private const val ID_CHUNK = 500
 
         /** U+10FFFF, after which no character sorts. */
         private const val MAX_CODE_POINT = "\uDBFF\uDFFF"

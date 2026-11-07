@@ -23,6 +23,10 @@ import io.github.lorddetson.piplayer.playback.PlaybackExtras
 import io.github.lorddetson.piplayer.playback.PlaybackSessionCallback
 import io.github.lorddetson.piplayer.playback.QueueRequest
 import io.github.lorddetson.piplayer.library.lists.SongQuery
+import io.github.lorddetson.piplayer.library.lists.SongSort
+import io.github.lorddetson.piplayer.settings.ListName
+import io.github.lorddetson.piplayer.settings.ListSorts
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
@@ -50,10 +54,14 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     /** The current song's embedded cover, null while there is none or it is still being decoded. */
     val cover: StateFlow<ImageBitmap?> = mutableCover.asStateFlow()
 
-    private val mutableMessages = Channel<String>(Channel.BUFFERED)
+    private val mutableMessages = Channel<PlayerMessage>(Channel.BUFFERED)
 
-    /** Messages of the playback service, such as playback stopping on broken songs. */
-    val messages: Flow<String> = mutableMessages.receiveAsFlow()
+    /** Messages of the playback service, such as playback stopping on broken songs, and of the queue's edits. */
+    val messages: Flow<PlayerMessage> = mutableMessages.receiveAsFlow()
+
+    private fun message(text: String?) {
+        if (text != null) mutableMessages.trySend(PlayerMessage(text))
+    }
 
     /** Now Playing draws the cover as wide as the screen at most. */
     private val coverSizePx = application.resources.displayMetrics.let { minOf(it.widthPixels, it.heightPixels) }
@@ -73,7 +81,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     private val connection = PlaybackConnection(application, object : MediaController.Listener {
         @OptIn(UnstableApi::class)
         override fun onError(controller: MediaController, sessionError: SessionError) {
-            mutableMessages.trySend(sessionError.message)
+            message(sessionError.message)
         }
 
         override fun onExtrasChanged(controller: MediaController, extras: Bundle) {
@@ -155,19 +163,108 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
                     val sessionResult = runCatching { result.get() }.getOrNull() ?: return@addListener
                     val app = getApplication<Application>()
                     if (sessionResult.resultCode != SessionResult.RESULT_SUCCESS) {
-                        mutableMessages.trySend(app.getString(R.string.open_files_failed))
+                        message(app.getString(R.string.open_files_failed))
                     } else {
                         val skipped = sessionResult.extras.getInt(PlaybackSessionCallback.EXTRA_SKIPPED, 0)
-                        if (skipped > 0) {
-                            mutableMessages.trySend(
-                                app.resources.getQuantityString(R.plurals.open_files_skipped, skipped, skipped),
-                            )
-                        }
+                        if (skipped > 0) message(app.resources.getQuantityString(R.plurals.open_files_skipped, skipped, skipped))
                     }
                 },
                 ContextCompat.getMainExecutor(getApplication()),
             )
         }
+    }
+
+    /**
+     * Adds the songs of [target] right after the current song ([next]) or after the up-next run, and says so
+     * (docs/playback.md §9.1). An album, an artist or a folder goes in the sort kept for its kind of list.
+     */
+    fun addToQueue(target: QueueTarget, next: Boolean) {
+        viewModelScope.launch {
+            val args = Bundle().apply {
+                putBoolean(PlaybackSessionCallback.EXTRA_NEXT, next)
+                when (target) {
+                    is QueueTarget.Songs -> putLongArray(PlaybackSessionCallback.EXTRA_SONG_IDS, target.ids.toLongArray())
+                    else -> putString(PlaybackSessionCallback.EXTRA_REQUEST, QueueRequest(NO_SONG, 0, queryOf(target)).mediaId)
+                }
+            }
+            connection.whenConnected {
+                val result = sendCustomCommand(PlaybackSessionCallback.ADD_TO_QUEUE_COMMAND, args)
+                result.addListener(
+                    {
+                        val sessionResult = runCatching { result.get() }.getOrNull() ?: return@addListener
+                        if (sessionResult.resultCode != SessionResult.RESULT_SUCCESS) return@addListener
+                        val count = sessionResult.extras.getInt(PlaybackSessionCallback.EXTRA_ADDED)
+                        val title = sessionResult.extras.getString(PlaybackSessionCallback.EXTRA_TITLE).orEmpty()
+                        val resources = getApplication<Application>().resources
+                        message(
+                            when {
+                                count == 1 && next -> resources.getString(R.string.queue_plays_next, title)
+                                count == 1 -> resources.getString(R.string.queue_added, title)
+                                next -> resources.getQuantityString(R.plurals.queue_plays_next_count, count, count)
+                                else -> resources.getQuantityString(R.plurals.queue_added_count, count, count)
+                            },
+                        )
+                    },
+                    ContextCompat.getMainExecutor(getApplication()),
+                )
+            }
+        }
+    }
+
+    /**
+     * The list of [target] without a search: an album by disc and track, an artist and a folder in the order kept for
+     * their kind (docs/playback.md §9.1, docs/library.md §6.3).
+     */
+    private suspend fun queryOf(target: QueueTarget): SongQuery {
+        val (query, list) = when (target) {
+            is QueueTarget.Album -> return SongQuery.album(target.key)
+            is QueueTarget.Artist -> SongQuery.artist(target.key) to ListName.ARTIST_PAGE
+            is QueueTarget.Folder -> SongQuery.tree(target.volume, target.relativePath) to ListName.FOLDERS
+            is QueueTarget.Songs -> return SongQuery.SONGS
+        }
+        val order = ListSorts(getApplication()).order(list).first()
+        return query.copy(sort = SongSort.of(order.field) ?: query.sort, reversed = order.reversed)
+    }
+
+    /** Removes the queue entry at [row] that shows [mediaId], with "Undo" in the message (docs/playback.md §9.2). */
+    fun removeFromQueue(row: Int, mediaId: String, title: String) {
+        val args = Bundle().apply {
+            putInt(PlaybackSessionCallback.EXTRA_ROW, row)
+            putString(PlaybackSessionCallback.EXTRA_MEDIA_ID, mediaId)
+        }
+        connection.whenConnected {
+            val result = sendCustomCommand(PlaybackSessionCallback.REMOVE_FROM_QUEUE_COMMAND, args)
+            result.addListener(
+                {
+                    val sessionResult = runCatching { result.get() }.getOrNull() ?: return@addListener
+                    if (sessionResult.resultCode != SessionResult.RESULT_SUCCESS) return@addListener
+                    val app = getApplication<Application>()
+                    // The undo names this removal: an older message cannot put back a later one (§9.2).
+                    val token = sessionResult.extras.getLong(PlaybackSessionCallback.EXTRA_TOKEN, -1)
+                    mutableMessages.trySend(
+                        PlayerMessage(app.getString(R.string.queue_removed, title), app.getString(R.string.queue_undo)) {
+                            undoRemoval(token)
+                        },
+                    )
+                },
+                ContextCompat.getMainExecutor(getApplication()),
+            )
+        }
+    }
+
+    /** Puts back the entry of the removal [token] names, if the queue has not changed since (§9.2). */
+    fun undoRemoval(token: Long) = connection.whenConnected {
+        sendCustomCommand(PlaybackSessionCallback.UNDO_REMOVE_COMMAND, Bundle().apply { putLong(PlaybackSessionCallback.EXTRA_TOKEN, token) })
+    }
+
+    /** Moves the entry [mediaId] from place [from] to [to] of the order the queue screen shows (§9.2). */
+    fun moveInQueue(from: Int, to: Int, mediaId: String) {
+        val args = Bundle().apply {
+            putInt(PlaybackSessionCallback.EXTRA_FROM, from)
+            putInt(PlaybackSessionCallback.EXTRA_TO, to)
+            putString(PlaybackSessionCallback.EXTRA_MEDIA_ID, mediaId)
+        }
+        connection.whenConnected { sendCustomCommand(PlaybackSessionCallback.MOVE_IN_QUEUE_COMMAND, args) }
     }
 
     /**
@@ -195,4 +292,19 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
         /** No song of the library has it, so a request with it starts at its row. */
         const val NO_SONG = -1L
     }
+}
+
+/** A message for the snackbar, with an action such as "Undo" when it has one. */
+class PlayerMessage(val text: String, val actionLabel: String? = null, val action: (() -> Unit)? = null)
+
+/** What "Play next" and "Add to queue" add (docs/playback.md §9.1). */
+sealed interface QueueTarget {
+    data class Songs(val ids: List<Long>) : QueueTarget
+
+    data class Album(val key: String) : QueueTarget
+
+    data class Artist(val key: String) : QueueTarget
+
+    /** A folder with all its subfolders. */
+    data class Folder(val volume: String, val relativePath: String) : QueueTarget
 }

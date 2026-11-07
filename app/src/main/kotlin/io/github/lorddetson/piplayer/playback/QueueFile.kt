@@ -54,15 +54,21 @@ data class QueueFile(
     val journal: List<QueueEdit> = emptyList(),
     val order: List<EntryKey>? = null,
     val nextNumber: Long = 1,
+    /** The entries of the up-next run (docs/playback.md §9.1), added ones; format 2. */
+    val upNext: List<EntryKey> = emptyList(),
 )
 
 /**
- * Reads and writes [QueueFile], format 1: four magic bytes and the format, the values in a fixed order with numbers as
- * variable-length integers, and a CRC-32 of everything before it at the end.
+ * Reads and writes [QueueFile], format 2: four magic bytes and the format, the values in a fixed order with numbers as
+ * variable-length integers, and a CRC-32 of everything before it at the end. Format 2 adds the up-next run after the
+ * order; format 1 files are still read, without a run.
  */
 object QueueFileCodec {
 
-    const val FORMAT = 1
+    const val FORMAT = 2
+
+    /** The format of M2a step 8, without the up-next run. */
+    private const val FORMAT_1 = 1
 
     private val MAGIC = "PIQF".toByteArray(Charsets.US_ASCII)
 
@@ -114,6 +120,8 @@ object QueueFileCodec {
                 number(order.size.toLong())
                 order.forEach { key(it) }
             }
+            number(file.upNext.size.toLong())
+            file.upNext.forEach { key(it) }
             flush()
         }
         val bytes = body.toByteArray()
@@ -141,15 +149,18 @@ object QueueFileCodec {
 
     private fun DataInputStream.decode(): QueueFile? {
         val magic = ByteArray(MAGIC.size).also { readFully(it) }
-        if (!magic.contentEquals(MAGIC) || readInt() != FORMAT) return null
+        if (!magic.contentEquals(MAGIC)) return null
+        val format = readInt()
+        if (format != FORMAT && format != FORMAT_1) return null
         val revision = readLong()
         val libraryId = text()
         val nextNumber = number()
         val added = List(count()) { AddedEntry(number(), track()) }
         val journal = List(count()) { edit() }
         val order = if (readBoolean()) List(count()) { key() ?: throw IOException("An order without an entry") } else null
+        val upNext = if (format == FORMAT_1) emptyList() else List(count()) { key() ?: throw IOException("A run without an entry") }
         if (available() != 0) return null
-        return QueueFile(revision, libraryId, added, journal, order, nextNumber)
+        return QueueFile(revision, libraryId, added, journal, order, nextNumber, upNext)
     }
 
     private fun DataInputStream.edit(): QueueEdit = when (readByte().toInt()) {
@@ -259,15 +270,27 @@ object QueueJournal {
     /** Above this many edits the journal is folded into a fixed list. */
     const val MAX_EDITS = 200
 
-    /** [base] with [edits] applied in order. */
-    fun replay(base: List<EntryKey>, edits: List<QueueEdit>): List<EntryKey> {
+    /**
+     * [base] with [edits] applied in order. Without [songKeys] the file IDs of library songs name other files (another
+     * library ID, docs/playback.md §9.4): edits of library songs are left out and an insert after one goes to its row.
+     */
+    fun replay(base: List<EntryKey>, edits: List<QueueEdit>, songKeys: Boolean = true): List<EntryKey> {
         if (edits.isEmpty()) return base
         val list = base.toMutableList()
         for (edit in edits) {
             when (edit) {
-                is QueueEdit.Insert -> list.addAll(placeAfter(list, edit.after, edit.row), edit.entries)
-                is QueueEdit.Remove -> list.remove(edit.entry)
-                is QueueEdit.Move -> if (list.remove(edit.entry)) list.add(placeAfter(list, edit.after, edit.row), edit.entry)
+                is QueueEdit.Insert -> {
+                    val after = edit.after.takeUnless { !songKeys && it is EntryKey.Song }
+                    // An anchor that names another file now is not trusted: the row stands instead.
+                    val at = if (after == null && edit.after != null) edit.row.coerceIn(0, list.size) else placeAfter(list, after, edit.row)
+                    list.addAll(at, edit.entries)
+                }
+                is QueueEdit.Remove -> if (songKeys || edit.entry !is EntryKey.Song) list.remove(edit.entry)
+                is QueueEdit.Move -> if ((songKeys || edit.entry !is EntryKey.Song) && list.remove(edit.entry)) {
+                    val after = edit.after.takeUnless { !songKeys && it is EntryKey.Song }
+                    val at = if (after == null && edit.after != null) edit.row.coerceIn(0, list.size) else placeAfter(list, after, edit.row)
+                    list.add(at, edit.entry)
+                }
             }
         }
         return list
@@ -278,28 +301,5 @@ object QueueJournal {
         if (after == null) return 0
         val index = list.indexOf(after)
         return if (index >= 0) index + 1 else row.coerceIn(0, list.size)
-    }
-
-    /**
-     * [file] folded: every library entry of [entries] becomes an added entry with the track [track] gives it, in order,
-     * and the journal starts again. Opened files stay what they are, at their rows in the snapshot, and the play order
-     * names the same entries under their new keys. A library entry without a track is left out.
-     */
-    fun fold(file: QueueFile, entries: List<EntryKey>, track: (EntryKey) -> TrackRef?): QueueFile {
-        var number = file.nextNumber
-        val added = mutableListOf<AddedEntry>()
-        // Each place of the list gets its new key, so that an entry twice in the queue keeps both places in the order.
-        val renamed = HashMap<EntryKey, ArrayDeque<EntryKey>>()
-        for (key in entries) {
-            val new = if (key is EntryKey.Opened) {
-                key
-            } else {
-                val ref = track(key) ?: continue
-                EntryKey.Added(number).also { added += AddedEntry(number++, ref) }
-            }
-            renamed.getOrPut(key) { ArrayDeque() }.addLast(new)
-        }
-        val order = file.order?.mapNotNull { key -> renamed[key]?.removeFirstOrNull() }
-        return file.copy(added = added, journal = emptyList(), order = order, nextNumber = number)
     }
 }

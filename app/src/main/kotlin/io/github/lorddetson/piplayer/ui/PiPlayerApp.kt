@@ -15,6 +15,7 @@ import io.github.lorddetson.piplayer.ui.library.FolderPage
 import io.github.lorddetson.piplayer.ui.library.LibraryHost
 import io.github.lorddetson.piplayer.ui.library.LibraryScreen
 import io.github.lorddetson.piplayer.ui.songs.SongMenu
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -43,6 +44,12 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarResult
+import io.github.lorddetson.piplayer.playback.QueueIds
+import io.github.lorddetson.piplayer.ui.player.QueueActions
+import io.github.lorddetson.piplayer.ui.player.QueueScreen
+import io.github.lorddetson.piplayer.ui.player.QueueTarget
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
@@ -100,6 +107,10 @@ data class LibraryFolderRoute(val volume: String, val relativePath: String) : Na
 @Serializable
 data object NowPlayingRoute : NavKey
 
+/** The queue screen (docs/playback.md §9.2), opened from Now Playing. */
+@Serializable
+data object QueueRoute : NavKey
+
 /** The Library folders screen (docs/library.md §3.6). */
 @Serializable
 data object FoldersRoute : NavKey
@@ -128,7 +139,18 @@ fun PiPlayerApp(viewModel: PlayerViewModel = viewModel()) {
     val cover by viewModel.cover.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     LaunchedEffect(viewModel) {
-        viewModel.messages.collect { snackbar.showSnackbar(it) }
+        // Messages come one after another; one with "Undo" gives way to the next at once, since a newer one may come
+        // from a change of the queue that its undo no longer fits (docs/playback.md §9.2).
+        var shown: Job? = null
+        var undoable = false
+        viewModel.messages.collect { message ->
+            if (undoable) shown?.cancel() else shown?.join()
+            undoable = message.action != null
+            shown = launch {
+                val result = snackbar.showSnackbar(message.text, message.actionLabel, duration = SnackbarDuration.Short)
+                if (result == SnackbarResult.ActionPerformed) message.action?.invoke()
+            }
+        }
     }
     val backStack = rememberNavBackStack(SongsRoute)
     val close = { if (backStack.size > 1) backStack.removeLastOrNull() }
@@ -145,6 +167,8 @@ fun PiPlayerApp(viewModel: PlayerViewModel = viewModel()) {
             openAlbum = { open(AlbumRoute(it)) },
             openArtist = { open(ArtistRoute(it)) },
             openFolder = { volume, path -> open(LibraryFolderRoute(volume, path)) },
+            playNext = { viewModel.addToQueue(QueueTarget.Songs(listOf(it.id)), next = true) },
+            addToQueue = { viewModel.addToQueue(QueueTarget.Songs(listOf(it.id)), next = false) },
         )
     }
     val host = LibraryHost(
@@ -154,6 +178,7 @@ fun PiPlayerApp(viewModel: PlayerViewModel = viewModel()) {
         currentSongId = currentSongId,
         menu = menu,
         play = viewModel::play,
+        addToQueue = viewModel::addToQueue,
         openNowPlaying = { if (backStack.lastOrNull() != NowPlayingRoute) backStack.add(NowPlayingRoute) },
         openAlbum = menu.openAlbum,
         openArtist = menu.openArtist,
@@ -180,6 +205,17 @@ fun PiPlayerApp(viewModel: PlayerViewModel = viewModel()) {
             entry<ArtistRoute>(metadata = FROM_THE_SIDE) { route -> ArtistPage(route.key, host, onBack = { close() }) }
             entry<LibraryFolderRoute>(metadata = FROM_THE_SIDE) { route ->
                 FolderPage(route.volume, route.relativePath, host, onBack = { close() })
+            }
+            entry<QueueRoute>(metadata = FROM_THE_SIDE) {
+                QueueScreen(
+                    player = player,
+                    actions = QueueActions(
+                        remove = { entry -> viewModel.removeFromQueue(entry.row, entry.mediaId, entry.title) },
+                        move = { entry, from, to -> viewModel.moveInQueue(from, to, entry.mediaId) },
+                    ),
+                    snackbar = snackbar,
+                    onBack = { close() },
+                )
             }
             entry<SettingsRoute>(metadata = FROM_THE_SIDE) {
                 SettingsScreen(
@@ -211,6 +247,7 @@ fun PiPlayerApp(viewModel: PlayerViewModel = viewModel()) {
                             { openLatest { latest -> latest.artists.firstOrNull()?.let { ArtistRoute(it.key) } } }
                         },
                         onOpenAlbum = links?.albumKey?.let { { openLatest { latest -> latest.albumKey?.let(::AlbumRoute) } } },
+                        onOpenQueue = { if (backStack.lastOrNull() != QueueRoute) backStack.add(QueueRoute) },
                     )
                     SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).windowInsetsPadding(WindowInsets.navigationBars))
                 }
@@ -223,11 +260,12 @@ fun PiPlayerApp(viewModel: PlayerViewModel = viewModel()) {
 /** The current song's ID in the library, or null for an opened file or nothing. */
 @Composable
 private fun rememberCurrentSongId(player: Player?): Long? {
-    var id by remember(player) { mutableStateOf(player?.currentMediaItem?.mediaId?.toLongOrNull()) }
+    // An added entry plays a library song too (docs/playback.md §9.4).
+    var id by remember(player) { mutableStateOf(player?.currentMediaItem?.mediaId?.let(QueueIds::fileId)) }
     DisposableEffect(player) {
         val listener = object : Player.Listener {
             override fun onEvents(player: Player, events: Player.Events) {
-                id = player.currentMediaItem?.mediaId?.toLongOrNull()
+                id = player.currentMediaItem?.mediaId?.let(QueueIds::fileId)
             }
         }
         player?.addListener(listener)

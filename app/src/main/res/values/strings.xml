@@ -191,4 +191,24 @@
         <item quantity="one">%1$d album</item>
         <item quantity="other">%1$d albums</item>
     </plurals>
+    <!-- Queue editing (docs/playback.md §9). -->
+    <string name="play_next">Play next</string>
+    <string name="add_to_queue">Add to queue</string>
+    <string name="queue_open">Queue</string>
+    <string name="queue_remove">Remove from queue</string>
+    <string name="queue_removed">Removed: %1$s</string>
+    <string name="queue_move_up">Move up</string>
+    <string name="queue_move_down">Move down</string>
+    <string name="queue_undo">Undo</string>
+    <string name="queue_plays_next">Plays next: %1$s</string>
+    <string name="queue_added">Added to queue: %1$s</string>
+    <string name="page_menu">More options</string>
+    <plurals name="queue_plays_next_count">
+        <item quantity="one">%1$d song plays next</item>
+        <item quantity="other">%1$d songs play next</item>
+    </plurals>
+    <plurals name="queue_added_count">
+        <item quantity="one">%1$d song added to queue</item>
+        <item quantity="other">%1$d songs added to queue</item>
+    </plurals>
 </resources>

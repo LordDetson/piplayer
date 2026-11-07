@@ -310,6 +310,33 @@ class PlaybackRestoreTest {
     }
 
     @Test
+    fun underShuffleAFileOpenedFromAnotherAppPlaysRightAfterTheCurrentSongInThePlayOrder() {
+        songs.songs = (1L..20L).map { SongSourceRule.song(it, "Song %02d".format(it), LONG_FIXTURE) }
+        val opened = insertAudio("open-with-shuffled.mp3")
+        try {
+            controller.tap(QueueRequest(startSongId = 1, startRow = 0), "Song 01")
+            controller.waitUntil("the queue plays") { isPlaying && mediaItemCount == 20 }
+            onMain { controller.shuffleModeEnabled = true }
+            controller.waitUntil("shuffle is on") { shuffleModeEnabled }
+            val before = onMain { shuffledIds() }
+
+            openInApp(opened).use {
+                controller.waitUntil("the opened file plays") { mediaItemCount == 21 && currentMediaItem?.mediaId == opened.toString() }
+                // Nothing of the order is skipped: the opened file stands between the old current song and the rest.
+                assertThat(onMain { shuffledIds() }).containsExactlyElementsOf(listOf(before[0], opened.toString()) + before.drop(1))
+            }
+        } finally {
+            onMain {
+                controller.pause()
+                controller.stop()
+                controller.clearMediaItems()
+                controller.shuffleModeEnabled = false
+            }
+            deleteAudio(opened)
+        }
+    }
+
+    @Test
     fun aFileOpenedFromAnotherAppStartsAQueueAndIsRestoredByASystemPlayRequest() {
         val opened = insertAudio("open-with-alone.mp3")
         try {

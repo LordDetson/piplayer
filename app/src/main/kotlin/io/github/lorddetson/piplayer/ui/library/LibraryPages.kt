@@ -38,6 +38,7 @@ import io.github.lorddetson.piplayer.library.lists.FolderLevels
 import io.github.lorddetson.piplayer.library.lists.SongQuery
 import io.github.lorddetson.piplayer.settings.ListName
 import io.github.lorddetson.piplayer.ui.player.MiniPlayer
+import io.github.lorddetson.piplayer.ui.player.QueueTarget
 import io.github.lorddetson.piplayer.ui.songs.PermissionCard
 import io.github.lorddetson.piplayer.ui.songs.SongsScreen
 import io.github.lorddetson.piplayer.ui.songs.SongsViewModel
@@ -54,10 +55,15 @@ private fun PageScaffold(
     onSearch: (String) -> Unit,
     onSearching: (Boolean) -> Unit,
     sort: @Composable () -> Unit,
+    menu: QueueMenu? = null,
     content: @Composable (Modifier) -> Unit,
 ) {
     Scaffold(
-        topBar = { LibraryTopBar(title, onBack, searching, search, onSearch, onSearching, sort) },
+        topBar = {
+            LibraryTopBar(title, onBack, searching, search, onSearch, onSearching, sort) {
+                menu?.let { QueueMenuButton(stringResource(R.string.page_menu), it) }
+            }
+        },
         bottomBar = { MiniPlayer(host.player, host.cover, onOpen = host.openNowPlaying) },
         snackbarHost = { SnackbarHost(host.snackbar) },
     ) { padding -> content(Modifier.padding(padding).fillMaxSize()) }
@@ -88,6 +94,7 @@ fun AlbumPage(key: String, host: LibraryHost, onBack: () -> Unit) {
         onSearch = { search = it },
         onSearching = { open -> searching = open; if (!open) search = "" },
         sort = { SortButton(ListName.ALBUM_PAGE, songs.order.collectAsStateWithLifecycle().value, songs::setOrder) },
+        menu = album?.let { queue(host, QueueTarget.Album(key)) },
     ) { modifier ->
         when {
             !access.granted -> PermissionCard(access.deniedForGood, access.request, access.openSettings, modifier)
@@ -153,6 +160,7 @@ fun ArtistPage(key: String, host: LibraryHost, onBack: () -> Unit) {
         onSearch = { search = it },
         onSearching = { open -> searching = open; if (!open) search = "" },
         sort = { SortButton(ListName.ARTIST_PAGE, songs.order.collectAsStateWithLifecycle().value, songs::setOrder) },
+        menu = page?.let { queue(host, QueueTarget.Artist(key)) },
     ) { modifier ->
         when {
             !access.granted -> PermissionCard(access.deniedForGood, access.request, access.openSettings, modifier)
@@ -175,12 +183,11 @@ fun ArtistPage(key: String, host: LibraryHost, onBack: () -> Unit) {
                         item(key = "album " + row.first().key) {
                             if (grid) {
                                 Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp).testTag(LibraryTags.GRID)) {
-                                    for (album in row) Box(Modifier.weight(1f)) { AlbumTile(album) { host.openAlbum(album.key) } }
+                                    for (album in row) Box(Modifier.weight(1f)) { AlbumTile(album, host) }
                                     repeat(columns - row.size) { Spacer(Modifier.weight(1f)) }
                                 }
                             } else {
-                                val album = row.single()
-                                AlbumRow(album) { host.openAlbum(album.key) }
+                                AlbumRow(row.single(), host)
                             }
                         }
                     }
@@ -215,6 +222,7 @@ fun FolderPage(volume: String, relativePath: String, host: LibraryHost, onBack: 
         onSearch = { search = it },
         onSearching = { open -> searching = open; if (!open) search = "" },
         sort = { SortButton(ListName.FOLDERS, page.order.collectAsStateWithLifecycle().value, page::setOrder) },
+        menu = queue(host, QueueTarget.Folder(volume, relativePath)),
     ) { modifier -> FolderContent(access, page, folder, host, modifier, search) }
 }
 

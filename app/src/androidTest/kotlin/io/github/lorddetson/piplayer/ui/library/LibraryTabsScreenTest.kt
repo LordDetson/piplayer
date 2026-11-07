@@ -64,6 +64,12 @@ class LibraryTabsScreenTest {
     @Before
     fun connect() {
         controller = connectController()
+        // The service outlives a test: the queue of the one before must not take the songs added here.
+        onMain {
+            controller.stop()
+            controller.clearMediaItems()
+        }
+        controller.waitUntil("the player is empty") { mediaItemCount == 0 }
     }
 
     @After
@@ -265,5 +271,60 @@ class LibraryTabsScreenTest {
         compose.waitForIdle()
 
         compose.onNode(hasTestTag(ScrollThumbTags.THUMB)).assertDoesNotExist()
+    }
+
+    @Test
+    fun theSongMenuPlaysASongNextAndAddsOneToTheQueue() {
+        tap(hasText("Alpha") and inSongs)
+        waitForQueue(2, 1, 3, 4, 5)
+        // The index's files do not exist: playback skips them and stops at the last one, Golf, which is then current.
+        controller.waitUntil("playback stops") { playerError != null && currentMediaItemIndex == 4 }
+        val (alpha, charlie) = fileIds(2, 3)
+
+        tap(hasContentDescription(text(R.string.song_menu, "Charlie")))
+        tap(hasText(text(R.string.play_next)))
+        waitFor(hasText(text(R.string.queue_plays_next, "Charlie")))
+        controller.waitUntil("Charlie is added") { mediaItemCount == 6 }
+
+        tap(hasContentDescription(text(R.string.song_menu, "Alpha")))
+        tap(hasText(text(R.string.add_to_queue)))
+        controller.waitUntil("Alpha is added") { mediaItemCount == 7 }
+        val ids = onMain { (0 until controller.mediaItemCount).map { controller.getMediaItemAt(it).mediaId } }
+        assertThat(ids.drop(5)).containsExactly("$charlie/a1", "$alpha/a2")
+    }
+
+    @Test
+    fun anAlbumMenuAddsTheAlbumToAnEmptyQueue() {
+        tab(R.string.tab_albums)
+        tap(hasContentDescription(text(R.string.song_menu, "Second")))
+        tap(hasText(text(R.string.add_to_queue)))
+
+        val (charlie, delta) = fileIds(3, 4)
+        controller.waitUntil("the album is the queue") {
+            mediaItemCount == 2 && getMediaItemAt(0).mediaId == "$charlie/a1" && getMediaItemAt(1).mediaId == "$delta/a2"
+        }
+        waitFor(hasText(compose.activity.resources.getQuantityString(R.plurals.queue_added_count, 2, 2)))
+        assertThat(onMain { controller.playWhenReady }).isFalse()
+    }
+
+    @Test
+    fun anArtistRowAndAFolderPageAddTheirSongs() {
+        tab(R.string.tab_artists)
+        tap(hasContentDescription(text(R.string.song_menu, "Bob")))
+        tap(hasText(text(R.string.add_to_queue)))
+        controller.waitUntil("Bob's songs are the queue") { mediaItemCount == 2 }
+
+        tab(R.string.tab_folders)
+        tap(hasText("Music") and inPage)
+        tap(hasText("Ann") and inPage)
+        tap(hasContentDescription(text(R.string.page_menu)))
+        tap(hasText(text(R.string.play_next)))
+        // Ann's folder with its subfolder First: Alpha and Bravo, by file name.
+        val (alpha, bravo) = fileIds(2, 1)
+        controller.waitUntil("Ann's folder is added") { mediaItemCount == 4 }
+        val ids = onMain { (0 until controller.mediaItemCount).map { controller.getMediaItemAt(it).mediaId } }
+        val at = ids.indexOf("$alpha/a3")
+        assertThat(at).isPositive()
+        assertThat(ids[at + 1]).isEqualTo("$bravo/a4")
     }
 }

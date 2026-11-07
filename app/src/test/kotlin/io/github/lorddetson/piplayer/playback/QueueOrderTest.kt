@@ -67,4 +67,21 @@ class QueueOrderTest {
         assertThat(QueueOrder.restore(listOf(Song(1), Song(2)), entries, current = 2, Random(1))).isNull()
         assertThat(QueueOrder.restore(emptyList(), entries, current = 0, Random(1))).isNull()
     }
+
+    @Test
+    fun newEntriesComeAfterTheUpNextRun() {
+        repeat(50) { seed ->
+            val entries = listOf(Song(10), EntryKey.Added(1), EntryKey.Added(2), Song(20), Song(30), Song(40), Song(50))
+            val saved = listOf(Song(30), Song(10), EntryKey.Added(1), EntryKey.Added(2), Song(20))
+
+            // Song 10 plays with the two added entries next; songs 40 and 50 are new.
+            val order = QueueOrder.restore(
+                saved, entries, current = 0, Random(seed.toLong()), upNext = setOf(EntryKey.Added(1), EntryKey.Added(2)),
+            )!!
+            val keys = order.map { entries[it] }
+
+            assertThat(keys.take(4)).containsExactly(Song(30), Song(10), EntryKey.Added(1), EntryKey.Added(2))
+            assertThat(keys.drop(4)).containsExactlyInAnyOrder(Song(20), Song(40), Song(50))
+        }
+    }
 }

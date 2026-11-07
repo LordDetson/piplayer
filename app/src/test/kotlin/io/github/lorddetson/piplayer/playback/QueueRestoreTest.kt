@@ -100,6 +100,7 @@ class QueueRestoreTest {
             when (slot) {
                 is QueueSlot.Library -> "library ${slot.song.id}"
                 is QueueSlot.Open -> slot.item.file.title
+                is QueueSlot.Added -> "added ${slot.number}"
             }
         }).containsExactly("library 10", "first", "library 20", "second", "library 30")
     }
@@ -173,5 +174,39 @@ class QueueRestoreTest {
 
         assertThat(QueueRestore.openItems(order).map { it.index }).containsExactly(1, 2)
         assertThat(QueueRestore.choose(order, snapshot)).isEqualTo(QueueStart(index = 2, positionMs = 6_000))
+    }
+
+    @Test
+    fun `a song in the queue twice resumes at its saved row`() {
+        val order = listOf(QueueSlot.Library(song(10)), QueueSlot.Added(1, song(20)), QueueSlot.Library(song(20)))
+
+        assertThat(QueueRestore.choose(order, librarySnapshot(songId = 20, row = 2))).isEqualTo(QueueStart(2, 12_345))
+        assertThat(QueueRestore.choose(order, librarySnapshot(songId = 20, row = 1))).isEqualTo(QueueStart(1, 12_345))
+        assertThat(QueueRestore.choose(order, librarySnapshot(songId = 20, row = 0))).isEqualTo(QueueStart(1, 12_345))
+    }
+
+    @Test
+    fun `opened files go back among added songs of a queue without library`() {
+        val open = opened(1, "x")
+        val snapshot = PlaybackSnapshot(
+            queue = null,
+            openItems = listOf(open),
+            songId = -1,
+            row = 1,
+            positionMs = 0,
+            shuffle = false,
+            repeatMode = PlaybackSnapshot.REPEAT_OFF,
+            title = null,
+            artist = null,
+            album = null,
+            durationMs = 0,
+            uri = open.uri,
+            // The added songs are in the queue file.
+            queueRevision = 3,
+        )
+
+        val order = QueueRestore.withOpened(listOf(QueueSlot.Added(1, song(10)), QueueSlot.Added(2, song(20))), snapshot)
+
+        assertThat(order).containsExactly(QueueSlot.Added(1, song(10)), QueueSlot.Open(open), QueueSlot.Added(2, song(20)))
     }
 }

@@ -1,5 +1,6 @@
 package io.github.lorddetson.piplayer.ui.library
 
+import androidx.compose.foundation.layout.Row
 import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.semantics.toggleableState
 import androidx.compose.ui.semantics.role
@@ -92,6 +93,7 @@ import io.github.lorddetson.piplayer.ui.player.MiniPlayer
 import io.github.lorddetson.piplayer.ui.songs.AudioAccess
 import io.github.lorddetson.piplayer.ui.songs.PermissionCard
 import io.github.lorddetson.piplayer.ui.songs.SongMenu
+import io.github.lorddetson.piplayer.ui.player.QueueTarget
 import io.github.lorddetson.piplayer.ui.songs.SongsScreen
 import io.github.lorddetson.piplayer.ui.songs.SongsState
 import io.github.lorddetson.piplayer.ui.songs.SongsViewModel
@@ -112,6 +114,8 @@ class LibraryHost(
     val currentSongId: Long?,
     val menu: SongMenu,
     val play: (row: Int, song: Song?, list: SongQuery) -> Unit,
+    /** "Play next" ([next]) and "Add to queue" of an album, an artist or a folder (docs/playback.md §9.1). */
+    val addToQueue: (target: QueueTarget, next: Boolean) -> Unit,
     val openNowPlaying: () -> Unit,
     val openAlbum: (key: String) -> Unit,
     val openArtist: (key: String) -> Unit,
@@ -203,13 +207,13 @@ fun LibraryScreen(host: LibraryHost, onOpenSettings: () -> Unit) {
             LibraryTab.ALBUMS -> Groups(
                 access, albums, modifier, search,
                 sections = { list -> list.map { it.section } },
-                tiles = { list -> albumTiles(list, host.openAlbum) },
-            ) { list -> albumItems(list, host.openAlbum) }
+                tiles = { list -> albumTiles(list, host) },
+            ) { list -> albumItems(list, host) }
             LibraryTab.ARTISTS -> Groups(
                 access, artists, modifier, search,
                 sections = { list -> list.map { it.section } },
-                tiles = { list -> artistTiles(list, host.openArtist) },
-            ) { list -> artistItems(list, host.openArtist) }
+                tiles = { list -> artistTiles(list, host) },
+            ) { list -> artistItems(list, host) }
             LibraryTab.FOLDERS -> FolderContent(access, folders, folder = null, host, modifier, search)
         }
     }
@@ -271,19 +275,19 @@ private val GRID_PADDING = 8.dp
 internal fun gridColumns(widthDp: Int): Int =
     ((widthDp - 2 * GRID_PADDING.value) / TILE_MIN_WIDTH.value).toInt().coerceAtLeast(1)
 
-private fun LazyGridScope.albumTiles(albums: List<AlbumGroup>, open: (String) -> Unit) {
-    items(albums, key = { "album " + it.key }) { album -> AlbumTile(album) { open(album.key) } }
+private fun LazyGridScope.albumTiles(albums: List<AlbumGroup>, host: LibraryHost) {
+    items(albums, key = { "album " + it.key }) { album -> AlbumTile(album, host) }
 }
 
-private fun LazyGridScope.artistTiles(artists: List<ArtistGroup>, open: (String) -> Unit) {
-    items(artists, key = { "artist " + it.key }) { artist -> ArtistTile(artist) { open(artist.key) } }
+private fun LazyGridScope.artistTiles(artists: List<ArtistGroup>, host: LibraryHost) {
+    items(artists, key = { "artist " + it.key }) { artist -> ArtistTile(artist, host) }
 }
 
 /** An album in a grid: a square placeholder until covers come (step 13), its title, then its artist and year. */
 @Composable
-internal fun AlbumTile(album: AlbumGroup, onClick: () -> Unit) {
+internal fun AlbumTile(album: AlbumGroup, host: LibraryHost) {
     val details = listOfNotNull(creditText(album.credit), album.year?.toString()).joinToString(" · ")
-    Tile(album.title, details, stringResource(R.string.open_album), onClick) {
+    Tile(album.title, details, stringResource(R.string.open_album), queue(host, QueueTarget.Album(album.key)), { host.openAlbum(album.key) }) {
         Box(
             contentAlignment = Alignment.Center,
             modifier = Modifier.fillMaxWidth().aspectRatio(1f)
@@ -296,10 +300,10 @@ internal fun AlbumTile(album: AlbumGroup, onClick: () -> Unit) {
 
 /** An artist in a grid: a circle with their letter, their name, then their numbers of albums and songs. */
 @Composable
-internal fun ArtistTile(artist: ArtistGroup, onClick: () -> Unit) {
+internal fun ArtistTile(artist: ArtistGroup, host: LibraryHost) {
     val counts = pluralStringResource(R.plurals.albums_count, artist.albums, artist.albums) + " · " +
         pluralStringResource(R.plurals.songs_count, artist.songs, artist.songs)
-    Tile(artist.name, counts, stringResource(R.string.open_artist), onClick) {
+    Tile(artist.name, counts, stringResource(R.string.open_artist), queue(host, QueueTarget.Artist(artist.key)), { host.openArtist(artist.key) }) {
         Box(
             contentAlignment = Alignment.Center,
             modifier = Modifier.fillMaxWidth().aspectRatio(1f).background(MaterialTheme.colorScheme.primaryContainer, CircleShape),
@@ -313,8 +317,16 @@ internal fun ArtistTile(artist: ArtistGroup, onClick: () -> Unit) {
     }
 }
 
+/** A tile of a grid: its picture, then its title and details beside the menu of step 9 ("Play next", "Add to queue"). */
 @Composable
-private fun Tile(title: String, details: String, clickLabel: String, onClick: () -> Unit, picture: @Composable () -> Unit) {
+private fun Tile(
+    title: String,
+    details: String,
+    clickLabel: String,
+    menu: QueueMenu,
+    onClick: () -> Unit,
+    picture: @Composable () -> Unit,
+) {
     Column(
         modifier = Modifier
             .clip(RoundedCornerShape(12.dp))
@@ -322,28 +334,62 @@ private fun Tile(title: String, details: String, clickLabel: String, onClick: ()
             .padding(8.dp),
     ) {
         picture()
-        Text(title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 8.dp))
-        Text(details, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 8.dp)) {
+            Column(Modifier.weight(1f)) {
+                Text(title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(details, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            QueueMenuButton(stringResource(R.string.song_menu, title), menu)
+        }
     }
 }
 
-private fun LazyListScope.albumItems(albums: List<AlbumGroup>, open: (String) -> Unit) {
-    items(albums, key = { "album " + it.key }) { album -> AlbumRow(album) { open(album.key) } }
+private fun LazyListScope.albumItems(albums: List<AlbumGroup>, host: LibraryHost) {
+    items(albums, key = { "album " + it.key }) { album -> AlbumRow(album, host) }
 }
 
-private fun LazyListScope.artistItems(artists: List<ArtistGroup>, open: (String) -> Unit) {
+private fun LazyListScope.artistItems(artists: List<ArtistGroup>, host: LibraryHost) {
     items(artists, key = { "artist " + it.key }) { artist ->
         val counts = pluralStringResource(R.plurals.albums_count, artist.albums, artist.albums) + " · " +
             pluralStringResource(R.plurals.songs_count, artist.songs, artist.songs)
-        GroupRow(artist.name, counts, R.drawable.ic_artist, stringResource(R.string.open_artist)) { open(artist.key) }
+        GroupRow(artist.name, counts, R.drawable.ic_artist, stringResource(R.string.open_artist), queue(host, QueueTarget.Artist(artist.key))) {
+            host.openArtist(artist.key)
+        }
     }
 }
 
 @Composable
-internal fun AlbumRow(album: AlbumGroup, onClick: () -> Unit) {
+internal fun AlbumRow(album: AlbumGroup, host: LibraryHost) {
     val credit = creditText(album.credit)
     val details = listOfNotNull(credit, album.year?.toString(), pluralStringResource(R.plurals.songs_count, album.songs, album.songs))
-    GroupRow(album.title, details.joinToString(" · "), R.drawable.ic_album, stringResource(R.string.open_album), onClick)
+    GroupRow(album.title, details.joinToString(" · "), R.drawable.ic_album, stringResource(R.string.open_album), queue(host, QueueTarget.Album(album.key))) {
+        host.openAlbum(album.key)
+    }
+}
+
+/** What a row's or a page's menu adds to the queue (docs/playback.md §9.1). */
+internal class QueueMenu(val playNext: () -> Unit, val addToQueue: () -> Unit)
+
+internal fun queue(host: LibraryHost, target: QueueTarget) =
+    QueueMenu(playNext = { host.addToQueue(target, true) }, addToQueue = { host.addToQueue(target, false) })
+
+/** The menu button of a row or a page with "Play next" and "Add to queue". */
+@Composable
+internal fun QueueMenuButton(description: String, menu: QueueMenu) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        IconButton(onClick = { open = true }) { Icon(painterResource(R.drawable.ic_more), description) }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            DropdownMenuItem(text = { Text(stringResource(R.string.play_next)) }, onClick = {
+                open = false
+                menu.playNext()
+            })
+            DropdownMenuItem(text = { Text(stringResource(R.string.add_to_queue)) }, onClick = {
+                open = false
+                menu.addToQueue()
+            })
+        }
+    }
 }
 
 @Composable
@@ -354,11 +400,12 @@ internal fun creditText(credit: AlbumCredit): String = when (credit) {
 }
 
 @Composable
-private fun GroupRow(title: String, details: String?, icon: Int, clickLabel: String, onClick: () -> Unit) {
+private fun GroupRow(title: String, details: String?, icon: Int, clickLabel: String, menu: QueueMenu? = null, onClick: () -> Unit) {
     ListItem(
         headlineContent = { Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
         supportingContent = details?.let { { Text(it, maxLines = 1, overflow = TextOverflow.Ellipsis) } },
         leadingContent = { Icon(painterResource(icon), contentDescription = null) },
+        trailingContent = menu?.let { { QueueMenuButton(stringResource(R.string.song_menu, title), it) } },
         modifier = Modifier.clickable(onClickLabel = clickLabel, role = Role.Button, onClick = onClick),
     )
 }
@@ -393,7 +440,9 @@ internal fun FolderContent(
             val name = if (entry.relativePath.isEmpty()) volumeName(entry.volume, internal) else entry.name
             val details = pluralStringResource(R.plurals.songs_count, entry.songs, entry.songs)
             GroupRow(name, if (page.searching) entry.relativePath + " · " + details else details, R.drawable.ic_folder,
-                stringResource(R.string.open_folder)) { host.openFolder(entry.volume, entry.relativePath) }
+                stringResource(R.string.open_folder), queue(host, QueueTarget.Folder(entry.volume, entry.relativePath))) {
+                host.openFolder(entry.volume, entry.relativePath)
+            }
         }
     }
     val at = page.folder ?: folder
