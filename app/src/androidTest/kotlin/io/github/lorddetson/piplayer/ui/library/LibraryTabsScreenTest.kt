@@ -1,5 +1,6 @@
 package io.github.lorddetson.piplayer.ui.library
 
+import android.os.SystemClock
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.ExperimentalTestApi
@@ -24,6 +25,7 @@ import io.github.lorddetson.piplayer.library.FakeMediaIndex.Companion.row
 import io.github.lorddetson.piplayer.library.Library
 import io.github.lorddetson.piplayer.library.LibraryRule
 import io.github.lorddetson.piplayer.library.songs.SongList
+import io.github.lorddetson.piplayer.playback.PlaybackStateStore
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.connectController
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.onMain
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.stopAndRelease
@@ -31,12 +33,15 @@ import io.github.lorddetson.piplayer.playback.PlaybackTesting.waitUntil
 import io.github.lorddetson.piplayer.ui.GrantAudioPermission
 import io.github.lorddetson.piplayer.ui.player.PlayerTags
 import io.github.lorddetson.piplayer.ui.songs.SongsTags
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.After
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.ExternalResource
 import org.junit.rules.RuleChain
 import org.junit.runner.RunWith
 
@@ -56,20 +61,40 @@ class LibraryTabsScreenTest {
 
     private val compose = createAndroidComposeRule<MainActivity>()
 
+    /**
+     * The service outlives a test: before the activity starts, its player is emptied and the saved state forgotten, so
+     * that neither the queue of the test before nor a restore at the start takes the songs a test adds (§9.1).
+     */
+    private val emptyQueue = object : ExternalResource() {
+        override fun before() {
+            val cleaner = connectController()
+            onMain {
+                cleaner.stop()
+                cleaner.clearMediaItems()
+            }
+            cleaner.waitUntil("the player is empty") { mediaItemCount == 0 }
+            runBlocking { PlaybackStateStore.get(TestFiles.targetContext).clear() }
+            onMain { cleaner.release() }
+        }
+    }
+
     @get:Rule
-    val rules: RuleChain = RuleChain.outerRule(GrantAudioPermission).around(LibraryRule { index }).around(compose)
+    val rules: RuleChain =
+        RuleChain.outerRule(GrantAudioPermission).around(LibraryRule { index }).around(emptyQueue).around(compose)
 
     private lateinit var controller: MediaController
 
     @Before
     fun connect() {
         controller = connectController()
-        // The service outlives a test: the queue of the one before must not take the songs added here.
-        onMain {
-            controller.stop()
-            controller.clearMediaItems()
-        }
-        controller.waitUntil("the player is empty") { mediaItemCount == 0 }
+    }
+
+    /** The queue's media IDs once they are [expected]; else, after [timeout], a failure that shows the queue it has. */
+    private fun awaitQueue(what: String, expected: List<String>, timeout: Duration = ADD_TIMEOUT) {
+        val ids = { onMain { (0 until controller.mediaItemCount).map { controller.getMediaItemAt(it).mediaId } } }
+        val end = SystemClock.elapsedRealtime() + timeout.inWholeMilliseconds
+        while (ids() != expected && SystemClock.elapsedRealtime() < end) SystemClock.sleep(100)
+        assertThat(ids()).describedAs(what).containsExactlyElementsOf(expected)
     }
 
     @After
@@ -281,16 +306,16 @@ class LibraryTabsScreenTest {
         controller.waitUntil("playback stops") { playerError != null && currentMediaItemIndex == 4 }
         val (alpha, charlie) = fileIds(2, 3)
 
+        val queue = fileIds(2, 1, 3, 4, 5).map { it.toString() }
+
         tap(hasContentDescription(text(R.string.song_menu, "Charlie")))
         tap(hasText(text(R.string.play_next)))
-        waitFor(hasText(text(R.string.queue_plays_next, "Charlie")))
-        controller.waitUntil("Charlie is added") { mediaItemCount == 6 }
+        awaitQueue("Charlie is next", queue + "$charlie/a1")
+        compose.waitUntilAtLeastOneExists(hasText(text(R.string.queue_plays_next, "Charlie")), ADD_TIMEOUT.inWholeMilliseconds)
 
         tap(hasContentDescription(text(R.string.song_menu, "Alpha")))
         tap(hasText(text(R.string.add_to_queue)))
-        controller.waitUntil("Alpha is added") { mediaItemCount == 7 }
-        val ids = onMain { (0 until controller.mediaItemCount).map { controller.getMediaItemAt(it).mediaId } }
-        assertThat(ids.drop(5)).containsExactly("$charlie/a1", "$alpha/a2")
+        awaitQueue("Alpha is added after Charlie", queue + "$charlie/a1" + "$alpha/a2")
     }
 
     @Test
@@ -300,10 +325,11 @@ class LibraryTabsScreenTest {
         tap(hasText(text(R.string.add_to_queue)))
 
         val (charlie, delta) = fileIds(3, 4)
-        controller.waitUntil("the album is the queue") {
-            mediaItemCount == 2 && getMediaItemAt(0).mediaId == "$charlie/a1" && getMediaItemAt(1).mediaId == "$delta/a2"
-        }
-        waitFor(hasText(compose.activity.resources.getQuantityString(R.plurals.queue_added_count, 2, 2)))
+        awaitQueue("the album is the queue", listOf("$charlie/a1", "$delta/a2"))
+        compose.waitUntilAtLeastOneExists(
+            hasText(compose.activity.resources.getQuantityString(R.plurals.queue_added_count, 2, 2)),
+            ADD_TIMEOUT.inWholeMilliseconds,
+        )
         assertThat(onMain { controller.playWhenReady }).isFalse()
     }
 
@@ -312,7 +338,10 @@ class LibraryTabsScreenTest {
         tab(R.string.tab_artists)
         tap(hasContentDescription(text(R.string.song_menu, "Bob")))
         tap(hasText(text(R.string.add_to_queue)))
-        controller.waitUntil("Bob's songs are the queue") { mediaItemCount == 2 }
+        val (charlie, delta) = fileIds(3, 4)
+        awaitQueue("Bob's songs are the queue", listOf("$charlie/a1", "$delta/a2"))
+        // The index's files do not exist: preparing them fails and stops at one of Bob's songs, before the folder is added.
+        controller.waitUntil("the missing files stop the player", ADD_TIMEOUT) { playerError != null }
 
         tab(R.string.tab_folders)
         tap(hasText("Music") and inPage)
@@ -321,10 +350,13 @@ class LibraryTabsScreenTest {
         tap(hasText(text(R.string.play_next)))
         // Ann's folder with its subfolder First: Alpha and Bravo, by file name.
         val (alpha, bravo) = fileIds(2, 1)
-        controller.waitUntil("Ann's folder is added") { mediaItemCount == 4 }
-        val ids = onMain { (0 until controller.mediaItemCount).map { controller.getMediaItemAt(it).mediaId } }
-        val at = ids.indexOf("$alpha/a3")
-        assertThat(at).isPositive()
-        assertThat(ids[at + 1]).isEqualTo("$bravo/a4")
+        val current = onMain { controller.currentMediaItemIndex }
+        val bob = listOf("$charlie/a1", "$delta/a2")
+        awaitQueue("Ann's folder is next", bob.take(current + 1) + "$alpha/a3" + "$bravo/a4" + bob.drop(current + 1))
+    }
+
+    private companion object {
+        /** The add reads the songs and their track references in the service; the slow CI runner needs more than 10 s. */
+        val ADD_TIMEOUT = 30.seconds
     }
 }

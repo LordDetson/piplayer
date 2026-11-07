@@ -329,7 +329,9 @@ class PlaybackSessionCallbackTest {
         assertThat(bravo.mediaMetadata.isPlayable).isTrue()
         // Nothing for other apps to read from the published items beyond what the notification shows.
         assertThat(bravo.requestMetadata).isEqualTo(MediaItem.RequestMetadata.EMPTY)
-        assertThat(queueRequests.last()).isEqualTo(QueueState(request, emptyList(), libraryId()))
+        // The new queue becomes the callback's on the main thread, before Media3 sets its items (docs/playback.md §9).
+        val expected = QueueState(request, emptyList(), libraryId())
+        eventually("the queue state is reported") { queueRequests.lastOrNull() == expected }
     }
 
     @Test
@@ -344,7 +346,8 @@ class PlaybackSessionCallbackTest {
 
         assertThat(result.mediaItems.map { it.mediaId }).containsExactly("3", "1")
         assertThat(result.startIndex).isEqualTo(1)
-        assertThat(queueRequests.last()).isEqualTo(QueueState(request, emptyList(), libraryId()))
+        val expected = QueueState(request, emptyList(), libraryId())
+        eventually("the queue state is reported") { queueRequests.lastOrNull() == expected }
     }
 
     @Test
