@@ -14,7 +14,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
@@ -27,6 +29,7 @@ import androidx.compose.ui.unit.dp
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import io.github.lorddetson.piplayer.R
+import io.github.lorddetson.piplayer.covers.PlaceholderColors
 
 /*
  * The player's controls (docs/playback.md §3.3, §3.8). Media3's state holders (PlayerStates.kt) follow the player and
@@ -115,21 +118,29 @@ fun RepeatButton(player: Player?, modifier: Modifier = Modifier) {
     }
 }
 
-/** The cover, decorative, or a placeholder with a music note (§3.4). */
+/**
+ * The cover, decorative, or a placeholder with a music note (§3.4): in a calm color made from [placeholderName], the
+ * album's name, when there is one (docs/library.md §13.4), otherwise neutral.
+ */
 @Composable
-fun CoverImage(cover: ImageBitmap?, modifier: Modifier = Modifier, noteSize: Dp = 24.dp) {
+fun CoverImage(cover: ImageBitmap?, modifier: Modifier = Modifier, noteSize: Dp = 24.dp, placeholderName: String? = null) {
     if (cover != null) {
         Image(cover, contentDescription = null, modifier = modifier.testTag(PlayerTags.COVER), contentScale = ContentScale.Crop)
     } else {
+        val colors = placeholderName?.let { name ->
+            PlaceholderColors.of(name, dark = MaterialTheme.colorScheme.surface.luminance() < 0.5f)
+        }
         Box(
-            modifier.background(MaterialTheme.colorScheme.surfaceVariant).testTag(PlayerTags.COVER_PLACEHOLDER),
+            modifier
+                .background(colors?.let { Color(it.background) } ?: MaterialTheme.colorScheme.surfaceVariant)
+                .testTag(PlayerTags.COVER_PLACEHOLDER),
             contentAlignment = Alignment.Center,
         ) {
             Icon(
                 painterResource(R.drawable.ic_player_cover),
                 contentDescription = null,
                 modifier = Modifier.size(noteSize),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                tint = colors?.let { Color(it.note) } ?: MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
     }

@@ -190,7 +190,7 @@ The data model it implements is sketched in track-identification.md §10 (TI bel
     - `library_folder_rule(volume_name, relative_path, mode)`: a folder the user included or excluded (§3.4);
     - `user_meta(id, change_counter)`: one row whose counter goes up in the same transaction as every write of user
       data, so that the library database can tell whether it still mirrors it (TI §10.3).
-- Version 2 adds the track identities (§8.1). Later tables (favorites, playlists, statistics, decisions) arrive with
+- Version 2 adds the track identities (§8.1), version 3 the references of own covers (§13.2). Later tables (favorites, playlists, statistics, decisions) arrive with
   their milestones.
 
 ### 3.2 Settings files
@@ -206,7 +206,8 @@ The data model it implements is sketched in track-identification.md §10 (TI bel
 
 - Both rule files (`fullBackupContent` for Android 11, `dataExtractionRules` for cloud backup and device transfer on
   Android 12 and later) list what is backed up: `user.db` with its WAL file and the `settings` file. Everything else
-  stays out: the library database, `device_state`, the saved queue, crash reports and caches (TI §10.3).
+  stays out: the library database, `device_state`, the saved queue, crash reports, the copies of own covers (§13.2) and
+  caches (TI §10.3).
 
 ### 3.4 Library folders
 
@@ -623,8 +624,8 @@ saved queue that refers to identities is in playback.md §4.
   name one of the places, the one it named before while that file is still there.
 - `missing_since` is empty while a file holds the identity's key and is set when none does any more. An identity that
   holds no user data and has been missing for 30 days is deleted: a deleted file, an SD card left out of the phone. An
-  identity that holds user data is never deleted. M2a has no user data that refers to identities; favorites, playlists
-  and statistics (M2b) and decisions (M3) will.
+  identity that holds user data is never deleted. In M2a the only user data that refers to identities is a song's own
+  cover (§13.2); favorites, playlists and statistics (M2b) and decisions (M3) will add theirs.
 - Attaching changes no user data, so it does not raise the user database's change counter (§3.1), which would ask
   for a sync. Nothing is written into the library database: lists do not need the identity, and the two files keep no
   row IDs of each other (TI §10).
@@ -661,8 +662,8 @@ saved queue that refers to identities is in playback.md §4.
 - A match is a bit error rate of at most 10 % at the best offset (`FingerprintComparison`, as in M0). With exactly one
   match the missing identity takes the file's key and the new identity is deleted; with none or more it stays missing.
 - Each pair of identity and file is tried once per process. The library scan never fingerprints (TI §3.1).
-- In M2a nothing fills the cache and no identity holds user data, so this step does not run yet; identification (M3)
-  fills the cache and favorites (M2b) make identities hold data.
+- In M2a nothing fills the cache, so this step finds nothing yet even for identities with an own cover (§13.2);
+  identification (M3) fills the cache, and favorites (M2b) make more identities hold data.
 
 ### 8.4 File IDs
 
@@ -770,8 +771,8 @@ Instrumented tests on the API 30 emulator:
 - The sort menus of the Albums and Artists tabs have "Show as grid". The choice is kept per tab in the settings file
   that is backed up (§3.2); a list is the default. The albums of an artist page follow the Albums tab.
 - A grid has columns at least 150 dp wide, two on a phone held upright; an artist page's albums take as many columns as
-  the Albums tab. An album's tile is a square placeholder (covers come with step 13), its title, then its artist and
-  year; an artist's tile is a circle with the artist's letter, their name, then the numbers of albums and songs. A tile
+  the Albums tab. An album's tile is a square with its cover (§13.5), its title, then its artist and year; an
+  artist's tile is a circle with their cover, or else their letter, their name, then the numbers of albums and songs. A tile
   has the menu of its row (step 9: play next, add to queue) beside its title. The thumb works over grids too.
 
 ### 11.4 Checks
@@ -788,6 +789,143 @@ together, sections of the Songs, Albums and Artists lists; a sync under another 
 sync under the same one writes none; on the screen, the thumb on a long list and over a grid shows its letter and moves
 the list, no thumb on a short list, and "Show as grid" on Albums and Artists with its state for TalkBack, kept after the
 activity is recreated, and followed by an artist page. The quiet timing pass keeps the first launch under 5 s and a later launch under 1 s.
+
+## 13. Covers (M2a step 13, part A)
+
+Covers inside the app: where a cover comes from, the user's own covers, loading and caching, the placeholder. Part B,
+the cover provider that serves the library tree's `artworkUri` to controllers outside PiPlayer, follows step 10.
+
+### 13.1 Sources and their order
+
+- A song's cover is the first of:
+  1. the song's own cover (§13.2);
+  2. its album's own cover;
+  3. the picture embedded in the file, read on demand by Media3's extractors, the reader playback uses (§13.3): a front
+     cover wins over other pictures, otherwise the last picture counts (playback.md §3.4). It is skipped when the tag pass
+     found no picture in the file (`embedded_cover_present` is 0); an unread file is tried;
+  4. the system thumbnail of the file (`ContentResolver.loadThumbnail` on its media index URI), which Android takes from
+     the embedded picture or from an image in the file's folder;
+  5. the placeholder (§13.4).
+- An album's cover is its own cover, otherwise the embedded picture or system thumbnail of one of its songs: the first by
+  disc, track and file name among the songs whose picture the tag pass found, then among the unread ones, then among the
+  rest. A song's own cover stands for that song only, never for its album. Hidden files (§3.5) may stand for an album too:
+  their pictures are the album's all the same. An artist's albums, though, are exactly those of the artist page, with
+  its rule for hidden files.
+- An artist's cover is the cover of one of their albums, taken in the artist page's order (the album's year, then its
+  title, over all its songs, so that a compilation sorts by its own year): the first
+  with an own cover, otherwise the first with an embedded picture, otherwise the first. An artist without albums shows
+  the embedded picture or system thumbnail of their first song.
+- Media3 reads the picture rather than `MediaMetadataRetriever`, because the platform's retriever takes the first picture
+  of an MP3 even when it is a back cover, and because what lists show then matches what playback reads. The extractors
+  run in Java in PiPlayer's process: a malformed file fails with an exception, not a crash.
+- A picture in the album folder (`cover.jpg`) through a folder grant comes with folder access in v1.x; until then folder
+  images reach PiPlayer only through the system thumbnail. Covers from Cover Art Archive come with identification (M3).
+- A file opened from another app is not in the library: Now Playing shows the picture the player read from it, as before
+  (playback.md §5.2).
+
+### 13.2 Own covers
+
+- The menu of a song row has "Choose cover" and, when the song has one, "Remove own cover"; the menus of an album row,
+  an album tile and the album page's top bar have the same for the album. "Choose cover" opens the system photo picker
+  for images; PiPlayer needs no permission for it. Where the photo picker is not available, Android shows its document
+  picker instead.
+- A song's own cover belongs to its track identity (§8.1), so it follows the song through renames, moves, a new media
+  index and a rebuild of the library. A song gets an identity once the tag pass has read it; until then "Choose cover"
+  says that the song's tags are still being read and changes nothing.
+- An album's own cover belongs to its album key (§6.2, §6.5), so it survives renamed files and a rebuild of the library.
+  It no longer applies when the key changes: the tag pass finds a release ID, or the album's folder moves. The reference
+  stays stored; linking it again is left for later.
+- PiPlayer keeps a copy of the chosen image and never changes an audio file. The image is decoded (the decoder applies
+  its orientation), scaled down to at most 1500 px on its longer side and saved as JPEG at quality 92, or as PNG when it
+  has transparency, under a random name in `no_backup/covers/`. A new choice replaces the old copy; "Remove own cover"
+  deletes the reference and the copy. Copies that no reference names (a choice cut short by the process dying) are
+  deleted the next time the covers are read.
+- `user.db` version 3 adds `track_cover(identity_id, file_name, width, height, set_at)` and
+  `album_cover(album_key, file_name, width, height, set_at)`, keyed by their first column. Version 2 migrates by adding
+  the two tables (an automatic migration with the exported schema `3.json`).
+- An identity with an own cover holds user data: it is never deleted, and step 4 of the attach pass (§8.3) tries to keep
+  it on its file.
+- Setting or removing a cover does not raise the change counter of §3.1: the library database mirrors nothing of it, and
+  a raised counter would ask for a sync.
+- Backup: the references are backed up with `user.db`; the copies, in the no-backup files, are not (TI §10.3). After a
+  restore a reference whose copy is missing counts as no own cover, and the next source shows: the first read of the own
+  covers drops such references, so that neither the menus ("Remove own cover"), nor an artist's choice of album, nor the
+  session takes them for covers.
+
+### 13.3 Loading
+
+- One loader in the main process serves the screens and the session. A view asks for a cover with what it shows (a
+  song by file ID, an album by key, an artist by key) and the size it draws, in pixels. Everything but a memory hit runs
+  off the main thread, at most four loads at a time. A row that scrolls away cancels its load: the system thumbnail
+  through its cancellation signal, Media3's retrieval by closing it.
+- Sizes are rounded up to steps: 96, 128, 192, 256, 384, 512, 768, 1024, 1536 and 2048 px. Decoders scale while they
+  decode, so that the shorter side is at least the step (views crop to a square); a row never holds a full-size picture.
+  Now Playing asks for the shorter side of the screen.
+- A memory cache keeps decoded pictures, an eighth of the heap and at most 32 MB, the least recently used going first.
+  It also remembers that a source had no picture. A change of own covers empties it, and the covers on screen load again,
+  each keeping its picture until the new one is there. A sync that changed the library and the end of a run of the tag
+  pass empty it too (not every batch, so that scrolling back during a pass finds its covers), and so does an attach pass
+  that wrote identities, since an own cover follows its identity to another file (§8.2); views on screen then keep
+  what they show until they are drawn anew.
+- A disk cache keeps the pictures of steps up to 768 px as JPEG at quality 90, and an empty file for an embedded picture
+  that a file does not have, in `cache/covers/`. A missing thumbnail is not remembered on disk: an image put into the
+  folder later changes neither the file's size nor its time, and a passing error of the media index must not stick. A
+  missing own copy is only looked for again. The cache holds at most 100 MB, the least recently used file going first.
+  It reads its folder once, each file's time once, outside its lock. Keys name the source and its state: an own cover by its copy's name; a picture of a file by the file ID, size and modification time, so that a
+  changed file is read again. The cache is cleared with the app's caches and is never backed up (§3.3). A picture of
+  Now Playing's size is decoded from its source each time.
+- Own covers are read from `user.db` once and kept in memory; a change replaces them and raises a version that the
+  views watch.
+
+### 13.4 Placeholder
+
+- Without a cover, a song or an album shows a calm color made from the album name with a music note on it: the hue comes
+  from a stable hash of the name (FNV-1a over the lowercase name), the saturation is low, and the color is light in the
+  light theme and dark in the dark theme, with the note in a darker or lighter shade of the same hue. The note has a
+  contrast of at least 3:1 against the color in both themes. The same name gives the same color everywhere; neighbouring
+  tiles may share one.
+- A song without an album and a file that is not in the library show the neutral placeholder of playback.md §3.4. An
+  artist without a cover keeps their letter (grid) or the artist icon (list).
+
+### 13.5 Where covers show
+
+- Song rows, album rows and artist rows: a 48 dp picture before the text, rounded for songs and albums, round for
+  artists. Album tiles: a square as wide as the tile; artist tiles: a circle. The album page's header shows the album's
+  cover at 120 dp beside its title.
+- The mini player and Now Playing show the current song's cover by the order of §13.1; a new song shows the placeholder
+  until its own cover is loaded, never the previous one.
+- Covers are decorative and have no label (playback.md §3.8).
+
+### 13.6 The session
+
+- The session still shows the picture the player reads from the stream (playback.md §2.6). When the current song has an
+  own cover (its own or its album's), that cover replaces it, as JPEG bytes loaded for 1024 px (a copy is at most 1500 px
+  anyway); when the tag pass found no picture in the file, the system thumbnail loaded for 512 px stands in, so that a
+  folder image reaches the notification too. A file opened from another app keeps the stream's picture. The service
+  looks again at each change of the current item and of own covers (`SessionCovers`).
+  Items of the queue and of browse results carry no artwork until part B.
+
+### 13.7 Checks
+
+JVM tests: the order of §13.1 for songs, albums and artists, with and without own covers and embedded pictures; the
+size steps and the decode target of an oblong picture; the disk cache's limit, its least-recently-used order, its empty
+markers and a reopened cache; the memory cache's limit by weight; the loader: the first source with a picture wins, a
+disk or memory hit reads no source, a source without a picture is remembered, a change of own covers loads again, a
+cancelled load stores nothing; the placeholder's colors: the same name the same color, contrast in both themes, light
+and dark lightness, spread hues.
+
+Instrumented tests (on GitHub Actions, API 30 and 36):
+
+- `user.db` from version 2 to 3 with an identity of version 2 (`MigrationTestHelper`), and the exported schema.
+- Own covers: a chosen image is copied scaled down, a new choice replaces the copy, removing deletes it, a song's cover
+  follows its identity to a moved file, a copy without a reference is cleaned up, an identity with a cover is kept.
+- The sources on the cover fixtures: the embedded picture of MP3, FLAC, Ogg Vorbis, Opus and MP4, the front cover
+  before a back cover, no picture in a file without one, the system thumbnail of a file in the media index, a picture
+  decoded at its step and not at full size.
+- On the screen: a song row, an album row and tile, and the album page show an own album cover; a song's own cover
+  wins over its album's; the placeholder without a cover; Now Playing and the mini player show an own cover.
+- Through the service: an own cover replaces the stream's picture in the session, and the stream's picture is kept
+  without one.
 
 ## 14. First launch, empty states and open-source licences (M2a step 14)
 

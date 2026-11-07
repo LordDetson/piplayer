@@ -69,17 +69,22 @@ interface UserDao {
  * version needs a migration; there is no destructive fallback.
  */
 @Database(
-    entities = [FolderRuleEntity::class, UserMetaEntity::class, TrackIdentityEntity::class],
-    version = 2,
+    entities = [
+        FolderRuleEntity::class, UserMetaEntity::class, TrackIdentityEntity::class, TrackCoverEntity::class,
+        AlbumCoverEntity::class,
+    ],
+    version = 3,
     exportSchema = true,
-    // Version 2 adds the track identities (docs/library.md §8.1).
-    autoMigrations = [AutoMigration(from = 1, to = 2)],
+    // Version 2 adds the track identities (docs/library.md §8.1), version 3 the own covers (§13.2).
+    autoMigrations = [AutoMigration(from = 1, to = 2), AutoMigration(from = 2, to = 3)],
 )
 abstract class UserDatabase : RoomDatabase() {
 
     abstract fun user(): UserDao
 
     abstract fun identities(): TrackIdentityDao
+
+    abstract fun covers(): OwnCoverDao
 
     companion object {
         const val NAME = "user.db"

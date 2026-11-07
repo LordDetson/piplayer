@@ -227,4 +227,12 @@
         <item quantity="one">%1$d song added to queue</item>
         <item quantity="other">%1$d songs added to queue</item>
     </plurals>
+    <!-- Own covers (docs/library.md §13.2). -->
+    <string name="cover_choose">Choose cover</string>
+    <string name="cover_remove">Remove own cover</string>
+    <string name="cover_saved">Cover saved</string>
+    <string name="cover_removed">Own cover removed</string>
+    <string name="cover_not_read">The song\'s tags are still being read. Try again in a moment.</string>
+    <string name="cover_no_image">The image could not be read</string>
+    <string name="cover_failed">The cover could not be changed</string>
 </resources>

@@ -998,6 +998,9 @@ used, never through a stored content URI, which goes stale after a media index r
   per-location state, stored only when needed: when the file's value at a decision differs from the decided value,
   or when the field changed in the file since (§7.1). Whether a field is written into a file is derived from
   `applied_change`.
+- `track_cover(identity_id, file_name, width, height, set_at)` and `album_cover(album_key, file_name, width, height,
+  set_at)` (M2a): the user's own covers for a track and for an album, chosen from the device (library.md §13.2); the
+  copies live in no-backup app storage.
 - `saved_cover(id, release_mbid, path, width, height, bytes, hash, source)`: accepted covers; the image files live in
   no-backup app storage (§10).
 - `favorite(identity_id, added_at)`, `favorite_album(release_mbid, album_key, added_at)` (by release MBID when known,

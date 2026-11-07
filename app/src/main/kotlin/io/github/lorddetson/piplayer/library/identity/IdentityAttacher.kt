@@ -112,7 +112,10 @@ class IdentityAttacher(
         val stored = dao.identities()
         val holding = holders()
         val plan = IdentityMatcher.plan(files, stored.map(::identity), holding, now)
-        if (!plan.isEmpty) write(plan, stored.associateBy { it.id }, now)
+        if (!plan.isEmpty) {
+            write(plan, stored.associateBy { it.id }, now)
+            changes.value++
+        }
         fingerprints?.let { step -> takeOver(step, files, holding) }
         dropStaleFingerprints(now)
         plan
@@ -146,6 +149,7 @@ class IdentityAttacher(
             dao.delete(takeovers.map { it.replacedId })
             dao.updateAll(takeovers.map { identity(byId.getValue(it.missingId)).following(it.file).entity(byId.getValue(it.missingId)) })
         }
+        changes.value++
     }
 
     private suspend fun dropStaleFingerprints(now: Long) {
@@ -194,6 +198,12 @@ class IdentityAttacher(
     )
 
     companion object {
+        /**
+         * Raised after every pass that wrote identities, in any library of the process: covers that follow an identity
+         * may now belong to another file (docs/library.md §13.3).
+         */
+        val changes = kotlinx.coroutines.flow.MutableStateFlow(0L)
+
         private const val TAG = "IdentityAttacher"
         private const val CHUNK = 500
         private val PENDING = setOf(DurationSource.PENDING_WALK, DurationSource.PENDING_FLAC_END)

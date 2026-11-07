@@ -224,4 +224,12 @@
         <item quantity="many">В очередь добавлено %1$d песен</item>
         <item quantity="other">В очередь добавлено %1$d песни</item>
     </plurals>
+    <!-- Свои обложки (docs/library.md §13.2). -->
+    <string name="cover_choose">Выбрать обложку</string>
+    <string name="cover_remove">Убрать свою обложку</string>
+    <string name="cover_saved">Обложка сохранена</string>
+    <string name="cover_removed">Своя обложка убрана</string>
+    <string name="cover_not_read">Теги песни ещё читаются. Попробуйте чуть позже.</string>
+    <string name="cover_no_image">Не удалось прочитать изображение</string>
+    <string name="cover_failed">Не удалось изменить обложку</string>
 </resources>

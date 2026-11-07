@@ -73,6 +73,34 @@ class UserDatabaseTest {
     }
 
     @Test
+    fun versionTwoMigratesToThreeKeepingItsIdentitiesAndAddingOwnCovers() = runBlocking<Unit> {
+        migrations.createDatabase(2).use { connection ->
+            connection.prepare(
+                "INSERT INTO track_identity (id, content_key, start_ms, duration_ms, created_at) VALUES (7, x'0102', 0, 1000, 1)",
+            ).use { it.step() }
+            connection.prepare("INSERT INTO user_meta (id, change_counter) VALUES (1, 3)").use { it.step() }
+        }
+
+        // Checks the migrated schema against the committed app/schemas/.../3.json.
+        migrations.runMigrationsAndValidate(3).close()
+
+        val opened = UserDatabase.open(context, file.name)
+        try {
+            assertThat(opened.identities().identities().map { it.id }).containsExactly(7L)
+            assertThat(opened.user().changeCounter()).isEqualTo(3)
+            val covers = opened.covers()
+            assertThat(covers.trackCovers()).isEmpty()
+            assertThat(covers.albumCovers()).isEmpty()
+            covers.putTrackCover(7, "t.jpg", 10, 20, setAt = 5)
+            covers.putAlbumCover("album", "a.jpg", 30, 40, setAt = 6)
+            assertThat(covers.trackCover(7)).isEqualTo(TrackCoverEntity(7, "t.jpg", 10, 20, 5))
+            assertThat(covers.albumCover("album")).isEqualTo(AlbumCoverEntity("album", "a.jpg", 30, 40, 6))
+        } finally {
+            opened.close()
+        }
+    }
+
+    @Test
     fun anIdentityKeepsItsBlobsAndOneKeyHasOneIdentity() = runBlocking<Unit> {
         val dao = database.identities()
         val key = ByteArray(32) { it.toByte() }

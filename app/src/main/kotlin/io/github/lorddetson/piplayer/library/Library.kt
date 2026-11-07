@@ -13,6 +13,7 @@ import android.provider.MediaStore
 import android.util.Log
 import androidx.annotation.VisibleForTesting
 import io.github.lorddetson.piplayer.ProcessRole
+import io.github.lorddetson.piplayer.covers.Covers
 import io.github.lorddetson.piplayer.library.db.LibraryDatabase
 import io.github.lorddetson.piplayer.library.db.StoredPlace
 import io.github.lorddetson.piplayer.library.identity.FingerprintStep
@@ -315,6 +316,8 @@ object Library {
             database,
             user,
             sync,
+            // An own cover is user data: its identity is never deleted (docs/library.md §13.2).
+            holders = { Covers.own(context).identitiesWithCovers() },
             fingerprints = FingerprintStep(fingerprints),
             // Before the first sync every identity would look missing.
             ready = { sync.status.value.known },
