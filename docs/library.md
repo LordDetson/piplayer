@@ -795,7 +795,8 @@ activity is recreated, and followed by an artist page. The quiet timing pass kee
 
 - **Onboarding.** On a launch without the audio permission, before onboarding is done on this device, the app shows one
   screen instead of the library: the app's name, a few lines on what PiPlayer is and why it needs access to the audio
-  files, and an "Allow" button that brings up the system dialog (playback.md §2.2). Whatever the answer, onboarding is
+  files (only audio files are read, also on Android 11 and 12, whose dialog asks for "photos and media"), and an
+  "Allow" button that brings up the system dialog (playback.md §2.2). Whatever the answer, onboarding is
   then done and the library screen follows at once: with the permission it starts the first sync and shows its
   progress, without it the library shows its permission card. Library folders and the theme stay in Settings; onboarding
   asks nothing else. The system back gesture on the onboarding screen leaves the app, as on any first screen.

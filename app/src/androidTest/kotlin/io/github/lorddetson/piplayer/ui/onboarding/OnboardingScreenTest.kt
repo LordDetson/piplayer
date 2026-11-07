@@ -80,13 +80,15 @@ class OnboardingScreenTest {
     }
 
     @Test
-    fun doneIsKeptInTheDeviceState() = runBlocking {
-        Onboarding.forget(context)
-        assertThat(Onboarding.isDone(context)).isFalse()
+    fun doneIsKeptInTheDeviceState() {
+        runBlocking {
+            Onboarding.forget(context)
+            assertThat(Onboarding.isDone(context)).isFalse()
 
-        Onboarding.markDone(context)
+            Onboarding.markDone(context)
 
-        assertThat(Onboarding.isDone(context)).isTrue()
+            assertThat(Onboarding.isDone(context)).isTrue()
+        }
     }
 }
 
@@ -110,8 +112,11 @@ class OnboardingWithThePermissionTest {
 }
 
 /**
- * A first launch without the permission. A grant cannot be undone inside a test run, so this runs only in a run before
- * any test granted it, as a run of this class alone after `pm clear` is (docs/library.md §14.4).
+ * A first launch without the permission. A grant cannot be undone inside a test run, and the test helper and CI grant it
+ * before every run, so this runs only when started by hand after the permission was revoked (docs/library.md §14.4):
+ * `adb shell pm revoke io.github.lorddetson.piplayer android.permission.READ_EXTERNAL_STORAGE` (READ_MEDIA_AUDIO on API
+ * 33 and later), then `adb shell am instrument -w -e class io.github.lorddetson.piplayer.ui.onboarding.OnboardingFirstLaunchTest
+ * io.github.lorddetson.piplayer.test/io.github.lorddetson.piplayer.PiPlayerTestRunner`.
  */
 @OptIn(ExperimentalTestApi::class)
 @RunWith(AndroidJUnit4::class)

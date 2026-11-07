@@ -10,7 +10,7 @@
     <string name="songs_try_again">Try again</string>
     <!-- First launch, empty states and licences (docs/library.md §14). -->
     <string name="onboarding_what">PiPlayer plays the music stored on this device. It builds your library from your audio files and their tags, so you can browse it by song, album, artist and folder.</string>
-    <string name="onboarding_why">To find your music, PiPlayer needs access to the audio files on this device. It does not look at your photos, videos or other files.</string>
+    <string name="onboarding_why">To find your music, PiPlayer needs access to the audio files on this device. It reads only audio files, even where the system\'s dialog speaks of photos and media.</string>
     <string name="onboarding_later">Library folders and the theme can be changed later in Settings.</string>
     <string name="onboarding_allow">Allow</string>
     <string name="library_scanning">Looking for music on this device…</string>

@@ -162,7 +162,7 @@ object DependencyLicenses {
         notices: Map<String, String> = emptyMap(),
     ): List<LicensedLibrary> {
         val problems = mutableListOf<String>()
-        val libraries = components.distinct().sortedBy { it.toString() }.mapNotNull { component ->
+        val libraries = components.distinct().sortedWith(compareBy({ it.group }, { it.name }, { it.version })).mapNotNull { component ->
             val licenses = licensesOf(component, poms)
             if (licenses == null) {
                 problems += "$component: no POM with a <licenses> element, itself or a parent"
