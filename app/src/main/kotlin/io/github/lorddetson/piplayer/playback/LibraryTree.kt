@@ -39,9 +39,12 @@ sealed interface ArtworkSubject {
     data class Artist(val key: String) : ArtworkSubject
 }
 
-/** The covers of the tree's items as content URIs; the cover provider of M2a step 13 fills it, until then none. */
+/** The covers of the tree's items as content URIs, from the cover provider (docs/library.md §13.8) or none. */
 fun interface TreeArtwork {
     fun uriOf(subject: ArtworkSubject): Uri?
+
+    /** The length of [uriOf]'s URI, 0 without one; the tree weighs every song by it (§10.2), so it may avoid building it. */
+    fun uriLength(subject: ArtworkSubject): Int = uriOf(subject)?.toString()?.length ?: 0
 
     companion object {
         val NONE = TreeArtwork { null }
@@ -206,8 +209,8 @@ class LibraryTree(context: Context, private val artwork: TreeArtwork = TreeArtwo
             if (index < nodes.size) return nodes[index].weight
             val row = index - nodes.size
             val song = songs[row]
-            val artworkUri = artwork.uriOf(ArtworkSubject.Song(song.id))
-            return TreeBuckets.weight(idBase + digits(song.id) + digits(row.toLong()), song.title, song.artist, song.album, artworkUri?.toString()?.length ?: 0)
+            val uriLength = artwork.uriLength(ArtworkSubject.Song(song.id))
+            return TreeBuckets.weight(idBase + digits(song.id) + digits(row.toLong()), song.title, song.artist, song.album, uriLength)
         }
     }
 

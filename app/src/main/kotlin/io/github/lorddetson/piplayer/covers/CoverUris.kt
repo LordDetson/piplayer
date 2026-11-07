@@ -39,14 +39,29 @@ class CoverUris(
 
     private val prefix = "content://$authority/"
 
-    /** The URI of [request]'s cover. */
-    fun of(request: CoverRequest): String {
+    /**
+     * The URI of [request]'s cover. A [salt] (characters of 0-9 and a-z) is appended to the version of a song's URI, such as
+     * the session's checksum of the picture it shows (docs/library.md §13.8.6); any version names the song alike.
+     */
+    fun of(request: CoverRequest, salt: String? = null): String {
         val (kind, id) = when (request) {
             is CoverRequest.Track -> SONG to request.fileId
             is CoverRequest.Album -> ALBUM to albums.number(request.key).toLong()
             is CoverRequest.Artist -> ARTIST to artists.number(request.key).toLong()
         }
-        return "$prefix$kind/$id/$tag${generation().toString(36).padStart(GENERATION_WIDTH, '0')}"
+        require(salt == null || (request is CoverRequest.Track && salt.all(::isVersionChar))) { "Only a song's version takes a salt of 0-9 and a-z" }
+        return "$prefix$kind/$id/$tag${generation().toString(36).padStart(GENERATION_WIDTH, '0')}${salt.orEmpty()}"
+    }
+
+    /** The length of [of]'s URI for [request], without building it. */
+    fun lengthOf(request: CoverRequest): Int {
+        val id = when (request) {
+            is CoverRequest.Track -> request.fileId
+            is CoverRequest.Album -> albums.number(request.key).toLong()
+            is CoverRequest.Artist -> artists.number(request.key).toLong()
+        }
+        // "<kind>/<id>/<tag><generation>" after the prefix.
+        return prefix.length + 2 + digits(id, 10) + 1 + TAG_LENGTH + maxOf(GENERATION_WIDTH, digits(generation(), 36))
     }
 
     /**
@@ -100,6 +115,17 @@ class CoverUris(
         private val KINDS = setOf(SONG, ALBUM, ARTIST)
 
         private fun isVersionChar(c: Char) = c in '0'..'9' || c in 'a'..'z'
+
+        /** The digits of a non-negative [value] in [radix]. */
+        private fun digits(value: Long, radix: Int): Int {
+            var rest = value
+            var count = 1
+            while (rest >= radix) {
+                rest /= radix
+                count++
+            }
+            return count
+        }
 
         /** [text] as a non-negative number in the one form [of] writes it (no sign, no leading zero), or null. */
         private fun canonicalNumber(text: String): Long? {

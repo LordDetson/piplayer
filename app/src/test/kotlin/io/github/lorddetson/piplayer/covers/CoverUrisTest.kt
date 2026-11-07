@@ -124,6 +124,26 @@ class CoverUrisTest {
     }
 
     @Test
+    fun aSaltedSongUriIsAnotherUriForTheSameSong() {
+        val salted = uris.of(CoverRequest.Track(7), salt = "1z9")
+
+        assertThat(salted).isEqualTo("content://$AUTHORITY/s/7/k3x900001z9").isNotEqualTo(uris.of(CoverRequest.Track(7)))
+        assertThat(parse(salted)).isEqualTo(CoverRequest.Track(7))
+        assertThatThrownBy { uris.of(CoverRequest.Album("x"), salt = "1") }.isInstanceOf(IllegalArgumentException::class.java)
+        assertThatThrownBy { uris.of(CoverRequest.Track(7), salt = "A/") }.isInstanceOf(IllegalArgumentException::class.java)
+    }
+
+    @Test
+    fun theLengthIsKnownWithoutBuildingTheUri() {
+        // The tree weighs 20 000 songs by the length alone (docs/playback.md §10.2).
+        val requests = listOf(CoverRequest.Track(0), CoverRequest.Track(7), CoverRequest.Track(Long.MAX_VALUE), CoverRequest.Album("x"), CoverRequest.Artist("y"))
+        for (g in listOf(0L, 35L, 36L * 36 * 36 * 36, Long.MAX_VALUE)) {
+            generation = g
+            for (request in requests) assertThat(uris.lengthOf(request)).describedAs("$request at $g").isEqualTo(uris.of(request).length)
+        }
+    }
+
+    @Test
     fun aNewGenerationKeepsTheLengthSoThatBucketBordersStay() {
         // Items weigh their URIs (docs/playback.md §10.2): a URI one character longer could move a bucket's border.
         val lengths = listOf(0L, 1L, 35L, 36L, 1_295L, 1_296L, 36L * 36 * 36 * 36 - 1).map { g ->

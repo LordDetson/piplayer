@@ -216,7 +216,7 @@ class SessionMetadataTest {
 
     @Test
     fun thePlayingItemCarriesItsCoverUriNextToTheStreamsPicture() {
-        onMain { session.artworkUriOf = { id -> Uri.parse("content://covers.test/s/$id/v1") } }
+        onMain { session.artworkUriOf = { id, _ -> Uri.parse("content://covers.test/s/$id/v1") } }
         playFirst(item(1, "playback/cover-front.mp3"))
         eventually("the stream's cover has arrived") { onMain { session.mediaMetadata.artworkData != null } }
 
@@ -231,7 +231,7 @@ class SessionMetadataTest {
     @Test
     fun anItemWithoutAPictureCarriesItsCoverUriAnAddedEntryItsSongsAndAnOpenedFileNone() {
         // The service's own mapping (docs/library.md §13.8.6).
-        onMain { session.artworkUriOf = { id -> ProviderArtwork.ofQueueItem(context, id) } }
+        onMain { session.artworkUriOf = { id, picture -> ProviderArtwork.ofQueueItem(context, id, picture) } }
         val opened = MediaItem.Builder()
             .setMediaId("content://test/opened")
             .setUri(Uri.fromFile(TestFiles.copy(LONG_FIXTURE)))
@@ -255,11 +255,32 @@ class SessionMetadataTest {
     }
 
     @Test
+    fun theCoverUriChangesWithThePictureTheSessionShows() {
+        // Media3's bitmap cache matches by URI before data: one URI for two pictures would keep the first one.
+        onMain { session.artworkUriOf = { id, picture -> ProviderArtwork.ofQueueItem(context, id, picture) } }
+        playFirst(item(1, "playback/cover-front.mp3"))
+        eventually("the stream's cover has arrived") { onMain { session.mediaMetadata.artworkData != null } }
+        val uris = io.github.lorddetson.piplayer.covers.Covers.uris(context)
+        val song = io.github.lorddetson.piplayer.covers.CoverRequest.Track(1)
+        val stream = onMain { session.mediaMetadata.artworkUri!! }
+        val bare = ProviderArtwork.ofQueueItem(context, "1")!!
+
+        onMain { session.setArtwork("1", io.github.lorddetson.piplayer.ui.player.TestImages.png(32)) }
+        val own = onMain { session.mediaMetadata.artworkUri!! }
+        onMain { session.setArtwork("1", null) }
+        val back = onMain { session.mediaMetadata.artworkUri!! }
+
+        assertThat(listOf(stream, own, bare).toSet()).hasSize(3)
+        assertThat(back).isEqualTo(stream)
+        for (uri in listOf(stream, own, bare)) assertThat(uris.parse(uri.authority, uri.pathSegments)).describedAs("$uri").isEqualTo(song)
+    }
+
+    @Test
     fun listenersHearANewCoverUriEvenWithTheSamePicture() {
         var version = 1
         val heard = mutableListOf<MediaMetadata>()
         onMain {
-            session.artworkUriOf = { id -> Uri.parse("content://covers.test/s/$id/v$version") }
+            session.artworkUriOf = { id, _ -> Uri.parse("content://covers.test/s/$id/v$version") }
             session.addListener(object : Player.Listener {
                 override fun onMediaMetadataChanged(mediaMetadata: MediaMetadata) {
                     heard += mediaMetadata

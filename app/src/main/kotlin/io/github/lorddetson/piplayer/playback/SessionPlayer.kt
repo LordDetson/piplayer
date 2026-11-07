@@ -52,7 +52,7 @@ class SessionPlayer(private val player: ExoPlayer) : ForwardingPlayer(player) {
      * The content URI of the cover of the queue item with a media ID, for controllers in other apps (docs/library.md
      * §13.8.6), or null; asked on the player's thread whenever the metadata is.
      */
-    var artworkUriOf: (mediaId: String) -> android.net.Uri? = { null }
+    var artworkUriOf: (mediaId: String, picture: ByteArray?) -> android.net.Uri? = { _, _ -> null }
 
     init {
         // The player is still empty, so this changes no timeline and tells no listener.
@@ -261,13 +261,16 @@ class SessionPlayer(private val player: ExoPlayer) : ForwardingPlayer(player) {
         val current = currentMediaItem ?: return MediaMetadata.EMPTY
         val item = current.mediaMetadata
         if (item.artworkData != null || item.artworkUri != null) return item
-        val uri = artworkUriOf(current.mediaId)
         val own = artworks[current.mediaId]
-        if (uri == null && own == null && stream.artworkData == null) return item
+        val picture = own ?: stream.artworkData
+        // The URI names the picture shown too: Media3's bitmap cache matches a URI before the data, so one URI for two
+        // pictures would keep the first one (docs/library.md §13.8.6).
+        val uri = artworkUriOf(current.mediaId, picture)
+        if (uri == null && picture == null) return item
         return item.buildUpon().apply {
             when {
                 own != null -> setArtworkData(own, MediaMetadata.PICTURE_TYPE_FRONT_COVER)
-                stream.artworkData != null -> setArtworkData(stream.artworkData, stream.artworkDataType)
+                picture != null -> setArtworkData(picture, stream.artworkDataType)
             }
             if (uri != null) setArtworkUri(uri)
         }.build()

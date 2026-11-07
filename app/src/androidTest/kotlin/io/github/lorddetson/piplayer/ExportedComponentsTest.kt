@@ -12,8 +12,8 @@ import org.junit.Test
 import org.junit.runner.RunWith
 
 /**
- * Only the launcher activity and the playback service may be reachable from other apps. Library components that are exported must be
- * protected by a permission that ordinary apps cannot hold.
+ * Only the launcher activity, the playback service and the cover provider may be reachable from other apps. Library components that
+ * are exported must be protected by a permission that ordinary apps cannot hold.
  */
 @RunWith(AndroidJUnit4::class)
 class ExportedComponentsTest {
@@ -111,6 +111,8 @@ class ExportedComponentsTest {
             "androidx.profileinstaller.ProfileInstallReceiver" to "android.permission.DUMP",
             // Media3's answer to the Bluetooth stack's media player probe on API 36 and 37.
             "androidx.media3.session.BluetoothValidationActivity" to "android.permission.BLUETOOTH_PRIVILEGED",
+            // Covers for controllers; each open checks its caller in code (docs/library.md §13.8.3, CoverProviderTest).
+            "io.github.lorddetson.piplayer.covers.CoverProvider" to null,
         )
 
         /** Added only to debug builds by debugImplementation tooling: Compose previews and Compose UI tests. */

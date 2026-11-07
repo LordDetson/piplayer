@@ -1032,6 +1032,10 @@ provider of its own, `CoverProvider`, with the sources, their order and the disk
   bitmaps of the platform session's metadata down, and controllers such as Android Auto prefer a URI for the playing
   item; Media3 controllers of other apps take it from the metadata as well. The picture stays, for the notification and
   for controllers that cannot load URIs.
+- The session's URI also names the picture it shows: its version ends with the CRC-32 of that picture in base 36
+  (`.../s/1234/k3x90000` without a picture, `.../s/1234/k3x900001a2b3c` with one). Media3's bitmap cache matches the
+  URI before the picture, so under one URI the picture loaded first (before the stream's arrived, or before an own
+  cover replaced it) would stay. Any version names the song alike (§13.8.4).
 - Where the metadata has the URI and no picture (the stream's picture not read yet, or a song without one), Media3
   loads the URI itself for the notification and the platform session, inside PiPlayer, through the provider. The
   notification may then show a cover it showed nothing for before. For a song without any cover that load fails,
@@ -1058,7 +1062,7 @@ the length bound; the access rule (own uid, trusted, audio permission, anyone el
 flight; the loader's encoded cover: a disk hit served without decoding or reading a source, a disk entry that is no
 JPEG loaded again, a miss read once and stored, no picture, a cover memory knows to be none, a plan that fails, a
 picture that cannot be encoded, a load that takes too long, the time counted from the turn on, a reader gone before
-the turn; a change of the hidden files empties memory.
+the turn; a change of the hidden files empties memory; the length of a URI known without building it, a salted song URI.
 
 Instrumented tests (API 30 and 36): a URI from the tree opened through the content resolver as a controller does gives
 a JPEG of the album's own cover at 512 px, also for its songs and its artist, and the shell (another uid) reads it as
@@ -1066,8 +1070,9 @@ the rule decides for it; a caller that may not read music is refused, also when 
 mode is refused; a cover without a picture fails to open; browse results of a Media3 browser and of a platform browser
 carry cover URIs and no artwork data or bitmaps, and so do search results; after an own cover changes, the tree gives
 a new URI that serves the new picture, and the playing song's URI changes through the service; the playing song's
-session metadata carries its URI next to its picture (an added entry its song's, an opened file none), its listeners
-hear a new URI, and the same again is no news; a reader that never reads, one that reads a page now and then, and
+session metadata carries its URI next to its picture (an added entry its song's, an opened file none), the URI changes
+with the picture shown, the platform session still gets the stream's cover, its listeners hear a new URI, and the same
+again is no news; the provider is the only exported component besides the activity, the service and Media3's; a reader that never reads, one that reads a page now and then, and
 one that has gone do not keep the writer; the weight of an item with a cover URI is at least its parcel.
 
 ## 14. First launch, empty states and open-source licences (M2a step 14)
