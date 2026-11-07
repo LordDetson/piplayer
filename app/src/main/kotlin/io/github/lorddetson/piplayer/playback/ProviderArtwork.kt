@@ -16,6 +16,9 @@ class ProviderArtwork(context: Context) : TreeArtwork {
 
     override fun uriLength(subject: ArtworkSubject): Int = Covers.uris(app).lengthOf(requestOf(subject))
 
+    /** The loader's generation, which the URIs' version carries. */
+    override val version: Long get() = Covers.loader(app).generation
+
     companion object {
         fun requestOf(subject: ArtworkSubject): CoverRequest = when (subject) {
             is ArtworkSubject.Song -> CoverRequest.Track(subject.fileId)

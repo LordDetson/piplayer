@@ -26,6 +26,7 @@ import io.github.lorddetson.piplayer.playback.PlaybackService
 import io.github.lorddetson.piplayer.playback.PlaybackSessionCallback
 import io.github.lorddetson.piplayer.playback.PlaybackStateStore
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.connectBrowser
+import io.github.lorddetson.piplayer.playback.PlaybackTesting.eventually
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.onMain
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.stopAndRelease
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.waitUntil
@@ -91,9 +92,16 @@ class CoverProviderTest {
     private fun albumKey(mediaStoreId: Long) = Library.read(context) { LibraryLists(it).links(fileId(mediaStoreId)) }!!.albumKey!!
 
     /** A copy of an image of one [color], as a choice from the photo picker gives it; larger than what controllers get. */
-    private fun copy(color: Int) = run {
+    private fun copy(color: Int = RED, noise: Boolean = false) = run {
         val file = File(context.cacheDir, "chosen-${System.nanoTime()}.png")
-        file.outputStream().use { TestImages.bitmap(1_000, color = color).compress(Bitmap.CompressFormat.PNG, 100, it) }
+        val bitmap = TestImages.bitmap(1_000, color = color)
+        if (noise) {
+            // Noise does not compress: its JPEG at 512 px is far larger than a pipe's buffer.
+            val random = java.util.Random(7)
+            val pixels = IntArray(1_000 * 1_000) { 0xFF000000.toInt() or random.nextInt(0x1000000) }
+            bitmap.setPixels(pixels, 0, 1_000, 0, 0, 1_000, 1_000)
+        }
+        file.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
         checkNotNull(CoverImport.copy(context, Uri.fromFile(file), Covers.own(context).dir))
     }
 
@@ -308,6 +316,51 @@ class CoverProviderTest {
         assertThat(found).allSatisfy {
             assertThat(it.mediaMetadata.artworkData).isNull()
             assertThat(named(uriOf(it))).isNotNull()
+        }
+    }
+
+    @Test
+    fun aSearchAgainAfterANewOwnCoverGivesTheNewUri() {
+        fun search(): List<MediaItem> {
+            onMain { browser.search("Alpha", null) }.get(30, TimeUnit.SECONDS)
+            return onMain { browser.getSearchResult("Alpha", 0, Int.MAX_VALUE, null) }.get(30, TimeUnit.SECONDS).value!!
+        }
+        val before = search().map(::uriOf)
+
+        runBlocking { Covers.own(context).setAlbum(albumKey(1), copy(TestImages.BLUE)) }
+        val after = search().map(::uriOf)
+
+        assertThat(after.map(::named)).isEqualTo(before.map(::named))
+        assertThat(after.zip(before)).allSatisfy { (now, old) -> assertThat(now).isNotEqualTo(old) }
+        assertCover(after.single { named(it) is CoverRequest.Track }, TestImages.BLUE)
+    }
+
+    @Test
+    fun aCallerOverItsShareIsRefusedWhileAnotherIsServed() {
+        // A cover larger than the pipe holds: an open whose reader takes nothing keeps its place while the write waits.
+        runBlocking { Covers.own(context).setAlbum(albumKey(1), copy(noise = true)) }
+        val uri = uriOf(album("Red Album"))
+        val own = CoverAccess.Caller(Process.myUid(), Process.myPid(), context.packageName)
+        val held = (1..CoverProvider.MAX_PER_CALLER).map { provider.open(uri, "r", own) }
+        try {
+            assertThatThrownBy { provider.open(uri, "r", own) }.isInstanceOf(java.io.FileNotFoundException::class.java)
+            // Another caller that may read the library is served all the same.
+            val shell = CoverAccess.Caller(Process.SHELL_UID, 0, null)
+            if (CoverAccess.allows(context, shell)) {
+                val bytes = ParcelFileDescriptor.AutoCloseInputStream(provider.open(uri, "r", shell)).use { it.readBytes() }
+                assertThat(decode(bytes).width).isEqualTo(CoverProvider.PX)
+            }
+        } finally {
+            held.forEach { it.close() }
+        }
+        // Readers gone, their places come back.
+        eventually("the places are given back") {
+            try {
+                provider.open(uri, "r", own).close()
+                true
+            } catch (_: java.io.FileNotFoundException) {
+                false
+            }
         }
     }
 

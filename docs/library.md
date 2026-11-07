@@ -960,7 +960,8 @@ provider of its own, `CoverProvider`, with the sources, their order and the disk
     files changed. A new generation keeps the URI's length, which browse items weigh, so that the borders between
     buckets do not move under a controller that pages through a node (playback.md §10.2).
 - So a URI changes whenever the cover it names may have changed, and controllers that cache pictures by URI load it
-  again. One generation for all URIs, not one per item: building a URI reads nothing (a list of 20 000 songs builds
+  again. The tree's kept search results (playback.md §10.5) are built anew at a new generation, so that they never
+  hand out an old version. One generation for all URIs, not one per item: building a URI reads nothing (a list of 20 000 songs builds
   20 000 of them), and the events that raise it are rare. A new process gives new URIs, so a change while PiPlayer was
   not running (a file edited elsewhere) cannot leave an old picture under an old URI; controllers then load each cover
   once more, from the disk cache.
@@ -1008,11 +1009,15 @@ provider of its own, `CoverProvider`, with the sources, their order and the disk
 - A disk hit is served as stored once it starts as a JPEG does; anything else is loaded again and replaced. A request
   that memory already knows to have no cover (§13.3) is answered at once, without a plan.
 - Limits, so that a controller that scrolls fast or an app that opens thousands of URIs cannot hold PiPlayer down:
-  - at most 64 covers are served at a time, each holding two descriptors; more opens are not found;
+  - at most 64 covers are served at a time, each holding two descriptors, and at most 8 of them to one caller (uid), so
+    that one caller that opens many and reads none cannot take the places of Android Auto, a watch or PiPlayer's own
+    notification; more opens are not found;
   - when a load gets its turn (one of the four, behind the app's own loads), it first looks whether the reader is still
     there, and loads nothing for a reader that has gone;
   - a load is given up when it takes longer than 10 seconds from its turn on (the wait in line does not count);
   - a write is given up when the reader takes nothing for 10 seconds, or after 30 seconds in all;
+  - a write that waits for its reader holds no thread: it looks at the pipe without waiting every 20 ms and is
+    suspended in between, so that a reader that takes nothing (or shrinks its pipe) holds up no other cover;
   - waits and writes run on four threads of their own, apart from the database's;
   - whatever fails while a cover is served is logged, the reader gets an error, and the process goes on.
 
@@ -1059,8 +1064,8 @@ provider of its own, `CoverProvider`, with the sources, their order and the disk
 JVM tests: the URI of each kind and its parsing back, malformed URIs and other authorities refused, the number of a key
 stable within a process and refused from another one, the version rising with the generation and keeping the length,
 the length bound; the access rule (own uid, trusted, audio permission, anyone else refused); the limit of covers in
-flight; the loader's encoded cover: a disk hit served without decoding or reading a source, a disk entry that is no
-JPEG loaded again, a miss read once and stored, no picture, a cover memory knows to be none, a plan that fails, a
+flight, in all and for one caller; the loader's encoded cover: a disk hit served without decoding or reading a source,
+a disk entry that is no JPEG loaded again, a miss read once and stored, no picture, a cover memory knows to be none, a plan that fails, a
 picture that cannot be encoded, a load that takes too long, the time counted from the turn on, a reader gone before
 the turn; a change of the hidden files empties memory; the length of a URI known without building it, a salted song URI.
 
@@ -1072,8 +1077,11 @@ carry cover URIs and no artwork data or bitmaps, and so do search results; after
 a new URI that serves the new picture, and the playing song's URI changes through the service; the playing song's
 session metadata carries its URI next to its picture (an added entry its song's, an opened file none), the URI changes
 with the picture shown, the platform session still gets the stream's cover, its listeners hear a new URI, and the same
-again is no news; the provider is the only exported component besides the activity, the service and Media3's; a reader that never reads, one that reads a page now and then, and
-one that has gone do not keep the writer; the weight of an item with a cover URI is at least its parcel.
+again is no news; the provider is the only exported component besides the activity, the service and Media3's; a
+reader that never reads, one that reads a page now and then, and one that has gone do not keep the writer, and one that
+takes nothing does not hold up a second reader on the same thread; a caller over its share of open covers is refused
+while another is served; a search again after a new own cover gives the new URI; the weight of an item with a cover URI
+is at least its parcel.
 
 ## 14. First launch, empty states and open-source licences (M2a step 14)
 

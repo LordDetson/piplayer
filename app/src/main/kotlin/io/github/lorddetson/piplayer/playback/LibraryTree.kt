@@ -46,6 +46,9 @@ fun interface TreeArtwork {
     /** The length of [uriOf]'s URI, 0 without one; the tree weighs every song by it (§10.2), so it may avoid building it. */
     fun uriLength(subject: ArtworkSubject): Int = uriOf(subject)?.toString()?.length ?: 0
 
+    /** Changes whenever [uriOf] may give other URIs; items kept with URIs (search results) are built anew then. */
+    val version: Long get() = 0
+
     companion object {
         val NONE = TreeArtwork { null }
     }
@@ -93,7 +96,8 @@ class LibraryTree(context: Context, private val artwork: TreeArtwork = TreeArtwo
             val text = query.trim()
             if (SearchTerms.of(text).isEmpty()) return emptyList()
             val songsQuery = songsQuery().copy(search = text)
-            val stamp = listOf(text, stamp(), order(ListName.ARTISTS), order(ListName.ALBUMS), songsQuery)
+            // The cover version too: the kept results carry cover URIs (docs/library.md §13.8.2).
+            val stamp = listOf(text, stamp(), order(ListName.ARTISTS), order(ListName.ALBUMS), songsQuery, artwork.version)
             lastSearch?.takeIf { it.first == stamp }?.let { return it.second }
             val all = read { lists ->
                 lists.artists(artistSort(), order(ListName.ARTISTS).reversed, text).take(SEARCH_ARTISTS).map(::artistItem) +

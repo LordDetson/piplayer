@@ -54,18 +54,18 @@ class CoverProvider : ContentProvider() {
         if (!CoverAccess.allows(context, caller)) throw SecurityException("This caller may not read the music library")
         val request = Covers.uris(context).parse(uri.authority, uri.pathSegments) ?: throw FileNotFoundException("No cover")
         // Each cover served holds two descriptors and a place in the loader's line until it is written.
-        if (!admission.tryEnter()) throw FileNotFoundException("Too many covers at once")
+        if (!admission.tryEnter(caller.uid)) throw FileNotFoundException("Too many covers at once")
         val (source, sink) = try {
             ParcelFileDescriptor.createReliablePipe()
         } catch (e: IOException) {
-            admission.exit()
+            admission.exit(caller.uid)
             throw FileNotFoundException("No pipe: ${e.message}")
         }
         scope.launch {
             try {
                 serve(context, request, sink)
             } finally {
-                admission.exit()
+                admission.exit(caller.uid)
             }
         }
         return source
@@ -130,13 +130,16 @@ class CoverProvider : ContentProvider() {
         /** At most this many covers are served at a time; more opens are not found. */
         const val MAX_IN_FLIGHT = 64
 
+        /** At most this many of them for one caller (uid), so that one that opens many and reads none starves no other. */
+        const val MAX_PER_CALLER = 8
+
         const val MIME_TYPE = "image/jpeg"
 
         private const val TAG = "CoverProvider"
         private const val NO_COVER = "No cover"
         private const val NOT_READ = "The reader took nothing"
 
-        private val admission = CoverAdmission(MAX_IN_FLIGHT)
+        private val admission = CoverAdmission(MAX_IN_FLIGHT, MAX_PER_CALLER)
 
         /**
          * Lives as long as the process. The loads run on the loader's threads, at most four at a time; the waits and writes
