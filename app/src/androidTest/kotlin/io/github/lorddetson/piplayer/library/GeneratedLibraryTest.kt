@@ -206,7 +206,8 @@ class GeneratedLibraryTest {
     @TimingTest
     fun theControllerTreeAnswersTheSongsRootAndABucketWithin300Milliseconds() {
         runBlocking { Library.sync(context).awaitIdle() }
-        val tree = LibraryTree(context)
+        // As the service builds it, with a cover URI for every song (docs/library.md §13.8).
+        val tree = LibraryTree(context, io.github.lorddetson.piplayer.playback.ProviderArtwork(context))
         fun median(name: String, read: () -> Unit): Duration {
             repeat(WARM_UP) { read() }
             val times = List(5) { measureTime { read() } }.sorted()

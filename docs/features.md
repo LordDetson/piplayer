@@ -168,8 +168,8 @@ soon after 1.0, `later` is planned without a date. The items listed under Cut li
   session. `M1`
 - Minimal permissions, each requested at first use and explained in the app. `M1`
 - System surfaces show PiPlayer's own metadata (its tag reading, later identification results). `M2a`
-- A cover provider, so that hosts outside PiPlayer show the covers of the media library tree (Bluetooth and
-  other controllers). `M2a`
+- A cover provider, so that hosts outside PiPlayer show the covers of the media library tree and of the playing song
+  (cars, watches and other controllers that may read the library). `M2a`
 - Car displays (Android Auto) with browsing and search, voice requests. `v1.x`
 - Configurable extra buttons for the notification and the car (favorite, seek back 10 s, seek forward
   10 s). `v1.x`

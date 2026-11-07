@@ -83,6 +83,18 @@
             android:exported="false"
             android:process=":tagger" />
 
+        <!--
+            Covers for cars, watches and media browsers by content URI (docs/library.md §13.8). Exported because those
+            controllers are other apps; each open checks its caller in code by the rule of reading the library through
+            the session, which no manifest permission can express. Read only, no URI grants.
+        -->
+        <provider
+            android:name=".covers.CoverProvider"
+            android:authorities="${applicationId}.covers"
+            android:exported="true"
+            android:grantUriPermissions="false"
+            tools:ignore="ExportedContentProvider" />
+
         <!-- Hands a crash report to the app the user shares it with, for that share only (docs/playback.md §7.3). -->
         <provider
             android:name=".crash.CrashReportProvider"

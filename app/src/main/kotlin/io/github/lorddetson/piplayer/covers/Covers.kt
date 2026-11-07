@@ -140,6 +140,20 @@ object Covers {
         }
     }
 
+    @Volatile
+    private var coverUris: CoverUris? = null
+
+    /**
+     * The URIs of covers for controllers (docs/library.md §13.8.2): one tag for the process, the loader's generation as
+     * the version. Building a URI reads nothing; the loader comes into being with the first one.
+     */
+    fun uris(context: Context): CoverUris = coverUris ?: synchronized(this) {
+        coverUris ?: run {
+            val app = context.applicationContext
+            CoverUris(CoverUris.authorityOf(app.packageName), generation = { loader(app).generation }).also { coverUris = it }
+        }
+    }
+
     /** Lives as long as the process, as the loader does. */
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 

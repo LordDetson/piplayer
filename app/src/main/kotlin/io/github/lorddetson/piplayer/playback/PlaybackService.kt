@@ -91,6 +91,8 @@ class PlaybackService : MediaLibraryService() {
         player.addAnalyticsListener(passGateListener)
         playbackLooperForTests = player.playbackLooper
         val sessionPlayer = SessionPlayer(player)
+        // The playing library song's cover URI for controllers in other apps (docs/library.md §13.8.6).
+        sessionPlayer.artworkUriOf = { mediaId -> ProviderArtwork.ofQueueItem(this, mediaId) }
         callback.attach(sessionPlayer)
         val session = MediaLibrarySession.Builder(this, sessionPlayer, callback)
             .setSessionActivity(openApp())

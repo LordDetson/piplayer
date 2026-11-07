@@ -54,7 +54,9 @@ class CoverLoader<I : Any>(
      * Raised by [invalidate]; a load that began before a change does not keep its result in memory. Compared and put, and
      * raised and cleared, under one lock, so that no old result lands between a raise and its clearing.
      */
-    private var generation = 0L
+    @Volatile
+    var generation = 0L
+        private set
     private val memoryLock = Any()
 
     private fun memoryKey(request: CoverRequest, step: Int) = "$request@$step"
@@ -124,9 +126,66 @@ class CoverLoader<I : Any>(
             // Only an embedded picture's absence is remembered on disk: it holds while the file stays the same. A missing own
             // copy costs a look at the file, and a missing thumbnail may come with an image put into the folder later, which
             // changes nothing of the file (memory still remembers it until the library changes).
-            if (image != null) codec.encode(image)?.let { disk.write(diskKey, it) } else if (source is CoverStep.Embedded) disk.write(diskKey, null)
+            remember(source, diskKey, image, image?.let(codec::encode))
         }
         return image
+    }
+
+    /**
+     * The cover of [request] for a controller at [px] as the codec's bytes (docs/library.md §13.8.4), or null when no
+     * source has one or the library cannot be read now. A disk hit is served as stored, without decoding; memory is not
+     * asked, since encoding a decoded picture again costs more than reading the file.
+     */
+    suspend fun encoded(request: CoverRequest, px: Int): ByteArray? {
+        val step = CoverSizes.step(px)
+        val cached = CoverSizes.cached(step)
+        return permits.withPermit {
+            withContext(dispatcher) {
+                val steps = try {
+                    plan(request)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    failures(e)
+                    return@withContext null
+                }
+                for (source in steps) {
+                    val bytes = try {
+                        bytesOf(source, step, cached)
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        failures(e)
+                        continue
+                    }
+                    if (bytes != null) return@withContext bytes
+                }
+                null
+            }
+        }
+    }
+
+    /** The bytes of [source] at [step]: from the disk cache as stored, or loaded, encoded and stored. */
+    private suspend fun bytesOf(source: CoverStep, step: Int, cached: Boolean): ByteArray? {
+        val diskKey = "${source.key}@$step"
+        if (cached && disk != null) {
+            when (val hit = disk.read(diskKey)) {
+                Cached.Nothing -> return null
+                is Cached.Picture -> return hit.bytes
+                null -> Unit
+            }
+        }
+        val image = sources.load(source, step)
+        coroutineContext.ensureActive()
+        val bytes = image?.let(codec::encode)
+        if (cached && disk != null) remember(source, diskKey, image, bytes)
+        return bytes
+    }
+
+    /** Stores what [source] gave on disk: a picture's [bytes], or the absence of an embedded picture (see [picture]). */
+    private fun remember(source: CoverStep, diskKey: String, image: I?, bytes: ByteArray?) {
+        val store = disk ?: return
+        if (bytes != null) store.write(diskKey, bytes) else if (image == null && source is CoverStep.Embedded) store.write(diskKey, null)
     }
 
     /** Own covers or the library changed: what memory holds may be stale. */

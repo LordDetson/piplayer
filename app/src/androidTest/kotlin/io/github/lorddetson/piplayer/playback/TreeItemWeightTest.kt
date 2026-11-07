@@ -20,10 +20,11 @@ import org.junit.runner.RunWith
 class TreeItemWeightTest {
 
     /** The bytes of an item as Media3 hands it to a legacy browser: flags and a description with the media type. */
-    private fun parcelSize(mediaId: String, title: String?, subtitle: String?, description: String?): Int {
+    private fun parcelSize(mediaId: String, title: String?, subtitle: String?, description: String?, iconUri: String? = null): Int {
         val extras = Bundle().apply { putLong(MEDIA_TYPE_KEY, MediaMetadata.MEDIA_TYPE_MUSIC.toLong()) }
         val item = MediaBrowser.MediaItem(
-            MediaDescription.Builder().setMediaId(mediaId).setTitle(title).setSubtitle(subtitle).setDescription(description).setExtras(extras).build(),
+            MediaDescription.Builder().setMediaId(mediaId).setTitle(title).setSubtitle(subtitle).setDescription(description)
+                .setIconUri(iconUri?.let(android.net.Uri::parse)).setExtras(extras).build(),
             MediaBrowser.MediaItem.FLAG_PLAYABLE,
         )
         val parcel = Parcel.obtain()
@@ -53,6 +54,26 @@ class TreeItemWeightTest {
                 assertThat(weight).describedAs("$id / $title").isGreaterThanOrEqualTo(real)
                 // Not so much above it that buckets come out needlessly small.
                 assertThat(weight - real).describedAs("$id / $title").isLessThan(100)
+            }
+        }
+    }
+
+    @Test
+    fun theWeightOfAnItemWithACoverUriIsAtLeastItsParcel() {
+        // The cover URIs of docs/library.md §13.8.2, of every kind and length the provider gives.
+        val uris = listOf(
+            "content://io.github.lorddetson.piplayer.covers/s/1/k3x90",
+            "content://io.github.lorddetson.piplayer.covers/s/9999999999/k3x9zzzzzz",
+            "content://io.github.lorddetson.piplayer.benchmark.covers/a/123456/k3x91z",
+            "content://io.github.lorddetson.piplayer.covers/r/7/k3x90",
+        )
+        for (uri in uris) {
+            for ((id, title) in listOf("artist/ann" to "Ann", "q2/songs?key=&sort=title&rev=0&q=&start=12345&index=678" to "Wide " + "x".repeat(300))) {
+                val real = parcelSize(id, title, "Ann", "First", uri)
+                val weight = TreeBuckets.weight(id.length, title, "Ann", "First", artworkUriLength = uri.length)
+                Log.i(TAG, "weight $weight, parcel $real: $uri / $id")
+                assertThat(weight).describedAs("$uri / $id").isGreaterThanOrEqualTo(real)
+                assertThat(weight - real).describedAs("$uri / $id").isLessThan(160)
             }
         }
     }

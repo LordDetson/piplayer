@@ -63,8 +63,8 @@ class PlaybackSessionCallback(
             null
         }
     },
-    /** The library tree that controllers browse (docs/playback.md §10). */
-    private val tree: LibraryTree = LibraryTree(context),
+    /** The library tree that controllers browse (docs/playback.md §10), with the cover provider's URIs (library.md §13.8). */
+    private val tree: LibraryTree = LibraryTree(context, ProviderArtwork(context)),
     private val onQueueRequest: (QueueState?) -> Unit,
 ) : MediaLibrarySession.Callback, SessionPlayer.Edits {
 

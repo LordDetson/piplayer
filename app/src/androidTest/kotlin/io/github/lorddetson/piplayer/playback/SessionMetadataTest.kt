@@ -215,6 +215,68 @@ class SessionMetadataTest {
     }
 
     @Test
+    fun thePlayingItemCarriesItsCoverUriNextToTheStreamsPicture() {
+        onMain { session.artworkUriOf = { id -> Uri.parse("content://covers.test/s/$id/v1") } }
+        playFirst(item(1, "playback/cover-front.mp3"))
+        eventually("the stream's cover has arrived") { onMain { session.mediaMetadata.artworkData != null } }
+
+        onMain {
+            assertThat(session.mediaMetadata.artworkUri).isEqualTo(Uri.parse("content://covers.test/s/1/v1"))
+            assertThat(session.mediaMetadata.artworkData).isEqualTo(exo.mediaMetadata.artworkData)
+            // The queue's items stay without artwork.
+            assertThat(session.currentMediaItem!!.mediaMetadata.artworkUri).isNull()
+        }
+    }
+
+    @Test
+    fun anItemWithoutAPictureCarriesItsCoverUriAndAnOpenedFileNone() {
+        onMain { session.artworkUriOf = { id -> if (id.startsWith("content:")) null else Uri.parse("content://covers.test/s/$id/v1") } }
+        val opened = MediaItem.Builder()
+            .setMediaId("content://test/opened")
+            .setUri(Uri.fromFile(TestFiles.copy(LONG_FIXTURE)))
+            .setMediaMetadata(MediaMetadata.Builder().setTitle("Opened").build())
+            .build()
+        playFirst(item(1, LONG_FIXTURE), opened)
+        eventually("playback has started") { onMain { exo.playbackState == Player.STATE_READY } }
+
+        onMain {
+            assertThat(session.mediaMetadata.artworkUri).isEqualTo(Uri.parse("content://covers.test/s/1/v1"))
+            assertThat(session.mediaMetadata.artworkData).isNull()
+            session.seekToNextMediaItem()
+            assertThat(session.mediaMetadata.artworkUri).isNull()
+        }
+    }
+
+    @Test
+    fun listenersHearANewCoverUriEvenWithTheSamePicture() {
+        var version = 1
+        val heard = mutableListOf<MediaMetadata>()
+        onMain {
+            session.artworkUriOf = { id -> Uri.parse("content://covers.test/s/$id/v$version") }
+            session.addListener(object : Player.Listener {
+                override fun onMediaMetadataChanged(mediaMetadata: MediaMetadata) {
+                    heard += mediaMetadata
+                }
+            })
+        }
+        playFirst(item(1, LONG_FIXTURE))
+        eventually("playback has started") { onMain { exo.playbackState == Player.STATE_READY } }
+        onMain { heard.clear() }
+        version = 2
+
+        // What SessionCovers does when own covers change: the picture is looked for again, and it is still none.
+        onMain { session.setArtwork("1", null) }
+
+        onMain {
+            assertThat(session.mediaMetadata.artworkUri).isEqualTo(Uri.parse("content://covers.test/s/1/v2"))
+            assertThat(heard.map { it.artworkUri }).containsExactly(Uri.parse("content://covers.test/s/1/v2"))
+            // The same again is no news.
+            session.setArtwork("1", null)
+            assertThat(heard).hasSize(1)
+        }
+    }
+
+    @Test
     fun theListenerWrapperPassesOnEveryEvent() {
         val forwarded = ForwardingListener::class.java.declaredMethods.map { it.name to it.parameterTypes.toList() }.toSet()
 

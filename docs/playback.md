@@ -82,7 +82,8 @@ the version PiPlayer builds with; sections 1 to 7 were written on 1.11.1 and the
   get the timeline and may ask for the song list: PiPlayer itself, the controllers Android trusts, and apps whose uid
   holds the audio permission (checked by uid, since a package name can be claimed). Other apps see the current song
   only. Without this, an app with no access to music
-  could read the titles, artists and albums of the whole library through PiPlayer.
+  could read the titles, artists and albums of the whole library through PiPlayer. The cover provider serves covers to
+  the same callers only (library.md §13.8.3).
 - What a controller may play: items from PiPlayer's own process may name a file by URI. Items from other apps may only
   name PiPlayer's own lists: the song list's compact request (§2.3) for controllers that may read the library, and
   library items by media ID from the library tree (§10). The media notification's controller runs in PiPlayer's process but
@@ -224,7 +225,8 @@ is heard as a click. The becoming-noisy broadcast is protected, so emulator test
   fields PiPlayer leaves empty show nothing, not raw tags (TI §7.1). It stays a `ForwardingPlayer` that filters both the
   value it gives and what its listeners hear, because the session keeps what it hears. The stream's cover stays: the
   embedded picture is the third source of library.md §13.1 anyway. Since M2a step 13 an own cover replaces it, and the
-  system thumbnail stands in for a file the tag pass found without a picture (library.md §13.6).
+  system thumbnail stands in for a file the tag pass found without a picture (library.md §13.6). The playing library
+  song also carries the content URI of its cover for controllers in other apps (library.md §13.8.6).
 - While the tag pass lands its batches (library.md §5), the playing item and the next one come up to date in place, each
   when its values differ, with the same URI: playback does not prepare again. The next item after a transition catches up
   at that transition. The other items of a queue wait, because each change costs every controller a new timeline.
@@ -1019,8 +1021,9 @@ through the media library service: a tree of nodes, each a folder or a song.
   artist, music); an album also its artist and year, a song its artist, album and length, a volume the name the app
   gives it. Browsable nodes are folders; songs and the nodes of §10.3 that play are playable.
 - No item carries artwork data. Media3 decodes it into a bitmap for every item it hands a legacy browser, and Android
-  Auto warns that such bitmaps can exceed the binder's 1 MB. The cover provider of step 13 gives songs, albums and artists
-  an artwork URI (a content URI) through one hook that the tree already asks; until then it gives none.
+  Auto warns that such bitmaps can exceed the binder's 1 MB. Songs, albums and artists carry an artwork URI instead, a
+  content URI of PiPlayer's cover provider (library.md §13.8, since M2a step 13 part B), which the tree builds without
+  reading anything. The tabs, buckets and folders carry none.
 
 ### 10.2 Long lists
 
@@ -1033,7 +1036,8 @@ through the media library service: a tree of nodes, each a folder or a song.
   of songs for the others. A run of one section that is longer or heavier splits into parts, each as long as fits (at
   most 500), titled `A (1)`, `A (2)` and so on. The same section can start two runs (pinyin, or an artist's albums and
   songs of one year); its parts count on. A bucket never holds both albums, artists or folders and songs, so that every
-  bucket of songs plays. With texts of usual length a bucket of songs holds about 400 to 450 of them.
+  bucket of songs plays. With texts of usual length and their cover URIs a bucket of songs holds about 300 to 350 of
+  them.
 - A list whose entries have no section (disc and track order), or whose sections would make more than 500 buckets, splits
   into runs of rows instead, cut the same way and titled by their rows (`1-420`). The list of buckets itself is not
   weighed: it would take more than about 250 buckets with very long folder paths to fill a legacy answer.
@@ -1112,4 +1116,5 @@ no artwork data anywhere; a song of an album, an
 artist, a folder and the Songs list plays that list from it, a node plays its list from the start; search results and
 their songs playing the filtered list; a voice query playing an artist, an album and a song with its list; adds of tree
 items and queue items journaled as added entries; an app without access to music gets the root and nothing more, and
-cannot play or add library items. On the generated library, the timing check of §10.5.
+cannot play or add library items. On the generated library, the timing check of §10.5. The cover URIs of the tree's
+items have the checks of library.md §13.8.8.

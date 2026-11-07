@@ -790,10 +790,11 @@ sync under the same one writes none; on the screen, the thumb on a long list and
 the list, no thumb on a short list, and "Show as grid" on Albums and Artists with its state for TalkBack, kept after the
 activity is recreated, and followed by an artist page. The quiet timing pass keeps the first launch under 5 s and a later launch under 1 s.
 
-## 13. Covers (M2a step 13, part A)
+## 13. Covers (M2a step 13)
 
-Covers inside the app: where a cover comes from, the user's own covers, loading and caching, the placeholder. Part B,
-the cover provider that serves the library tree's `artworkUri` to controllers outside PiPlayer, follows step 10.
+Covers inside the app (part A): where a cover comes from, the user's own covers, loading and caching, the placeholder.
+Covers for controllers outside PiPlayer (part B, §13.8): a content provider that serves the covers of the library tree
+(playback.md §10) and of the playing song by content URI.
 
 ### 13.1 Sources and their order
 
@@ -903,7 +904,8 @@ the cover provider that serves the library tree's `artworkUri` to controllers ou
   anyway); when the tag pass found no picture in the file, the system thumbnail loaded for 512 px stands in, so that a
   folder image reaches the notification too. A file opened from another app keeps the stream's picture. The service
   looks again at each change of the current item and of own covers (`SessionCovers`).
-  Items of the queue and of browse results carry no artwork until part B.
+- Since part B the playing library song's metadata also carries its cover URI (§13.8.6) next to the picture. Items of
+  the queue carry no artwork.
 
 ### 13.7 Checks
 
@@ -926,3 +928,116 @@ Instrumented tests (on GitHub Actions, API 30 and 36):
   wins over its album's; the placeholder without a cover; Now Playing and the mini player show an own cover.
 - Through the service: an own cover replaces the stream's picture in the session, and the stream's picture is kept
   without one.
+
+### 13.8 Covers for controllers (part B)
+
+Android Auto, Android Automotive, Wear and the system's media browsers load the covers of browse results themselves, by
+URI. Android Auto takes `content://` and `android.resource://` URIs only and asks for no bitmaps in browse results:
+many bitmaps can exceed the binder's 1 MB (playback.md §10.1). PiPlayer serves its covers through a read-only content
+provider of its own, `CoverProvider`, with the sources, their order and the disk cache of part A.
+
+#### 13.8.1 Which items have a cover URI
+
+- Songs, albums and artists of the library tree, in browse results, items and search results, and the playing library
+  song in the session (§13.8.6). A song's URI names the song, an album's the album and an artist's the artist; each
+  serves the cover that §13.1 gives that subject in the app.
+- Not the four tabs, the buckets, nor folders: a folder has no cover source of its own until folder access (cover.jpg)
+  comes in v1.x, and a controller's own folder icon tells a folder from an album better than one song's picture would.
+- Not files opened from another app: they are not in the library.
+
+#### 13.8.2 The URI
+
+- `content://<application ID>.covers/<kind>/<id>/<version>`, for example
+  `content://io.github.lorddetson.piplayer.covers/s/1234/k3x90`:
+  - kind `s`, a song, by its file ID (§8.4), which survives a rebuild and a new media index;
+  - kind `a`, an album, and `r`, an artist, by a number that the process gives each album key or artist key the first
+    time it builds a URI for it. The key itself never goes into the URI: album keys hold names and folder paths, and
+    they are long;
+  - the version: four random characters (`0-9`, `a-z`) drawn when the process starts, then the cover generation in base
+    36. The generation rises each time the loader's memory is emptied (§13.3): own covers changed, a sync changed the
+    library, a run of the tag pass ended, or an attach pass wrote identities.
+- So a URI changes whenever the cover it names may have changed, and controllers that cache pictures by URI load it
+  again. One generation for all URIs, not one per item: building a URI reads nothing (a list of 20 000 songs builds
+  20 000 of them), and the events that raise it are rare. A new process gives new URIs, so a change while PiPlayer was
+  not running (a file edited elsewhere) cannot leave an old picture under an old URI; controllers then load each cover
+  once more, from the disk cache.
+- No file path, title, key or other user data goes into a URI. A song URI shows a file ID, a number that means nothing
+  outside PiPlayer's databases.
+- A URI is about 60 characters long; its length counts toward the weight of a browse item (playback.md §10.2).
+
+#### 13.8.3 Who may open a cover
+
+- Exactly the controllers that may read the library through the session (playback.md §1.4, the rule of `GET_TIMELINE`
+  and of browsing, §10.4): PiPlayer itself, the callers Android trusts for media control
+  (`MediaSessionManager.isTrustedForMediaControl`: the system, holders of the media control permission, apps with an
+  enabled notification listener), and apps whose uid holds the audio permission. The provider checks the caller of each
+  open by its uid and pid, as the session checks a controller; a package name alone is not enough. Anyone else gets a
+  security error. Covers are pictures of the user's music: an app that may not read music must not read them through
+  PiPlayer, just as it may not read the titles.
+- The provider is exported without a manifest permission and without URI grants:
+  - Exported, because the controllers live in other apps. No platform permission is held by Android Auto, Wear and
+    Android Automotive and by no other app, so a manifest permission could not draw the line; the check in code draws
+    the session's line instead.
+  - No URI grants (`grantUriPermissions` is false). The other way, a provider that is not exported plus a grant of each
+    URI to each controller's package, needs a call to the system for every item of every page (up to 500 a node),
+    leaves the grants in the system until the device restarts, cannot reach the readers of the platform session's
+    metadata, whose packages PiPlayer does not know, and adds nothing: the controllers that would get grants are exactly
+    those that pass the check.
+- Only reading: any other mode is refused. `getType` answers `image/jpeg` for a URI of the right form without looking
+  anything up or checking the caller, so it tells nothing; `query`, `insert`, `update` and `delete` do nothing.
+
+#### 13.8.4 Serving
+
+- An open checks the caller and the form of the URI, then returns the read end of a pipe at once: no database or file
+  is read on the binder thread, so that a car asking for fifty covers cannot hold up the binder threads that the session
+  needs too. The cover is looked up and written on the loader's threads (at most four loads at a time, together with
+  the app's own loads, §13.3).
+- The size is the 512 px step of §13.3: the shorter side 512 px, as a JPEG at quality 90. That is sharp on a car's
+  tiles and its playing screen, and it is a step the disk cache keeps, so a cover that the app or a controller loaded
+  before is served from `cache/covers/` without decoding; a new one is decoded from its source once and stored there.
+- A song URI serves the song's current cover, whatever its version: file IDs mean the same in every process. An album or
+  artist URI of another process (its four characters differ) or with a number the process never gave is not found.
+- A load that takes longer than 10 seconds is given up, and so is a write when the reader takes nothing for 10 seconds:
+  a controller that never reads cannot keep a thread.
+
+#### 13.8.5 Without a picture
+
+- A subject without a picture still gets a URI: the tree builds its items without reading covers (playback.md §10.5),
+  so it cannot know. Opening such a URI gives an empty pipe closed with an error, which controllers treat as a cover
+  that failed to load: they show their own default. PiPlayer serves no placeholder: the colored placeholder of §13.4 is
+  part of PiPlayer's own look, and in a car's grid a controller's uniform default reads better than a tile that looks
+  like a cover.
+- The tree does not drop the URI of a subject found without a picture later: items whose weight changed while a
+  controller pages through a node could move the borders between its buckets (playback.md §10.2).
+
+#### 13.8.6 The session
+
+- The playing library song's metadata carries the song's cover URI next to the picture of §13.6. Android scales the
+  bitmaps of the platform session's metadata down, and controllers such as Android Auto prefer a URI for the playing
+  item; Media3 controllers of other apps take it from the metadata as well. The picture stays, for the notification and
+  for controllers that cannot load URIs.
+- Only the playing item: the queue's items stay without artwork (a URI each would change every item of a queue of 20 000
+  at each new generation, and no platform queue is published, playback.md §2.3).
+- When own covers change, the session looks again (§13.6), and its listeners hear the new URI even when the picture
+  stays the same. After other changes of the generation the playing song's URI is new at its next change; until then
+  its old URI serves the current cover anyway.
+
+#### 13.8.7 Start
+
+- Nothing at start or in the first sync: the provider's `onCreate` does nothing, and the cover loader, the numbers of
+  keys and the version come into being with the first URI or the first open.
+
+#### 13.8.8 Checks
+
+JVM tests: the URI of each kind and its parsing back, malformed URIs and other authorities refused, the number of a key
+stable within a process and refused from another one, the version rising with the generation, the length bound; the
+access rule (own uid, trusted, audio permission, anyone else refused); the loader's encoded cover: a disk hit served
+without decoding or reading a source, a miss read once and stored, no picture, a plan that fails.
+
+Instrumented tests (API 30 and 36): a URI from the tree opened through the content resolver as a controller does gives
+a JPEG of the album's own cover at 512 px, also for its songs and its artist, and the shell (another uid) reads it as
+the rule decides for it; a caller that may not read music is refused, also when it claims PiPlayer's package; a write
+mode is refused; a cover without a picture fails to open; browse results of a Media3 browser and of a platform browser
+carry cover URIs and no artwork data or bitmaps; after an own cover changes, the tree gives a new URI that serves the
+new picture; the playing song's session metadata carries its URI next to its picture, and its listeners hear a new URI;
+a reader that never reads does not keep the writer; the weight of an item with a cover URI is at least its parcel.

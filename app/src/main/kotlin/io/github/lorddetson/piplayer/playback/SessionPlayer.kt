@@ -48,6 +48,12 @@ class SessionPlayer(private val player: ExoPlayer) : ForwardingPlayer(player) {
 
     var edits: Edits? = null
 
+    /**
+     * The content URI of the cover of the queue item with a media ID, for controllers in other apps (docs/library.md
+     * §13.8.6), or null; asked on the player's thread whenever the metadata is.
+     */
+    var artworkUriOf: (mediaId: String) -> android.net.Uri? = { null }
+
     init {
         // The player is still empty, so this changes no timeline and tells no listener.
         player.setShuffleOrder(StartFirstShuffleOrder())
@@ -218,13 +224,18 @@ class SessionPlayer(private val player: ExoPlayer) : ForwardingPlayer(player) {
      */
     fun setArtwork(mediaId: String, data: ByteArray?) {
         val before = if (data == null) artworks.remove(mediaId) else artworks.put(mediaId, data)
-        // The same picture again is no news: each change makes the platform session draw its notification again.
-        if (before.contentEquals(data)) return
         // Only a change of what the current item shows is news to the listeners.
         if (mediaId != currentMediaItem?.mediaId) return
         val metadata = getMediaMetadata()
+        // The same picture under the same URI is no news: each change makes the platform session draw its notification
+        // again. A new cover URI with the same picture is (library.md §13.8.6).
+        if (before.contentEquals(data) && metadata.artworkUri == heardUri) return
+        heardUri = metadata.artworkUri
         filtered.keys.toList().forEach { it.onMediaMetadataChanged(metadata) }
     }
+
+    /** The cover URI the listeners heard last for the current item. */
+    private var heardUri: android.net.Uri? = null
 
     /** Forgets the pictures of every item but [mediaId]: own covers changed, so they may be stale. */
     fun keepArtworkOf(mediaId: String?) {
@@ -250,17 +261,25 @@ class SessionPlayer(private val player: ExoPlayer) : ForwardingPlayer(player) {
         val current = currentMediaItem ?: return MediaMetadata.EMPTY
         val item = current.mediaMetadata
         if (item.artworkData != null || item.artworkUri != null) return item
-        artworks[current.mediaId]?.let { data ->
-            return item.buildUpon().setArtworkData(data, MediaMetadata.PICTURE_TYPE_FRONT_COVER).build()
-        }
-        if (stream.artworkData == null) return item
-        return item.buildUpon().setArtworkData(stream.artworkData, stream.artworkDataType).build()
+        val uri = artworkUriOf(current.mediaId)
+        val own = artworks[current.mediaId]
+        if (uri == null && own == null && stream.artworkData == null) return item
+        return item.buildUpon().apply {
+            when {
+                own != null -> setArtworkData(own, MediaMetadata.PICTURE_TYPE_FRONT_COVER)
+                stream.artworkData != null -> setArtworkData(stream.artworkData, stream.artworkDataType)
+            }
+            if (uri != null) setArtworkUri(uri)
+        }.build()
     }
 
     /** A listener hears the same as [getMediaMetadata] gives; the session keeps what it hears. */
     private inner class MetadataFilter(listener: Player.Listener) : ForwardingListener(listener) {
-        override fun onMediaMetadataChanged(mediaMetadata: MediaMetadata) =
-            super.onMediaMetadataChanged(itemMetadata(mediaMetadata))
+        override fun onMediaMetadataChanged(mediaMetadata: MediaMetadata) {
+            val metadata = itemMetadata(mediaMetadata)
+            heardUri = metadata.artworkUri
+            super.onMediaMetadataChanged(metadata)
+        }
     }
 }
 

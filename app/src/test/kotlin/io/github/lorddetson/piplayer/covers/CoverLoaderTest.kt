@@ -243,6 +243,90 @@ class CoverLoaderTest {
         assertThat(sources.reads).containsExactly(own, embedded)
     }
 
+    /** [Codec] that counts its decodes and encodes. */
+    private class CountingCodec : ImageCodec<String> {
+        var decodes = 0
+        var encodes = 0
+        override fun encode(image: String): ByteArray { encodes++; return Codec.encode(image) }
+        override fun decode(bytes: ByteArray, size: Int): String { decodes++; return Codec.decode(bytes, size) }
+        override fun weight(image: String) = Codec.weight(image)
+    }
+
+    private fun TestScope.counting(codec: CountingCodec, plan: suspend () -> List<CoverStep> = { plans++; steps }) = CoverLoader(
+        plan = { plan() },
+        sources = sources,
+        codec = codec,
+        disk = disk,
+        memoryWeight = 1_000,
+        dispatcher = StandardTestDispatcher(testScheduler),
+    )
+
+    @Test
+    fun aControllersCoverIsEncodedOnceAndThenServedFromTheDiskAsStored() = runTest {
+        sources.pictures[embedded] = "E"
+        val codec = CountingCodec()
+        val loader = counting(codec)
+
+        assertThat(loader.encoded(request, 512)?.let(::String)).isEqualTo("E@512")
+        assertThat(codec.encodes).isEqualTo(1)
+        assertThat(disk.read(embedded.key + "@512")).isInstanceOf(Cached.Picture::class.java)
+        sources.reads.clear()
+
+        // Another process: the bytes come from the disk, not decoded and encoded again, and no source is read.
+        val again = counting(codec)
+        assertThat(again.encoded(request, 512)?.let(::String)).isEqualTo("E@512")
+        assertThat(codec.decodes).isZero()
+        assertThat(codec.encodes).isEqualTo(1)
+        assertThat(sources.reads).containsExactly(own)
+    }
+
+    @Test
+    fun aControllersCoverSharesTheDiskWithTheApp() = runTest {
+        sources.pictures[thumbnail] = "T"
+        loader().load(request, 512)
+        sources.reads.clear()
+        val codec = CountingCodec()
+
+        assertThat(counting(codec).encoded(request, 512)?.let(::String)).isEqualTo("T@512")
+        assertThat(sources.reads).containsExactly(own)
+        assertThat(codec.encodes).isZero()
+    }
+
+    @Test
+    fun aControllersCoverWithoutAPictureIsNullAndAnEmbeddedAbsenceIsRemembered() = runTest {
+        val loader = counting(CountingCodec())
+
+        assertThat(loader.encoded(request, 512)).isNull()
+        assertThat(disk.read(embedded.key + "@512")).isEqualTo(Cached.Nothing)
+        assertThat(disk.read(thumbnail.key + "@512")).isNull()
+    }
+
+    @Test
+    fun aControllersCoverIsNullWhileTheLibraryCannotBeReadOrASourceFails() = runTest {
+        sources.pictures[embedded] = "E"
+        var failing = true
+        val loader = counting(CountingCodec()) { if (failing) throw IllegalStateException("closed for a rebuild") else steps }
+        assertThat(loader.encoded(request, 512)).isNull()
+
+        failing = false
+        sources.failing += embedded
+        sources.pictures[thumbnail] = "T"
+        assertThat(loader.encoded(request, 512)?.let(::String)).isEqualTo("T@512")
+        sources.failing.clear()
+        assertThat(loader.encoded(request, 512)?.let(::String)).isEqualTo("E@512")
+    }
+
+    @Test
+    fun theGenerationRisesWithEveryChange() = runTest {
+        val loader = loader()
+        val before = loader.generation
+
+        loader.invalidate()
+        loader.clear()
+
+        assertThat(loader.generation).isEqualTo(before + 2)
+    }
+
     @Test
     fun nowPlayingsSizeIsNotCached() = runTest {
         sources.pictures[embedded] = "E"
