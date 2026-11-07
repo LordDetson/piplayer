@@ -1,6 +1,7 @@
 package io.github.lorddetson.piplayer.userdata
 
 import android.content.Context
+import androidx.room3.AutoMigration
 import androidx.room3.ColumnInfo
 import androidx.room3.Dao
 import androidx.room3.Database
@@ -67,10 +68,18 @@ interface UserDao {
  * The user database (docs/library.md §3.1): what the user decided, never rebuilt. Its schema is exported and every new
  * version needs a migration; there is no destructive fallback.
  */
-@Database(entities = [FolderRuleEntity::class, UserMetaEntity::class], version = 1, exportSchema = true)
+@Database(
+    entities = [FolderRuleEntity::class, UserMetaEntity::class, TrackIdentityEntity::class],
+    version = 2,
+    exportSchema = true,
+    // Version 2 adds the track identities (docs/library.md §8.1).
+    autoMigrations = [AutoMigration(from = 1, to = 2)],
+)
 abstract class UserDatabase : RoomDatabase() {
 
     abstract fun user(): UserDao
+
+    abstract fun identities(): TrackIdentityDao
 
     companion object {
         const val NAME = "user.db"

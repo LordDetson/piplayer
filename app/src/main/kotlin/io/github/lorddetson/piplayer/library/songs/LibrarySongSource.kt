@@ -26,11 +26,12 @@ class LibrarySongSource(
     }.map(::song)
 
     private fun song(row: SongRow) = Song(
-        id = row.mediaStoreId,
+        id = row.fileId,
         uri = ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, row.mediaStoreId).toString(),
         title = row.title,
         artist = row.artist,
         album = row.album,
         durationMs = row.durationMs,
+        mediaStoreId = row.mediaStoreId,
     )
 }

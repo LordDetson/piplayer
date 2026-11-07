@@ -63,6 +63,9 @@ class PlaybackSessionCallbackTest {
     private val stateFile = File(context.cacheDir, "callback-state-${UUID.randomUUID()}.preferences_pb")
     private val queueRequests = CopyOnWriteArrayList<QueueState?>()
 
+    /** The library ID a queue of library songs carries (docs/playback.md §4.8). */
+    private fun libraryId() = io.github.lorddetson.piplayer.library.Library.trackRefs(context).libraryId()
+
     @get:Rule
     val songs = SongSourceRule()
     private lateinit var session: MediaLibrarySession
@@ -316,7 +319,7 @@ class PlaybackSessionCallbackTest {
         assertThat(bravo.mediaMetadata.isPlayable).isTrue()
         // Nothing for other apps to read from the published items beyond what the notification shows.
         assertThat(bravo.requestMetadata).isEqualTo(MediaItem.RequestMetadata.EMPTY)
-        assertThat(queueRequests.last()).isEqualTo(QueueState(request, emptyList()))
+        assertThat(queueRequests.last()).isEqualTo(QueueState(request, emptyList(), libraryId()))
     }
 
     @Test
@@ -344,7 +347,7 @@ class PlaybackSessionCallbackTest {
         assertThat(onMain { session.player.playWhenReady }).isFalse()
         eventually("the restored song is ready") { onMain { session.player.playbackState == Player.STATE_READY } }
         assertThat(onMain { session.player.currentPosition }).isBetween(400L, 700L)
-        assertThat(queueRequests.last()).isEqualTo(QueueState(requireNotNull(saved.queue), emptyList()))
+        assertThat(queueRequests.last()).isEqualTo(QueueState(requireNotNull(saved.queue), emptyList(), libraryId()))
     }
 
     @Test
@@ -405,7 +408,7 @@ class PlaybackSessionCallbackTest {
         assertThat(result.mediaItems.map { it.mediaId }).containsExactly("1", "2", "3")
         assertThat(result.startIndex).isEqualTo(1)
         assertThat(result.startPositionMs).isEqualTo(500L)
-        assertThat(queueRequests.last()).isEqualTo(QueueState(requireNotNull(saved.queue), emptyList()))
+        assertThat(queueRequests.last()).isEqualTo(QueueState(requireNotNull(saved.queue), emptyList(), libraryId()))
     }
 
     @Test

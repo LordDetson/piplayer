@@ -17,6 +17,8 @@ class StartFirstShuffleOrder private constructor(
     /** The songs' indices in the order they play. */
     private val shuffled: IntArray,
     private val random: Random,
+    /** An order the next queue of its length takes as it is: a restored one (docs/playback.md §4.8). */
+    private val waiting: IntArray? = null,
 ) : ShuffleOrder {
 
     /** Where each song stands in [shuffled]. */
@@ -61,7 +63,12 @@ class StartFirstShuffleOrder private constructor(
     override fun getFirstIndex(): Int = if (shuffled.isEmpty()) C.INDEX_UNSET else shuffled[0]
 
     /** A new queue: its start song first. */
-    override fun cloneAndSet(insertionCount: Int, startIndex: Int): ShuffleOrder = startingAt(insertionCount, startIndex)
+    override fun cloneAndSet(insertionCount: Int, startIndex: Int): ShuffleOrder =
+        if (waiting != null && waiting.size == insertionCount) {
+            StartFirstShuffleOrder(waiting, child())
+        } else {
+            startingAt(insertionCount, startIndex)
+        }
 
     /**
      * Songs added at [insertionIndex] go to random places of the order, but never before its first song, which is
@@ -123,4 +130,22 @@ class StartFirstShuffleOrder private constructor(
     override fun cloneAndClear(): ShuffleOrder = StartFirstShuffleOrder(IntArray(0), child())
 
     private fun child() = Random(random.nextLong())
+
+    /** The songs' indices in the order they play. */
+    fun indices(): IntArray = shuffled.copyOf()
+
+    /** An empty order that hands [order] to the next queue of its length (a restore), and shuffles anew otherwise. */
+    fun waitingFor(order: IntArray): StartFirstShuffleOrder = StartFirstShuffleOrder(IntArray(0), child(), of(order).shuffled)
+
+    companion object {
+        /** The order [order], which must hold every index below its size once. */
+        fun of(order: IntArray, seed: Long = Random().nextLong()): StartFirstShuffleOrder {
+            val seen = BooleanArray(order.size)
+            for (index in order) {
+                require(index in order.indices && !seen[index]) { "Not an order of ${order.size} songs" }
+                seen[index] = true
+            }
+            return StartFirstShuffleOrder(order.copyOf(), Random(seed))
+        }
+    }
 }

@@ -11,6 +11,7 @@ import io.github.lorddetson.piplayer.library.FakeMediaIndex.Companion.row
 import androidx.room3.useReaderConnection
 import androidx.room3.withWriteTransaction
 import io.github.lorddetson.piplayer.library.db.LibraryDatabase
+import io.github.lorddetson.piplayer.library.db.StoredPlace
 import io.github.lorddetson.piplayer.library.db.TrackEntity
 import io.github.lorddetson.piplayer.library.values.TrackTags
 import java.util.concurrent.CountDownLatch
@@ -494,11 +495,11 @@ class LibrarySyncTest {
         sync.sync()
         assertThat(dao.tracks()).isEmpty()
 
-        // New files take the next free ID, which is the removed file's again.
+        // A new file never takes the removed file's ID (docs/library.md §8.4).
         index.volume().rows = listOf(row(1), row(3, title = "Third", generation = 3))
         sync.sync()
 
-        assertThat(files().getValue(3).id).isEqualTo(removedId)
+        assertThat(files().getValue(3).id).isGreaterThan(removedId)
         assertThat(files().getValue(3).tagPassAt).isNull()
         assertThat(display(3).title).isEqualTo("Third")
     }
@@ -679,5 +680,58 @@ class LibrarySyncTest {
             check(System.currentTimeMillis() < end) { "Timed out" }
             Thread.sleep(20)
         }
+    }
+
+    @Test
+    fun aDeletedFilesIdIsNeverGivenToAnotherFile() = runBlocking<Unit> {
+        index.volume().rows = listOf(row(1), row(2))
+        sync.sync()
+        val second = files().getValue(2).id
+
+        index.volume().rows = listOf(row(1))
+        sync.sync()
+        index.volume().rows = listOf(row(1), row(3, generation = 10))
+        sync.sync()
+
+        assertThat(files().getValue(3).id).isGreaterThan(second)
+    }
+
+    @Test
+    fun theLibraryHasAnIdOfItsOwnThatStays() = runBlocking<Unit> {
+        val first = dao.libraryId()
+        index.volume().rows = listOf(row(1))
+        sync.sync()
+
+        assertThat(first).isNotBlank()
+        assertThat(dao.libraryId()).isEqualTo(first)
+        val other = LibraryDatabase.open(context, file = null)
+        try {
+            assertThat(other.library().libraryId()).isNotEqualTo(first)
+        } finally {
+            other.close()
+        }
+    }
+
+    @Test
+    fun aSeededFirstSyncGivesFilesAtTheSamePlaceTheirOldIds() = runBlocking<Unit> {
+        index.volume().rows = listOf(row(1, name = "a.mp3"), row(2, name = "b.mp3"), row(3, name = "new.mp3"))
+        index.volume("external_sd").rows = listOf(row(4, volume = "external_sd", name = "c.mp3"))
+        val seed = listOf(
+            StoredPlace(fileId = 40, volume = PRIMARY, relativePath = "Music/", displayName = "a.mp3"),
+            StoredPlace(fileId = 7, volume = PRIMARY, relativePath = "Music/", displayName = "b.mp3"),
+            StoredPlace(fileId = 90, volume = PRIMARY, relativePath = "Music/", displayName = "gone.mp3"),
+            StoredPlace(fileId = 12, volume = "external_sd", relativePath = "Music/", displayName = "c.mp3"),
+        )
+        val seeded = LibrarySync(database, index, mayRead = { true }, rules, seed = seed).also { syncs += it }
+
+        seeded.sync()
+
+        val files = files()
+        assertThat(files.getValue(1).id).isEqualTo(40)
+        assertThat(files.getValue(2).id).isEqualTo(7)
+        assertThat(files.getValue(4).id).isEqualTo(12)
+        // A new file never takes an ID of the seed, also not that of a file that is gone.
+        assertThat(files.getValue(3).id).isGreaterThan(90)
+        assertThat(dao.displays().map { it.fileId }).containsExactlyInAnyOrder(40, 7, 12, files.getValue(3).id)
     }
 }

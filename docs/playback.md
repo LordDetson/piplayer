@@ -541,6 +541,56 @@ By hand on the phone later: open the app after a force stop and check the paused
 and a Bluetooth device, use the headset buttons after process death, and send a foreign start with `adb` while watching
 that playback is unaffected.
 
+### 4.8 Schema 3: identities, the queue file and the shuffle order (M2a step 8)
+
+Schema 3 replaces what §4.1 to §4.3 say about media index IDs, the saved shuffle order and where the queue lives.
+
+- **Two files.** `playback_state` keeps what changes while playing: the current item, its row and position, shuffle,
+  repeat, what the system shows before the queue is read (title, artist, album, duration, URI), and the revision of
+  the queue file it belongs to. It is still written every five seconds while playing and at once on the events of
+  §4.2. The structure of the queue lives in `queue.bin` under the app's no-backup files and is written only when the
+  structure changes: a new queue, an open from another app, shuffle turned on or off, an edit (step 9). It is written
+  to a new file that then replaces the old one, so a reader never sees half of it.
+- **The queue file** (format 1) holds its revision, the library ID (library.md §8.4), the entries added by edits, the
+  edit journal and, while shuffle is on, the play order. The compact request and the opened files at their rows stay in
+  `playback_state`, as in schema 2, because they are small.
+  An entry of the queue is named by a key: a library song by its file ID, an opened file by its place in the opened
+  list, an added entry by a number that the queue file hands out once.
+- **The current item** is saved as a track reference, the form of a playlist entry (TI §10.2): its file ID, its
+  identity when it has one, its content key, its place (volume, relative path, display name) and its length. A
+  restore finds it by the file ID when the library ID is the same and that file still has the place, otherwise by the
+  identity's current key, then by the saved key, then by the place with a length within 1 s; among several files with
+  the key, the one at the saved place wins. Only then does the saved row count, with position zero, as in §4.3. So the
+  position survives a moved or renamed album, an index rebuild and a library rebuild, also after a new app version
+  whose library database starts empty, as long as the file is still at its place or its key is known again.
+- **The shuffle order** is saved exactly: the keys of the queue's entries in play order, those already played
+  included. A restore gives the player the same order. When the library changed meanwhile, the entries that are still
+  there keep their order, the gone ones leave, and new ones (the compact request is read again, §4.2) go to random
+  places after the current item, so they are still to come. When the library ID differs, file IDs mean nothing and
+  the order is generated again with the current item first, as before. A current song that moved and has another file
+  ID now keeps its place in the order. The library ID saved is the one the songs of the queue were read under, so a queue
+  that outlived a rebuild with new IDs is not taken for a queue of the new library.
+- **The edit journal** (filled by step 9) lists the edits in the order they were made: insert entries after an entry,
+  remove an entry, move an entry after another. Each edit names entries by their keys, not by rows, and keeps the row
+  it was made at as a fallback, so it still applies when the compact request reads a changed list: an insert whose
+  entry is gone goes to its row, a removal or a move of an entry that is gone does nothing. Added entries carry their
+  track references, so they survive a library rebuild like the current item. After 200 edits the journal is folded:
+  the queue file then holds every library entry as an added entry, the opened files stay at their rows in
+  `playback_state`, which holds no compact request any more, and the play order names the same entries under their new
+  keys. From then on the queue is a fixed list that no longer follows the library.
+- **Schema 2** files are still read: their compact request's start ID and the saved song ID are media index IDs, which
+  a restore turns into file IDs through `audio_file.media_store_id`; the order is generated again. Schema 2 and 1
+  files are rewritten as schema 3 at the next save. The queue file is written before `playback_state`, which names its
+  revision; a queue file of another revision (the process died between the two writes), a damaged one or one of a
+  format it does not know is ignored, and the queue starts from the snapshot's request and opened files as in schema 2.
+- **Checks.** JVM tests: the queue file round trip and a damaged or unknown file; the track reference resolution in
+  its order; the shuffle order restored exactly, with gone entries left out and new ones only after the current item;
+  a library ID that differs; the journal: inserts, removals and moves on an unchanged and on a changed list, a missing
+  anchor falling back to the row, folding after 200 edits; schema 2 to 3. Instrumented tests on the API 30 emulator,
+  through the service: a shuffled queue is restored in the same order after the process is gone; the current song is
+  restored after its file moved to another folder, after an index rebuild with new IDs and after a library rebuild; a
+  20 000-song queue still starts within 1 s on the phone (§2.3).
+
 ## 5. Files opened from other apps
 
 ### 5.1 Opening and the queue

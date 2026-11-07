@@ -6,6 +6,7 @@ import androidx.room3.withWriteTransaction
 import io.github.lorddetson.piplayer.library.db.LibraryDao
 import io.github.lorddetson.piplayer.library.db.LibraryDatabase
 import io.github.lorddetson.piplayer.library.db.ReadFileRow
+import io.github.lorddetson.piplayer.library.db.StoredPlace
 import io.github.lorddetson.piplayer.library.db.VolumeSyncStateEntity
 import io.github.lorddetson.piplayer.library.db.JsonRows
 import io.github.lorddetson.piplayer.library.db.replaceAll
@@ -43,7 +44,18 @@ class LibrarySync(
     private val index: MediaIndex,
     private val mayRead: () -> Boolean,
     private val rules: RulesSource = RulesSource.NONE,
+    /**
+     * The files of a library database that was rebuilt (docs/library.md §8.5): the first sync of a volume gives a file
+     * at the same place the ID it had there, and no new file takes any of their IDs.
+     */
+    seed: List<StoredPlace> = emptyList(),
 ) {
+
+    @Volatile
+    private var seed: Map<String, List<StoredFile>> = seed.groupBy({ it.volume }) {
+        StoredFile(it.fileId, mediaStoreId = -1, it.relativePath, it.displayName)
+    }
+    private val seedMax = seed.maxOfOrNull { it.fileId } ?: 0L
 
     private val dao: LibraryDao = database.library()
     private val displays = TrackDisplayWriter(database)
@@ -191,6 +203,7 @@ class LibrarySync(
                 write(plan)
                 if (plan.stateChanged) dao.saveVolume(plan.state)
             }
+            if (seedMax > 0) dao.raiseLastFileId(seedMax)
             if (rulesChanged) {
                 // The files written above already carry the new rules; only folders whose files carry another rule
                 // are written again, so that a first sync and a change of one rule stay quick.
@@ -201,6 +214,7 @@ class LibrarySync(
                 dao.setMirroredUserCounter(userCounter)
             }
         }
+        if (seed.isNotEmpty()) seed = seed - plans.map { it.state.volumeName }.toSet()
         mutableStatus.update { it.copy(ready = true, known = true, revision = if (filesChanged) it.revision + 1 else it.revision) }
         return filesChanged
     }
@@ -209,7 +223,8 @@ class LibrarySync(
         val version = index.version(volume) ?: return null
         // Read before the rows: a change that lands while they are read is read again by the next sync.
         val generation = index.generation(volume)
-        val files = dao.storedFiles(volume)
+        // A rebuilt library has no files yet; the seed stands in for them (docs/library.md §8.5).
+        val files = dao.storedFiles(volume).ifEmpty { seed[volume].orEmpty() }
         val storedVolume = stored?.let { StoredVolume(it.volumeName, it.version, it.generation) }
         val changes = when (val mode = SyncPlanner.mode(storedVolume, version, generation)) {
             VolumeMode.Full -> SyncPlanner.full(files, index.rows(volume, since = null))
@@ -255,8 +270,10 @@ class LibrarySync(
         delete(changes.removed)
         deleteTracks(plan.changedFiles)
         if (plan.rows.isEmpty()) return
-        val first = dao.lastFileId() + 1
+        // Never an ID a file had before, also one that is gone (docs/library.md §8.4).
+        val first = maxOf(dao.lastFileId(), dao.lastGivenFileId(), seedMax) + 1
         val ids = changes.updated.map { it.fileId } + List(changes.added.size) { first + it }
+        if (changes.added.isNotEmpty()) dao.raiseLastFileId(first + changes.added.size - 1)
         val indices = plan.rows.indices.toList()
         if (changes.updated.isEmpty()) {
             // Only new files, as in a first sync: nothing to keep, and no reading of the table being written.

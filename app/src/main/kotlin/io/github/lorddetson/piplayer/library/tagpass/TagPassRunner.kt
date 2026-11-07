@@ -38,6 +38,8 @@ class TagPassRunner(
     private val gate: PassGate,
     private val startDelay: Duration = START_DELAY,
     private val walks: DurationWalks? = null,
+    /** After the pass and after the walks of a run: the attach pass follows (docs/library.md §8.2). */
+    private val onRunEnd: () -> Unit = {},
 ) {
     /** Whether something asked for a run since the last one started; the walks make way for it. */
     private val runAsked = AtomicBoolean()
@@ -102,7 +104,9 @@ class TagPassRunner(
         } finally {
             SongList.passFinished()
         }
+        onRunEnd()
         runWalks()
+        onRunEnd()
     }
 
     /** What the pass could not take from headers, last (docs/library.md §7.2). */

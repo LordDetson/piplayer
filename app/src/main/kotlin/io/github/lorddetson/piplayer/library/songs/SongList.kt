@@ -175,9 +175,9 @@ object SongList {
         synchronized(lock) {
             marking()
             batchCount++
-            if (activeReads > 0) rows.forEach { racing[it.mediaStoreId] = it }
+            if (activeReads > 0) rows.forEach { racing[it.fileId] = it }
             kept = kept?.let { current ->
-                val byId = rows.associateBy { it.mediaStoreId }
+                val byId = rows.associateBy { it.fileId }
                 Kept(current.songs.withValues(byId), current.key)
             }
         }

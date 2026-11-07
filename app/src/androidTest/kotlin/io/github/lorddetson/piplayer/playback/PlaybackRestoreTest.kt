@@ -125,6 +125,50 @@ class PlaybackRestoreTest {
     }
 
     @Test
+    fun aShuffledQueueComesBackInTheSameOrderAtTheSameSong() {
+        songs.songs = (1L..8L).map { SongSourceRule.song(it, "Song $it", LONG_FIXTURE) }
+        controller.tap(QueueRequest(startSongId = 1, startRow = 0), "Song 1")
+        controller.waitUntil("the queue plays") { isPlaying && mediaItemCount == 8 }
+        onMain { controller.shuffleModeEnabled = true }
+        controller.waitUntil("shuffle is on") { shuffleModeEnabled }
+        onMain { repeat(2) { controller.seekToNextMediaItem() } }
+        val order = onMain { shuffledIds() }
+        controller.waitUntil("the third song of the order plays") { currentMediaItem?.mediaId == order[2] }
+        onMain { controller.pause() }
+        eventually("the shuffled queue is saved") {
+            val saved = store.readBlocking()
+            saved != null && saved.shuffle && saved.songId.toString() == order[2] && saved.queueRevision > 0
+        }
+
+        // As after the end of the process: the player forgets its queue and its shuffle, the files stay.
+        onMain {
+            controller.stop()
+            controller.clearMediaItems()
+            controller.shuffleModeEnabled = false
+        }
+        controller.waitUntil("the player is empty") { mediaItemCount == 0 && !shuffleModeEnabled }
+
+        ActivityScenario.launch(MainActivity::class.java).use {
+            controller.waitUntil("the saved queue is back") { mediaItemCount == 8 && currentMediaItem?.mediaId == order[2] }
+            assertThat(onMain { controller.shuffleModeEnabled }).isTrue()
+            assertThat(onMain { shuffledIds() }).isEqualTo(order)
+        }
+    }
+
+    /** The media IDs of the queue in its shuffled play order. */
+    private fun shuffledIds(): List<String> {
+        val timeline = controller.currentTimeline
+        val ids = mutableListOf<String>()
+        var index = timeline.getFirstWindowIndex(true)
+        val window = androidx.media3.common.Timeline.Window()
+        while (index != androidx.media3.common.C.INDEX_UNSET) {
+            ids += timeline.getWindow(index, window).mediaItem.mediaId
+            index = timeline.getNextWindowIndex(index, Player.REPEAT_MODE_OFF, true)
+        }
+        return ids
+    }
+
+    @Test
     fun aPlayRequestOnAnEmptyPlayerRebuildsTheSavedQueueAndStartsIt() {
         runBlocking { store.write(snapshot(songId = 2, row = 1, positionMs = 2_000)) }
 
@@ -184,7 +228,8 @@ class PlaybackRestoreTest {
         onMain { controller.pause() }
 
         Thread.sleep(500)
-        assertThat(store.readBlocking()).isEqualTo(saved)
+        // The store adds the song's track reference from the library when it writes (§4.8).
+        assertThat(store.readBlocking()?.copy(current = null, libraryId = null)).isEqualTo(saved)
     }
 
     @Test

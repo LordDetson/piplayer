@@ -3,6 +3,8 @@ package io.github.lorddetson.piplayer.playback
 import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.mutablePreferencesOf
 import org.assertj.core.api.Assertions.assertThat
+import io.github.lorddetson.piplayer.library.identity.Place
+import io.github.lorddetson.piplayer.library.identity.TrackRef
 import org.junit.jupiter.api.Test
 
 class PlaybackSnapshotPreferencesTest {
@@ -118,7 +120,41 @@ class PlaybackSnapshotPreferencesTest {
         preferences[PlaybackKeys.schema] = PlaybackSnapshot.LEGACY_SCHEMA_VERSION
         preferences.remove(PlaybackKeys.openItems)
 
-        assertThat(preferences.toSnapshot()).isEqualTo(snapshot)
+        assertThat(preferences.toSnapshot()).isEqualTo(snapshot.copy(mediaIndexIds = true))
+    }
+
+    @Test
+    fun `schema 3 keeps the current track reference, the library and the queue file's revision`() {
+        val full = snapshot.copy(
+            current = TrackRef(42, identityId = 7, contentKey = "ab".repeat(32), Place("external_primary", "Music/", "a.mp3"), 180_000),
+            libraryId = "lib-1",
+            queueRevision = 12,
+        )
+        val preferences = mutablePreferencesOf()
+
+        preferences.putSnapshot(full)
+
+        assertThat(preferences[PlaybackKeys.schema]).isEqualTo(3)
+        assertThat(preferences.toSnapshot()).isEqualTo(full)
+    }
+
+    @Test
+    fun `a track reference with only a file ID survives too`() {
+        val bare = snapshot.copy(current = TrackRef(42, null, null, null, null))
+        val preferences = mutablePreferencesOf()
+
+        preferences.putSnapshot(bare)
+
+        assertThat(preferences.toSnapshot()).isEqualTo(bare)
+    }
+
+    @Test
+    fun `a schema 2 snapshot is read with media index IDs and without a track reference`() {
+        val preferences = mutablePreferencesOf()
+        preferences.putSnapshot(mixedSnapshot.copy(current = TrackRef(42, null, null, null, null), libraryId = "x", queueRevision = 3))
+        preferences[PlaybackKeys.schema] = 2
+
+        assertThat(preferences.toSnapshot()).isEqualTo(mixedSnapshot.copy(mediaIndexIds = true))
     }
 
     @Test

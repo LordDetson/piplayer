@@ -50,6 +50,51 @@ class UserDatabaseTest {
     }
 
     @Test
+    fun versionOneMigratesToTwoKeepingItsRulesAndAddingIdentities() = runBlocking<Unit> {
+        migrations.createDatabase(1).use { connection ->
+            connection.prepare(
+                "INSERT INTO library_folder_rule (volume_name, relative_path, mode) VALUES ('external_primary', 'Music/', 1)",
+            ).use { it.step() }
+            connection.prepare("INSERT INTO user_meta (id, change_counter) VALUES (1, 5)").use { it.step() }
+        }
+
+        // Checks the migrated schema against the committed app/schemas/.../2.json.
+        migrations.runMigrationsAndValidate(2).close()
+
+        val opened = UserDatabase.open(context, file.name)
+        try {
+            val dao = opened.user()
+            assertThat(dao.folderRules()).containsExactly(FolderRuleEntity("external_primary", "Music/", FolderRuleEntity.INCLUDE))
+            assertThat(dao.changeCounter()).isEqualTo(5)
+            assertThat(opened.identities().identities()).isEmpty()
+        } finally {
+            opened.close()
+        }
+    }
+
+    @Test
+    fun anIdentityKeepsItsBlobsAndOneKeyHasOneIdentity() = runBlocking<Unit> {
+        val dao = database.identities()
+        val key = ByteArray(32) { it.toByte() }
+        val mbid = ByteArray(16) { (it * 3).toByte() }
+        val id = dao.add(
+            TrackIdentityEntity(
+                contentKey = key, durationMs = 1_000, recordingMbid = mbid, hintVolumeName = "v", hintRelativePath = "p/",
+                hintDisplayName = "n", hintSize = 5, createdAt = 1, missingSince = null,
+            ),
+        )
+
+        val stored = dao.identities().single()
+        assertThat(stored.id).isEqualTo(id)
+        assertThat(stored.contentKey).isEqualTo(key)
+        assertThat(stored.recordingMbid).isEqualTo(mbid)
+        assertThat(stored.startMs).isZero()
+        org.assertj.core.api.Assertions.assertThatThrownBy {
+            runBlocking { dao.add(stored.copy(id = 0)) }
+        }.isInstanceOf(Exception::class.java)
+    }
+
+    @Test
     fun everyChangeOfAFolderRuleCountsAsAChangeOfUserData() = runBlocking<Unit> {
         val dao = database.user()
         assertThat(dao.changeCounter()).isZero()

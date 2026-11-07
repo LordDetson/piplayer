@@ -133,4 +133,36 @@ class StartFirstShuffleOrderTest {
 
         assertThat(times.sorted()[times.size / 2]).isLessThanOrEqualTo(20L)
     }
+
+    @Test
+    fun `an order given whole plays as given and tells its indices`() {
+        val order = StartFirstShuffleOrder.of(intArrayOf(3, 0, 4, 1, 2), seed = 1)
+
+        assertThat(order.walk()).containsExactly(3, 0, 4, 1, 2)
+        assertThat(order.indices()).containsExactly(3, 0, 4, 1, 2)
+        assertThat(StartFirstShuffleOrder(seed = 1).cloneAndSet(4, 2).let { (it as StartFirstShuffleOrder).indices() })
+            .startsWith(2).hasSize(4)
+    }
+
+    @Test
+    fun `a waiting order is taken by the next queue of its length, once`() {
+        val waiting = StartFirstShuffleOrder(seed = 4).waitingFor(intArrayOf(2, 0, 1))
+
+        val restored = waiting.cloneAndSet(3, 1)
+        assertThat(restored.walk()).containsExactly(2, 0, 1)
+        assertThat(restored.cloneAndClear().cloneAndSet(3, 1).walk().first()).isEqualTo(1)
+    }
+
+    @Test
+    fun `a waiting order of another length gives way to a new shuffle`() {
+        val waiting = StartFirstShuffleOrder(seed = 4).waitingFor(intArrayOf(2, 0, 1))
+
+        assertThat(waiting.cloneAndSet(5, 4).walk()).startsWith(4).hasSize(5).doesNotHaveDuplicates()
+    }
+
+    @Test
+    fun `an order that is not a permutation is refused`() {
+        org.assertj.core.api.Assertions.assertThatThrownBy { StartFirstShuffleOrder.of(intArrayOf(0, 0, 1)) }
+            .isInstanceOf(IllegalArgumentException::class.java)
+    }
 }

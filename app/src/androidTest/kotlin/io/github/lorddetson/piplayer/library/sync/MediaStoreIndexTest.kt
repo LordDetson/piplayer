@@ -140,8 +140,8 @@ class MediaStoreIndexTest {
             sync.sync()
             // The fixtures last 2 s: no length limit here, this test is about reading the index.
             val songs = LibrarySongSource(database, HiddenFiles(minLengthSeconds = 0)).songs()
-                .filter { song -> inserted.any { it.id == song.id } }
-                .associateBy { it.id }
+                .filter { song -> inserted.any { it.id == song.mediaStoreId } }
+                .associateBy { it.mediaStoreId }
 
             assertThat(songs.keys).containsExactlyInAnyOrder(tagged.id, untagged.id)
             assertThat(songs.getValue(untagged.id).title).isEqualTo("Без тегов")

@@ -6,6 +6,8 @@ import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
+import io.github.lorddetson.piplayer.library.identity.Place
+import io.github.lorddetson.piplayer.library.identity.TrackRef
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -25,6 +27,17 @@ internal object PlaybackKeys {
     val album = stringPreferencesKey("album")
     val duration = longPreferencesKey("duration_ms")
     val uri = stringPreferencesKey("uri")
+
+    // Schema 3: the current song as a track reference (docs/playback.md §4.8).
+    val refFile = longPreferencesKey("ref_file_id")
+    val refIdentity = longPreferencesKey("ref_identity_id")
+    val refKey = stringPreferencesKey("ref_content_key")
+    val refVolume = stringPreferencesKey("ref_volume")
+    val refPath = stringPreferencesKey("ref_relative_path")
+    val refName = stringPreferencesKey("ref_display_name")
+    val refDuration = longPreferencesKey("ref_duration_ms")
+    val libraryId = stringPreferencesKey("library_id")
+    val queueRevision = longPreferencesKey("queue_revision")
 }
 
 private val openItemsJson = Json {
@@ -50,22 +63,56 @@ internal fun MutablePreferences.putSnapshot(snapshot: PlaybackSnapshot) {
     snapshot.album?.let { this[PlaybackKeys.album] = it }
     this[PlaybackKeys.duration] = snapshot.durationMs
     snapshot.uri?.let { this[PlaybackKeys.uri] = it }
+    snapshot.current?.let { ref ->
+        this[PlaybackKeys.refFile] = ref.fileId
+        ref.identityId?.let { this[PlaybackKeys.refIdentity] = it }
+        ref.contentKey?.let { this[PlaybackKeys.refKey] = it }
+        ref.place?.let {
+            this[PlaybackKeys.refVolume] = it.volume
+            this[PlaybackKeys.refPath] = it.relativePath
+            this[PlaybackKeys.refName] = it.displayName
+        }
+        ref.durationMs?.let { this[PlaybackKeys.refDuration] = it }
+    }
+    snapshot.libraryId?.let { this[PlaybackKeys.libraryId] = it }
+    if (snapshot.queueRevision > 0) this[PlaybackKeys.queueRevision] = snapshot.queueRevision
 }
 
 /** The saved snapshot, or null when there is none or it cannot be understood. */
 internal fun Preferences.toSnapshot(): PlaybackSnapshot? = when (this[PlaybackKeys.schema]) {
     PlaybackSnapshot.LEGACY_SCHEMA_VERSION -> {
         val queue = this[PlaybackKeys.queue]?.let(QueueRequest::parse) ?: return null
-        snapshot(queue = queue, openItems = emptyList())
+        snapshot(queue = queue, openItems = emptyList())?.copy(mediaIndexIds = true)
     }
-    PlaybackSnapshot.SCHEMA_VERSION -> {
-        val queue = this[PlaybackKeys.queue]?.let { value -> QueueRequest.parse(value) ?: return null }
-        val openItems = this[PlaybackKeys.openItems]?.let { value ->
-            runCatching { openItemsJson.decodeFromString<List<SavedOpenItem>>(value) }.getOrNull() ?: return null
-        } ?: emptyList()
-        snapshot(queue = queue, openItems = openItems)
-    }
+    PlaybackSnapshot.OPEN_SCHEMA_VERSION -> withOpenItems()?.copy(mediaIndexIds = true)
+    PlaybackSnapshot.SCHEMA_VERSION -> withOpenItems()?.copy(
+        current = currentRef(),
+        libraryId = this[PlaybackKeys.libraryId],
+        queueRevision = (this[PlaybackKeys.queueRevision] ?: 0L).coerceAtLeast(0),
+    )
     else -> null
+}
+
+private fun Preferences.withOpenItems(): PlaybackSnapshot? {
+    val queue = this[PlaybackKeys.queue]?.let { value -> QueueRequest.parse(value) ?: return null }
+    val openItems = this[PlaybackKeys.openItems]?.let { value ->
+        runCatching { openItemsJson.decodeFromString<List<SavedOpenItem>>(value) }.getOrNull() ?: return null
+    } ?: emptyList()
+    return snapshot(queue = queue, openItems = openItems)
+}
+
+private fun Preferences.currentRef(): TrackRef? {
+    val fileId = this[PlaybackKeys.refFile] ?: return null
+    val volume = this[PlaybackKeys.refVolume]
+    val path = this[PlaybackKeys.refPath]
+    val name = this[PlaybackKeys.refName]
+    return TrackRef(
+        fileId = fileId,
+        identityId = this[PlaybackKeys.refIdentity],
+        contentKey = this[PlaybackKeys.refKey],
+        place = if (volume != null && path != null && name != null) Place(volume, path, name) else null,
+        durationMs = this[PlaybackKeys.refDuration],
+    )
 }
 
 private fun Preferences.snapshot(queue: QueueRequest?, openItems: List<SavedOpenItem>): PlaybackSnapshot? {
