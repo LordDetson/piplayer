@@ -9,7 +9,8 @@ import io.github.lorddetson.piplayer.library.db.FolderKey
 import io.github.lorddetson.piplayer.library.db.LibraryDatabase
 import io.github.lorddetson.piplayer.library.db.ListSongRow
 import io.github.lorddetson.piplayer.library.search.SearchTerms
-import io.github.lorddetson.piplayer.library.search.SearchText
+import io.github.lorddetson.piplayer.identification.text.TextNormalizer
+import io.github.lorddetson.piplayer.library.values.TextForms
 import io.github.lorddetson.piplayer.library.songs.Song
 import io.github.lorddetson.piplayer.settings.HiddenFiles
 import kotlinx.coroutines.runBlocking
@@ -44,12 +45,18 @@ data class DisplayArtist(val name: String, val key: String, val searchText: Stri
 
 /** The artist key of a name (docs/library.md §6.2). */
 object DisplayArtists {
-    /** A name of punctuation alone, such as `+`, normalizes to nothing and keeps itself. */
-    fun keyOf(name: String): String = SortKeys.of(name).ifEmpty { name.lowercase() }
+    /**
+     * The normalized name, which the artist's page is found by, so it stays what it is when sort keys change. A name of
+     * punctuation alone, such as `+`, normalizes to nothing and keeps itself.
+     */
+    fun keyOf(name: String): String = keyOf(name, TextNormalizer.normalize(name))
+
+    private fun keyOf(name: String, normalized: String) = normalized.ifEmpty { name.lowercase() }
 
     /** [names] as rows, one per key, in order. */
-    fun of(names: List<String>): List<DisplayArtist> =
-        names.map { DisplayArtist(it, keyOf(it), SearchText.of(it)) }.distinctBy { it.key }
+    fun of(names: List<String>, forms: TextForms = TextForms()): List<DisplayArtist> =
+        names.map { name -> forms.shared(name).let { DisplayArtist(name, keyOf(name, it.normalized), it.indexed) } }
+            .distinctBy { it.key }
 }
 
 /**

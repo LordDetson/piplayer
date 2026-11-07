@@ -2,10 +2,7 @@ package io.github.lorddetson.piplayer.library.values
 
 import android.provider.MediaStore
 import io.github.lorddetson.piplayer.identification.text.FileNameParser
-import io.github.lorddetson.piplayer.identification.text.TextNormalizer
 import io.github.lorddetson.piplayer.library.lists.DisplayArtists
-import io.github.lorddetson.piplayer.library.lists.SortKeys
-import io.github.lorddetson.piplayer.library.search.SearchText
 import io.github.lorddetson.piplayer.library.sync.DisplayValues
 
 /** What the media index says of a file, precedence level 4 (TI §7.1). */
@@ -54,6 +51,7 @@ object MergedValues {
         overrides: FieldOverrides = FieldOverrides.NONE,
         volume: String = "",
         relativePath: String = "",
+        forms: TextForms = TextForms(),
     ): DisplayValues {
         val tagValues = tags.takeIf { read }
         val indexValues = index.takeIf { !read }
@@ -78,31 +76,36 @@ object MergedValues {
             !tagValues?.artists.isNullOrEmpty() -> tagValues!!.artists
             else -> listOfNotNull(artist)
         }
+        // Each text normalized once: the title and file name for this file, the others for the batch (TextForms).
+        val titleForm = forms.once(title)
+        val fileForm = forms.once(fileName)
+        val artistForm = artist?.let(forms::shared)
+        val albumForm = album?.let(forms::shared)
         return DisplayValues(
-            albumKey = albumTags?.let { AlbumKey.of(it, volume, relativePath) },
+            albumKey = albumTags?.let { AlbumKey.of(it, volume, relativePath) { text -> forms.shared(text).normalized } },
             albumArtist = albumArtist,
             compilation = compilation,
             year = if (read) yearOf(tagValues?.date) ?: yearOf(tagValues?.originalDate) else indexValues?.year?.takeIf { it > 0 },
             discNumber = disc,
             trackNumber = track,
-            displayArtists = DisplayArtists.of(artists),
-            artistKey = artist?.let(SortKeys::of),
-            albumTitleKey = album?.let(SortKeys::of),
-            albumSearch = if (album == null) "" else SearchText.of(album, albumArtist ?: artist),
-            fileKey = SortKeys.of(fileName),
+            displayArtists = DisplayArtists.of(artists, forms),
+            artistKey = artistForm?.sortKey,
+            albumTitleKey = albumForm?.sortKey,
+            albumSearch = if (albumForm == null) "" else TextForms.searchText(albumForm, (albumArtist ?: artist)?.let(forms::shared)),
+            fileKey = fileForm.sortKey,
             title = title,
             artist = artist,
             album = album,
             durationMs = exactDurationMs?.takeIf { it > 0 } ?: index?.durationMs?.takeIf { it > 0 }
                 ?: tagLengthMs?.takeIf { it > 0 },
-            titleKey = TextNormalizer.normalize(title),
-            searchText = SearchText.of(
-                title,
-                artistsForSearch,
-                album,
-                tagValues?.composers?.joinToString(" ") ?: indexValues?.composer.present(),
-                tagValues?.genres?.joinToString(" ") ?: indexValues?.genre.present(),
-                fileName,
+            titleKey = titleForm.normalized,
+            searchText = TextForms.searchText(
+                titleForm,
+                artistsForSearch?.let(forms::shared),
+                albumForm,
+                (tagValues?.composers?.joinToString(" ") ?: indexValues?.composer.present())?.let(forms::shared),
+                (tagValues?.genres?.joinToString(" ") ?: indexValues?.genre.present())?.let(forms::shared),
+                fileForm,
             ),
             // Unknown until read: the index fills albums with folder names (docs/playback.md §2.2).
             reasons = if (!read) {

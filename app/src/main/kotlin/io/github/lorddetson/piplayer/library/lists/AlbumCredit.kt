@@ -25,5 +25,8 @@ sealed interface AlbumCredit {
 /** The sort keys of names (docs/library.md §6.3): the one place step 11 changes for locale-aware keys. */
 object SortKeys {
     /** The key of [text]: normalized as for search, so that case, diacritics and ё do not change the order. */
-    fun of(text: String): String = TextNormalizer.normalize(text)
+    fun of(text: String): String = of(text, TextNormalizer.normalize(text))
+
+    /** The key of [text] whose [normalized] form the caller has already. */
+    fun of(text: String, normalized: String): String = normalized
 }

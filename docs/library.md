@@ -472,6 +472,9 @@ keeps playing meanwhile, and the crash leaves a native crash report of `:tagger`
 - An album shows its album artist; without one, its artist when all its songs share it (by its key, so "Queen" and
   "QUEEN" are one), otherwise "Various artists"; with no artist on any song, "Unknown artist". A compilation without an
   album artist shows "Various artists" too.
+- The resolver normalizes each text once: the title and file name once per file, and the album, artists, album artist,
+  composers and genres, which repeat over an album's tracks and over one track's fields, once per batch of files. With
+  every text normalized again, the grouping values made a first sync of the generated library about 1.5 s slower.
 - Hidden files (§3.5) count nowhere: an album, artist or folder whose songs are all hidden is not listed.
 - An album's year is the earliest year of its songs. Albums sort by artist with the key of their album artist, or else
   the lowest artist key of their songs.

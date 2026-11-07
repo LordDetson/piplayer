@@ -12,12 +12,17 @@ object AlbumKey {
     private val discFolder = Regex("""(?:cd|dis[ck]|диск)[\s_-]*\d+""", RegexOption.IGNORE_CASE)
 
     /** Null for a track without an album. */
-    fun of(tags: TrackTags, volume: String, relativePath: String): String? {
+    fun of(
+        tags: TrackTags,
+        volume: String,
+        relativePath: String,
+        normalize: (String) -> String = TextNormalizer::normalize,
+    ): String? {
         val album = tags.album ?: return null
         tags.releaseMbid?.let { return "mbid:$it" }
         return listOf(
-            keyOf(album),
-            tags.albumArtist?.let(::keyOf).orEmpty(),
+            keyOf(album, normalize),
+            tags.albumArtist?.let { keyOf(it, normalize) }.orEmpty(),
             volume,
             albumFolder(relativePath).lowercase(),
             if (tags.compilation) "1" else "0",
@@ -25,7 +30,7 @@ object AlbumKey {
     }
 
     /** The normalized text; a name of punctuation alone, such as `+`, normalizes to nothing and keeps itself. */
-    private fun keyOf(text: String) = TextNormalizer.normalize(text).ifEmpty { text.lowercase() }
+    private fun keyOf(text: String, normalize: (String) -> String) = normalize(text).ifEmpty { text.lowercase() }
 
     /** [relativePath] without a last folder named like a disc, unless that is all it holds. */
     private fun albumFolder(relativePath: String): String {

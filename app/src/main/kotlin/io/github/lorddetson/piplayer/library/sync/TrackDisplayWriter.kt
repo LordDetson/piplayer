@@ -11,6 +11,7 @@ import io.github.lorddetson.piplayer.library.db.TrackEntity
 import io.github.lorddetson.piplayer.library.db.replaceAll
 import io.github.lorddetson.piplayer.library.values.IndexValues
 import io.github.lorddetson.piplayer.library.values.MergedValues
+import io.github.lorddetson.piplayer.library.values.TextForms
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -26,8 +27,8 @@ internal class DisplayInput(
     private val volume: String = "",
     private val relativePath: String = "",
 ) {
-    /** Normalizes, so not on a thread that playback or a list waits for. */
-    fun resolve(): DisplayValues = MergedValues.of(
+    /** Normalizes, so not on a thread that playback or a list waits for; [forms] are shared by a batch. */
+    fun resolve(forms: TextForms = TextForms()): DisplayValues = MergedValues.of(
         displayName,
         index,
         read?.let(TrackEntity::tagsOf),
@@ -37,6 +38,7 @@ internal class DisplayInput(
         embeddedCover = read?.embeddedCover == true,
         volume = volume,
         relativePath = relativePath,
+        forms = forms,
     )
 }
 
@@ -95,7 +97,13 @@ class TrackDisplayWriter(private val database: LibraryDatabase) {
         /** Normalizing 20 000 titles and search texts takes about a second on one core, so the cores share it. */
         internal suspend fun resolve(inputs: List<DisplayInput>): List<DisplayValues> = coroutineScope {
             inputs.chunked(RESOLVE_CHUNK)
-                .map { chunk -> async(Dispatchers.Default) { chunk.map { it.resolve() } } }
+                .map { chunk ->
+                    async(Dispatchers.Default) {
+                        // One per chunk: its tracks share their albums and artists.
+                        val forms = TextForms()
+                        chunk.map { it.resolve(forms) }
+                    }
+                }
                 .awaitAll()
                 .flatten()
         }
