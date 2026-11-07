@@ -6,6 +6,7 @@ import io.github.lorddetson.piplayer.library.db.PendingDuration
 import io.github.lorddetson.piplayer.library.db.SongRow
 import io.github.lorddetson.piplayer.library.sync.LibrarySync
 import io.github.lorddetson.piplayer.library.sync.TrackDisplayWriter
+import io.github.lorddetson.piplayer.library.values.TextForms
 import io.github.lorddetson.piplayer.tagging.TagReadGuard
 import io.github.lorddetson.piplayer.tagging.contentkey.DurationCheck
 import io.github.lorddetson.piplayer.tagging.contentkey.DurationPlan
@@ -192,7 +193,7 @@ class DurationWalks(
             database.withWriteTransaction {
                 current.forEach { dao.setDuration(it.pending.fileId, it.stored.ms, it.stored.source) }
                 val inputs = displays.inputsOf(ids)
-                with(TrackDisplayWriter) { write(inputs.map { it.fileId }, inputs.map { it.resolve() }) }
+                with(TrackDisplayWriter) { write(inputs.map { it.fileId }, TextForms().let { forms -> inputs.map { it.resolve(forms) } }) }
             }
             ids.chunked(CHUNK).flatMap { dao.songRowsOf(it) }
         }

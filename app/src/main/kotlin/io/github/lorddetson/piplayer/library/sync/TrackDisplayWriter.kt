@@ -10,10 +10,10 @@ import io.github.lorddetson.piplayer.library.db.ReadFileRow
 import io.github.lorddetson.piplayer.library.db.TrackEntity
 import io.github.lorddetson.piplayer.library.db.replaceAll
 import io.github.lorddetson.piplayer.library.sort.Collation
-import io.github.lorddetson.piplayer.library.sort.SortKey
 import io.github.lorddetson.piplayer.library.sort.SortKeys
 import io.github.lorddetson.piplayer.library.values.IndexValues
 import io.github.lorddetson.piplayer.library.values.MergedValues
+import io.github.lorddetson.piplayer.library.values.TextForms
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -29,8 +29,8 @@ internal class DisplayInput(
     private val volume: String = "",
     private val relativePath: String = "",
 ) {
-    /** Normalizes, so not on a thread that playback or a list waits for. */
-    fun resolve(keys: (String) -> SortKey = SortKeys::of): DisplayValues = MergedValues.of(
+    /** Normalizes, so not on a thread that playback or a list waits for; [forms] are shared by a batch. */
+    fun resolve(forms: TextForms = TextForms()): DisplayValues = MergedValues.of(
         displayName,
         index,
         read?.let(TrackEntity::tagsOf),
@@ -40,7 +40,7 @@ internal class DisplayInput(
         embeddedCover = read?.embeddedCover == true,
         volume = volume,
         relativePath = relativePath,
-        keys = keys,
+        forms = forms,
     )
 }
 
@@ -99,13 +99,19 @@ class TrackDisplayWriter(private val database: LibraryDatabase) {
 
         /**
          * Normalizing 20 000 titles and search texts takes about a second on one core, so the cores share it. Each chunk
-         * remembers the sort keys of the texts it has seen, so an artist or an album of many songs costs one key; all
-         * use [collation], which the caller stores with them (docs/library.md §11.1).
+         * shares the forms and sort keys of its texts, so an artist or an album of many songs costs one of each, and
+         * makes its keys with a collator of its own; all use [collation], which the caller stores with them (docs/
+         * library.md §11.1).
          */
         internal suspend fun resolve(inputs: List<DisplayInput>, collation: Collation = SortKeys.current()): List<DisplayValues> =
             coroutineScope {
                 inputs.chunked(RESOLVE_CHUNK)
-                    .map { chunk -> async(Dispatchers.Default) { SortKeys.Cache(collation).let { keys -> chunk.map { it.resolve(keys::of) } } } }
+                    .map { chunk ->
+                        async(Dispatchers.Default) {
+                            val forms = TextForms(keys = collation.newKeys())
+                            chunk.map { it.resolve(forms) }
+                        }
+                    }
                     .awaitAll()
                     .flatten()
             }

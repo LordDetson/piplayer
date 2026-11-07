@@ -13,6 +13,7 @@ import io.github.lorddetson.piplayer.library.sync.LibrarySync
 import io.github.lorddetson.piplayer.library.sync.TrackDisplayWriter
 import io.github.lorddetson.piplayer.library.values.AlbumKey
 import io.github.lorddetson.piplayer.library.values.LegacyText
+import io.github.lorddetson.piplayer.library.values.TextForms
 import io.github.lorddetson.piplayer.library.values.TrackTags
 import io.github.lorddetson.piplayer.nativelib.taglib.TagReadError
 import io.github.lorddetson.piplayer.tagging.TagReadGuard
@@ -168,7 +169,7 @@ class TagPass(
                     }
                 }
                 val inputs = displays.inputsOf(read)
-                with(TrackDisplayWriter) { write(inputs.map { it.fileId }, inputs.map { it.resolve() }) }
+                with(TrackDisplayWriter) { write(inputs.map { it.fileId }, TextForms().let { forms -> inputs.map { it.resolve(forms) } }) }
             }
             read.chunked(CHUNK).flatMap { dao.songRowsOf(it) }
         }

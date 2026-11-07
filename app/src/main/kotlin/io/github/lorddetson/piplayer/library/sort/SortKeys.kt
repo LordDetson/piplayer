@@ -55,12 +55,4 @@ object SortKeys {
         val tag = locale.getUnicodeLocaleType("co")?.let { "$base-u-co-$it" } ?: base
         return "$tag/$collatorVersion/$ucaVersion/$RULES_VERSION"
     }
-
-    /** Keys of one collation that remembers those of texts it has seen: a resolver chunk's, for one thread. */
-    class Cache(collation: Collation = current()) {
-        private val make = collation.newKeys()
-        private val keys = HashMap<String, SortKey>()
-
-        fun of(text: String): SortKey = keys.getOrPut(text) { make(text) }
-    }
 }

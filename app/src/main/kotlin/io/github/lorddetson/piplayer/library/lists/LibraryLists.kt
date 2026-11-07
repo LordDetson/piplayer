@@ -9,7 +9,7 @@ import io.github.lorddetson.piplayer.library.db.FolderKey
 import io.github.lorddetson.piplayer.library.db.LibraryDatabase
 import io.github.lorddetson.piplayer.library.db.ListSongRow
 import io.github.lorddetson.piplayer.library.search.SearchTerms
-import io.github.lorddetson.piplayer.library.search.SearchText
+import io.github.lorddetson.piplayer.library.values.TextForms
 import io.github.lorddetson.piplayer.library.songs.Song
 import io.github.lorddetson.piplayer.library.sort.SortKey
 import io.github.lorddetson.piplayer.library.sort.SortKeys
@@ -58,15 +58,22 @@ data class DisplayArtist(val name: String, val key: String, val searchText: Stri
 
 /** The artist key of a name (docs/library.md §6.2). */
 object DisplayArtists {
-    /** A name of punctuation alone, such as `+`, normalizes to nothing and keeps itself. */
-    fun keyOf(name: String): String = TextNormalizer.normalize(name).ifEmpty { name.lowercase() }
+    /**
+     * The normalized name, which the artist's page is found by, so it stays what it is when sort keys change. A name of
+     * punctuation alone, such as `+`, normalizes to nothing and keeps itself.
+     */
+    fun keyOf(name: String): String = keyOf(name, TextNormalizer.normalize(name))
+
+    internal fun keyOf(name: String, normalized: String) = normalized.ifEmpty { name.lowercase() }
 
     /**
-     * [names] as rows, one per key, in order, each sorted by [keys] of its name; [sortTag], the artist's sort tag, names
+     * [names] as rows, one per key, in order, each sorted by the key of its name; [sortTag], the artist's sort tag, names
      * a single artist (docs/library.md §11.1).
      */
-    fun of(names: List<String>, keys: (String) -> SortKey = SortKeys::of, sortTag: String? = null): List<DisplayArtist> =
-        names.map { DisplayArtist(it, keyOf(it), SearchText.of(it), keys(sortTag ?: it)) }.distinctBy { it.key }
+    fun of(names: List<String>, forms: TextForms = TextForms(), sortTag: String? = null): List<DisplayArtist> =
+        names.map { name ->
+            forms.shared(name).let { DisplayArtist(name, keyOf(name, it.normalized), it.indexed, forms.sortKey(sortTag ?: name)) }
+        }.distinctBy { it.key }
 }
 
 /**

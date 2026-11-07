@@ -1,5 +1,6 @@
 package io.github.lorddetson.piplayer.library.sort
 
+import io.github.lorddetson.piplayer.library.values.TextForms
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
@@ -57,23 +58,17 @@ class SortKeysTest {
     }
 
     @Test
-    fun `a chunk's cache gives the collation's keys and makes each once`() {
+    fun `a batch's forms give the collation's keys and make each once`() {
         var made = 0
-        val counting = object : Collation {
-            val inner = Icu4jCollation(listOf(Locale.ENGLISH))
-            override val name = inner.name
-            override val buckets get() = inner.buckets
+        val inner = Icu4jCollation(listOf(Locale.ENGLISH))
+        val own = inner.newKeys()
+        val forms = TextForms(keys = { made++; own(it) })
 
-            override fun key(text: String): SortKey {
-                made++
-                return inner.key(text)
-            }
-        }
-        val cache = SortKeys.Cache(counting)
+        val keys = listOf("Queen", "Queen", "ABBA", "Queen").map { forms.shared(it).sortKey } + forms.sortKey("Queen") + forms.once("Queen").sortKey
 
-        val keys = listOf("Queen", "Queen", "ABBA", "Queen").map(cache::of)
-
-        assertThat(keys).containsExactly(counting.inner.key("Queen"), counting.inner.key("Queen"), counting.inner.key("ABBA"), counting.inner.key("Queen"))
+        assertThat(keys).containsExactly(
+            inner.key("Queen"), inner.key("Queen"), inner.key("ABBA"), inner.key("Queen"), inner.key("Queen"), inner.key("Queen"),
+        )
         assertThat(made).isEqualTo(2)
     }
 }

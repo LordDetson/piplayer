@@ -37,9 +37,11 @@ object SearchText {
         .mapNotNull { field -> field?.let(::indexed)?.takeIf { it.isNotEmpty() } }
         .joinToString(" ")
 
-    /** The normalized [field], then its glued words: each word with punctuation inside, each run of short words. */
-    private fun indexed(field: String): String {
-        val normalized = TextNormalizer.normalize(field)
+    /**
+     * The normalized [field], then its glued words: each word with punctuation inside, each run of short words.
+     * [normalized] is the field normalized, when the caller has it already.
+     */
+    internal fun indexed(field: String, normalized: String = TextNormalizer.normalize(field)): String {
         // A first sync brings here every value of the library: most of them have nothing to glue.
         val splitWords = if (field.any { !it.isLetterOrDigit() && !it.isWhitespace() && it != '_' }) {
             field.split(wordBreak)
