@@ -38,6 +38,12 @@ class SessionPlayer(private val player: ExoPlayer) : ForwardingPlayer(player) {
 
         /** The entries from [from] to [to] are about to move to start at [newIndex]. */
         fun moving(from: Int, to: Int, newIndex: Int)
+
+        /**
+         * [items] are about to be added at [index] by someone other than the edits themselves: a controller's add
+         * (docs/playback.md §10.3).
+         */
+        fun inserting(index: Int, items: List<MediaItem>) {}
     }
 
     var edits: Edits? = null
@@ -144,22 +150,42 @@ class SessionPlayer(private val player: ExoPlayer) : ForwardingPlayer(player) {
 
     override fun addMediaItem(mediaItem: MediaItem) {
         placeJoining()
+        edits?.inserting(player.mediaItemCount, listOf(mediaItem))
         super.addMediaItem(mediaItem)
     }
 
     override fun addMediaItem(index: Int, mediaItem: MediaItem) {
         placeJoining()
+        edits?.inserting(index.coerceIn(0, player.mediaItemCount), listOf(mediaItem))
         super.addMediaItem(index, mediaItem)
     }
 
     override fun addMediaItems(mediaItems: List<MediaItem>) {
         placeJoining()
+        if (mediaItems.isNotEmpty()) edits?.inserting(player.mediaItemCount, mediaItems)
         super.addMediaItems(mediaItems)
     }
 
     override fun addMediaItems(index: Int, mediaItems: List<MediaItem>) {
         placeJoining()
+        if (mediaItems.isNotEmpty()) edits?.inserting(index.coerceIn(0, player.mediaItemCount), mediaItems)
         super.addMediaItems(index, mediaItems)
+    }
+
+    override fun replaceMediaItem(index: Int, mediaItem: MediaItem) = replaceMediaItems(index, index + 1, listOf(mediaItem))
+
+    /**
+     * New metadata for the same entries passes as it is (the refresh of docs/playback.md §2.6). Other entries in place of
+     * old ones, as a controller's replace brings them (§10.3), are added after them and the old ones removed, so that the
+     * edits see both.
+     */
+    override fun replaceMediaItems(fromIndex: Int, toIndex: Int, mediaItems: List<MediaItem>) {
+        val to = toIndex.coerceAtMost(player.mediaItemCount)
+        val same = to - fromIndex == mediaItems.size &&
+            mediaItems.indices.all { player.getMediaItemAt(fromIndex + it).mediaId == mediaItems[it].mediaId }
+        if (edits == null || same || fromIndex !in 0..to) return super.replaceMediaItems(fromIndex, toIndex, mediaItems)
+        if (mediaItems.isNotEmpty()) addMediaItems(to, mediaItems)
+        if (to > fromIndex) removeMediaItems(fromIndex, to)
     }
 
     override fun removeMediaItem(index: Int) {

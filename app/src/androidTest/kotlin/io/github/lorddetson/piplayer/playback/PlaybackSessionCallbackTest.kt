@@ -283,7 +283,7 @@ class PlaybackSessionCallbackTest {
     }
 
     @Test
-    fun anItemThatNamesNoFileCannotBePlayedYet() {
+    fun anItemThatNamesNeitherAFileNorTheLibraryCannotBePlayed() {
         val items = listOf(MediaItem.Builder().setMediaId("library:1").build())
 
         for (controller in listOf(piPlayer, otherApp)) {
