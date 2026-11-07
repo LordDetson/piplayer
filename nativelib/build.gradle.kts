@@ -61,14 +61,24 @@ androidComponents {
 }
 
 /**
- * ccache for the debug native build, from -Ppiplayer.ccache=<path to ccache> (a development machine sets it in
+ * ccache for the debug native build, from -Ppiplayer.ccache=<ccache> (a development machine sets it in
  * ~/.gradle/gradle.properties; CI never does): TagLib, most of the native build, then compiles once for every checkout
  * and clean build. The release build always compiles from source. base_dir makes the paths relative to the checkout and
  * hash_dir=false leaves the build folder out of the key, so that worktrees share the cache; the price is that a cached
  * object's debug info may name another checkout's build folder.
+ *
+ * The value is a path or a program name looked up on PATH, since a package manager may move ccache on an upgrade. When
+ * it cannot be found, the build goes on without ccache instead of failing on every compile.
  */
 val ccacheLauncher: String? = providers.gradleProperty("piplayer.ccache").orNull?.let { ccache ->
-    listOf(ccache, "base_dir=${rootProject.layout.projectDirectory.asFile}", "hash_dir=false")
+    val found = File(ccache).takeIf { it.isFile } ?: System.getenv("PATH").orEmpty().split(File.pathSeparator)
+        .flatMap { dir -> listOf(File(dir, ccache), File(dir, "$ccache.exe")) }
+        .firstOrNull { it.isFile }
+    if (found == null) {
+        logger.warn("piplayer.ccache=$ccache is neither a file nor on PATH: building without ccache")
+        return@let null
+    }
+    listOf(found.path, "base_dir=${rootProject.layout.projectDirectory.asFile}", "hash_dir=false")
         .joinToString(";") { it.replace('\\', '/') }
 }
 
