@@ -89,6 +89,7 @@ class PlaybackService : MediaLibraryService() {
         player.addAnalyticsListener(passGateListener)
         playbackLooperForTests = player.playbackLooper
         val sessionPlayer = SessionPlayer(player)
+        callback.attach(sessionPlayer)
         val session = MediaLibrarySession.Builder(this, sessionPlayer, callback)
             .setSessionActivity(openApp())
             .setMediaButtonPreferences(MediaButtons.of(this, player.shuffleModeEnabled, player.repeatMode))

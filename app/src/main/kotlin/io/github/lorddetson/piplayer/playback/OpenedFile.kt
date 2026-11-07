@@ -39,14 +39,18 @@ data class QueueState(
     val openItems: List<SavedOpenItem>,
     /** The library ID the songs' file IDs were read under (docs/library.md §8.4); null without library songs. */
     val libraryId: String? = null,
+    /** The edits of the queue (docs/playback.md §9.4). */
+    val edits: QueueEdits = QueueEdits(),
 ) {
 
     init {
-        require(library != null || openItems.isNotEmpty()) { "A queue needs a library request or opened files" }
+        require(library != null || openItems.isNotEmpty() || edits.added.isNotEmpty()) {
+            "A queue needs a library request, opened files or added songs"
+        }
         require(openItems.zipWithNext().all { (first, second) -> first.index < second.index }) {
             "Opened files must have increasing rows"
         }
-        if (library == null) {
+        if (library == null && edits.added.isEmpty()) {
             require(openItems.withIndex().all { (row, item) -> item.index == row }) {
                 "A queue of opened files starts at row zero and has no gaps"
             }
@@ -64,6 +68,20 @@ data class QueueState(
         val shifted = openItems.map { item ->
             if (item.index > currentIndex) item.copy(index = item.index + files.size) else item
         }
-        return QueueState(library, (shifted + inserted).sortedBy { it.index }, libraryId)
+        return copy(openItems = (shifted + inserted).sortedBy { it.index })
     }
+}
+
+/**
+ * What the user changed in a queue (docs/playback.md §9.4): the entries added, the journal of edits over the compact
+ * request's list, the up-next run's entries and the number the next added entry gets.
+ */
+data class QueueEdits(
+    val added: List<AddedEntry> = emptyList(),
+    val journal: List<QueueEdit> = emptyList(),
+    val upNext: List<EntryKey.Added> = emptyList(),
+    val nextNumber: Long = 1,
+) {
+    /** Whether there is anything the queue file must keep. */
+    val isEmpty: Boolean get() = added.isEmpty() && journal.isEmpty() && upNext.isEmpty()
 }

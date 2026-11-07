@@ -80,6 +80,9 @@ class SongMenu(
     val openAlbum: (key: String) -> Unit,
     val openArtist: (key: String) -> Unit,
     val openFolder: (volume: String, relativePath: String) -> Unit,
+    /** "Play next" and "Add to queue" (docs/playback.md §9.1). */
+    val playNext: (Song) -> Unit = {},
+    val addToQueue: (Song) -> Unit = {},
 )
 
 /**
@@ -301,6 +304,14 @@ private fun SongMenuButton(song: Song, menu: SongMenu) {
             Icon(painterResource(R.drawable.ic_more), stringResource(R.string.song_menu, song.title))
         }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            DropdownMenuItem(text = { Text(stringResource(R.string.play_next)) }, onClick = {
+                open = false
+                menu.playNext(song)
+            })
+            DropdownMenuItem(text = { Text(stringResource(R.string.add_to_queue)) }, onClick = {
+                open = false
+                menu.addToQueue(song)
+            })
             val found = links
             found?.albumKey?.let { key ->
                 DropdownMenuItem(text = { Text(stringResource(R.string.go_to_album)) }, onClick = {

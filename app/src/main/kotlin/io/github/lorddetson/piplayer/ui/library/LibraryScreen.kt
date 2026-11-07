@@ -77,6 +77,7 @@ import io.github.lorddetson.piplayer.ui.player.MiniPlayer
 import io.github.lorddetson.piplayer.ui.songs.AudioAccess
 import io.github.lorddetson.piplayer.ui.songs.PermissionCard
 import io.github.lorddetson.piplayer.ui.songs.SongMenu
+import io.github.lorddetson.piplayer.ui.player.QueueTarget
 import io.github.lorddetson.piplayer.ui.songs.SongsScreen
 import io.github.lorddetson.piplayer.ui.songs.SongsState
 import io.github.lorddetson.piplayer.ui.songs.SongsViewModel
@@ -96,6 +97,8 @@ class LibraryHost(
     val currentSongId: Long?,
     val menu: SongMenu,
     val play: (row: Int, song: Song?, list: SongQuery) -> Unit,
+    /** "Play next" ([next]) and "Add to queue" of an album, an artist or a folder (docs/playback.md §9.1). */
+    val addToQueue: (target: QueueTarget, next: Boolean) -> Unit,
     val openNowPlaying: () -> Unit,
     val openAlbum: (key: String) -> Unit,
     val openArtist: (key: String) -> Unit,
@@ -178,8 +181,8 @@ fun LibraryScreen(host: LibraryHost, onOpenSettings: () -> Unit) {
                 menu = host.menu,
                 emptyText = if (search.isBlank()) null else stringResource(R.string.search_nothing_found),
             )
-            LibraryTab.ALBUMS -> Groups(access, albums, modifier, search) { list -> albumItems(list, host.openAlbum) }
-            LibraryTab.ARTISTS -> Groups(access, artists, modifier, search) { list -> artistItems(list, host.openArtist) }
+            LibraryTab.ALBUMS -> Groups(access, albums, modifier, search) { list -> albumItems(list, host) }
+            LibraryTab.ARTISTS -> Groups(access, artists, modifier, search) { list -> artistItems(list, host) }
             LibraryTab.FOLDERS -> FolderContent(access, folders, folder = null, host, modifier, search)
         }
     }
@@ -209,23 +212,52 @@ private fun <T : List<*>> Groups(
     }
 }
 
-private fun LazyListScope.albumItems(albums: List<AlbumGroup>, open: (String) -> Unit) {
-    items(albums, key = { "album " + it.key }) { album -> AlbumRow(album) { open(album.key) } }
+private fun LazyListScope.albumItems(albums: List<AlbumGroup>, host: LibraryHost) {
+    items(albums, key = { "album " + it.key }) { album -> AlbumRow(album, host) }
 }
 
-private fun LazyListScope.artistItems(artists: List<ArtistGroup>, open: (String) -> Unit) {
+private fun LazyListScope.artistItems(artists: List<ArtistGroup>, host: LibraryHost) {
     items(artists, key = { "artist " + it.key }) { artist ->
         val counts = pluralStringResource(R.plurals.albums_count, artist.albums, artist.albums) + " · " +
             pluralStringResource(R.plurals.songs_count, artist.songs, artist.songs)
-        GroupRow(artist.name, counts, R.drawable.ic_artist, stringResource(R.string.open_artist)) { open(artist.key) }
+        GroupRow(artist.name, counts, R.drawable.ic_artist, stringResource(R.string.open_artist), queue(host, QueueTarget.Artist(artist.key))) {
+            host.openArtist(artist.key)
+        }
     }
 }
 
 @Composable
-internal fun AlbumRow(album: AlbumGroup, onClick: () -> Unit) {
+internal fun AlbumRow(album: AlbumGroup, host: LibraryHost) {
     val credit = creditText(album.credit)
     val details = listOfNotNull(credit, album.year?.toString(), pluralStringResource(R.plurals.songs_count, album.songs, album.songs))
-    GroupRow(album.title, details.joinToString(" · "), R.drawable.ic_album, stringResource(R.string.open_album), onClick)
+    GroupRow(album.title, details.joinToString(" · "), R.drawable.ic_album, stringResource(R.string.open_album), queue(host, QueueTarget.Album(album.key))) {
+        host.openAlbum(album.key)
+    }
+}
+
+/** What a row's or a page's menu adds to the queue (docs/playback.md §9.1). */
+internal class QueueMenu(val playNext: () -> Unit, val addToQueue: () -> Unit)
+
+internal fun queue(host: LibraryHost, target: QueueTarget) =
+    QueueMenu(playNext = { host.addToQueue(target, true) }, addToQueue = { host.addToQueue(target, false) })
+
+/** The menu button of a row or a page with "Play next" and "Add to queue". */
+@Composable
+internal fun QueueMenuButton(description: String, menu: QueueMenu) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        IconButton(onClick = { open = true }) { Icon(painterResource(R.drawable.ic_more), description) }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            DropdownMenuItem(text = { Text(stringResource(R.string.play_next)) }, onClick = {
+                open = false
+                menu.playNext()
+            })
+            DropdownMenuItem(text = { Text(stringResource(R.string.add_to_queue)) }, onClick = {
+                open = false
+                menu.addToQueue()
+            })
+        }
+    }
 }
 
 @Composable
@@ -236,11 +268,12 @@ internal fun creditText(credit: AlbumCredit): String = when (credit) {
 }
 
 @Composable
-private fun GroupRow(title: String, details: String?, icon: Int, clickLabel: String, onClick: () -> Unit) {
+private fun GroupRow(title: String, details: String?, icon: Int, clickLabel: String, menu: QueueMenu? = null, onClick: () -> Unit) {
     ListItem(
         headlineContent = { Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
         supportingContent = details?.let { { Text(it, maxLines = 1, overflow = TextOverflow.Ellipsis) } },
         leadingContent = { Icon(painterResource(icon), contentDescription = null) },
+        trailingContent = menu?.let { { QueueMenuButton(stringResource(R.string.song_menu, title), it) } },
         modifier = Modifier.clickable(onClickLabel = clickLabel, role = Role.Button, onClick = onClick),
     )
 }
@@ -275,7 +308,9 @@ internal fun FolderContent(
             val name = if (entry.relativePath.isEmpty()) volumeName(entry.volume, internal) else entry.name
             val details = pluralStringResource(R.plurals.songs_count, entry.songs, entry.songs)
             GroupRow(name, if (page.searching) entry.relativePath + " · " + details else details, R.drawable.ic_folder,
-                stringResource(R.string.open_folder)) { host.openFolder(entry.volume, entry.relativePath) }
+                stringResource(R.string.open_folder), queue(host, QueueTarget.Folder(entry.volume, entry.relativePath))) {
+                host.openFolder(entry.volume, entry.relativePath)
+            }
         }
     }
     val at = page.folder ?: folder

@@ -225,4 +225,16 @@ class PlaybackSnapshotPreferencesTest {
             assertThat(preferences.toSnapshot()).isNull()
         }
     }
+
+    @Test
+    fun `a queue of added songs only has neither a request nor opened files`() {
+        val added = snapshot.copy(queue = null, queueRevision = 5, libraryId = "lib")
+        val preferences = mutablePreferencesOf()
+
+        preferences.putSnapshot(added)
+
+        assertThat(preferences.toSnapshot()).isEqualTo(added)
+        org.assertj.core.api.Assertions.assertThatThrownBy { snapshot.copy(queue = null, queueRevision = 0) }
+            .isInstanceOf(IllegalArgumentException::class.java)
+    }
 }

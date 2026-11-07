@@ -76,6 +76,7 @@ fun NowPlaying(
     controls: ExtraControls = ExtraControls(),
     onOpenArtist: (() -> Unit)? = null,
     onOpenAlbum: (() -> Unit)? = null,
+    onOpenQueue: (() -> Unit)? = null,
 ) {
     val metadata = rememberCurrentItemState(player).mediaMetadata
     val pane = stringResource(R.string.player_now_playing)
@@ -90,8 +91,14 @@ fun NowPlaying(
             .padding(vertical = 8.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        IconButton(onClick = onClose, modifier = Modifier.align(Alignment.Start)) {
-            Icon(painterResource(R.drawable.ic_player_collapse), stringResource(R.string.player_close_now_playing))
+        Row(Modifier.fillMaxWidth()) {
+            IconButton(onClick = onClose) {
+                Icon(painterResource(R.drawable.ic_player_collapse), stringResource(R.string.player_close_now_playing))
+            }
+            Spacer(Modifier.weight(1f))
+            onOpenQueue?.let { open ->
+                IconButton(onClick = open) { Icon(painterResource(R.drawable.ic_queue), stringResource(R.string.queue_open)) }
+            }
         }
         CoverImage(
             cover,

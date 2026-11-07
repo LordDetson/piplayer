@@ -22,6 +22,26 @@ class SessionPlayer(private val player: ExoPlayer) : ForwardingPlayer(player) {
 
     private val filtered = HashMap<Player.Listener, Player.Listener>()
 
+    /**
+     * What the queue's edits know (docs/playback.md §9): the up-next run and the journal. Every change of the list goes
+     * through this player, whoever asks for it, so that the journal sees it.
+     */
+    interface Edits {
+        /** The rows of the up-next run right after the current entry, which stay next when shuffle goes on. */
+        fun upNextRows(): IntArray
+
+        /** The play position after which songs that join the queue in other ways go. */
+        fun joinAfter(): Int
+
+        /** The entries from [from] to [to] are about to be removed. */
+        fun removing(from: Int, to: Int)
+
+        /** The entries from [from] to [to] are about to move to start at [newIndex]. */
+        fun moving(from: Int, to: Int, newIndex: Int)
+    }
+
+    var edits: Edits? = null
+
     init {
         // The player is still empty, so this changes no timeline and tells no listener.
         player.setShuffleOrder(StartFirstShuffleOrder())
@@ -34,7 +54,9 @@ class SessionPlayer(private val player: ExoPlayer) : ForwardingPlayer(player) {
     override fun setShuffleModeEnabled(shuffleModeEnabled: Boolean) {
         if (shuffleModeEnabled && !player.shuffleModeEnabled && player.mediaItemCount > 0) {
             val order = player.shuffleOrder as? StartFirstShuffleOrder ?: StartFirstShuffleOrder()
-            player.setShuffleOrder(order.startingAt(player.mediaItemCount, player.currentMediaItemIndex))
+            // The up-next run stays right after the current song (§9.3).
+            val next = edits?.upNextRows() ?: IntArray(0)
+            player.setShuffleOrder(order.startingAt(player.mediaItemCount, player.currentMediaItemIndex, next))
         }
         super.setShuffleModeEnabled(shuffleModeEnabled)
     }
@@ -87,6 +109,81 @@ class SessionPlayer(private val player: ExoPlayer) : ForwardingPlayer(player) {
     override fun setMediaItem(mediaItem: MediaItem, startPositionMs: Long) {
         beforeNewQueue(listOf(mediaItem))
         super.setMediaItem(mediaItem, startPositionMs)
+    }
+
+    /** The shuffle order now, or null while shuffle is off or the order is not PiPlayer's. */
+    val playOrder: StartFirstShuffleOrder?
+        get() = if (player.shuffleModeEnabled) player.shuffleOrder as? StartFirstShuffleOrder else null
+
+    /** Puts [order] in place: a drag while shuffle is on changes only the play order (§9.2). */
+    fun setPlayOrder(order: StartFirstShuffleOrder) = player.setShuffleOrder(order)
+
+    /**
+     * Adds [items] at list [index], at play [position] while shuffle is on, or else where songs that join the queue go
+     * (§9.3); the edits record their own inserts.
+     */
+    fun insert(index: Int, items: List<MediaItem>, position: Int?) {
+        (player.shuffleOrder as? StartFirstShuffleOrder)?.placeNextInsert(
+            if (position != null) InsertPlacement.At(position) else InsertPlacement.RandomAfter(joinPosition()),
+        )
+        player.addMediaItems(index, items)
+    }
+
+    /** Where songs that join the queue go: after the current song and its up-next run in the play order. */
+    private fun joinPosition(): Int = edits?.joinAfter() ?: run {
+        val order = player.shuffleOrder as? StartFirstShuffleOrder
+        val current = player.currentMediaItemIndex
+        if (order != null && current in 0 until order.length) order.positionOf(current) else 0
+    }
+
+    /** Songs added by a controller or an open from another app go to random places after the current song (§9.3). */
+    private fun placeJoining() {
+        if (player.mediaItemCount == 0) return
+        (player.shuffleOrder as? StartFirstShuffleOrder)?.placeNextInsert(InsertPlacement.RandomAfter(joinPosition()))
+    }
+
+    override fun addMediaItem(mediaItem: MediaItem) {
+        placeJoining()
+        super.addMediaItem(mediaItem)
+    }
+
+    override fun addMediaItem(index: Int, mediaItem: MediaItem) {
+        placeJoining()
+        super.addMediaItem(index, mediaItem)
+    }
+
+    override fun addMediaItems(mediaItems: List<MediaItem>) {
+        placeJoining()
+        super.addMediaItems(mediaItems)
+    }
+
+    override fun addMediaItems(index: Int, mediaItems: List<MediaItem>) {
+        placeJoining()
+        super.addMediaItems(index, mediaItems)
+    }
+
+    override fun removeMediaItem(index: Int) {
+        if (index in 0 until player.mediaItemCount) edits?.removing(index, index + 1)
+        super.removeMediaItem(index)
+    }
+
+    override fun removeMediaItems(fromIndex: Int, toIndex: Int) {
+        val to = toIndex.coerceAtMost(player.mediaItemCount)
+        if (fromIndex in 0 until to) edits?.removing(fromIndex, to)
+        super.removeMediaItems(fromIndex, toIndex)
+    }
+
+    override fun moveMediaItem(currentIndex: Int, newIndex: Int) {
+        val count = player.mediaItemCount
+        if (currentIndex in 0 until count && newIndex in 0 until count) edits?.moving(currentIndex, currentIndex + 1, newIndex)
+        super.moveMediaItem(currentIndex, newIndex)
+    }
+
+    override fun moveMediaItems(fromIndex: Int, toIndex: Int, newIndex: Int) {
+        val count = player.mediaItemCount
+        val to = toIndex.coerceAtMost(count)
+        if (fromIndex in 0 until to) edits?.moving(fromIndex, to, newIndex.coerceAtMost(count - (to - fromIndex)))
+        super.moveMediaItems(fromIndex, toIndex, newIndex)
     }
 
     override fun getMediaMetadata(): MediaMetadata = itemMetadata(super.getMediaMetadata())

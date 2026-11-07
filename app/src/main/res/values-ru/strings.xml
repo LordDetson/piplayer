@@ -182,4 +182,28 @@
         <item quantity="many">%1$d альбомов</item>
         <item quantity="other">%1$d альбома</item>
     </plurals>
+    <!-- Правка очереди (docs/playback.md §9). -->
+    <string name="play_next">Играть следующей</string>
+    <string name="add_to_queue">Добавить в очередь</string>
+    <string name="queue_open">Очередь</string>
+    <string name="queue_remove">Убрать из очереди</string>
+    <string name="queue_removed">Убрано: %1$s</string>
+    <string name="queue_move_up">Переместить выше</string>
+    <string name="queue_move_down">Переместить ниже</string>
+    <string name="queue_undo">Отменить</string>
+    <string name="queue_plays_next">Следующей: %1$s</string>
+    <string name="queue_added">В очереди: %1$s</string>
+    <string name="page_menu">Ещё</string>
+    <plurals name="queue_plays_next_count">
+        <item quantity="one">Следующими: %1$d песня</item>
+        <item quantity="few">Следующими: %1$d песни</item>
+        <item quantity="many">Следующими: %1$d песен</item>
+        <item quantity="other">Следующими: %1$d песни</item>
+    </plurals>
+    <plurals name="queue_added_count">
+        <item quantity="one">В очередь добавлена %1$d песня</item>
+        <item quantity="few">В очередь добавлены %1$d песни</item>
+        <item quantity="many">В очередь добавлено %1$d песен</item>
+        <item quantity="other">В очередь добавлено %1$d песни</item>
+    </plurals>
 </resources>

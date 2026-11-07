@@ -139,6 +139,10 @@ class PlaybackSessionCallbackTest {
                     .add(PlaybackSessionCallback.OPEN_COMMAND)
                     .add(PlaybackSessionCallback.SLEEP_TIMER_COMMAND)
                     .add(PlaybackSessionCallback.STOP_AFTER_CURRENT_COMMAND)
+                    .add(PlaybackSessionCallback.ADD_TO_QUEUE_COMMAND)
+                    .add(PlaybackSessionCallback.REMOVE_FROM_QUEUE_COMMAND)
+                    .add(PlaybackSessionCallback.UNDO_REMOVE_COMMAND)
+                    .add(PlaybackSessionCallback.MOVE_IN_QUEUE_COMMAND)
                     .build()
             } else {
                 ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS
@@ -158,6 +162,10 @@ class PlaybackSessionCallbackTest {
                 .doesNotContain(PlaybackSessionCallback.OPEN_COMMAND)
                 .doesNotContain(PlaybackSessionCallback.SLEEP_TIMER_COMMAND)
                 .doesNotContain(PlaybackSessionCallback.STOP_AFTER_CURRENT_COMMAND)
+                .doesNotContain(PlaybackSessionCallback.ADD_TO_QUEUE_COMMAND)
+                .doesNotContain(PlaybackSessionCallback.REMOVE_FROM_QUEUE_COMMAND)
+                .doesNotContain(PlaybackSessionCallback.UNDO_REMOVE_COMMAND)
+                .doesNotContain(PlaybackSessionCallback.MOVE_IN_QUEUE_COMMAND)
         }
     }
 
@@ -894,4 +902,19 @@ class PlaybackSessionCallbackTest {
             hints,
             /* isPackageNameVerified= */ true,
         )
+
+    @Test
+    fun onlyPiPlayersScreenMayEditTheQueue() {
+        songs.songs = listOf(SongSourceRule.song(1, "A"))
+        val args = Bundle().apply { putLongArray(PlaybackSessionCallback.EXTRA_SONG_IDS, longArrayOf(1)) }
+
+        for (controller in listOf(systemUi, otherApp, notification)) {
+            val result = onMain {
+                callback.onCustomCommand(session, controller, PlaybackSessionCallback.ADD_TO_QUEUE_COMMAND, args, null)
+            }.get(5, TimeUnit.SECONDS)
+
+            assertThat(result.resultCode).describedAs(controller.toString()).isEqualTo(SessionResult.RESULT_ERROR_NOT_SUPPORTED)
+            assertThat(onMain { session.player.mediaItemCount }).describedAs(controller.toString()).isZero()
+        }
+    }
 }

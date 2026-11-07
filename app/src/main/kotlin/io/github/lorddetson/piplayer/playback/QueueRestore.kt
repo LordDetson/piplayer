@@ -9,6 +9,9 @@ data class QueueStart(val index: Int, val positionMs: Long)
 sealed interface QueueSlot {
     data class Library(val song: Song) : QueueSlot
     data class Open(val item: SavedOpenItem) : QueueSlot
+
+    /** An entry an edit added, by its [number] (docs/playback.md §9.4). */
+    data class Added(val number: Long, val song: Song) : QueueSlot
 }
 
 /** Which item of the restored queue resumes at which position (docs/playback.md §4.3, §5.3). */
@@ -22,9 +25,17 @@ object QueueRestore {
         library: List<Song>,
         snapshot: PlaybackSnapshot,
         openItems: List<SavedOpenItem> = snapshot.openItems,
+    ): List<QueueSlot> = withOpened(library.map { QueueSlot.Library(it) }, snapshot, openItems)
+
+    /** [entries], the library songs and added entries in order, with the opened files put back at their saved rows. */
+    fun withOpened(
+        entries: List<QueueSlot>,
+        snapshot: PlaybackSnapshot,
+        openItems: List<SavedOpenItem> = snapshot.openItems,
     ): List<QueueSlot> {
+        val library = entries
         val opens = openItems.sortedBy { it.index }
-        if (snapshot.queue == null) return opens.map { QueueSlot.Open(it) }
+        if (library.isEmpty()) return opens.map { QueueSlot.Open(it) }
         val slots = arrayOfNulls<QueueSlot>(library.size + opens.size)
         for (open in opens) {
             var row = open.index.coerceIn(0, slots.lastIndex)
@@ -35,7 +46,7 @@ object QueueRestore {
         var libraryRow = 0
         for (row in slots.indices) {
             if (slots[row] == null && libraryRow < library.size) {
-                slots[row] = QueueSlot.Library(library[libraryRow++])
+                slots[row] = library[libraryRow++]
             }
         }
         return slots.filterNotNull()
@@ -59,9 +70,11 @@ object QueueRestore {
             }
             val exact = matches.firstOrNull { it == fallback } ?: matches.firstOrNull()
             if (exact != null) return QueueStart(exact, snapshot.positionMs)
-        } else {
-            val exact = order.indexOfFirst { it is QueueSlot.Library && it.song.id == currentFileId }
-            if (currentFileId != null && exact >= 0) return QueueStart(exact, snapshot.positionMs)
+        } else if (currentFileId != null) {
+            // A song in the queue twice (once added) resumes at its saved row when that is one of its places.
+            val matches = order.mapIndexedNotNull { row, slot -> if (slot.fileId == currentFileId) row else null }
+            val exact = matches.firstOrNull { it == fallback } ?: matches.firstOrNull()
+            if (exact != null) return QueueStart(exact, snapshot.positionMs)
         }
         return QueueStart(fallback, 0)
     }
@@ -71,3 +84,11 @@ object QueueRestore {
         if (slot is QueueSlot.Open) slot.item.copy(index = row) else null
     }
 }
+
+/** The file a library song or an added entry plays; null for an opened file. */
+private val QueueSlot.fileId: Long?
+    get() = when (this) {
+        is QueueSlot.Library -> song.id
+        is QueueSlot.Added -> song.id
+        is QueueSlot.Open -> null
+    }

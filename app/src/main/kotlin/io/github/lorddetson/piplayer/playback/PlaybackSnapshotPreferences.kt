@@ -85,20 +85,19 @@ internal fun Preferences.toSnapshot(): PlaybackSnapshot? = when (this[PlaybackKe
         snapshot(queue = queue, openItems = emptyList())?.copy(mediaIndexIds = true)
     }
     PlaybackSnapshot.OPEN_SCHEMA_VERSION -> withOpenItems()?.copy(mediaIndexIds = true)
-    PlaybackSnapshot.SCHEMA_VERSION -> withOpenItems()?.copy(
+    PlaybackSnapshot.SCHEMA_VERSION -> withOpenItems(queueRevision = (this[PlaybackKeys.queueRevision] ?: 0L).coerceAtLeast(0))?.copy(
         current = currentRef(),
         libraryId = this[PlaybackKeys.libraryId],
-        queueRevision = (this[PlaybackKeys.queueRevision] ?: 0L).coerceAtLeast(0),
     )
     else -> null
 }
 
-private fun Preferences.withOpenItems(): PlaybackSnapshot? {
+private fun Preferences.withOpenItems(queueRevision: Long = 0): PlaybackSnapshot? {
     val queue = this[PlaybackKeys.queue]?.let { value -> QueueRequest.parse(value) ?: return null }
     val openItems = this[PlaybackKeys.openItems]?.let { value ->
         runCatching { openItemsJson.decodeFromString<List<SavedOpenItem>>(value) }.getOrNull() ?: return null
     } ?: emptyList()
-    return snapshot(queue = queue, openItems = openItems)
+    return snapshot(queue = queue, openItems = openItems, queueRevision = queueRevision)
 }
 
 private fun Preferences.currentRef(): TrackRef? {
@@ -115,7 +114,8 @@ private fun Preferences.currentRef(): TrackRef? {
     )
 }
 
-private fun Preferences.snapshot(queue: QueueRequest?, openItems: List<SavedOpenItem>): PlaybackSnapshot? {
+/** A snapshot of [queue] and [openItems]; with a [queueRevision] its added songs are in the queue file (docs/playback.md §9.4). */
+private fun Preferences.snapshot(queue: QueueRequest?, openItems: List<SavedOpenItem>, queueRevision: Long = 0): PlaybackSnapshot? {
     val songId = this[PlaybackKeys.songId] ?: return null
     val row = this[PlaybackKeys.row] ?: return null
     val position = this[PlaybackKeys.position] ?: return null
@@ -125,9 +125,10 @@ private fun Preferences.snapshot(queue: QueueRequest?, openItems: List<SavedOpen
     if (songId < -1 || row < 0 || position < 0 || repeat !in PlaybackSnapshot.REPEAT_OFF..PlaybackSnapshot.REPEAT_ALL) {
         return null
     }
-    if (songId >= 0 && queue == null) return null
-    if (queue == null && openItems.isEmpty()) return null
-    if (queue == null && openItems.withIndex().any { (index, item) -> item.index != index }) return null
+    val queueFile = queueRevision > 0
+    if (songId >= 0 && queue == null && !queueFile) return null
+    if (queue == null && openItems.isEmpty() && !queueFile) return null
+    if (queue == null && !queueFile && openItems.withIndex().any { (index, item) -> item.index != index }) return null
     return runCatching {
         PlaybackSnapshot(
             queue = queue,
@@ -142,6 +143,7 @@ private fun Preferences.snapshot(queue: QueueRequest?, openItems: List<SavedOpen
             album = this[PlaybackKeys.album],
             durationMs = duration.coerceAtLeast(0),
             uri = this[PlaybackKeys.uri],
+            queueRevision = queueRevision,
         )
     }.getOrNull()
 }

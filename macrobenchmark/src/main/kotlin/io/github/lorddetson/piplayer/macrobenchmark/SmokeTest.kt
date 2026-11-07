@@ -29,6 +29,7 @@ class SmokeTest {
 
     private companion object {
         const val TAG_PROGRESS = "songs_progress"
+        const val QUEUE_LIST = "queue_list"
     }
 
     @Before
@@ -68,6 +69,17 @@ class SmokeTest {
         mini.click()
         val nowPlaying = checkNotNull(device.wait(Until.findObject(By.res(NOW_PLAYING)), 10_000)) { "No Now Playing" }
         assertThat(nowPlaying.wait(Until.hasObject(By.text(title)), 10_000)).describedAs("the title in Now Playing").isTrue()
+
+        // The queue screen and its drag library under R8 (docs/playback.md §9.2): a drag moves a row and nothing breaks.
+        checkNotNull(device.findObject(By.desc(Pattern.compile("Queue|Очередь")))) { "No queue button" }.click()
+        val queue = checkNotNull(device.wait(Until.findObject(By.res(QUEUE_LIST)), 10_000)) { "No queue screen" }
+        assertThat(queue.wait(Until.hasObject(By.text(title)), 10_000)).describedAs("the title in the queue").isTrue()
+        val handles = device.wait(Until.findObjects(By.res(Pattern.compile("queue_handle_.+"))), 10_000).orEmpty()
+        assertThat(handles.size).describedAs("drag handles").isGreaterThan(1)
+        val target = handles[0].visibleCenter
+        handles[1].drag(target, 600)
+        assertThat(device.wait(Until.hasObject(By.res(QUEUE_LIST)), 5_000)).describedAs("the queue after a drag").isTrue()
+        assertThat(device.executeShellCommand("pidof $PACKAGE").trim()).describedAs("the app process").isNotEmpty()
     }
 
     /** `:tagger`, its JSON replies and the database writes of the pass under R8 (docs/library.md §5.5). */

@@ -30,6 +30,7 @@ import com.google.common.util.concurrent.SettableFuture
 import io.github.lorddetson.piplayer.R
 import io.github.lorddetson.piplayer.library.Library
 import io.github.lorddetson.piplayer.library.identity.LibraryTrackRefs
+import io.github.lorddetson.piplayer.library.identity.TrackRef
 import io.github.lorddetson.piplayer.library.songs.AudioPermission
 import io.github.lorddetson.piplayer.library.lists.LibraryLists
 import io.github.lorddetson.piplayer.library.lists.ListKind
@@ -44,6 +45,8 @@ import java.util.concurrent.atomic.AtomicInteger
  * Who may connect to the session and what they may play or browse (docs/playback.md §1.4, §2.3), how the saved queue
  * is restored (docs/playback.md §4.3, §4.4), and how opened files join it (docs/playback.md §5).
  */
+// The queue's edits call the session's own player, which is a Media3 ForwardingPlayer over ExoPlayer (§9).
+@OptIn(UnstableApi::class)
 class PlaybackSessionCallback(
     private val context: Context,
     private val store: PlaybackStateStore,
@@ -58,7 +61,7 @@ class PlaybackSessionCallback(
         }
     },
     private val onQueueRequest: (QueueState?) -> Unit,
-) : MediaLibrarySession.Callback {
+) : MediaLibrarySession.Callback, SessionPlayer.Edits {
 
     private val packageName = context.packageName
 
@@ -86,6 +89,37 @@ class PlaybackSessionCallback(
 
     @Volatile
     private var released = false
+
+    /** The player the session wraps, once the service has it; the edits of the queue go through it (§9). */
+    private var player: SessionPlayer? = null
+
+    /** Counts the changes of the queue's state, so that an undo knows whether the queue changed since (§9.2). */
+    private var version = 0L
+
+    /** The entry removed last and what undoing it needs; only touched on the main thread. */
+    private var lastRemoval: Removal? = null
+
+    private class Removal(val before: QueueState?, val row: Int, val position: Int?, val item: MediaItem, val version: Long)
+
+    /** The URI of an opened file that the last removal took out: its grant stays while an undo may want it back. */
+    private val undoUri: String?
+        get() = lastRemoval?.item?.mediaId?.takeIf { QueueIds.fileId(it) == null }
+
+    private val transitions = object : Player.Listener {
+        override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) = onTransition()
+
+        // A new play order makes the saved play position of a removal meaningless (§9.2).
+        override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
+            version++
+        }
+    }
+
+    /** Edits of the queue go through [player], which tells this callback about them (§9). Call it on the main thread. */
+    fun attach(player: SessionPlayer) {
+        this.player = player
+        player.edits = this
+        player.addListener(transitions)
+    }
 
     /**
      * Every controller may browse and control playback. Changing how the player is set up stays with PiPlayer itself
@@ -115,6 +149,10 @@ class PlaybackSessionCallback(
                 .add(OPEN_COMMAND)
                 .add(SLEEP_TIMER_COMMAND)
                 .add(STOP_AFTER_CURRENT_COMMAND)
+                .add(ADD_TO_QUEUE_COMMAND)
+                .add(REMOVE_FROM_QUEUE_COMMAND)
+                .add(UNDO_REMOVE_COMMAND)
+                .add(MOVE_IN_QUEUE_COMMAND)
                 .build()
         } else {
             ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS
@@ -195,9 +233,16 @@ class PlaybackSessionCallback(
             if (start < 0) throw UnsupportedOperationException("The song list is empty")
             if (token != restoreGeneration.get()) throw UnsupportedOperationException("The queue request was superseded")
             val state = QueueState(request, emptyList(), libraryId)
-            currentOrigin = state
-            openGrants.keepOnly(emptyList())
-            report(state)
+            // On the main thread, where the edits run, after any edit already on its way and before Media3 sets the
+            // items the future gives it (§9): an edit never mixes this queue's state with the old player.
+            mainHandler.post {
+                if (token == restoreGeneration.get()) {
+                    currentOrigin = state
+                    openGrants.keepOnly(emptyList())
+                    lastRemoval = null
+                    report(state)
+                }
+            }
             MediaItemsWithStartPosition(songs.map(::mediaItem), start, startPositionMs)
         }
     }
@@ -250,6 +295,10 @@ class PlaybackSessionCallback(
                 controls.setStopAfterCurrent(args.getBoolean(EXTRA_ENABLED))
                 Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
             }
+            customCommand.customAction == ADD_TO_QUEUE_ACTION && mayControl -> addToQueue(args)
+            customCommand.customAction == REMOVE_FROM_QUEUE_ACTION && mayControl -> Futures.immediateFuture(removeFromQueue(args))
+            customCommand.customAction == UNDO_REMOVE_ACTION && mayControl -> Futures.immediateFuture(undoRemoval(args.getLong(EXTRA_TOKEN, -1)))
+            customCommand.customAction == MOVE_IN_QUEUE_ACTION && mayControl -> Futures.immediateFuture(moveInQueue(args))
             else -> super.onCustomCommand(session, controller, customCommand, args, progressReporter)
         }
     }
@@ -426,7 +475,14 @@ class PlaybackSessionCallback(
                             }
                     } else {
                         state.withInserted(currentIndex, opened).also {
-                            player.addMediaItems(currentIndex + 1, opened.map(::mediaItem))
+                            val items = opened.map(::mediaItem)
+                            val sessionPlayer = player as? SessionPlayer
+                            if (sessionPlayer != null) {
+                                // Right after the current song in the play order too, so that nothing is skipped (§5.1, §9.3).
+                                sessionPlayer.insert(currentIndex + 1, items, sessionPlayer.playOrder?.let { it.positionOf(currentIndex) + 1 })
+                            } else {
+                                player.addMediaItems(currentIndex + 1, items)
+                            }
                             player.seekTo(currentIndex + 1, 0)
                             player.prepare()
                             player.play()
@@ -490,20 +546,57 @@ class PlaybackSessionCallback(
                 emptyList()
             }
         }.orEmpty()
-        val order = QueueRestore.order(library, snapshot, openItems)
+        val file = queueFileOf(snapshot)
+        val savedEdits = file?.let { QueueEdits(it.added, it.journal, it.upNext.filterIsInstance<EntryKey.Added>(), it.nextNumber) }
+            ?: QueueEdits()
+        // File IDs of another library name other files (docs/playback.md §9.4).
+        val songKeys = file?.libraryId == null || file.libraryId == libraryId
+        val entries = QueueRebuild.entries(library, savedEdits, addedSongs(savedEdits, file?.libraryId, refs), songKeys)
+        var order = QueueRestore.withOpened(entries, snapshot, openItems)
         if (order.isEmpty()) return null
         val currentFileId = currentFileId(snapshot, refs)
         val start = QueueRestore.choose(order, snapshot, currentFileId) ?: return null
+        val shuffled = savedOrder(snapshot, file, order, start.index, currentFileId, libraryId, savedEdits.upNext.toSet())
+        var edits = savedEdits
+        var libraryRequest = if (order.any { it is QueueSlot.Library } || !savedEdits.isEmpty) request else null
+        if (QueueRebuild.mustFold(savedEdits, songKeys)) {
+            // The journal is folded here, where every entry gets its media ID anew (§9.4); the order keeps its indices.
+            val folded = QueueRebuild.fold(order, savedEdits) { id -> refs.lookup { it.refOf(id) } }
+            order = folded.first
+            edits = folded.second
+            libraryRequest = null
+        }
         val items = order.map { slot ->
             when (slot) {
                 is QueueSlot.Library -> mediaItem(slot.song)
                 is QueueSlot.Open -> mediaItem(slot.item.file)
+                is QueueSlot.Added -> mediaItem(slot.song, slot.number)
             }
         }
         val openItems = QueueRestore.openItems(order)
-        val libraryRequest = if (order.any { it is QueueSlot.Library }) request else null
-        val shuffled = savedOrder(snapshot, order, start.index, currentFileId, libraryId)
-        return RestoredQueue(items, start, QueueState(libraryRequest, openItems, libraryId), shuffled)
+        if (libraryRequest == null && openItems.isEmpty() && edits.added.isEmpty()) return null
+        return RestoredQueue(items, start, QueueState(libraryRequest, openItems, libraryId, edits), shuffled)
+    }
+
+    /** The queue file [snapshot] names, or null when there is none or it is of another revision. */
+    private fun queueFileOf(snapshot: PlaybackSnapshot): QueueFile? {
+        if (snapshot.queueRevision <= 0) return null
+        return store.readQueueBlocking()?.takeIf { it.revision == snapshot.queueRevision }
+    }
+
+    /** The songs of the added entries of [edits] by their numbers, found by their track references (§9.4). */
+    private fun addedSongs(edits: QueueEdits, savedLibraryId: String?, refs: LibraryTrackRefs?): Map<Long, Song> {
+        if (edits.added.isEmpty()) return emptyMap()
+        // A test's own songs are no files of the library: their IDs stand as they are.
+        val asSaved = refs == null || SongList.sourceOverride != null
+        val files = edits.added.associate { entry ->
+            entry.number to if (asSaved) entry.track.fileId else refs.lookup { it.resolve(entry.track, savedLibraryId) }
+        }
+        val songs = runCatching { SongList.songsById(context, files.values.filterNotNull()) }.getOrElse { e ->
+            Log.w(TAG, "Could not read the added songs of the saved queue", e)
+            emptyMap()
+        }
+        return files.mapNotNull { (number, file) -> file?.let(songs::get)?.let { number to it } }.toMap()
     }
 
     /** The file ID of the saved current song as the library has it now, or null when it is gone or an opened file. */
@@ -534,30 +627,32 @@ class PlaybackSessionCallback(
     /** The saved shuffle order over the restored queue, or null for a new one (docs/playback.md §4.8). */
     private fun savedOrder(
         snapshot: PlaybackSnapshot,
+        file: QueueFile?,
         order: List<QueueSlot>,
         current: Int,
         currentFileId: Long?,
         libraryId: String?,
+        upNext: Set<EntryKey>,
     ): IntArray? {
-        if (!snapshot.shuffle || snapshot.queueRevision <= 0) return null
-        val file = store.readQueueBlocking() ?: return null
+        if (!snapshot.shuffle || file == null) return null
         val saved = file.order ?: return null
-        if (file.revision != snapshot.queueRevision) return null
         if (order.any { it is QueueSlot.Library } && file.libraryId != libraryId) return null
         val keys = order.mapIndexed { index, slot ->
-            when {
+            when (slot) {
                 // The current song moved and has another file ID now; in the saved order it has its old one.
-                index == current && slot is QueueSlot.Library && slot.song.id == currentFileId -> EntryKey.Song(snapshot.songId)
-                slot is QueueSlot.Library -> EntryKey.Song(slot.song.id)
-                else -> EntryKey.Opened(snapshot.openItems.indexOf((slot as QueueSlot.Open).item))
+                is QueueSlot.Library ->
+                    if (index == current && slot.song.id == currentFileId) EntryKey.Song(snapshot.songId) else EntryKey.Song(slot.song.id)
+                is QueueSlot.Added -> EntryKey.Added(slot.number)
+                is QueueSlot.Open -> EntryKey.Opened(snapshot.openItems.indexOf(slot.item))
             }
         }
-        return QueueOrder.restore(saved, keys, current, Random())
+        return QueueOrder.restore(saved, keys, current, Random(), upNext)
     }
 
     /** Tells the saver the queue's state, and keeps the list it plays while it plays (docs/library.md §6.4). */
     private fun report(state: QueueState?) {
         SongList.hold(this, state?.library?.list)
+        version++
         onQueueRequest(state)
     }
 
@@ -638,6 +733,189 @@ class PlaybackSessionCallback(
         .setMediaMetadata(SessionItemRefresher.songMetadata(song))
         .build()
 
+    /** An entry an edit added: its own media ID, so that a song added twice is two entries (§9.4). */
+    private fun mediaItem(song: Song, number: Long): MediaItem = mediaItem(song).buildUpon()
+        .setMediaId(QueueIds.added(number, song.id))
+        .build()
+
+    /** The queue of [player] as [state] names its entries, or null while the two disagree. */
+    private fun viewOf(player: SessionPlayer, state: QueueState): QueueView? {
+        val ids = List(player.mediaItemCount) { player.getMediaItemAt(it).mediaId }
+        val keys = QueueIds.keys(ids, state.openItems) ?: return null
+        val current = player.currentMediaItemIndex
+        if (current !in keys.indices) return null
+        return QueueView(keys, current, player.playOrder?.indices())
+    }
+
+    /** Makes [state] the queue's after an edit (§9). */
+    private fun edited(state: QueueState) {
+        currentOrigin = state
+        // A file that left the queue gives back its grant, unless an undo may still want it (§5.3).
+        openGrants.keepOnly(state.openItems.map { it.uri } + listOfNotNull(undoUri))
+        report(state)
+    }
+
+    /** The queue became empty: it and the saved one are forgotten (§9.4). */
+    private fun emptied() {
+        currentOrigin = null
+        report(null)
+        store.enqueueClear()
+    }
+
+    override fun upNextRows(): IntArray {
+        val player = player ?: return IntArray(0)
+        val state = currentOrigin ?: return IntArray(0)
+        if (state.edits.upNext.isEmpty()) return IntArray(0)
+        return viewOf(player, state)?.let { QueueEditing.upNextRows(state, it) } ?: IntArray(0)
+    }
+
+    override fun joinAfter(): Int {
+        val player = player ?: return 0
+        val order = player.playOrder
+        val current = player.currentMediaItemIndex
+        val position = if (order != null && current in 0 until order.length) order.positionOf(current) else current.coerceAtLeast(0)
+        val state = currentOrigin ?: return position
+        if (state.edits.upNext.isEmpty()) return position
+        return viewOf(player, state)?.let { QueueEditing.joinAfter(state, it) } ?: position
+    }
+
+    override fun removing(from: Int, to: Int) {
+        val player = player ?: return
+        if (from == 0 && to >= player.mediaItemCount) return emptied()
+        val state = currentOrigin ?: return
+        val view = viewOf(player, state) ?: return
+        QueueEditing.removeRange(state, QueueView(view.keys, view.current), from, to)?.let(::edited) ?: emptied()
+    }
+
+    override fun moving(from: Int, to: Int, newIndex: Int) {
+        val player = player ?: return
+        val state = currentOrigin ?: return
+        val view = viewOf(player, state) ?: return
+        edited(QueueEditing.moveRange(state, QueueView(view.keys, view.current), from, to, newIndex))
+    }
+
+    /** A song played or passed leaves the up-next run (§9.1). */
+    private fun onTransition() {
+        val player = player ?: return
+        val state = currentOrigin ?: return
+        if (state.edits.upNext.isEmpty()) return
+        val view = viewOf(player, state) ?: return
+        val played = QueueEditing.played(state, view)
+        if (played !== state) edited(played)
+    }
+
+    /** Adds songs right after the current one or after the up-next run; to an empty player, as its queue (§9.1). */
+    private fun addToQueue(args: Bundle): ListenableFuture<SessionResult> {
+        val ids = args.getLongArray(EXTRA_SONG_IDS)
+        val request = args.getString(EXTRA_REQUEST)?.let(QueueRequest::parse)
+        if (ids == null && request == null) return Futures.immediateFuture(SessionResult(SessionError.ERROR_BAD_VALUE))
+        val next = args.getBoolean(EXTRA_NEXT)
+        val result = SettableFuture.create<SessionResult>()
+        expansion.execute {
+            try {
+                val songs = if (ids != null) {
+                    val found = SongList.songsById(context, ids.toList())
+                    ids.toList().mapNotNull(found::get)
+                } else {
+                    SongList.load(context, query = requireNotNull(request).list)
+                }
+                if (songs.isEmpty()) {
+                    result.set(SessionResult(SessionError.ERROR_BAD_VALUE))
+                    return@execute
+                }
+                val refs = trackRefs()
+                val libraryId = libraryIdNow(refs)
+                val tracks = songs.map { song -> refs.lookup { it.refOf(song.id) } ?: TrackRef(song.id, null, null, null, null) }
+                mainHandler.post { result.set(insertSongs(songs, tracks, libraryId, next)) }
+            } catch (e: Exception) {
+                Log.w(TAG, "Could not add songs to the queue", e)
+                result.set(SessionResult(SessionError.ERROR_UNKNOWN))
+            }
+        }
+        return result
+    }
+
+    private fun insertSongs(songs: List<Song>, tracks: List<TrackRef>, libraryId: String?, next: Boolean): SessionResult {
+        val player = player
+        if (released || player == null) return SessionResult(SessionError.ERROR_INVALID_STATE)
+        val extras = Bundle().apply {
+            putInt(EXTRA_ADDED, songs.size)
+            putString(EXTRA_TITLE, songs.first().title)
+        }
+        if (player.mediaItemCount == 0) {
+            // An empty player takes the songs as its queue, paused; a restore on its way gives way to it.
+            restoreGeneration.incrementAndGet()
+            val state = QueueEditing.added(libraryId, tracks)
+            player.pause()
+            player.setMediaItems(songs.mapIndexed { index, song -> mediaItem(song, index + 1L) }, 0, 0)
+            player.prepare()
+            lastRemoval = null
+            commit(state)
+            return SessionResult(SessionResult.RESULT_SUCCESS, extras)
+        }
+        val state = currentOrigin ?: return SessionResult(SessionError.ERROR_INVALID_STATE)
+        val view = viewOf(player, state) ?: return SessionResult(SessionError.ERROR_INVALID_STATE)
+        val insertion = QueueEditing.insert(state, view, tracks, next)
+        player.insert(insertion.row, songs.zip(insertion.keys) { song, key -> mediaItem(song, key.number) }, insertion.position)
+        edited(insertion.state)
+        return SessionResult(SessionResult.RESULT_SUCCESS, extras)
+    }
+
+    /** Removes the entry at the row the screen showed, if it is still the one it showed (§9.2). */
+    private fun removeFromQueue(args: Bundle): SessionResult {
+        val player = player ?: return SessionResult(SessionError.ERROR_INVALID_STATE)
+        val row = args.getInt(EXTRA_ROW, -1)
+        if (row !in 0 until player.mediaItemCount || player.getMediaItemAt(row).mediaId != args.getString(EXTRA_MEDIA_ID)) {
+            return SessionResult(SessionError.ERROR_BAD_VALUE)
+        }
+        val before = currentOrigin
+        val position = player.playOrder?.positionOf(row)
+        val item = player.getMediaItemAt(row)
+        // Known before the removal, so that the removed file keeps its grant for an undo.
+        lastRemoval = Removal(before, row, position, item, -1)
+        player.removeMediaItem(row)
+        val removal = Removal(before, row, position, item, version)
+        lastRemoval = removal
+        return SessionResult(SessionResult.RESULT_SUCCESS, Bundle().apply { putLong(EXTRA_TOKEN, removal.version) })
+    }
+
+    /** Puts the entry removed last back where it was, in the list and the play order, if nothing changed since (§9.2). */
+    private fun undoRemoval(token: Long): SessionResult {
+        val player = player ?: return SessionResult(SessionError.ERROR_INVALID_STATE)
+        // Only the removal the message names, and only while the queue is as that removal left it.
+        val removal = lastRemoval?.takeIf { it.version == version && it.version == token }
+            ?: return SessionResult(SessionError.ERROR_INVALID_STATE)
+        lastRemoval = null
+        val wasEmpty = player.mediaItemCount == 0
+        player.insert(removal.row.coerceAtMost(player.mediaItemCount), listOf(removal.item), removal.position.takeIf { player.playOrder != null })
+        if (wasEmpty) player.prepare()
+        val before = removal.before
+        if (before != null) {
+            commit(before)
+        }
+        return SessionResult(SessionResult.RESULT_SUCCESS)
+    }
+
+    /** Moves an entry in the order the screen shows: the play order while shuffle is on, the list otherwise (§9.2). */
+    private fun moveInQueue(args: Bundle): SessionResult {
+        val player = player ?: return SessionResult(SessionError.ERROR_INVALID_STATE)
+        val count = player.mediaItemCount
+        val from = args.getInt(EXTRA_FROM, -1)
+        val to = args.getInt(EXTRA_TO, -1)
+        if (from !in 0 until count || to !in 0 until count) return SessionResult(SessionError.ERROR_BAD_VALUE)
+        val order = player.playOrder
+        val row = order?.indices()?.get(from) ?: from
+        if (player.getMediaItemAt(row).mediaId != args.getString(EXTRA_MEDIA_ID)) return SessionResult(SessionError.ERROR_BAD_VALUE)
+        if (order != null) {
+            player.setPlayOrder(order.moved(from, to))
+            // The play order is the queue file's: the saver writes it on the new timeline; an undo no longer fits.
+            version++
+        } else {
+            player.moveMediaItem(from, to)
+        }
+        return SessionResult(SessionResult.RESULT_SUCCESS)
+    }
+
     /** A file opened from another app; its URI is also its media ID, so the current item can be found after a restore. */
     private fun mediaItem(file: OpenedFile): MediaItem = MediaItem.Builder()
         .setMediaId(file.uri)
@@ -710,6 +988,59 @@ class PlaybackSessionCallback(
 
         /** How many files of an opened set could not be read; in the result of [OPEN_COMMAND]. */
         const val EXTRA_SKIPPED = "io.github.lorddetson.piplayer.playback.SKIPPED"
+
+        /**
+         * The custom session command with which PiPlayer's own screen adds songs to the queue (docs/playback.md §9.1):
+         * [EXTRA_SONG_IDS] or the list of [EXTRA_REQUEST], right after the current song when [EXTRA_NEXT], otherwise
+         * after the up-next run. Its result tells [EXTRA_ADDED] and the first song's [EXTRA_TITLE].
+         */
+        const val ADD_TO_QUEUE_ACTION = "io.github.lorddetson.piplayer.playback.ADD_TO_QUEUE"
+
+        val ADD_TO_QUEUE_COMMAND = SessionCommand(ADD_TO_QUEUE_ACTION, Bundle.EMPTY)
+
+        /** File IDs, as a long array. */
+        const val EXTRA_SONG_IDS = "io.github.lorddetson.piplayer.playback.SONG_IDS"
+
+        /** The media ID of a queue request (§2.3) whose list is added; its start is ignored. */
+        const val EXTRA_REQUEST = "io.github.lorddetson.piplayer.playback.REQUEST"
+
+        const val EXTRA_NEXT = "io.github.lorddetson.piplayer.playback.NEXT"
+
+        const val EXTRA_ADDED = "io.github.lorddetson.piplayer.playback.ADDED"
+
+        const val EXTRA_TITLE = "io.github.lorddetson.piplayer.playback.TITLE"
+
+        /**
+         * The custom session command with which PiPlayer's own screen removes the entry at [EXTRA_ROW] of the list, which
+         * must have [EXTRA_MEDIA_ID] (docs/playback.md §9.2).
+         */
+        const val REMOVE_FROM_QUEUE_ACTION = "io.github.lorddetson.piplayer.playback.REMOVE_FROM_QUEUE"
+
+        val REMOVE_FROM_QUEUE_COMMAND = SessionCommand(REMOVE_FROM_QUEUE_ACTION, Bundle.EMPTY)
+
+        /** Puts back the entry removed last, while the queue has not changed since (§9.2). */
+        const val UNDO_REMOVE_ACTION = "io.github.lorddetson.piplayer.playback.UNDO_REMOVE"
+
+        val UNDO_REMOVE_COMMAND = SessionCommand(UNDO_REMOVE_ACTION, Bundle.EMPTY)
+
+        /**
+         * The custom session command with which PiPlayer's own screen moves the entry with [EXTRA_MEDIA_ID] from place
+         * [EXTRA_FROM] to [EXTRA_TO] of the order it shows: the play order while shuffle is on, the list otherwise (§9.2).
+         */
+        const val MOVE_IN_QUEUE_ACTION = "io.github.lorddetson.piplayer.playback.MOVE_IN_QUEUE"
+
+        val MOVE_IN_QUEUE_COMMAND = SessionCommand(MOVE_IN_QUEUE_ACTION, Bundle.EMPTY)
+
+        /** In the result of [REMOVE_FROM_QUEUE_COMMAND] and the arguments of [UNDO_REMOVE_COMMAND]: which removal. */
+        const val EXTRA_TOKEN = "io.github.lorddetson.piplayer.playback.TOKEN"
+
+        const val EXTRA_ROW = "io.github.lorddetson.piplayer.playback.ROW"
+
+        const val EXTRA_MEDIA_ID = "io.github.lorddetson.piplayer.playback.MEDIA_ID"
+
+        const val EXTRA_FROM = "io.github.lorddetson.piplayer.playback.FROM"
+
+        const val EXTRA_TO = "io.github.lorddetson.piplayer.playback.TO"
 
         /** Commands that change how the player is set up rather than what it plays. */
         private val SETUP_COMMANDS = intArrayOf(

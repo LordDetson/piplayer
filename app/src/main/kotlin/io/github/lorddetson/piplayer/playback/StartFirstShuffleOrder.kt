@@ -33,13 +33,29 @@ class StartFirstShuffleOrder private constructor(
      * A new order of [length] songs with [first] first and the others shuffled after it; a [first] outside the queue
      * (such as [C.INDEX_UNSET]) shuffles them all.
      */
-    fun startingAt(length: Int, first: Int): StartFirstShuffleOrder {
+    fun startingAt(length: Int, first: Int): StartFirstShuffleOrder = startingAt(length, first, IntArray(0))
+
+    /**
+     * A new order of [length] songs with [first] first, then the songs of [next] in their order (the up-next run,
+     * docs/playback.md §9.3), and the others shuffled after them.
+     */
+    fun startingAt(length: Int, first: Int, next: IntArray): StartFirstShuffleOrder {
         val order = IntArray(length) { it }
+        val placed = BooleanArray(length)
         var from = 0
-        if (first in 0 until length) {
-            order[0] = first
-            order[first] = 0
-            from = 1
+        // The first song and the run go to the front in turn, each swapped with what stood there.
+        val front = if (first in 0 until length) intArrayOf(first) + next.filter { it in 0 until length && it != first } else IntArray(0)
+        val where = IntArray(length) { it }
+        for (song in front) {
+            if (placed[song]) continue
+            placed[song] = true
+            val at = where[song]
+            val other = order[from]
+            order[from] = song
+            order[at] = other
+            where[other] = at
+            where[song] = from
+            from++
         }
         val random = child()
         for (i in length - 1 downTo from + 1) {
@@ -50,6 +66,28 @@ class StartFirstShuffleOrder private constructor(
         }
         return StartFirstShuffleOrder(order, random)
     }
+
+    /** Where the song at [index] stands in the play order. */
+    fun positionOf(index: Int): Int = positions[index]
+
+    /** The same songs with the one at play [from] moved to play [to] (a drag while shuffle is on, §9.2). */
+    fun moved(from: Int, to: Int): StartFirstShuffleOrder {
+        val order = shuffled.toMutableList()
+        order.add(to, order.removeAt(from))
+        return StartFirstShuffleOrder(order.toIntArray(), child())
+    }
+
+    /**
+     * Where the songs of the next [cloneAndInsert] go in the play order (docs/playback.md §9.3). The player inserts into
+     * the order it holds, so this tells that very order; it is used once.
+     */
+    fun placeNextInsert(placement: InsertPlacement) {
+        nextInsert = placement
+    }
+
+    /** The placement of the next insert; the one mutable part of the order, read once. */
+    @Volatile
+    private var nextInsert: InsertPlacement? = null
 
     override fun getLength(): Int = shuffled.size
 
@@ -71,18 +109,31 @@ class StartFirstShuffleOrder private constructor(
         }
 
     /**
-     * Songs added at [insertionIndex] go to random places of the order, but never before its first song, which is
-     * playing; the songs already there keep their order.
+     * Songs added at [insertionIndex] go where [placeNextInsert] said: together at a place of the order, or at random
+     * places after one. Without a placement they go to random places, but never before its first song, which is playing
+     * when nothing else is known. The songs already there keep their order.
      */
     override fun cloneAndInsert(insertionIndex: Int, insertionCount: Int): ShuffleOrder {
+        val placement = nextInsert
+        nextInsert = null
         val random = child()
-        val points = IntArray(insertionCount) { if (shuffled.isEmpty()) 0 else 1 + random.nextInt(shuffled.size) }.apply { sort() }
         val values = IntArray(insertionCount) { insertionIndex + it }
-        for (i in insertionCount - 1 downTo 1) {
-            val j = random.nextInt(i + 1)
-            val song = values[i]
-            values[i] = values[j]
-            values[j] = song
+        // Each new song goes before the old song at its point, or after all of them at the order's length.
+        val points = when (placement) {
+            is InsertPlacement.At -> IntArray(insertionCount) { placement.position.coerceIn(0, shuffled.size) }
+            else -> {
+                val after = when (placement) {
+                    is InsertPlacement.RandomAfter -> (placement.position + 1).coerceIn(0, shuffled.size)
+                    else -> if (shuffled.isEmpty()) 0 else 1
+                }
+                for (i in insertionCount - 1 downTo 1) {
+                    val j = random.nextInt(i + 1)
+                    val song = values[i]
+                    values[i] = values[j]
+                    values[j] = song
+                }
+                IntArray(insertionCount) { after + random.nextInt(shuffled.size - after + 1) }.apply { sort() }
+            }
         }
         val order = IntArray(shuffled.size + insertionCount)
         var old = 0
@@ -148,4 +199,13 @@ class StartFirstShuffleOrder private constructor(
             return StartFirstShuffleOrder(order.copyOf(), Random(seed))
         }
     }
+}
+
+/** Where inserted songs go in the play order (docs/playback.md §9.3). */
+sealed interface InsertPlacement {
+    /** Together, in their order, starting at play [position]. */
+    data class At(val position: Int) : InsertPlacement
+
+    /** Each at a random place after play [position]. */
+    data class RandomAfter(val position: Int) : InsertPlacement
 }

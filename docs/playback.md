@@ -342,6 +342,8 @@ large queue, and a song from an SD card if there is one.
   a queue is set); for shuffle turned on in the middle of a queue, the player the session wraps sets the order before
   it turns shuffle on, so that the same rule holds whichever controller turns it on: the app, the notification, the
   system, Bluetooth or another app. Controllers that may read the timeline (§1.4) see the same order.
+- Songs added to the queue keep their place in the order, and the up-next run stays next when shuffle is turned on
+  (§9.3).
 - Repeat goes off, all, one, and round again. With repeat all, shuffle replays the same order on every lap.
 - Previous goes back to the start of the song after its first 3 seconds, otherwise to the previous song: the previous
   one of the shuffle order while shuffle is on. At the first song it restarts the song, or with repeat all goes to the
@@ -553,8 +555,8 @@ Schema 3 replaces what §4.1 to §4.3 say about media index IDs, the saved shuff
   §4.2. The structure of the queue lives in `queue.bin` under the app's no-backup files and is written only when the
   structure changes: a new queue, an open from another app, shuffle turned on or off, an edit (step 9). It is written
   to a new file that then replaces the old one, so a reader never sees half of it.
-- **The queue file** (format 1) holds its revision, the library ID (library.md §8.4), the entries added by edits, the
-  edit journal and, while shuffle is on, the play order. The compact request and the opened files at their rows stay in
+- **The queue file** (format 2 since step 9; format 1 is still read) holds its revision, the library ID (library.md §8.4),
+  the entries added by edits, the edit journal, the up-next run (§9.4) and, while shuffle is on, the play order. The compact request and the opened files at their rows stay in
   `playback_state`, as in schema 2, because they are small.
   An entry of the queue is named by a key: a library song by its file ID, an opened file by its place in the opened
   list, an added entry by a number that the queue file hands out once.
@@ -572,11 +574,12 @@ Schema 3 replaces what §4.1 to §4.3 say about media index IDs, the saved shuff
   the order is generated again with the current item first, as before. A current song that moved and has another file
   ID now keeps its place in the order. The library ID saved is the one the songs of the queue were read under, so a queue
   that outlived a rebuild with new IDs is not taken for a queue of the new library.
-- **The edit journal** (filled by step 9) lists the edits in the order they were made: insert entries after an entry,
+- **The edit journal** (filled since step 9, §9) lists the edits in the order they were made: insert entries after an entry,
   remove an entry, move an entry after another. Each edit names entries by their keys, not by rows, and keeps the row
   it was made at as a fallback, so it still applies when the compact request reads a changed list: an insert whose
   entry is gone goes to its row, a removal or a move of an entry that is gone does nothing. Added entries carry their
-  track references, so they survive a library rebuild like the current item. After 200 edits the journal is folded:
+  track references, so they survive a library rebuild like the current item. A journal of more than 200 edits
+  is folded at the next restore (§9.4):
   the queue file then holds every library entry as an added entry, the opened files stay at their rows in
   `playback_state`, which holds no compact request any more, and the play order names the same entries under their new
   keys. From then on the queue is a fixed list that no longer follows the library.
@@ -895,3 +898,88 @@ automatic song changes, no pause and one audio output. With `-e screenOff true`,
 with the screen off, one audio output each and no underrun on the phone.
 
 By hand on the phone: one of the owner's albums (MP3 with a LAME tag) with the screen off and earbuds, no gap heard.
+
+## 9. Queue editing and own shuffle (M2a step 9)
+
+### 9.1 Adding songs
+
+- Every song row has "Play next" and "Add to queue" in its menu, above "Go to album", "Go to artist" and "Go to folder".
+  Album, artist and folder rows of the tabs and pages have a menu with the same two entries, and so has the top bar of
+  an album, artist and folder page. An album adds its songs by disc and track, an artist and a folder (with all its
+  subfolders, as "Play all, with subfolders") in the sort kept for that kind of list (library.md §6.3), without the
+  page's search.
+- "Play next" puts the songs right after the current one. "Add to queue" puts them after the current song and after
+  the songs already added that come right after it: the songs added by "Play next" and "Add to queue" that have not
+  played yet form an up-next run behind the current song, and "Add to queue" extends it. A song played, or passed by a
+  jump to a later song, leaves the run. Without such a run "Add to queue" also goes right after the current song, so a
+  song added to a 20 000-song queue plays soon rather than after the whole list.
+- A song already in the queue is added again as another entry. A message says what happened: "Plays next: <title>" or
+  "Added to queue: <title>" for one song, with the number of songs for more.
+- With an empty player the songs become the queue, paused at the first of them: the mini player shows it and nothing
+  plays until the user presses play.
+- The songs are read by the service off the main thread, from the library as the request names them. Only PiPlayer's
+  own screen may add songs this way, as it alone may restore the queue (§4.4).
+
+### 9.2 The queue screen
+
+- A "Queue" button on Now Playing opens the queue screen: every entry of the queue in the order it plays, the shuffle
+  order while shuffle is on, the current song marked and shown when the screen opens. A tap plays that entry.
+- Each row has a handle to drag it to another place and a menu with "Remove from queue"; a swipe to either side removes
+  it too. TalkBack offers "Move up" and "Move down" on each row in place of the drag. A removal shows "Removed: <title>"
+  with "Undo" for a few seconds; undo puts that entry back where it was, in the list and in the play order, as long as
+  the queue has not changed since (another removal, an edit, a new queue, shuffle turned on or off). A newer message
+  replaces the one shown. Removing the current song plays the next.
+- A drag while shuffle is on changes the play order, not the list underneath: turning shuffle off afterwards goes on in
+  the list's order from the current song. With shuffle off a drag moves the entry in the list.
+- A tap on a song in any list still replaces the whole queue, edits included, without asking.
+
+### 9.3 Own shuffle order and "Play next"
+
+- Songs added while shuffle is on go to the same place in the play order as in the list: right after the current song,
+  or after the up-next run. They are not scattered.
+- The up-next run stays right after the current song when shuffle is turned on: the new order is the current song, the
+  run in its order, then the other songs shuffled. Turning shuffle off goes on in list order, where the run already
+  follows the current song.
+- A file opened from another app goes right after the current song in the play order too, before the run, and plays
+  (§5.1): nothing of the order is skipped. Songs that a controller adds by itself go to random places after the current
+  song and the run, never among songs already played.
+- After a restore (§4.8) the order and the run are the saved ones; new songs of the compact request go to random places
+  after the run.
+
+### 9.4 What is saved
+
+- An edited queue is the compact request (§2.3) with the edit journal and the added entries of the queue file (§4.8).
+  An added entry has its own media ID, the file ID and the entry's number (`<file ID>/a<number>`), so that a song added
+  twice is two entries; a song's file ID marks the playing song in the lists either way.
+- The journal names entries of the library and added ones. Its rows count only those entries: files opened from other
+  apps are not in it and keep their rows in `playback_state` as the queue has them now, so they are put back at the end.
+  Removing or moving an opened file changes only its row.
+- The queue file (format 2) also holds the up-next run's entries. Format 1 files are still read, without a run.
+- Every edit writes the queue file and then `playback_state`; a queue of added songs only has no compact request.
+- An edited queue restored under another library ID keeps its added entries, found by their track references, leaves
+  out the edits that name library songs by file ID, which would now name other files, and is folded at once (below),
+  so that no later save writes old file IDs under the new library ID.
+- When the journal holds more than 200 edits, the next restore folds it (§4.8): the restored queue is a fixed list of
+  added entries, each with the track reference the library gives its file now, and no compact request. Folding while
+  the queue plays would change the media ID of every entry.
+- Removing the last entry empties the queue and forgets the saved one; undoing that removal saves the queue again.
+
+### 9.5 Checks
+
+JVM tests: inserts after the queue advanced never land behind the current song; "Play next" and "Add to queue" places
+in the list and in the play order, with and without the run; shuffle turned on keeps the run; a move in the play order;
+the restored order puts new songs after the run; media IDs of added entries; the journal rows without opened files and
+opened rows after inserts, removals and moves; the rebuilt queue from the request, the journal, the added entries and
+the opened files equals the edited one, also on a changed list and with another library ID; folding over 200 edits;
+the queue file format 2 and format 1; a snapshot of added songs only; removing the only entry, and ranges across opened
+files; when a restore folds.
+
+Instrumented tests on the API 30 emulator: through the service, "Play next" and "Add to queue" with shuffle off and on,
+the run kept when shuffle is turned on, removal and undo, moves with shuffle off and on, an empty player taking added
+songs paused, other apps refused; an undo that names an older removal or comes after shuffle was turned on is refused;
+removing the last entry forgets the saved queue and its undo saves it again; under shuffle a file opened from another
+app plays right after the current song in the play order; an edited and shuffled queue restored after the process is
+gone with its entries, order and run; on the library database, songs by file ID; on the screen, the song menu, the
+album, artist and folder menus, the queue screen in play order with the current song, a tap, a removal with undo, a
+swiped row undone that stays, a drag, and "Move up" and "Move down". An edit of a 20 000-song queue reaches the
+controllers within 0.25 s (the median of 5 runs, `@TimingTest`).

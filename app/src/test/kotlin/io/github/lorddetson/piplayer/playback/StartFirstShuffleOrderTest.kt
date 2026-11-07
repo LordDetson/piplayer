@@ -165,4 +165,72 @@ class StartFirstShuffleOrderTest {
         org.assertj.core.api.Assertions.assertThatThrownBy { StartFirstShuffleOrder.of(intArrayOf(0, 0, 1)) }
             .isInstanceOf(IllegalArgumentException::class.java)
     }
+
+    @Test
+    fun `songs added after the queue advanced never land behind the current song`() {
+        repeat(200) { seed ->
+            val base = StartFirstShuffleOrder(seed.toLong()).cloneAndSet(10, 4) as StartFirstShuffleOrder
+            // The sixth song of the order plays: the five before it are played.
+            val played = base.walk().take(5)
+            base.placeNextInsert(InsertPlacement.RandomAfter(5))
+
+            val inserted = base.cloneAndInsert(10, 3)
+
+            val walk = inserted.walk()
+            assertThat(walk).containsExactlyInAnyOrderElementsOf(0 until 13)
+            assertThat(walk.take(6)).isEqualTo(base.walk().take(6))
+            assertThat(walk.indexOf(10)).isGreaterThan(5)
+            assertThat(walk.indexOf(11)).isGreaterThan(5)
+            assertThat(walk.indexOf(12)).isGreaterThan(5)
+            assertThat(walk.take(5)).isEqualTo(played)
+        }
+    }
+
+    @Test
+    fun `songs added at a place of the order come there together in their order`() {
+        val base = StartFirstShuffleOrder(seed = 12).cloneAndSet(8, 2) as StartFirstShuffleOrder
+        base.placeNextInsert(InsertPlacement.At(3))
+
+        // Two songs inserted at list index 3 shift the songs from 3 on by two.
+        val inserted = base.cloneAndInsert(3, 2)
+
+        val shifted = base.walk().map { if (it >= 3) it + 2 else it }
+        assertThat(inserted.walk()).isEqualTo(shifted.take(3) + listOf(3, 4) + shifted.drop(3))
+    }
+
+    @Test
+    fun `a placement is used by one insert only`() {
+        val second = (1L..50L).map { seed ->
+            val order = StartFirstShuffleOrder(seed).cloneAndSet(6, 0) as StartFirstShuffleOrder
+            order.placeNextInsert(InsertPlacement.At(1))
+            assertThat(order.cloneAndInsert(6, 1).walk().indexOf(6)).isEqualTo(1)
+            order.cloneAndInsert(6, 1).walk().indexOf(6)
+        }
+        // Without a placement the same insert again goes anywhere after the first song.
+        assertThat(second.toSet().size).isGreaterThan(1)
+        assertThat(second).allMatch { it >= 1 }
+    }
+
+    @Test
+    fun `shuffle turned on keeps the up-next run right after the current song`() {
+        repeat(50) { seed ->
+            val order = StartFirstShuffleOrder(seed.toLong()).startingAt(100, 40, intArrayOf(41, 42, 43))
+
+            val walk = order.walk()
+            assertThat(walk.take(4)).containsExactly(40, 41, 42, 43)
+            assertThat(walk).containsExactlyInAnyOrderElementsOf(0 until 100)
+        }
+        assertThat(StartFirstShuffleOrder(seed = 1).startingAt(100, 40, intArrayOf(41)).walk().drop(2))
+            .isNotEqualTo((0 until 100).filter { it != 40 && it != 41 })
+    }
+
+    @Test
+    fun `a song moved in the play order plays at its new place and the others keep theirs`() {
+        val order = StartFirstShuffleOrder.of(intArrayOf(3, 0, 4, 1, 2), seed = 1)
+
+        assertThat(order.positionOf(4)).isEqualTo(2)
+        assertThat(order.moved(from = 4, to = 1).walk()).containsExactly(3, 2, 0, 4, 1)
+        assertThat(order.moved(from = 1, to = 3).walk()).containsExactly(3, 4, 1, 0, 2)
+        assertThat(order.moved(from = 2, to = 2).walk()).containsExactly(3, 0, 4, 1, 2)
+    }
 }

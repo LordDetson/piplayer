@@ -90,4 +90,31 @@ class QueueFileTest {
         assertThat(QueueFileCodec.read(ByteArrayInputStream(later))).isNull()
         assertThat(QueueFileCodec.read(ByteArrayInputStream("not a queue".toByteArray()))).isNull()
     }
+
+    @Test
+    fun theUpNextRunRoundTripsInFormat2() {
+        val withRun = full.copy(upNext = listOf(EntryKey.Added(1), EntryKey.Added(3)))
+
+        assertThat(QueueFileCodec.FORMAT).isEqualTo(2)
+        assertThat(roundTrip(withRun)).isEqualTo(withRun)
+    }
+
+    @Test
+    fun aFormat1FileIsStillReadWithoutARun() {
+        // Written by the format 1 codec of M2a step 8.
+        val format1 = "504951460000000100000000000000070100036c69620201010c016301000261620100017600064d757369632f0005612e6d70" +
+            "3301e8070100000501020103010200050201a0fa1c90"
+        val bytes = format1.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+
+        assertThat(QueueFileCodec.read(ByteArrayInputStream(bytes))).isEqualTo(
+            QueueFile(
+                revision = 7,
+                libraryId = "lib",
+                added = listOf(AddedEntry(1, TrackRef(12, 99, "ab", Place("v", "Music/", "a.mp3"), 1000))),
+                journal = listOf(QueueEdit.Insert(after = EntryKey.Song(5), entries = listOf(EntryKey.Added(1)), row = 3)),
+                order = listOf(EntryKey.Song(5), EntryKey.Added(1)),
+                nextNumber = 2,
+            ),
+        )
+    }
 }

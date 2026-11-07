@@ -313,4 +313,18 @@ class LibraryListsTest {
         assertThat(ids(SongQuery.folder(PRIMARY, "Music/Mix/").copy(search = "echo"))).containsExactly(5L)
         assertThat(ids(SongQuery.album(second.key).copy(search = "zzz"))).isEmpty()
     }
+
+    @Test
+    fun songsAreFoundByFileIdHiddenOnesToo() {
+        val bravo = fileOf(1)
+        val ring = fileOf(8)
+
+        val found = lists.songsById(listOf(bravo, ring, 99_999))
+
+        assertThat(found.keys).containsExactlyInAnyOrder(bravo, ring)
+        assertThat(found.getValue(bravo).title).isEqualTo("Bravo")
+        assertThat(found.getValue(bravo).mediaStoreId).isEqualTo(1)
+        assertThat(found.getValue(ring).title).isEqualTo("Ring")
+        assertThat(lists.songsById(emptyList())).isEmpty()
+    }
 }

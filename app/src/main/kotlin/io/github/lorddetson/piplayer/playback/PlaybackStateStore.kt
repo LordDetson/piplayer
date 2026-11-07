@@ -133,6 +133,11 @@ class PlaybackStateStore internal constructor(
 
     fun readBlocking(): PlaybackSnapshot? = runBlocking { read() }
 
+    /** Forgets the saved state in the background, after every write enqueued so far and before any enqueued after it. */
+    fun enqueueClear() {
+        writes.trySend(Write.Clear(CompletableDeferred()))
+    }
+
     /** Forgets the saved state after every write enqueued so far. */
     suspend fun clear() {
         val done = CompletableDeferred<Unit>()

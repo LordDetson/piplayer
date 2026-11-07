@@ -31,11 +31,14 @@ data class PlaybackSnapshot(
 ) {
 
     init {
-        require(queue != null || openItems.isNotEmpty()) { "A snapshot needs a library request or opened files" }
+        // A queue of added songs keeps them in the queue file its revision names (docs/playback.md §9.4).
+        require(queue != null || openItems.isNotEmpty() || queueRevision > 0) {
+            "A snapshot needs a library request, opened files or a queue file"
+        }
         require(openItems.zipWithNext().all { (first, second) -> first.index < second.index }) {
             "Opened files must have increasing rows"
         }
-        if (queue == null) {
+        if (queue == null && queueRevision <= 0) {
             require(openItems.withIndex().all { (row, item) -> item.index == row }) {
                 "A queue of opened files starts at row zero and has no gaps"
             }
@@ -46,7 +49,7 @@ data class PlaybackSnapshot(
                 "The current opened file must be in the saved queue at its row"
             }
         } else {
-            require(queue != null) { "A library song needs a library request" }
+            require(queue != null || queueRevision > 0) { "A library song needs a library request or a queue file" }
         }
         require(row >= 0) { "row must not be negative" }
         require(positionMs >= 0) { "positionMs must not be negative" }

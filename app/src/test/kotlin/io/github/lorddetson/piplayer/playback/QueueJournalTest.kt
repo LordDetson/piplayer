@@ -1,6 +1,5 @@
 package io.github.lorddetson.piplayer.playback
 
-import io.github.lorddetson.piplayer.library.identity.TrackRef
 import io.github.lorddetson.piplayer.playback.EntryKey.Added
 import io.github.lorddetson.piplayer.playback.EntryKey.Opened
 import io.github.lorddetson.piplayer.playback.EntryKey.Song
@@ -90,49 +89,15 @@ class QueueJournalTest {
     }
 
     @Test
-    fun foldingKeepsOpenedFilesAndAnEntryTwiceInTheOrder() {
-        val file = QueueFile(revision = 1, libraryId = null, order = listOf(Song(1), Opened(0), Song(1)))
-
-        val folded = QueueJournal.fold(file, listOf(Song(1), Opened(0), Song(1))) { key -> (key as? Song)?.let { ref(it.fileId) } }
-
-        assertThat(folded.added).containsExactly(AddedEntry(1, ref(1)), AddedEntry(2, ref(1)))
-        assertThat(folded.order).containsExactly(Added(1), Opened(0), Added(2))
-    }
-
-    @Test
-    fun foldingMakesAFixedListOfAddedEntries() {
-        val file = QueueFile(
-            revision = 3,
-            libraryId = "lib",
-            added = listOf(AddedEntry(1, ref(50))),
-            journal = List(QueueJournal.MAX_EDITS + 1) { QueueEdit.Remove(Song(1000L + it), 0) },
-            order = listOf(Song(2), Song(1)),
-            nextNumber = 2,
+    fun withoutSongKeysOnlyTheEditsOfAddedEntriesApply() {
+        val edits = listOf(
+            QueueEdit.Insert(after = Song(3), entries = listOf(Added(1), Added(2)), row = 1),
+            QueueEdit.Remove(entry = Song(1), row = 0),
+            QueueEdit.Move(entry = Song(2), after = null, row = 0),
+            QueueEdit.Move(entry = Added(2), after = null, row = 0),
+            QueueEdit.Remove(entry = Added(1), row = 1),
         )
-        val entries = listOf(Song(2), Added(1), Opened(0), Song(1))
 
-        val folded = QueueJournal.fold(file, entries) { key ->
-            when (key) {
-                is Song -> ref(key.fileId)
-                is Added -> ref(50)
-                is Opened -> null
-            }
-        }
-
-        assertThat(folded.revision).isEqualTo(3)
-        assertThat(folded.libraryId).isEqualTo("lib")
-        assertThat(folded.journal).isEmpty()
-        // The play order names the same songs under their new keys.
-        assertThat(folded.order).containsExactly(Added(2), Added(4))
-        assertThat(folded.added).containsExactly(AddedEntry(2, ref(2)), AddedEntry(3, ref(50)), AddedEntry(4, ref(1)))
-        assertThat(folded.nextNumber).isEqualTo(5)
-        assertThat(QueueJournal.replay(emptyList(), listOfNotNull(folded.baseInsert())))
-            .containsExactly(Added(2), Added(3), Added(4))
+        assertThat(QueueJournal.replay(base, edits, songKeys = false)).containsExactly(Added(2), Song(1), Song(2), Song(3), Song(4))
     }
-
-    private fun ref(fileId: Long) = TrackRef(fileId, null, null, null, null)
-
-    /** A folded file has no request: its entries are the list. */
-    private fun QueueFile.baseInsert() =
-        if (added.isEmpty()) null else QueueEdit.Insert(null, added.map { Added(it.number) }, 0)
 }

@@ -33,7 +33,8 @@ class SessionItemRefresher(private val player: Player, private val find: (Long) 
     private fun refreshAt(index: Int) {
         if (index !in 0 until player.mediaItemCount) return
         val item = player.getMediaItemAt(index)
-        val song = item.mediaId.toLongOrNull()?.let(find) ?: return
+        // An added entry plays a library song too (docs/playback.md §9.4).
+        val song = QueueIds.fileId(item.mediaId)?.let(find) ?: return
         if (item.mediaMetadata.shows(song)) return
         player.replaceMediaItem(index, item.buildUpon().setMediaMetadata(songMetadata(song)).build())
     }
