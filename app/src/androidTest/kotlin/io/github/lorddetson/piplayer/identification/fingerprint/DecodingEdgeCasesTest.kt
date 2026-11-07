@@ -89,6 +89,24 @@ class DecodingEdgeCasesTest {
         assertThat(seconds).isBetween(CUT_EARLY_SECONDS - 0.001, CUT_EARLY_SECONDS + 1024 / 44_100.0 + 0.001)
     }
 
+    /**
+     * A consumer slower than the decoder, as on a loaded machine: the decoder runs ahead to the cut frame and fails on it
+     * while frames it decoded before still wait for the consumer. Those frames are audio of the file and must arrive.
+     */
+    @Test(timeout = 60_000)
+    fun aSlowConsumerLosesNoFrameBeforeTheCutFrame() {
+        var seconds = 0.0
+        withSource(CUT_EARLY_IN_A_FRAME) { source ->
+            source.decode { pcm, format ->
+                seconds += (pcm.remaining() / format.bytesPerFrame).toDouble() / format.sampleRate
+                Thread.sleep(SLOW_CONSUMER_MS)
+                seconds < CUT_EARLY_GIVE_UP_SECONDS
+            }
+        }
+
+        assertThat(seconds).isBetween(CUT_EARLY_SECONDS - 0.001, CUT_EARLY_SECONDS + 1024 / 44_100.0 + 0.001)
+    }
+
     @Test
     fun theFingerprintOfAFlacCutOffLongBeforeItsStatedLengthTakesOnlyWhatIsLeft() {
         val result = withSource(CUT_EARLY) { source ->
@@ -120,5 +138,8 @@ class DecodingEdgeCasesTest {
         /** The same file with 200 bytes of the next frame left. */
         const val CUT_EARLY_IN_A_FRAME = "flac-44100-16bit-mono-cut-early-in-a-frame.flac"
         const val CUT_EARLY_GIVE_UP_SECONDS = 30.0
+
+        /** Far slower than any decoder takes for a frame of 1024 samples. */
+        const val SLOW_CONSUMER_MS = 30L
     }
 }

@@ -70,6 +70,7 @@ object SongsTags {
     const val LIST = "songs_list"
     const val LOADING = "songs_loading"
     const val PROGRESS = "songs_progress"
+    const val SCANNING = "songs_scanning"
 }
 
 /**
@@ -110,6 +111,8 @@ fun SongsContent(
     headerItems: Int = 0,
     headerSections: List<String?> = emptyList(),
     header: LazyListScope.() -> Unit = {},
+    scanning: Boolean = false,
+    onOpenLibrarySettings: (() -> Unit)? = null,
 ) {
     when (state) {
         SongsState.Loading -> Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {

@@ -39,10 +39,57 @@ room3 {
     schemaDirectory("$projectDir/schemas")
 }
 
+// The native components of THIRD_PARTY_NOTICES.md, with the licence files :nativelib puts into the assets; the open-source
+// licences screen lists them after the Maven modules (docs/library.md §14.2).
+val nativeLibraries = listOf(
+    NativeLibrary("TagLib", "2.3.2", "GNU LGPL 2.1", listOf("licenses/taglib-COPYING.LGPL")),
+    NativeLibrary("utfcpp", "pinned by TagLib 2.3.2", "Boost Software License 1.0", listOf("licenses/utfcpp-LICENSE")),
+    NativeLibrary("Chromaprint", "1.6.2", "MIT License", listOf("licenses/chromaprint-LICENSE.md")),
+    NativeLibrary(
+        "KissFFT", "bundled with Chromaprint 1.6.2", "BSD 3-Clause License",
+        listOf("licenses/kissfft-COPYING", "licenses/kissfft-BSD-3-Clause"),
+    ),
+    NativeLibrary(
+        "speexdsp (resampler)", "1.2.1", "BSD 3-Clause License",
+        listOf("licenses/speexdsp-resampler-NOTICE.txt", "licenses/speexdsp-COPYING"),
+    ),
+    NativeLibrary(
+        "LLVM libc++ and libc++abi", "NDK 30.0.16248370", "Apache License 2.0 with LLVM Exceptions",
+        listOf("licenses/libc++-LICENSE.txt"),
+    ),
+)
+
+// The copyright notices of the runtime modules whose licence text asks for "the above copyright notice", taken from the
+// module's own licence file; a new such module without one fails the licence list (docs/library.md §14.2).
+val licenseNotices = mapOf(
+    "org.checkerframework:checker-qual" to "Copyright 2004-present by the Checker Framework developers",
+    // AndroidX's copy of Protocol Buffers; the licence file in its jar leaves the line out, protobuf's own has it.
+    "androidx.datastore:datastore-preferences-external-protobuf" to "Copyright 2008 Google Inc. All rights reserved.",
+)
+
 androidComponents {
     onVariants { variant ->
         variant.androidTest?.sources?.assets
             ?.addGeneratedSourceDirectory(prepareRecordings, PrepareFingerprintSamples::outputDir)
+        val (licenses, components) = registerDependencyLicenses(
+            variant.name, variant.runtimeConfiguration, layout.projectDirectory.dir("licenses"), licenseNotices, nativeLibraries,
+        )
+        variant.sources.assets?.addGeneratedSourceDirectory(licenses, CollectDependencyLicenses::outputDir)
+        // The JVM check of the list (docs/library.md §14.4) compares it with the variant's runtime modules.
+        val unitTest = "test${variant.name.replaceFirstChar { it.uppercase() }}UnitTest"
+        tasks.withType<Test>().configureEach {
+            if (name != unitTest) return@configureEach
+            val list = licenses.flatMap { it.outputDir }
+            val expected = components.flatMap { it.output }
+            inputs.dir(list).withPropertyName("licenseList").withPathSensitivity(PathSensitivity.RELATIVE)
+            inputs.file(expected).withPropertyName("runtimeComponents").withPathSensitivity(PathSensitivity.NONE)
+            jvmArgumentProviders += CommandLineArgumentProvider {
+                listOf(
+                    "-Dpiplayer.licenses.dir=${list.get().asFile.path}",
+                    "-Dpiplayer.licenses.components=${expected.get().asFile.path}",
+                )
+            }
+        }
     }
 }
 
