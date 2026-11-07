@@ -8,6 +8,22 @@
     <string name="songs_denied_explanation">Access to music is turned off for PiPlayer. Turn it on in the app\'s settings to list your songs.</string>
     <string name="songs_open_settings">Open settings</string>
     <string name="songs_try_again">Try again</string>
+    <!-- First launch, empty states and licences (docs/library.md §14). -->
+    <string name="onboarding_what">PiPlayer plays the music stored on this device. It builds your library from your audio files and their tags, so you can browse it by song, album, artist and folder.</string>
+    <string name="onboarding_why">To find your music, PiPlayer needs access to the audio files on this device. It reads only audio files, even if the system dialog mentions photos and media.</string>
+    <string name="onboarding_later">Library folders and the theme can be changed later in Settings.</string>
+    <string name="onboarding_allow">Allow</string>
+    <string name="library_scanning">Looking for music on this device…</string>
+    <string name="library_no_music">No music found</string>
+    <string name="library_no_music_explanation">PiPlayer shows the music files in this device\'s storage, for example in the Music folder. Ringtones, recordings, very short files and excluded folders are hidden; you can change that in Settings.</string>
+    <string name="library_no_music_settings">Settings</string>
+    <string name="settings_about">About</string>
+    <string name="settings_version">Version %1$s</string>
+    <string name="settings_licenses">Open-source licences</string>
+    <string name="settings_licenses_summary">The libraries PiPlayer is built with and their licences</string>
+    <string name="licenses_native">Native code and bundled data</string>
+    <string name="licenses_unreadable">The list of licences could not be read.</string>
+    <string name="licenses_open">Show the licence</string>
     <string name="songs_tag_progress">Reading tags: %1$d of %2$d</string>
     <string name="songs_empty">No music found on this device.</string>
     <string name="songs_unknown_artist">Unknown artist</string>

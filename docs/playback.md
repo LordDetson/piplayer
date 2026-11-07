@@ -172,7 +172,8 @@ is heard as a click. The becoming-noisy broadcast is protected, so emulator test
   and offers "Open settings" (the app's details screen) and "Try again". A dialog closed without an answer is no
   denial: the system explains why it asks only after a real denial, and PiPlayer remembers across launches that it
   did. The permission is checked again whenever the screen resumes, because a grant in the settings does not restart
-  the app. The app never asks on its own, only on a tap.
+  the app. The app never asks on its own, only on a tap: on the first launch the tap is onboarding's "Allow"
+  (library.md §14.1).
 
 ### 2.3 Compact queue request
 
@@ -870,6 +871,11 @@ ends and the next begins.
 - Media3 1.11 shifted every join of an MP3 with a LAME tag by 529 samples and kept the end of every Opus song; PiPlayer
   uses 1.12.0-alpha02 (1.12.0-alpha01 fixed both), and moves to 1.12.0 once it is stable, before its first public
   release.
+- M2a closed on 1.12.0-alpha02: on 08.11.2026 the Maven repository had no 1.12.0 beta, release candidate or stable
+  release (the newest version was alpha02, of 26.10.2026). The move to the stable 1.12 is a separate commit with an
+  A/B run of `GaplessTest` and `ScreenOffGaplessTest` (the old and the new version's journals compared, as for
+  alpha01 to alpha02), and it is required before the first public 0.x pre-release; a beta or release candidate that
+  comes first may be taken the same way, each in its own commit.
 
 ### 8.2 The fixture
 

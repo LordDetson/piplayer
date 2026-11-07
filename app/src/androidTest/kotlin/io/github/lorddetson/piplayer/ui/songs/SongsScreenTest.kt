@@ -84,6 +84,44 @@ class SongsContentTest {
     }
 
     @Test
+    fun whileTheLibraryIsScannedTheListSaysSo() {
+        compose.setContent { SongsContent(SongsState.Loading, {}, {}, { _, _ -> }, scanning = true) }
+
+        compose.onNodeWithTag(SongsTags.SCANNING).assertIsDisplayed()
+        compose.onNodeWithText(text(R.string.library_scanning)).assertIsDisplayed()
+    }
+
+    @Test
+    fun aListReadAfterTheScanShowsNoScanningText() {
+        compose.setContent { SongsContent(SongsState.Loading, {}, {}, { _, _ -> }, scanning = false) }
+
+        compose.onNodeWithTag(SongsTags.LOADING).assertIsDisplayed()
+        compose.onNodeWithText(text(R.string.library_scanning)).assertDoesNotExist()
+    }
+
+    @Test
+    fun anEmptyLibraryExplainsAndOffersTheSettings() {
+        var opened = false
+        compose.setContent { SongsContent(SongsState.Loaded(emptyList()), {}, {}, { _, _ -> }, onOpenLibrarySettings = { opened = true }) }
+
+        compose.onNodeWithText(text(R.string.library_no_music)).assertIsDisplayed()
+        compose.onNodeWithText(text(R.string.library_no_music_explanation)).assertIsDisplayed()
+        compose.onNodeWithText(text(R.string.library_no_music_settings)).performClick()
+
+        assertThat(opened).isTrue()
+    }
+
+    @Test
+    fun anEmptySearchSaysNothingWasFoundInsteadOfNoMusic() {
+        compose.setContent {
+            SongsContent(SongsState.Loaded(emptyList()), {}, {}, { _, _ -> }, emptyText = "Nothing found", onOpenLibrarySettings = {})
+        }
+
+        compose.onNodeWithText("Nothing found").assertIsDisplayed()
+        compose.onNodeWithText(text(R.string.library_no_music)).assertDoesNotExist()
+    }
+
+    @Test
     fun rowsShowTitleArtistAndLength() {
         compose.setContent { SongsContent(SongsState.Loaded(songs), {}, {}, { _, _ -> }) }
 

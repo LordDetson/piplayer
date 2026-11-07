@@ -49,7 +49,23 @@ under `third_party/`, pinned to the release tags named below.
 - License: Apache License 2.0 with LLVM Exceptions; older parts are dual licensed under the University of Illinois
   "BSD-Like" license and the MIT license. The full text is in `nativelib/licenses/libc++-LICENSE.txt`.
 
-The app carries all of these texts in its assets under `licenses/`.
+## SQLite (in androidx.sqlite:sqlite-bundled)
+
+- The AndroidX library `androidx.sqlite:sqlite-bundled` (Apache License 2.0, listed with the other Maven modules on
+  the app's licences screen) compiles the SQLite library into the app; PiPlayer's library database uses it.
+- License: SQLite is in the public domain (https://sqlite.org/copyright.html). The app carries a short statement as
+  `licenses/sqlite-public-domain.txt`.
+
+## Public Suffix List (in OkHttp)
+
+- OkHttp (Apache License 2.0) ships the Public Suffix List as the data file `PublicSuffixDatabase.list` in its Android
+  library, which ends up in the APK's assets. Source: https://publicsuffix.org/list/.
+- License: Mozilla Public License 2.0; the full text is in `licenses/publicsuffix-MPL-2.0.txt`. The file in the APK is
+  a processed form of the list, so `licenses/publicsuffix-source.txt` says where its Source Code Form is
+  (https://publicsuffix.org/list/, as carried by OkHttp 5.5.0), as the licence's section 3.2(a) asks.
+
+The app carries all of these texts in its assets under `licenses/`. The Maven modules of the runtime classpath, with their
+licences, are listed on the app's licences screen (docs/library.md §14.2).
 
 ## Test recordings (not distributed)
 

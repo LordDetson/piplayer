@@ -74,6 +74,7 @@ object SongsTags {
     const val LIST = "songs_list"
     const val LOADING = "songs_loading"
     const val PROGRESS = "songs_progress"
+    const val SCANNING = "songs_scanning"
 }
 
 /**
@@ -95,6 +96,8 @@ class SongMenu(
 /**
  * A song list without its state holder: the permission card, the list or its empty state. [header] comes before the
  * songs, as a page's albums or subfolders; [discHeaders] starts each disc with a header when the songs have more than one.
+ * While [scanning] (the library's first sync), "Loading" says so; an empty list with [onOpenLibrarySettings] and no
+ * [emptyText] is the library without music, which offers the settings (docs/library.md §14.1).
  * A long list has the scroll thumb (docs/library.md §11.2), whose bubble shows the songs' sections and [headerSections]
  * for the items of [header].
  */
@@ -115,14 +118,22 @@ fun SongsContent(
     discHeaders: Boolean = false,
     headerItems: Int = 0,
     headerSections: List<String?> = emptyList(),
+    scanning: Boolean = false,
+    onOpenLibrarySettings: (() -> Unit)? = null,
     header: LazyListScope.() -> Unit = {},
 ) {
     when (state) {
-        SongsState.Loading -> Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            CircularProgressIndicator(Modifier.testTag(SongsTags.LOADING))
+        SongsState.Loading -> if (scanning) {
+            Scanning(modifier)
+        } else {
+            Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(Modifier.testTag(SongsTags.LOADING))
+            }
         }
         is SongsState.NeedsPermission -> PermissionCard(state.deniedForGood, onAllowAccess, onOpenSettings, modifier)
-        is SongsState.Loaded -> if (state.songs.isEmpty() && headerItems == 0) {
+        is SongsState.Loaded -> if (state.songs.isEmpty() && headerItems == 0 && emptyText == null && onOpenLibrarySettings != null) {
+            NoMusic(onOpenLibrarySettings, modifier)
+        } else if (state.songs.isEmpty() && headerItems == 0) {
             Text(
                 text = emptyText ?: stringResource(R.string.songs_empty),
                 style = MaterialTheme.typography.bodyLarge,

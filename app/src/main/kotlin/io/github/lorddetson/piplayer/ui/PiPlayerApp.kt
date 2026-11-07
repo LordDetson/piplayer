@@ -14,6 +14,10 @@ import io.github.lorddetson.piplayer.ui.library.ArtistPage
 import io.github.lorddetson.piplayer.ui.library.FolderPage
 import io.github.lorddetson.piplayer.ui.library.LibraryHost
 import io.github.lorddetson.piplayer.ui.library.LibraryScreen
+import io.github.lorddetson.piplayer.ui.onboarding.OnboardingGate
+import io.github.lorddetson.piplayer.ui.onboarding.rememberOnboarding
+import io.github.lorddetson.piplayer.ui.settings.LicenseTextScreen
+import io.github.lorddetson.piplayer.ui.settings.LicensesScreen
 import io.github.lorddetson.piplayer.ui.songs.SongMenu
 import io.github.lorddetson.piplayer.covers.CoverChoices
 import io.github.lorddetson.piplayer.ui.covers.CoverActions
@@ -125,6 +129,14 @@ data object FoldersRoute : NavKey
 @Serializable
 data object SettingsRoute : NavKey
 
+/** The open-source licences (docs/library.md §14.3). */
+@Serializable
+data object LicensesRoute : NavKey
+
+/** One licence: a module's [notice] if it has one, then the [texts] (asset paths) one after another. */
+@Serializable
+data class LicenseTextRoute(val title: String, val notice: String?, val texts: List<String>) : NavKey
+
 // Settings pages come in from the side, unlike Now Playing.
 private val FROM_THE_SIDE = NavDisplay.transitionSpec {
     slideInHorizontally(initialOffsetX = { it }) togetherWith ExitTransition.KeepUntilTransitionsFinished
@@ -137,7 +149,8 @@ private val FROM_THE_SIDE = NavDisplay.transitionSpec {
 /**
  * The app's screens (docs/playback.md §3.1): the song list and Now Playing over it, which slides up when it opens and
  * down when it closes, following the predictive back gesture. Back is PiPlayer's only while Now Playing is open. The
- * crash dialog (§7.3) comes over either.
+ * crash dialog (§7.3) comes over either. A first launch without access shows onboarding in place of the library
+ * (docs/library.md §14.1).
  */
 @Composable
 fun PiPlayerApp(viewModel: PlayerViewModel = viewModel()) {
@@ -159,6 +172,7 @@ fun PiPlayerApp(viewModel: PlayerViewModel = viewModel()) {
             }
         }
     }
+    val onboarding = rememberOnboarding()
     val backStack = rememberNavBackStack(SongsRoute)
     val close = { if (backStack.size > 1) backStack.removeLastOrNull() }
     // A page opens over the library or the page it was opened from; Now Playing gives way to it.
@@ -210,7 +224,13 @@ fun PiPlayerApp(viewModel: PlayerViewModel = viewModel()) {
         predictivePopTransitionSpec = { EnterTransition.None togetherWith slideOutVertically(targetOffsetY = { it }) },
         entryProvider = entryProvider {
             entry<SongsRoute> {
-                LibraryScreen(host, onOpenSettings = { if (backStack.lastOrNull() != SettingsRoute) backStack.add(SettingsRoute) })
+                OnboardingGate(
+                    onboarding,
+                    bottomBar = { MiniPlayer(host.player, host.cover, onOpen = host.openNowPlaying) },
+                    snackbarHost = { SnackbarHost(host.snackbar) },
+                ) {
+                    LibraryScreen(host, onOpenSettings = { if (backStack.lastOrNull() != SettingsRoute) backStack.add(SettingsRoute) })
+                }
             }
             entry<AlbumRoute>(metadata = FROM_THE_SIDE) { route -> AlbumPage(route.key, host, onBack = { close() }) }
             entry<ArtistRoute>(metadata = FROM_THE_SIDE) { route -> ArtistPage(route.key, host, onBack = { close() }) }
@@ -232,7 +252,19 @@ fun PiPlayerApp(viewModel: PlayerViewModel = viewModel()) {
                 SettingsScreen(
                     onBack = { close() },
                     onOpenFolders = { if (backStack.lastOrNull() != FoldersRoute) backStack.add(FoldersRoute) },
+                    onOpenLicenses = { if (backStack.lastOrNull() != LicensesRoute) backStack.add(LicensesRoute) },
                 )
+            }
+            entry<LicensesRoute>(metadata = FROM_THE_SIDE) {
+                LicensesScreen(
+                    onBack = { close() },
+                    onOpen = { title, notice, texts ->
+                        if (backStack.lastOrNull() !is LicenseTextRoute) backStack.add(LicenseTextRoute(title, notice, texts))
+                    },
+                )
+            }
+            entry<LicenseTextRoute>(metadata = FROM_THE_SIDE) { route ->
+                LicenseTextScreen(route.title, route.notice, route.texts, onBack = { close() })
             }
             entry<FoldersRoute>(metadata = FROM_THE_SIDE) {
                 FoldersScreen(onBack = { close() })

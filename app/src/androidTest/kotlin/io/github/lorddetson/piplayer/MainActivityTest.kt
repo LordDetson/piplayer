@@ -5,16 +5,21 @@ import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import io.github.lorddetson.piplayer.ui.GrantAudioPermission
 import org.junit.Assume.assumeTrue
 import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.RuleChain
 import org.junit.runner.RunWith
 
+/** The library screen with access granted, as on every launch after the first (docs/library.md §14.1). */
 @RunWith(AndroidJUnit4::class)
 class MainActivityTest {
 
-    @get:Rule
     val composeRule = createAndroidComposeRule<MainActivity>()
+
+    @get:Rule
+    val rules: RuleChain = RuleChain.outerRule(GrantAudioPermission).around(composeRule)
 
     @Test
     fun showsTheAppNameFromResources() {

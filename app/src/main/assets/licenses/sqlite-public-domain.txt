@@ -1,0 +1,9 @@
+SQLite
+
+PiPlayer's library database uses the SQLite library that androidx.sqlite:sqlite-bundled compiles into the app.
+
+The SQLite source code is in the public domain. Its authors have dedicated the code to the public domain; anyone is
+free to copy, modify, publish, use, compile, sell or distribute the original SQLite code, either in source code form or
+as a compiled binary, for any purpose, commercial or non-commercial, and by any means.
+
+See https://sqlite.org/copyright.html.

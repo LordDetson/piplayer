@@ -23,6 +23,12 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.transformLatest
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -47,6 +53,19 @@ class SongsViewModel(
 
     /** How far the tag pass has come. */
     val passProgress: StateFlow<PassProgress> = TagPassState.progress
+
+    /**
+     * Whether the library's first sync is under way: it has not been ready for [SCANNING_AFTER_MS] (docs/library.md §1.3,
+     * §14.1). A later launch is ready as soon as its first sync starts, a moment after the screen; the wait keeps that
+     * moment from showing "Looking for music".
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val scanning: StateFlow<Boolean> = Library.status(application).map { !it.ready }.distinctUntilChanged()
+        .transformLatest { notReady ->
+            if (notReady) delay(SCANNING_AFTER_MS)
+            emit(notReady)
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(), initialValue = false)
 
     /** The order chosen for this kind of list. */
     val order: StateFlow<ListOrder> get() = mutableOrder
@@ -186,5 +205,8 @@ class SongsViewModel(
 
         /** Long enough for the next letter of someone typing. */
         const val SEARCH_PAUSE_MS = 250L
+
+        /** Longer than a later launch takes to find its earlier sync. */
+        const val SCANNING_AFTER_MS = 500L
     }
 }

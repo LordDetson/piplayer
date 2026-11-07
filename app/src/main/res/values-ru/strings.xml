@@ -6,6 +6,22 @@
     <string name="songs_denied_explanation">Доступ к музыке для PiPlayer выключен. Включите его в настройках приложения, чтобы увидеть песни.</string>
     <string name="songs_open_settings">Открыть настройки</string>
     <string name="songs_try_again">Попробовать снова</string>
+    <!-- Первый запуск, пустые состояния и лицензии (docs/library.md §14). -->
+    <string name="onboarding_what">PiPlayer воспроизводит музыку, которая хранится на этом устройстве. Он собирает библиотеку из ваших аудиофайлов и их тегов, а смотреть её можно по песням, альбомам, исполнителям и папкам.</string>
+    <string name="onboarding_why">Чтобы найти вашу музыку, PiPlayer нужен доступ к аудиофайлам на устройстве. Он читает только аудиофайлы, даже если окно системы говорит о фото и мультимедиа.</string>
+    <string name="onboarding_later">Папки библиотеки и тему можно изменить позже в настройках.</string>
+    <string name="onboarding_allow">Разрешить</string>
+    <string name="library_scanning">Ищем музыку на устройстве…</string>
+    <string name="library_no_music">Музыка не найдена</string>
+    <string name="library_no_music_explanation">PiPlayer показывает музыкальные файлы в памяти устройства, например в папке Music. Рингтоны, записи, очень короткие файлы и исключённые папки скрыты; это можно изменить в настройках.</string>
+    <string name="library_no_music_settings">Настройки</string>
+    <string name="settings_about">О приложении</string>
+    <string name="settings_version">Версия %1$s</string>
+    <string name="settings_licenses">Лицензии открытого ПО</string>
+    <string name="settings_licenses_summary">Библиотеки, из которых собран PiPlayer, и их лицензии</string>
+    <string name="licenses_native">Нативный код и встроенные данные</string>
+    <string name="licenses_unreadable">Не удалось прочитать список лицензий.</string>
+    <string name="licenses_open">Показать лицензию</string>
     <string name="songs_tag_progress">Чтение тегов: %1$d из %2$d</string>
     <string name="songs_empty">На устройстве не найдено музыки.</string>
     <string name="songs_unknown_artist">Неизвестный исполнитель</string>

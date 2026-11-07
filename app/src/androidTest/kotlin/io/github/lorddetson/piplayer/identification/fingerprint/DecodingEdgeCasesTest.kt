@@ -89,6 +89,30 @@ class DecodingEdgeCasesTest {
         assertThat(seconds).isBetween(CUT_EARLY_SECONDS - 0.001, CUT_EARLY_SECONDS + 1024 / 44_100.0 + 0.001)
     }
 
+    /**
+     * The decoder fails on the cut frame, and a decoder in error gives none of the frames it decoded before and still
+     * holds. How many it holds then depends on timing: on the API 30 emulator 11 of 40 decodes lost 1 to 6 frames, and the
+     * test above failed on loaded CI with 29 of 30. So the same file is decoded many times, and every time all 30 frames
+     * must arrive.
+     */
+    @Test(timeout = 120_000)
+    fun noDecodeOfAFlacCutOffInsideAFrameLosesTheFramesBeforeTheCut() {
+        val lengths = List(REPEATS) {
+            var seconds = 0.0
+            withSource(CUT_EARLY_IN_A_FRAME) { source ->
+                source.decode { pcm, format ->
+                    seconds += (pcm.remaining() / format.bytesPerFrame).toDouble() / format.sampleRate
+                    seconds < CUT_EARLY_GIVE_UP_SECONDS
+                }
+            }
+            seconds
+        }
+
+        assertThat(lengths).allSatisfy { seconds ->
+            assertThat(seconds).isBetween(CUT_EARLY_SECONDS - 0.001, CUT_EARLY_SECONDS + 1024 / 44_100.0 + 0.001)
+        }
+    }
+
     @Test
     fun theFingerprintOfAFlacCutOffLongBeforeItsStatedLengthTakesOnlyWhatIsLeft() {
         val result = withSource(CUT_EARLY) { source ->
@@ -120,5 +144,8 @@ class DecodingEdgeCasesTest {
         /** The same file with 200 bytes of the next frame left. */
         const val CUT_EARLY_IN_A_FRAME = "flac-44100-16bit-mono-cut-early-in-a-frame.flac"
         const val CUT_EARLY_GIVE_UP_SECONDS = 30.0
+
+        /** Decodes of the cut file; each takes about a quarter of a second on the API 30 emulator. */
+        const val REPEATS = 40
     }
 }

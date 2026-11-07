@@ -1,5 +1,6 @@
 package io.github.lorddetson.piplayer.library
 
+import java.util.concurrent.atomic.AtomicInteger
 import android.content.ContentUris
 import android.content.Context
 import android.content.pm.PackageManager
@@ -120,13 +121,20 @@ object Library {
         return opened.filterNotNull().flatMapLatest { it.sync.status }
     }
 
+    /** Calls of [start] that found access, for the test that resumes do not start the library again. */
+    @VisibleForTesting
+    val starts = AtomicInteger()
+
     /**
      * Watches the media index and syncs now, if the app may read it; called when the main process starts and when access
-     * is granted. Once the library is started, calling it again does nothing.
+     * is newly granted. The watcher and the listeners are registered once, but every call asks the tag pass and the attach
+     * pass for a run (and a reopened library is started this way in tests), so callers call it on a new grant only, never
+     * on every resume.
      */
     fun start(context: Context) {
         val app = context.applicationContext
         if (!mayRead(app)) return
+        starts.incrementAndGet()
         val sync = sync(app)
         startTagPass(app)
         identities(app).request()

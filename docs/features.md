@@ -146,6 +146,8 @@ soon after 1.0, `later` is planned without a date. The items listed under Cut li
 - Source of each value and per-field revert in track details. `M3`
 - Artist and album on Now Playing open their pages; the current track is marked in lists. `M2a`
 - Onboarding with permission explanations; empty states for no permission, scanning and no music. `M2a`
+  One screen: what PiPlayer is, why it needs access to the audio files, and "Allow"; then the library with its sync
+  progress (library.md §14.1).
 - Metadata badge on Now Playing and in details: from tags, identified (source and confidence), saved in PiPlayer,
   written to file, needs review (states appear as their milestones land). `M3`
 - Cover gestures (swipe to skip, swipe down to close), each with a visible button and an accessibility
@@ -221,7 +223,9 @@ soon after 1.0, `later` is planned without a date. The items listed under Cut li
   rebuildable library database and caches are excluded, and restored data is re-attached to files by content
   key. `M5`
 - Report a problem: copyable text with device and versions, optionally an identification trace. `M5`
-- About: version, source code, licenses, data source attribution (TI §9), privacy policy, donation link. `M5`
+- About: version and the open-source licences of every runtime dependency, listed at build time from the resolved
+  runtime classpath (library.md §14.2, §14.3). `M2a`
+- About: source code, data source attribution (TI §9), privacy policy, donation link. `M5`
 - Opt-in update notice in the GitHub build only. `M5`
 - Export and import of user data as a versioned JSON file that merges with existing data. `v1.x`
 - Storage screen that clears caches but keeps identification results and undo history. `v1.x`
@@ -298,20 +302,27 @@ Size: L (about 10 weeks).
 - Media index sync, the background tag pass, Songs, Albums, Artists and Folders as the media library tree,
   grouping, sorting, the scroll thumb, search, queue editing with its own shuffle order, local covers including a
   track's own cover and a cover provider for the tree, playing a folder with its subfolders, library folders,
-  automatic detection of legacy tag encodings, onboarding, the settings skeleton with the theme choice.
-- Done when the owner uses PiPlayer as the daily player for a week, and a generated 20 000-track library (a script
-  that creates short tagged files with varied and Cyrillic names) is browsable within seconds of the first launch
-  on the API 30 emulator and the owner's phone and scrolls smoothly on the phone (emulators draw through the host's
-  graphics, library.md §2.2); a search for "ежик" finds "Ёжик" and "Beyonce" finds "Beyoncé".
+  automatic detection of legacy tag encodings, onboarding, the settings skeleton with the theme choice, the
+  open-source licences screen.
+- Done when the acceptance rows of `m2a-acceptance.md` pass by tests and measurements: a generated 20 000-track library
+  (a script that creates short tagged files with varied and Cyrillic names) is browsable within seconds of the first
+  launch on the API 30 emulator and the owner's phone and scrolls smoothly on the phone (emulators draw through the
+  host's graphics, library.md §2.2); a search for "ежик" finds "Ёжик" and "Beyonce" finds "Beyoncé". The week of daily
+  use with real music moved to the start of M2b (owner's decision of 07.11.2026). Media3 stays on 1.12.0-alpha02 until
+  a stable 1.12 is released; the move is required before the first public 0.x (playback.md §8.1).
 
 ### M2b Library data
 
 Size: M (about 5 weeks).
 
+- Starts with what M2a handed over: a week in which the owner uses PiPlayer as the daily player with real music on
+  the phone, with no open blocker, and M1's check C2 with a real phone call (`m1-acceptance.md`); what the week finds is
+  fixed first.
 - Playlists with resolution hints, smart lists, favorite tracks and albums, statistics, the manual choice of legacy
   encodings, track details, multi-select, the Genres and Playlists categories.
-- Done when favorites, playlists and statistics survive a rebuild of the media index and a deletion of the library
-  database, and the legacy-encoding fixtures show readable text.
+- Done when the daily-use week has passed with no open blocker, C2 passes with a real call, favorites, playlists and
+  statistics survive a rebuild of the media index and a deletion of the library database, and the legacy-encoding
+  fixtures show readable text.
 
 ### M3 Identification (single file)
 

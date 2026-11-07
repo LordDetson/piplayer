@@ -1069,3 +1069,87 @@ a new URI that serves the new picture, and the playing song's URI changes throug
 session metadata carries its URI next to its picture (an added entry its song's, an opened file none), its listeners
 hear a new URI, and the same again is no news; a reader that never reads, one that reads a page now and then, and
 one that has gone do not keep the writer; the weight of an item with a cover URI is at least its parcel.
+
+## 14. First launch, empty states and open-source licences (M2a step 14)
+
+### 14.1 First launch and empty states
+
+- **Onboarding.** On a launch without the audio permission, before onboarding is done on this device, the app shows one
+  screen instead of the library: the app's name, a few lines on what PiPlayer is and why it needs access to the audio
+  files (only audio files are read, also on Android 11 and 12, whose dialog asks for "photos and media"), and an
+  "Allow" button that brings up the system dialog (playback.md §2.2). Whatever the answer, onboarding is
+  then done and the library screen follows at once: with the permission it starts the first sync and shows its
+  progress, without it the library shows its permission card. Library folders and the theme stay in Settings; onboarding
+  asks nothing else. The system back gesture on the onboarding screen leaves the app, as on any first screen.
+- Onboarding is done once the system dialog it opened has answered, or as soon as the app holds the permission (granted
+  in the system settings, by a restore, or by a test), so a phone that already gave access never sees it. The flag
+  lives in the `device_state` file (§3.2), which is not backed up: a new phone shows onboarding again, as it asks for
+  the permission again.
+- A file opened from another app (playback.md §5) plays without the permission. Onboarding keeps the library's mini
+  player and messages for it, so Now Playing opens from there as it does over the library.
+- **Empty states.** Each library tab shows one of these instead of an empty list:
+    - **No permission:** the permission card of playback.md §2.2, with "Allow access", or, once the system no longer
+      shows its dialog, "Open settings" (the app's details screen) and "Try again".
+    - **Scanning:** while the library is not ready (§1.3: no sync has finished in this process and the database shows
+      none from an earlier one) for more than half a second, "Looking for music on this device" over an indeterminate
+      progress bar. A later launch finds its earlier sync as soon as its first sync starts, a moment after the screen
+      appears; the half second keeps that moment from showing the scan. The tag pass that follows has its own progress line over the list
+      (§5.4).
+    - **No music found:** when the library is ready and the tab's list is empty without a search: a title, a line on
+      where PiPlayer looks (the music files in the device's storage, minus the hidden kinds and excluded folders of §3)
+      and a "Settings" button that opens PiPlayer's settings. With a search the tab says that nothing was found, as
+      before.
+
+### 14.2 The licence list
+
+- The licence list names every component the APK contains: each module of the variant's runtime classpath (AndroidX,
+  Media3, Kotlin and kotlinx, OkHttp and Okio, Guava's parts, reorderable and the rest) with its version and licence,
+  and the native components of `THIRD_PARTY_NOTICES.md` (TagLib, utfcpp, Chromaprint, KissFFT, speexdsp, LLVM libc++).
+- It is written while the app is built, by an own Gradle task in `buildSrc` (`collect<Variant>DependencyLicenses`), with
+  no new library: the task takes the resolved runtime classpath of the variant (group, name and version of every module
+  in its graph, BOMs and Kotlin Multiplatform root modules included), fetches each module's POM, and takes the
+  `<licenses>` of the POM or, when it has none, of its nearest parent POM, up to four levels up (Guava's parts have
+  their licence in `guava-parent`). A configuration keeps one version of each module, so parents in two versions are
+  fetched separately.
+- The POMs are found while Gradle plans the task graph, since a parent level is known only from the level below. So a
+  configuration cache miss (a changed build script, a new worktree, every CI run) resolves the runtime classpath and the
+  POMs before any task runs, and Gradle notes that the classpath was resolved during configuration time; after the
+  first build the POMs come from Gradle's cache. A run that reuses the configuration cache does none of this.
+- Each POM licence is mapped by its name or URL to a licence kind the build knows: Apache License 2.0, MIT and BSD
+  3-Clause so far. When the name and the URL disagree (a name of another licence with an Apache URL), the licence is
+  unknown. The app ships one text of each kind it uses, from `app/licenses/<SPDX id>.txt`. The MIT and BSD texts
+  ask for "the above copyright notice", which a generic text cannot hold, so each module under them has its notice in
+  the build script, taken from the module's own licence file (checker-qual; AndroidX's copy of Protocol Buffers).
+- The build fails, naming the module, when a module has no POM licence (itself or a parent), when its licence maps to
+  no kind, or when its kind needs a notice that is not given. So a new dependency cannot reach the APK unlisted: adding
+  it means adding its licence kind, text or notice when the build does not know them.
+- The native components come from a list in `app/build.gradle.kts` with their licences and their own licence files,
+  which `:nativelib` already puts into the assets under `licenses/` (with their copyright lines). The same list names
+  what Maven modules carry under a licence of their own: SQLite in `androidx.sqlite:sqlite-bundled` (public domain) and
+  the Public Suffix List in OkHttp's assets (MPL 2.0), with their texts in the app's own assets. The list ships in a
+  processed form, so its entry also says where its Source Code Form is (MPL 2.0 §3.2(a)).
+- Output, in the variant's assets: `licenses/dependencies.json` (the modules sorted by coordinates, the native
+  components, and the kinds with the asset path of their texts) and `licenses/kinds/<SPDX id>.txt`. Debug builds list
+  their own runtime classpath, which has the debug-only tooling modules as well.
+
+### 14.3 The licences screen
+
+- Settings has an About section with the app's version and "Open-source licences". The licences screen lists the
+  modules, one row each with `group:name`, version and licence, then the native components with theirs. A row opens
+  the licence: the module's copyright notice when it has one, then the kind's text; for a native component, its own
+  licence files one after another.
+- The list and texts are read from the assets off the main thread; a missing or unreadable list shows a line that the
+  list could not be read instead of failing.
+
+### 14.4 Checks
+
+JVM tests: onboarding shows only without the permission and before it is done; the licence list read by the app
+parses, holds every module whose files the debug APK packages (a second task lists them from the packaged artifacts,
+not from the graph the list walks, so that a module the walk misses fails the test; BOMs and Kotlin Multiplatform root
+modules have no files, so the list may hold more), each with a known kind whose text is in the assets, each MIT or BSD
+module with a notice, and every component of `THIRD_PARTY_NOTICES.md` and nothing else. A module without a known
+licence or notice already fails the build at the list task.
+Instrumented tests: the onboarding screen and its "Allow" button; the gate shows the library once the dialog answered,
+and never with the permission; onboarding keeps the mini player of an opened file; the empty states for no permission,
+scanning and no music, and "No music found" on every tab of a library with no songs; Settings opens the licences screen, which lists a Media3 module and TagLib, and opens a licence text; every
+text the list names opens from the assets.
