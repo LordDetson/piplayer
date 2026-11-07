@@ -48,7 +48,7 @@ import io.github.lorddetson.piplayer.R
  */
 @OptIn(UnstableApi::class)
 @Composable
-fun MiniPlayer(player: Player?, cover: ImageBitmap?, onOpen: () -> Unit, modifier: Modifier = Modifier) {
+fun MiniPlayer(player: Player?, cover: ImageBitmap?, onOpen: () -> Unit, modifier: Modifier = Modifier, coverName: String? = null) {
     val item = rememberCurrentItemState(player)
     if (player == null || item.mediaItem == null) return
     val metadata = item.mediaMetadata
@@ -66,7 +66,7 @@ fun MiniPlayer(player: Player?, cover: ImageBitmap?, onOpen: () -> Unit, modifie
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                CoverImage(cover, Modifier.size(48.dp).clip(RoundedCornerShape(6.dp)))
+                CoverImage(cover, Modifier.size(48.dp).clip(RoundedCornerShape(6.dp)), placeholderName = coverName)
                 Column(Modifier.weight(1f)) {
                     Text(
                         text = metadata.title?.toString().orEmpty(),

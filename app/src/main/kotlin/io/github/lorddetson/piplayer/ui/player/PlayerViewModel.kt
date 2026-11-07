@@ -17,6 +17,10 @@ import androidx.media3.session.MediaController
 import androidx.media3.session.SessionError
 import androidx.media3.session.SessionResult
 import io.github.lorddetson.piplayer.R
+import io.github.lorddetson.piplayer.covers.CoverRequest
+import io.github.lorddetson.piplayer.covers.Covers as AppCovers
+import io.github.lorddetson.piplayer.playback.QueueIds
+import kotlinx.coroutines.flow.drop
 import io.github.lorddetson.piplayer.library.songs.Song
 import io.github.lorddetson.piplayer.playback.PlaybackConnection
 import io.github.lorddetson.piplayer.playback.PlaybackExtras
@@ -51,8 +55,16 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
 
     private val mutableCover = MutableStateFlow<ImageBitmap?>(null)
 
-    /** The current song's embedded cover, null while there is none or it is still being decoded. */
+    /**
+     * The current song's cover by the order of docs/library.md §13.1, or for a file opened from another app the picture
+     * the player read from it; null while there is none or it is still being loaded.
+     */
     val cover: StateFlow<ImageBitmap?> = mutableCover.asStateFlow()
+
+    private val mutableCoverName = MutableStateFlow<String?>(null)
+
+    /** The current library song's album, which colors the placeholder (docs/library.md §13.4); null otherwise. */
+    val coverName: StateFlow<String?> = mutableCoverName.asStateFlow()
 
     private val mutableMessages = Channel<PlayerMessage>(Channel.BUFFERED)
 
@@ -67,10 +79,14 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     private val coverSizePx = application.resources.displayMetrics.let { minOf(it.widthPixels, it.heightPixels) }
 
     private var coverBytes: ByteArray? = null
+    private var coverId: String? = null
     private var decoding: Job? = null
+    private val covers = AppCovers.loader(application)
 
     private val listener = object : Player.Listener {
-        override fun onMediaMetadataChanged(mediaMetadata: MediaMetadata) = showCover(mediaMetadata.artworkData)
+        override fun onMediaMetadataChanged(mediaMetadata: MediaMetadata) = showCover()
+
+        override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) = showCover()
     }
 
     private val mutableExtras = MutableStateFlow(PlaybackExtras.NONE)
@@ -95,7 +111,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
         connection.whenConnected {
             controller = this
             addListener(listener)
-            showCover(mediaMetadata.artworkData)
+            showCover()
             mutableExtras.value = PlaybackExtras.from(sessionExtras)
             mutablePlayer.value = this
             // Opening the screen shows the queue saved before the process died, paused (docs/playback.md §4.4).
@@ -267,19 +283,41 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
         connection.whenConnected { sendCustomCommand(PlaybackSessionCallback.MOVE_IN_QUEUE_COMMAND, args) }
     }
 
+    init {
+        // A change of own covers loads the current song's cover again, keeping the old one on screen meanwhile.
+        viewModelScope.launch { AppCovers.own(application).version.drop(1).collect { showCover(reload = true) } }
+    }
+
     /**
-     * Decodes the cover once per song: the controller lives in the service's process and shares the bytes of the
-     * metadata, so the same picture comes as the same array. A new song shows no cover until its own is decoded.
+     * Loads the current song's cover once per song (docs/library.md §13.5): a library song's from the cover loader, a file
+     * opened from another app's from the session's metadata. The controller lives in the service's process and shares
+     * the bytes of the metadata, so the same picture comes as the same array. A new song shows no cover until its own is
+     * loaded. A library song falls back to the stream's picture when the loader finds nothing, such as for a file the
+     * library does not hold yet; that picture may arrive after the loader has finished.
      */
-    private fun showCover(bytes: ByteArray?) {
-        if (bytes === coverBytes) return
+    private fun showCover(reload: Boolean = false) {
+        val controller = controller ?: return
+        val item = controller.currentMediaItem
+        val id = item?.mediaId
+        val bytes = controller.mediaMetadata.artworkData
+        val fileId = id?.let(QueueIds::fileId)
+        mutableCoverName.value = if (fileId != null) item.mediaMetadata.albumTitle?.toString() else null
+        val newSong = id != coverId
+        if (!newSong && !reload) {
+            if (bytes === coverBytes) return
+            coverBytes = bytes
+            // Only a picture of the stream that came late can help, while nothing is shown and nothing is loading.
+            if (bytes == null || mutableCover.value != null || decoding?.isActive == true) return
+        }
+        coverId = id
         coverBytes = bytes
         decoding?.cancel()
-        mutableCover.value = null
-        if (bytes == null) return
+        if (newSong) mutableCover.value = null
+        if (id == null) return
         decoding = viewModelScope.launch {
-            val bitmap = withContext(Dispatchers.Default) { Covers.decode(bytes, coverSizePx) }
-            mutableCover.value = bitmap?.asImageBitmap()
+            val loaded = fileId?.let { covers.load(CoverRequest.Track(it), coverSizePx) }
+            val image = loaded ?: coverBytes?.let { stream -> withContext(Dispatchers.Default) { Covers.decode(stream, coverSizePx) } }
+            mutableCover.value = image?.asImageBitmap()
         }
     }
 

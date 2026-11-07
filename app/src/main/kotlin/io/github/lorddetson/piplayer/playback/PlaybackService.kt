@@ -29,6 +29,7 @@ import androidx.media3.session.MediaSession
 import androidx.media3.session.SessionError
 import io.github.lorddetson.piplayer.ProcessRole
 import io.github.lorddetson.piplayer.R
+import io.github.lorddetson.piplayer.covers.Covers
 import io.github.lorddetson.piplayer.library.Library
 import io.github.lorddetson.piplayer.library.songs.SongList
 import kotlinx.coroutines.Job
@@ -50,6 +51,7 @@ class PlaybackService : MediaLibraryService() {
 
     private val passGateListener = PassGateListener()
     private var passBatches: Job? = null
+    private var sessionCovers: SessionCovers? = null
     private val postNotificationAgain = Runnable { postNotification() }
     private var lastStartId = 0
     private var startCheckKind = StartIntentRules.Kind.MEDIA_BUTTON
@@ -104,6 +106,9 @@ class PlaybackService : MediaLibraryService() {
         val refresher = SessionItemRefresher(sessionPlayer, SongList::keptSong)
         refresher.start()
         passBatches = mainScope.launch { SongList.batches.drop(1).collect { refresher.refresh() } }
+        // Own covers and folder images for the session (docs/library.md §13.6).
+        sessionCovers = SessionCovers(sessionPlayer, { SessionCovers.pictureOf(this, it) }, Covers.own(this).version, mainScope)
+            .also { it.start() }
         isRunningForTests = true
     }
 
@@ -183,6 +188,8 @@ class PlaybackService : MediaLibraryService() {
         playbackLooperForTests = null
         passBatches?.cancel()
         passBatches = null
+        sessionCovers?.stop()
+        sessionCovers = null
         handler.removeCallbacks(postNotificationAgain)
         controls?.release()
         controls = null

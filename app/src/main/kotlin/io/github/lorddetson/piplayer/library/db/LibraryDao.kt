@@ -395,7 +395,59 @@ interface LibraryDao {
 
     @Query("DELETE FROM genre WHERE id NOT IN (SELECT genre_id FROM track_genre)")
     suspend fun deleteGenresWithoutTracks()
+
+    /** A file as covers need it (docs/library.md §13.1). */
+    @Query("$COVER_FILES FROM audio_file f LEFT JOIN track_display d ON d.file_id = f.id WHERE f.id = :fileId")
+    suspend fun coverFile(fileId: Long): CoverFileRow?
+
+    /**
+     * The song that stands for an album: the first by disc, track and file name among those with an embedded picture,
+     * then the unread ones, then the rest (docs/library.md §13.1).
+     */
+    @Query(
+        "$COVER_FILES FROM track_display d JOIN audio_file f ON f.id = d.file_id WHERE d.album_key = :albumKey " +
+            "ORDER BY $BY_PICTURE, d.disc_number IS NULL, d.disc_number, d.track_number IS NULL, d.track_number, " +
+            "d.file_sort, f.id LIMIT 1",
+    )
+    suspend fun albumCoverFile(albumKey: String): CoverFileRow?
+
+    /** An artist's albums in the artist page's order, by year then title, each with whether a song has a picture. */
+    @Query(
+        "SELECT d.album_key AS albumKey, MAX(f.embedded_cover_present IS 1) AS embedded FROM display_artist a " +
+            "JOIN track_display d ON d.file_id = a.file_id JOIN audio_file f ON f.id = d.file_id " +
+            "WHERE a.artist_key = :artistKey AND d.album_key IS NOT NULL GROUP BY d.album_key " +
+            "ORDER BY MIN(d.year) IS NULL, MIN(d.year), MIN(d.album_sort), d.album_key",
+    )
+    suspend fun artistCoverAlbums(artistKey: String): List<ArtistCoverAlbumRow>
+
+    /** An artist's first song by title, for an artist without albums. */
+    @Query(
+        "$COVER_FILES FROM display_artist a JOIN track_display d ON d.file_id = a.file_id JOIN audio_file f ON f.id = d.file_id " +
+            "WHERE a.artist_key = :artistKey ORDER BY $BY_PICTURE, d.title_sort, f.id LIMIT 1",
+    )
+    suspend fun artistCoverFile(artistKey: String): CoverFileRow?
 }
+
+private const val COVER_FILES = "SELECT f.id AS fileId, f.media_store_id AS mediaStoreId, f.size, f.mtime, " +
+    "f.embedded_cover_present AS embedded, f.content_key AS contentKey, d.album_key AS albumKey"
+
+/** Songs whose picture the tag pass found first, then the unread ones, then those without. */
+private const val BY_PICTURE =
+    "CASE WHEN f.embedded_cover_present = 1 THEN 0 WHEN f.embedded_cover_present IS NULL THEN 1 ELSE 2 END"
+
+/** A file as covers need it (docs/library.md §13.1). */
+data class CoverFileRow(
+    val fileId: Long,
+    val mediaStoreId: Long,
+    val size: Long,
+    val mtime: Long,
+    val embedded: Boolean?,
+    val contentKey: String?,
+    val albumKey: String?,
+)
+
+/** An album of an artist for its cover. */
+data class ArtistCoverAlbumRow(val albumKey: String, val embedded: Boolean)
 
 /** A song of a list, with what the list groups it by. */
 data class ListSongRow(

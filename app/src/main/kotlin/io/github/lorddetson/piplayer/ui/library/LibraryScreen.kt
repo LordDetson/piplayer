@@ -98,6 +98,9 @@ import io.github.lorddetson.piplayer.ui.songs.SongsScreen
 import io.github.lorddetson.piplayer.ui.songs.SongsState
 import io.github.lorddetson.piplayer.ui.songs.SongsViewModel
 import io.github.lorddetson.piplayer.ui.songs.rememberAudioAccess
+import io.github.lorddetson.piplayer.covers.CoverRequest
+import io.github.lorddetson.piplayer.ui.covers.CoverActions
+import io.github.lorddetson.piplayer.ui.covers.LibraryCover
 
 object LibraryTags {
     const val TABS = "library_tabs"
@@ -110,6 +113,8 @@ object LibraryTags {
 class LibraryHost(
     val player: Player?,
     val cover: ImageBitmap?,
+    /** The current song's album, which colors the mini player's placeholder (docs/library.md §13.4). */
+    val coverName: String? = null,
     val snackbar: SnackbarHostState,
     val currentSongId: Long?,
     val menu: SongMenu,
@@ -120,6 +125,8 @@ class LibraryHost(
     val openAlbum: (key: String) -> Unit,
     val openArtist: (key: String) -> Unit,
     val openFolder: (volume: String, relativePath: String) -> Unit,
+    /** Own covers of songs and albums (docs/library.md §13.2). */
+    val covers: CoverActions? = null,
 )
 
 private enum class LibraryTab(val label: Int) { SONGS(R.string.tab_songs), ALBUMS(R.string.tab_albums), ARTISTS(R.string.tab_artists), FOLDERS(R.string.tab_folders) }
@@ -190,7 +197,7 @@ fun LibraryScreen(host: LibraryHost, onOpenSettings: () -> Unit) {
                 }
             }
         },
-        bottomBar = { MiniPlayer(host.player, host.cover, onOpen = host.openNowPlaying) },
+        bottomBar = { MiniPlayer(host.player, host.cover, onOpen = host.openNowPlaying, coverName = host.coverName) },
         snackbarHost = { SnackbarHost(host.snackbar) },
     ) { padding ->
         val modifier = Modifier.padding(padding).fillMaxSize()
@@ -283,36 +290,35 @@ private fun LazyGridScope.artistTiles(artists: List<ArtistGroup>, host: LibraryH
     items(artists, key = { "artist " + it.key }) { artist -> ArtistTile(artist, host) }
 }
 
-/** An album in a grid: a square placeholder until covers come (step 13), its title, then its artist and year. */
+/** An album in a grid: its cover as a square (docs/library.md §13.5), its title, then its artist and year. */
 @Composable
 internal fun AlbumTile(album: AlbumGroup, host: LibraryHost) {
     val details = listOfNotNull(creditText(album.credit), album.year?.toString()).joinToString(" · ")
-    Tile(album.title, details, stringResource(R.string.open_album), queue(host, QueueTarget.Album(album.key)), { host.openAlbum(album.key) }) {
-        Box(
-            contentAlignment = Alignment.Center,
-            modifier = Modifier.fillMaxWidth().aspectRatio(1f)
-                .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(12.dp)),
-        ) {
-            Icon(painterResource(R.drawable.ic_album), contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
+    Tile(album.title, details, stringResource(R.string.open_album), albumMenu(host, album.key), { host.openAlbum(album.key) }) {
+        LibraryCover(
+            CoverRequest.Album(album.key),
+            album.title,
+            Modifier.fillMaxWidth().aspectRatio(1f),
+            shape = RoundedCornerShape(12.dp),
+            noteSize = 48.dp,
+        )
     }
 }
 
-/** An artist in a grid: a circle with their letter, their name, then their numbers of albums and songs. */
+/** An artist in a grid: a circle with their cover or else their letter, their name, then their numbers of albums and songs. */
 @Composable
 internal fun ArtistTile(artist: ArtistGroup, host: LibraryHost) {
     val counts = pluralStringResource(R.plurals.albums_count, artist.albums, artist.albums) + " · " +
         pluralStringResource(R.plurals.songs_count, artist.songs, artist.songs)
     Tile(artist.name, counts, stringResource(R.string.open_artist), queue(host, QueueTarget.Artist(artist.key)), { host.openArtist(artist.key) }) {
-        Box(
-            contentAlignment = Alignment.Center,
-            modifier = Modifier.fillMaxWidth().aspectRatio(1f).background(MaterialTheme.colorScheme.primaryContainer, CircleShape),
-        ) {
-            Text(
-                artist.name.firstOrNull { it.isLetterOrDigit() }?.uppercase() ?: "#",
-                style = MaterialTheme.typography.displaySmall,
-                color = MaterialTheme.colorScheme.onPrimaryContainer,
-            )
+        LibraryCover(CoverRequest.Artist(artist.key), null, Modifier.fillMaxWidth().aspectRatio(1f), shape = CircleShape) { modifier ->
+            Box(contentAlignment = Alignment.Center, modifier = modifier.background(MaterialTheme.colorScheme.primaryContainer)) {
+                Text(
+                    artist.name.firstOrNull { it.isLetterOrDigit() }?.uppercase() ?: "#",
+                    style = MaterialTheme.typography.displaySmall,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                )
+            }
         }
     }
 }
@@ -352,7 +358,11 @@ private fun LazyListScope.artistItems(artists: List<ArtistGroup>, host: LibraryH
     items(artists, key = { "artist " + it.key }) { artist ->
         val counts = pluralStringResource(R.plurals.albums_count, artist.albums, artist.albums) + " · " +
             pluralStringResource(R.plurals.songs_count, artist.songs, artist.songs)
-        GroupRow(artist.name, counts, R.drawable.ic_artist, stringResource(R.string.open_artist), queue(host, QueueTarget.Artist(artist.key))) {
+        GroupRow(artist.name, counts, stringResource(R.string.open_artist), queue(host, QueueTarget.Artist(artist.key)), leading = {
+            LibraryCover(CoverRequest.Artist(artist.key), null, size = 48.dp, shape = CircleShape) { modifier ->
+                Box(modifier, contentAlignment = Alignment.Center) { Icon(painterResource(R.drawable.ic_artist), contentDescription = null) }
+            }
+        }) {
             host.openArtist(artist.key)
         }
     }
@@ -362,21 +372,42 @@ private fun LazyListScope.artistItems(artists: List<ArtistGroup>, host: LibraryH
 internal fun AlbumRow(album: AlbumGroup, host: LibraryHost) {
     val credit = creditText(album.credit)
     val details = listOfNotNull(credit, album.year?.toString(), pluralStringResource(R.plurals.songs_count, album.songs, album.songs))
-    GroupRow(album.title, details.joinToString(" · "), R.drawable.ic_album, stringResource(R.string.open_album), queue(host, QueueTarget.Album(album.key))) {
+    GroupRow(album.title, details.joinToString(" · "), stringResource(R.string.open_album), albumMenu(host, album.key), leading = {
+        LibraryCover(CoverRequest.Album(album.key), album.title, size = 48.dp, shape = RoundedCornerShape(6.dp))
+    }) {
         host.openAlbum(album.key)
     }
 }
 
-/** What a row's or a page's menu adds to the queue (docs/playback.md §9.1). */
-internal class QueueMenu(val playNext: () -> Unit, val addToQueue: () -> Unit)
+/**
+ * What a row's or a page's menu adds to the queue (docs/playback.md §9.1); an album's menu also chooses or removes its
+ * own cover (docs/library.md §13.2).
+ */
+internal class QueueMenu(val playNext: () -> Unit, val addToQueue: () -> Unit, val cover: CoverMenu? = null)
+
+/** "Choose cover", and "Remove own cover" while [hasOwn]. */
+internal class CoverMenu(val choose: () -> Unit, val remove: () -> Unit, val hasOwn: suspend () -> Boolean)
 
 internal fun queue(host: LibraryHost, target: QueueTarget) =
     QueueMenu(playNext = { host.addToQueue(target, true) }, addToQueue = { host.addToQueue(target, false) })
+
+/** The menu of the album [key]: the queue, and its own cover. */
+internal fun albumMenu(host: LibraryHost, key: String) = QueueMenu(
+    playNext = { host.addToQueue(QueueTarget.Album(key), true) },
+    addToQueue = { host.addToQueue(QueueTarget.Album(key), false) },
+    cover = host.covers?.let { covers ->
+        CoverMenu(choose = { covers.chooseForAlbum(key) }, remove = { covers.removeForAlbum(key) }, hasOwn = { covers.albumHasOwn(key) })
+    },
+)
 
 /** The menu button of a row or a page with "Play next" and "Add to queue". */
 @Composable
 internal fun QueueMenuButton(description: String, menu: QueueMenu) {
     var open by remember { mutableStateOf(false) }
+    var ownCover by remember { mutableStateOf(false) }
+    LaunchedEffect(open) {
+        if (open) ownCover = menu.cover?.hasOwn?.invoke() == true
+    }
     Box {
         IconButton(onClick = { open = true }) { Icon(painterResource(R.drawable.ic_more), description) }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
@@ -388,6 +419,18 @@ internal fun QueueMenuButton(description: String, menu: QueueMenu) {
                 open = false
                 menu.addToQueue()
             })
+            menu.cover?.let { cover ->
+                DropdownMenuItem(text = { Text(stringResource(R.string.cover_choose)) }, onClick = {
+                    open = false
+                    cover.choose()
+                })
+                if (ownCover) {
+                    DropdownMenuItem(text = { Text(stringResource(R.string.cover_remove)) }, onClick = {
+                        open = false
+                        cover.remove()
+                    })
+                }
+            }
         }
     }
 }
@@ -400,11 +443,18 @@ internal fun creditText(credit: AlbumCredit): String = when (credit) {
 }
 
 @Composable
-private fun GroupRow(title: String, details: String?, icon: Int, clickLabel: String, menu: QueueMenu? = null, onClick: () -> Unit) {
+private fun GroupRow(
+    title: String,
+    details: String?,
+    clickLabel: String,
+    menu: QueueMenu? = null,
+    leading: @Composable () -> Unit,
+    onClick: () -> Unit,
+) {
     ListItem(
         headlineContent = { Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
         supportingContent = details?.let { { Text(it, maxLines = 1, overflow = TextOverflow.Ellipsis) } },
-        leadingContent = { Icon(painterResource(icon), contentDescription = null) },
+        leadingContent = leading,
         trailingContent = menu?.let { { QueueMenuButton(stringResource(R.string.song_menu, title), it) } },
         modifier = Modifier.clickable(onClickLabel = clickLabel, role = Role.Button, onClick = onClick),
     )
@@ -439,8 +489,9 @@ internal fun FolderContent(
         items(page.entries, key = { "folder " + it.volume + "/" + it.relativePath }) { entry ->
             val name = if (entry.relativePath.isEmpty()) volumeName(entry.volume, internal) else entry.name
             val details = pluralStringResource(R.plurals.songs_count, entry.songs, entry.songs)
-            GroupRow(name, if (page.searching) entry.relativePath + " · " + details else details, R.drawable.ic_folder,
-                stringResource(R.string.open_folder), queue(host, QueueTarget.Folder(entry.volume, entry.relativePath))) {
+            GroupRow(name, if (page.searching) entry.relativePath + " · " + details else details,
+                stringResource(R.string.open_folder), queue(host, QueueTarget.Folder(entry.volume, entry.relativePath)),
+                leading = { Icon(painterResource(R.drawable.ic_folder), contentDescription = null) }) {
                 host.openFolder(entry.volume, entry.relativePath)
             }
         }

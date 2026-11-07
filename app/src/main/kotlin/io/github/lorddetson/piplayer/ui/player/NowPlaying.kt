@@ -77,6 +77,7 @@ fun NowPlaying(
     onOpenArtist: (() -> Unit)? = null,
     onOpenAlbum: (() -> Unit)? = null,
     onOpenQueue: (() -> Unit)? = null,
+    coverName: String? = null,
 ) {
     val metadata = rememberCurrentItemState(player).mediaMetadata
     val pane = stringResource(R.string.player_now_playing)
@@ -104,6 +105,7 @@ fun NowPlaying(
             cover,
             Modifier.widthIn(max = 480.dp).fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(12.dp)),
             noteSize = 96.dp,
+            placeholderName = coverName,
         )
         Spacer(Modifier.height(24.dp))
         Text(

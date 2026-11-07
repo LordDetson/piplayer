@@ -81,9 +81,9 @@ class CoverLoaderTest {
         assertThat(loader.load(request, 150)).isEqualTo("T@192")
         assertThat(sources.reads).isEmpty()
 
-        // Another process start: memory is empty, the disk still knows.
+        // Another process start: memory is empty, the disk still knows. A missing own copy is only looked for again.
         assertThat(loader().load(request, 150)).isEqualTo("T@192")
-        assertThat(sources.reads).isEmpty()
+        assertThat(sources.reads).containsExactly(own)
     }
 
     @Test
@@ -96,7 +96,7 @@ class CoverLoaderTest {
 
         assertThat(other.peek(request, 100)).isNull()
         assertThat(other.load(request, 100)).isEqualTo("E@128")
-        assertThat(sources.reads).isEmpty()
+        assertThat(sources.reads).containsExactly(own)
         assertThat(other.peek(request, 100)).isEqualTo("E@128")
     }
 
@@ -145,8 +145,8 @@ class CoverLoaderTest {
         sources.failing.clear()
         sources.reads.clear()
         assertThat(loader.load(request, 96)).isEqualTo("E@96")
-        // The own cover's absence was remembered, the failure was not.
-        assertThat(sources.reads).containsExactly(embedded)
+        // The failure was not remembered.
+        assertThat(sources.reads).containsExactly(own, embedded)
     }
 
     @Test
@@ -192,6 +192,24 @@ class CoverLoaderTest {
         assertThat(loader.peek(request, 96)).isNull()
         assertThat(disk.read(own.key + "@96")).isNull()
         assertThat(disk.read(embedded.key + "@96")).isNull()
+    }
+
+    @Test
+    fun aLibraryThatCannotBeReadGivesNoCoverAndNothingIsRemembered() = runTest {
+        sources.pictures[embedded] = "E"
+        var failing = true
+        val loader = CoverLoader(
+            plan = { if (failing) throw IllegalStateException("closed for a rebuild") else steps },
+            sources = sources,
+            codec = Codec,
+            disk = disk,
+            memoryWeight = 1_000,
+            dispatcher = StandardTestDispatcher(testScheduler),
+        )
+
+        assertThat(loader.load(request, 96)).isNull()
+        failing = false
+        assertThat(loader.load(request, 96)).isEqualTo("E@96")
     }
 
     @Test

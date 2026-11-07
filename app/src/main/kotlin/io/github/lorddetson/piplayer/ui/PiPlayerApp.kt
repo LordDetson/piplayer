@@ -15,6 +15,10 @@ import io.github.lorddetson.piplayer.ui.library.FolderPage
 import io.github.lorddetson.piplayer.ui.library.LibraryHost
 import io.github.lorddetson.piplayer.ui.library.LibraryScreen
 import io.github.lorddetson.piplayer.ui.songs.SongMenu
+import io.github.lorddetson.piplayer.covers.CoverChoices
+import io.github.lorddetson.piplayer.ui.covers.CoverActions
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.compose.runtime.saveable.rememberSaveable
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -63,6 +67,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -137,6 +142,7 @@ private val FROM_THE_SIDE = NavDisplay.transitionSpec {
 fun PiPlayerApp(viewModel: PlayerViewModel = viewModel()) {
     val player by viewModel.player.collectAsStateWithLifecycle()
     val cover by viewModel.cover.collectAsStateWithLifecycle()
+    val coverName by viewModel.coverName.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     LaunchedEffect(viewModel) {
         // Messages come one after another; one with "Undo" gives way to the next at once, since a newer one may come
@@ -161,6 +167,7 @@ fun PiPlayerApp(viewModel: PlayerViewModel = viewModel()) {
     }
     val context = LocalContext.current
     val currentSongId = rememberCurrentSongId(player)
+    val covers = rememberCoverActions(snackbar)
     val menu = remember {
         SongMenu(
             links = { song -> linksOf(context, song.id) },
@@ -169,11 +176,13 @@ fun PiPlayerApp(viewModel: PlayerViewModel = viewModel()) {
             openFolder = { volume, path -> open(LibraryFolderRoute(volume, path)) },
             playNext = { viewModel.addToQueue(QueueTarget.Songs(listOf(it.id)), next = true) },
             addToQueue = { viewModel.addToQueue(QueueTarget.Songs(listOf(it.id)), next = false) },
+            covers = covers,
         )
     }
     val host = LibraryHost(
         player = player,
         cover = cover,
+        coverName = coverName,
         snackbar = snackbar,
         currentSongId = currentSongId,
         menu = menu,
@@ -183,6 +192,7 @@ fun PiPlayerApp(viewModel: PlayerViewModel = viewModel()) {
         openAlbum = menu.openAlbum,
         openArtist = menu.openArtist,
         openFolder = menu.openFolder,
+        covers = covers,
     )
     // What the artist and the album on Now Playing open (docs/library.md §6.1).
     var playingLinks by remember { mutableStateOf<SongLinks?>(null) }
@@ -248,6 +258,7 @@ fun PiPlayerApp(viewModel: PlayerViewModel = viewModel()) {
                         },
                         onOpenAlbum = links?.albumKey?.let { { openLatest { latest -> latest.albumKey?.let(::AlbumRoute) } } },
                         onOpenQueue = { if (backStack.lastOrNull() != QueueRoute) backStack.add(QueueRoute) },
+                        coverName = coverName,
                     )
                     SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).windowInsetsPadding(WindowInsets.navigationBars))
                 }
@@ -256,6 +267,69 @@ fun PiPlayerApp(viewModel: PlayerViewModel = viewModel()) {
     )
     if (CrashReports.promptEnabled) CrashPrompt(CrashReports.of(LocalContext.current))
 }
+
+/**
+ * "Choose cover" and "Remove own cover" (docs/library.md §13.2): the system photo picker for images, then a copy of the
+ * chosen image. A song gets an own cover once its tags are read; until then the snackbar says so. What the picker is
+ * choosing for survives the activity being recreated while it is open.
+ */
+@Composable
+private fun rememberCoverActions(snackbar: SnackbarHostState): CoverActions {
+    val context = LocalContext.current
+    val resources = LocalResources.current
+    val scope = rememberCoroutineScope()
+    val choices = remember(context) { CoverChoices(context) }
+    // "song:<file ID>" or "album:<album key>".
+    var choosingFor by rememberSaveable { mutableStateOf<String?>(null) }
+    val say = { id: Int -> scope.launch { snackbar.showSnackbar(resources.getString(id)) }; Unit }
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { image ->
+        val target = choosingFor
+        choosingFor = null
+        if (image == null || target == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            val result = when {
+                target.startsWith(SONG_TARGET) -> choices.chooseForSong(target.removePrefix(SONG_TARGET).toLong(), image)
+                else -> choices.chooseForAlbum(target.removePrefix(ALBUM_TARGET), image)
+            }
+            say(
+                when (result) {
+                    CoverChoices.Result.SAVED -> R.string.cover_saved
+                    CoverChoices.Result.NOT_READ -> R.string.cover_not_read
+                    CoverChoices.Result.NO_IMAGE -> R.string.cover_no_image
+                },
+            )
+        }
+    }
+    val pick = { target: String ->
+        choosingFor = target
+        picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+    }
+    return remember(choices) {
+        CoverActions(
+            chooseForSong = { song ->
+                scope.launch { if (choices.canChooseForSong(song.id)) pick(SONG_TARGET + song.id) else say(R.string.cover_not_read) }
+            },
+            removeForSong = { song ->
+                scope.launch {
+                    choices.removeForSong(song.id)
+                    say(R.string.cover_removed)
+                }
+            },
+            songHasOwn = { song -> choices.songHasOwn(song.id) },
+            chooseForAlbum = { key -> pick(ALBUM_TARGET + key) },
+            removeForAlbum = { key ->
+                scope.launch {
+                    choices.removeForAlbum(key)
+                    say(R.string.cover_removed)
+                }
+            },
+            albumHasOwn = { key -> choices.albumHasOwn(key) },
+        )
+    }
+}
+
+private const val SONG_TARGET = "song:"
+private const val ALBUM_TARGET = "album:"
 
 /** The current song's ID in the library, or null for an opened file or nothing. */
 @Composable

@@ -43,6 +43,11 @@ import io.github.lorddetson.piplayer.ui.songs.PermissionCard
 import io.github.lorddetson.piplayer.ui.songs.SongsScreen
 import io.github.lorddetson.piplayer.ui.songs.SongsViewModel
 import io.github.lorddetson.piplayer.ui.songs.rememberAudioAccess
+import io.github.lorddetson.piplayer.covers.CoverRequest
+import io.github.lorddetson.piplayer.ui.covers.LibraryCover
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.Alignment
 
 /** A page's frame: the top bar with back, search and sort, and the mini player (docs/library.md §6.1). */
 @Composable
@@ -64,7 +69,7 @@ private fun PageScaffold(
                 menu?.let { QueueMenuButton(stringResource(R.string.page_menu), it) }
             }
         },
-        bottomBar = { MiniPlayer(host.player, host.cover, onOpen = host.openNowPlaying) },
+        bottomBar = { MiniPlayer(host.player, host.cover, onOpen = host.openNowPlaying, coverName = host.coverName) },
         snackbarHost = { SnackbarHost(host.snackbar) },
     ) { padding -> content(Modifier.padding(padding).fillMaxSize()) }
 }
@@ -94,7 +99,7 @@ fun AlbumPage(key: String, host: LibraryHost, onBack: () -> Unit) {
         onSearch = { search = it },
         onSearching = { open -> searching = open; if (!open) search = "" },
         sort = { SortButton(ListName.ALBUM_PAGE, songs.order.collectAsStateWithLifecycle().value, songs::setOrder) },
-        menu = album?.let { queue(host, QueueTarget.Album(key)) },
+        menu = album?.let { albumMenu(host, key) },
     ) { modifier ->
         when {
             !access.granted -> PermissionCard(access.deniedForGood, access.request, access.openSettings, modifier)
@@ -113,14 +118,21 @@ fun AlbumPage(key: String, host: LibraryHost, onBack: () -> Unit) {
                 headerItems = 1,
             ) {
                 item(key = "album header") {
-                    Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
-                        Text(album.title, style = MaterialTheme.typography.headlineSmall, modifier = Modifier.semantics { heading() })
-                        val details = listOfNotNull(
-                            creditText(album.credit),
-                            album.year?.toString(),
-                            pluralStringResource(R.plurals.songs_count, album.songs, album.songs),
-                        )
-                        Text(details.joinToString(" · "), style = MaterialTheme.typography.bodyMedium)
+                    Row(
+                        Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    ) {
+                        LibraryCover(CoverRequest.Album(key), album.title, size = 120.dp, shape = RoundedCornerShape(12.dp), noteSize = 48.dp)
+                        Column {
+                            Text(album.title, style = MaterialTheme.typography.headlineSmall, modifier = Modifier.semantics { heading() })
+                            val details = listOfNotNull(
+                                creditText(album.credit),
+                                album.year?.toString(),
+                                pluralStringResource(R.plurals.songs_count, album.songs, album.songs),
+                            )
+                            Text(details.joinToString(" · "), style = MaterialTheme.typography.bodyMedium)
+                        }
                     }
                 }
             }

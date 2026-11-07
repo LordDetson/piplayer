@@ -187,6 +187,24 @@ class CoversScreenTest {
     }
 
     @Test
+    fun theSessionShowsTheCurrentSongsOwnCover() {
+        tab(R.string.tab_albums)
+        tap(hasText("Red Album") and inPage)
+        tap(hasText("Alpha") and inPage)
+
+        val controller = connectController()
+        try {
+            controller.waitUntil("the session has the own cover") {
+                mediaMetadata.artworkData?.let { bytes ->
+                    android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.let { near(it.getPixel(it.width / 2, it.height / 2), RED) }
+                } == true
+            }
+        } finally {
+            onMain { controller.release() }
+        }
+    }
+
+    @Test
     fun theAlbumMenuRemovesItsOwnCover() {
         tab(R.string.tab_albums)
         waitFor(cover and inPage)

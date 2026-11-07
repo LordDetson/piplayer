@@ -70,5 +70,26 @@ interface OwnCoverIndex {
 /** The sources of a cover in their order (docs/library.md §13.1). */
 object CoverPlan {
 
-    suspend fun of(request: CoverRequest, facts: CoverFacts, own: OwnCoverIndex): List<CoverStep> = TODO()
+    suspend fun of(request: CoverRequest, facts: CoverFacts, own: OwnCoverIndex): List<CoverStep> = when (request) {
+        is CoverRequest.Track -> facts.file(request.fileId)?.let { file ->
+            listOfNotNull(
+                file.identityId?.let(own::track)?.let(CoverStep::Own),
+                file.albumKey?.let(own::album)?.let(CoverStep::Own),
+            ) + fromFile(file)
+        }.orEmpty()
+        is CoverRequest.Album -> album(request.key, facts, own)
+        is CoverRequest.Artist -> {
+            val albums = facts.artistAlbums(request.key)
+            val chosen = albums.firstOrNull { own.album(it.key) != null } ?: albums.firstOrNull { it.embedded } ?: albums.firstOrNull()
+            if (chosen != null) album(chosen.key, facts, own) else facts.artistFile(request.key)?.let(::fromFile).orEmpty()
+        }
+    }
+
+    /** An album's own cover, then the pictures of the song that stands for it; a song's own cover never does. */
+    private suspend fun album(key: String, facts: CoverFacts, own: OwnCoverIndex): List<CoverStep> =
+        listOfNotNull(own.album(key)?.let(CoverStep::Own)) + facts.albumFile(key)?.let(::fromFile).orEmpty()
+
+    /** The embedded picture, unless the tag pass found none, then the system thumbnail. */
+    private fun fromFile(file: CoverFile): List<CoverStep> =
+        if (file.embedded == false) listOf(CoverStep.Thumbnail(file)) else listOf(CoverStep.Embedded(file), CoverStep.Thumbnail(file))
 }

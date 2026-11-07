@@ -14,8 +14,8 @@ import androidx.media3.exoplayer.ExoPlayer
  * the current song; a new queue gets its start song first from [StartFirstShuffleOrder] itself.
  *
  * It shows the queue item's metadata, built from the library's merged values, and nothing of what the extractor finds
- * in the stream, so that fields PiPlayer leaves empty do not show raw tags (TI §7.1). The stream's cover stays until the
- * cover resolver of M2a step 13 takes over.
+ * in the stream, so that fields PiPlayer leaves empty do not show raw tags (TI §7.1). The stream's cover stays, unless an
+ * own cover or a system thumbnail replaces it ([setArtwork], docs/library.md §13.6).
  */
 @OptIn(UnstableApi::class)
 class SessionPlayer(private val player: ExoPlayer) : ForwardingPlayer(player) {
@@ -191,6 +191,16 @@ class SessionPlayer(private val player: ExoPlayer) : ForwardingPlayer(player) {
      * or gives the stream's back with null. Call it on the player's thread.
      */
     fun setArtwork(mediaId: String, data: ByteArray?) {
+        if (data == null) artworks.remove(mediaId) else artworks[mediaId] = data
+        // Only a change of what the current item shows is news to the listeners.
+        if (mediaId != currentMediaItem?.mediaId) return
+        val metadata = getMediaMetadata()
+        filtered.keys.toList().forEach { it.onMediaMetadataChanged(metadata) }
+    }
+
+    /** The pictures that replace the stream's, by media ID: the current item's and the last few before it. */
+    private val artworks = object : LinkedHashMap<String, ByteArray>() {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, ByteArray>?) = size > KEPT_ARTWORKS
     }
 
     override fun getMediaMetadata(): MediaMetadata = itemMetadata(super.getMediaMetadata())
@@ -204,8 +214,13 @@ class SessionPlayer(private val player: ExoPlayer) : ForwardingPlayer(player) {
     }
 
     private fun itemMetadata(stream: MediaMetadata): MediaMetadata {
-        val item = currentMediaItem?.mediaMetadata ?: return MediaMetadata.EMPTY
-        if (stream.artworkData == null || item.artworkData != null || item.artworkUri != null) return item
+        val current = currentMediaItem ?: return MediaMetadata.EMPTY
+        val item = current.mediaMetadata
+        if (item.artworkData != null || item.artworkUri != null) return item
+        artworks[current.mediaId]?.let { data ->
+            return item.buildUpon().setArtworkData(data, MediaMetadata.PICTURE_TYPE_FRONT_COVER).build()
+        }
+        if (stream.artworkData == null) return item
         return item.buildUpon().setArtworkData(stream.artworkData, stream.artworkDataType).build()
     }
 
@@ -215,3 +230,6 @@ class SessionPlayer(private val player: ExoPlayer) : ForwardingPlayer(player) {
             super.onMediaMetadataChanged(itemMetadata(mediaMetadata))
     }
 }
+
+/** How many items' replacement pictures the session player keeps. */
+private const val KEPT_ARTWORKS = 4

@@ -51,6 +51,10 @@ import io.github.lorddetson.piplayer.library.lists.SongQuery
 import io.github.lorddetson.piplayer.library.songs.Song
 import io.github.lorddetson.piplayer.library.tagpass.PassProgress
 import io.github.lorddetson.piplayer.ui.formatDuration
+import io.github.lorddetson.piplayer.covers.CoverRequest
+import io.github.lorddetson.piplayer.ui.covers.CoverActions
+import io.github.lorddetson.piplayer.ui.covers.LibraryCover
+import androidx.compose.foundation.shape.RoundedCornerShape
 
 /** What a song list shows (docs/playback.md §2.1, §2.2, docs/library.md §6). */
 sealed interface SongsState {
@@ -84,6 +88,8 @@ class SongMenu(
     /** "Play next" and "Add to queue" (docs/playback.md §9.1). */
     val playNext: (Song) -> Unit = {},
     val addToQueue: (Song) -> Unit = {},
+    /** "Choose cover" and "Remove own cover" (docs/library.md §13.2). */
+    val covers: CoverActions? = null,
 )
 
 /**
@@ -301,6 +307,9 @@ private fun SongRow(song: Song, playing: Boolean, menu: SongMenu?, onClick: () -
         supportingContent = {
             Text("$artist · ${formatDuration(song.durationMs)}", maxLines = 1, overflow = TextOverflow.Ellipsis)
         },
+        leadingContent = {
+            LibraryCover(CoverRequest.Track(song.id), song.album, size = 48.dp, shape = RoundedCornerShape(6.dp))
+        },
         trailingContent = menu?.let { { SongMenuButton(song, it) } },
         modifier = Modifier
             .clickable(onClickLabel = stringResource(R.string.songs_play), role = Role.Button, onClick = onClick)
@@ -312,8 +321,12 @@ private fun SongRow(song: Song, playing: Boolean, menu: SongMenu?, onClick: () -
 private fun SongMenuButton(song: Song, menu: SongMenu) {
     var open by remember { mutableStateOf(false) }
     var links by remember { mutableStateOf<SongLinks?>(null) }
+    var ownCover by remember { mutableStateOf(false) }
     LaunchedEffect(open) {
-        if (open) links = menu.links(song)
+        if (open) {
+            links = menu.links(song)
+            ownCover = menu.covers?.songHasOwn?.invoke(song) == true
+        }
     }
     Box {
         IconButton(onClick = { open = true }) {
@@ -346,6 +359,18 @@ private fun SongMenuButton(song: Song, menu: SongMenu) {
                     open = false
                     menu.openFolder(folder.volume, folder.relativePath)
                 })
+            }
+            menu.covers?.let { covers ->
+                DropdownMenuItem(text = { Text(stringResource(R.string.cover_choose)) }, onClick = {
+                    open = false
+                    covers.chooseForSong(song)
+                })
+                if (ownCover) {
+                    DropdownMenuItem(text = { Text(stringResource(R.string.cover_remove)) }, onClick = {
+                        open = false
+                        covers.removeForSong(song)
+                    })
+                }
             }
         }
     }

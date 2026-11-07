@@ -858,8 +858,8 @@ the cover provider that serves the library tree's `artworkUri` to controllers ou
   Now Playing asks for the shorter side of the screen.
 - A memory cache keeps decoded pictures, an eighth of the heap and at most 32 MB, the least recently used going first.
   It also remembers that a source had no picture. A change of own covers empties it, and the covers on screen load again.
-- A disk cache keeps the pictures of steps up to 768 px as JPEG at quality 90, and an empty file for a source without a
-  picture, in `cache/covers/`: at most 100 MB, the least recently used file going first. Keys name the source and its
+- A disk cache keeps the pictures of steps up to 768 px as JPEG at quality 90, and an empty file for an embedded picture
+  or a thumbnail that a file does not have, in `cache/covers/` (a missing own copy is only looked for again): at most 100 MB, the least recently used file going first. Keys name the source and its
   state: an own cover by its copy's name; a picture of a file by the file ID, size and modification time, so that a
   changed file is read again. The cache is cleared with the app's caches and is never backed up (§3.3). A picture of
   Now Playing's size is decoded from its source each time.
@@ -888,8 +888,10 @@ the cover provider that serves the library tree's `artworkUri` to controllers ou
 ### 13.6 The session
 
 - The session still shows the picture the player reads from the stream (playback.md §2.6). When the current song has an
-  own cover (its own or its album's), that cover replaces it, as JPEG bytes of at most 1024 px; when the tag pass found
-  no picture in the file, the system thumbnail at 512 px stands in, so that a folder image reaches the notification too.
+  own cover (its own or its album's), that cover replaces it, as JPEG bytes loaded for 1024 px (a copy is at most 1500 px
+  anyway); when the tag pass found no picture in the file, the system thumbnail loaded for 512 px stands in, so that a
+  folder image reaches the notification too. A file opened from another app keeps the stream's picture. The service
+  looks again at each change of the current item and of own covers (`SessionCovers`).
   Items of the queue and of browse results carry no artwork until part B.
 
 ### 13.7 Checks
