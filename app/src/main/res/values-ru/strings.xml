@@ -151,6 +151,8 @@
     <string name="sort_album_year">Альбом по году</string>
     <string name="sort_file_name">Имя файла</string>
     <string name="sort_reverse">Обратный порядок</string>
+    <string name="sort_show_as_grid">Сеткой</string>
+    <string name="scroll_thumb">Ползунок прокрутки</string>
     <string name="various_artists">Разные исполнители</string>
     <string name="internal_storage">Внутренняя память</string>
     <string name="album_disc">Диск %1$d</string>

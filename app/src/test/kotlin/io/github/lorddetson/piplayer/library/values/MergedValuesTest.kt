@@ -1,5 +1,6 @@
 package io.github.lorddetson.piplayer.library.values
 
+import io.github.lorddetson.piplayer.library.sort.SortKeys
 import io.github.lorddetson.piplayer.library.sync.DisplayValues
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -132,9 +133,9 @@ class MergedValuesTest {
     }
 
     @Test
-    fun `the title key is the normalized title`() {
-        assertThat(merge(tags = TrackTags.from(mapOf("TITLE" to listOf("The Ёжик, Part II"))), read = true).titleKey)
-            .isEqualTo("the ежик part ii")
+    fun `the title sorts by the collator's key of the title`() {
+        assertThat(merge(tags = TrackTags.from(mapOf("TITLE" to listOf("The Ёжик, Part II"))), read = true).titleSort)
+            .isEqualTo(SortKeys.of("The Ёжик, Part II"))
     }
 
     @Test

@@ -154,6 +154,10 @@ data class TrackEntity(
             originalDate = row.originalDate,
             trackNumber = row.trackNumber,
             discNumber = row.discNumber,
+            titleSort = row.titleSort,
+            artistSort = row.artistSort,
+            albumSort = row.albumSort,
+            albumArtistSort = row.albumArtistSort,
         )
     }
 }

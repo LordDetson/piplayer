@@ -2,10 +2,10 @@ package io.github.lorddetson.piplayer.library.values
 
 import android.provider.MediaStore
 import io.github.lorddetson.piplayer.identification.text.FileNameParser
-import io.github.lorddetson.piplayer.identification.text.TextNormalizer
 import io.github.lorddetson.piplayer.library.lists.DisplayArtists
-import io.github.lorddetson.piplayer.library.lists.SortKeys
 import io.github.lorddetson.piplayer.library.search.SearchText
+import io.github.lorddetson.piplayer.library.sort.SortKey
+import io.github.lorddetson.piplayer.library.sort.SortKeys
 import io.github.lorddetson.piplayer.library.sync.DisplayValues
 
 /** What the media index says of a file, precedence level 4 (TI §7.1). */
@@ -41,7 +41,8 @@ object MergedValues {
     /**
      * [read] says the tag pass has read the file (`tag_pass_at` is set): from then on the index no longer fills empty
      * tags, only the file name does. The length is not one of those values: TagLib's is an estimate for a VBR MP3 without
-     * a header, so it comes last (TI §3.5).
+     * a header, so it comes last (TI §3.5). [keys] makes the sort keys (docs/library.md §11.1); a resolver chunk passes
+     * one that remembers them.
      */
     fun of(
         displayName: String,
@@ -54,6 +55,7 @@ object MergedValues {
         overrides: FieldOverrides = FieldOverrides.NONE,
         volume: String = "",
         relativePath: String = "",
+        keys: (String) -> SortKey = SortKeys::of,
     ): DisplayValues {
         val tagValues = tags.takeIf { read }
         val indexValues = index.takeIf { !read }
@@ -78,6 +80,11 @@ object MergedValues {
             !tagValues?.artists.isNullOrEmpty() -> tagValues!!.artists
             else -> listOfNotNull(artist)
         }
+        // A sort tag counts only while its field comes from the tags (docs/library.md §11.1).
+        val titleSortTag = tagValues?.titleSort.present().takeIf { overrides.title == null && tagValues?.title != null }
+        val artistSortTag = tagValues?.artistSort.present().takeIf { overrides.artist == null && tagValues?.artist != null }
+        val albumSortTag = tagValues?.albumSort.present().takeIf { overrides.album == null && tagValues?.album != null }
+        val albumArtistSortTag = tagValues?.albumArtistSort.present()
         return DisplayValues(
             albumKey = albumTags?.let { AlbumKey.of(it, volume, relativePath) },
             albumArtist = albumArtist,
@@ -85,17 +92,19 @@ object MergedValues {
             year = if (read) yearOf(tagValues?.date) ?: yearOf(tagValues?.originalDate) else indexValues?.year?.takeIf { it > 0 },
             discNumber = disc,
             trackNumber = track,
-            displayArtists = DisplayArtists.of(artists),
-            artistKey = artist?.let(SortKeys::of),
-            albumTitleKey = album?.let(SortKeys::of),
+            displayArtists = DisplayArtists.of(artists, keys, if (artists.size == 1) artistSortTag else null),
+            artistKey = artist?.let(DisplayArtists::keyOf),
             albumSearch = if (album == null) "" else SearchText.of(album, albumArtist ?: artist),
-            fileKey = SortKeys.of(fileName),
+            titleSort = keys(titleSortTag ?: title),
+            artistSort = artist?.let { keys(artistSortTag ?: it) },
+            albumSort = album?.let { keys(albumSortTag ?: it) },
+            albumArtistSort = albumArtist?.let { keys(albumArtistSortTag ?: it) },
+            fileSort = keys(fileName),
             title = title,
             artist = artist,
             album = album,
             durationMs = exactDurationMs?.takeIf { it > 0 } ?: index?.durationMs?.takeIf { it > 0 }
                 ?: tagLengthMs?.takeIf { it > 0 },
-            titleKey = TextNormalizer.normalize(title),
             searchText = SearchText.of(
                 title,
                 artistsForSearch,

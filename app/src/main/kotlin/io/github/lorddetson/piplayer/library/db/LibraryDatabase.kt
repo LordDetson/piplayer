@@ -84,6 +84,8 @@ data class LibraryMetaEntity(
     @ColumnInfo(name = "library_id") val libraryId: String? = null,
     /** The highest file ID ever given, so that no ID goes to a second file (docs/library.md §8.4). */
     @ColumnInfo(name = "last_file_id", defaultValue = "0") val lastFileId: Long = 0,
+    /** The collation the sort keys were made by (`Collation.name`, docs/library.md §11.1). */
+    val collation: String? = null,
 )
 
 /** A cached fingerprint (TI §10.1, docs/library.md §8.3): the raw items of Chromaprint, by the key of their file. */
@@ -119,18 +121,17 @@ data class MediaIndexEntryEntity(
 /** What lists show, sort and search by (docs/library.md §1.2). */
 // Covering the search text too: a search walks this index in title order and never reads the table for rows that do
 // not match (M0 spike).
-@Entity(tableName = "track_display", indices = [Index("title_key", "search_text"), Index("album_key")])
+@Entity(tableName = "track_display", indices = [Index("title_sort", "search_text"), Index("album_key")])
 data class TrackDisplayEntity(
     @PrimaryKey @ColumnInfo(name = "file_id") val fileId: Long,
     val title: String,
     val artist: String?,
     val album: String?,
     @ColumnInfo(name = "duration_ms") val durationMs: Long?,
-    @ColumnInfo(name = "title_key") val titleKey: String,
     @ColumnInfo(name = "search_text") val searchText: String,
     /** The reasons of `MergedValues`, null until the tag pass has read the file. */
     @ColumnInfo(name = "missing_info_reasons") val missingInfoReasons: Int? = null,
-    /** What groups and sorts the file (docs/library.md §6.2); the keys are those of `SortKeys`. */
+    /** What groups the file (docs/library.md §6.2); `artist_key` is the normalized name, not an order. */
     @ColumnInfo(name = "album_key") val albumKey: String? = null,
     @ColumnInfo(name = "album_artist") val albumArtist: String? = null,
     @ColumnInfo(defaultValue = "0") val compilation: Boolean = false,
@@ -138,9 +139,13 @@ data class TrackDisplayEntity(
     @ColumnInfo(name = "disc_number") val discNumber: Int? = null,
     @ColumnInfo(name = "track_number") val trackNumber: Int? = null,
     @ColumnInfo(name = "artist_key") val artistKey: String? = null,
-    @ColumnInfo(name = "album_title_key") val albumTitleKey: String? = null,
     @ColumnInfo(name = "album_search", defaultValue = "") val albumSearch: String = "",
-    @ColumnInfo(name = "file_key", defaultValue = "") val fileKey: String = "",
+    /** The collator's keys (docs/library.md §11.1), from the sort tags once read. */
+    @ColumnInfo(name = "title_sort", typeAffinity = ColumnInfo.BLOB) val titleSort: ByteArray,
+    @ColumnInfo(name = "artist_sort", typeAffinity = ColumnInfo.BLOB) val artistSort: ByteArray? = null,
+    @ColumnInfo(name = "album_sort", typeAffinity = ColumnInfo.BLOB) val albumSort: ByteArray? = null,
+    @ColumnInfo(name = "album_artist_sort", typeAffinity = ColumnInfo.BLOB) val albumArtistSort: ByteArray? = null,
+    @ColumnInfo(name = "file_sort", typeAffinity = ColumnInfo.BLOB) val fileSort: ByteArray,
 )
 
 /**
@@ -154,6 +159,8 @@ data class DisplayArtistEntity(
     @ColumnInfo(name = "artist_key") val artistKey: String,
     val name: String,
     @ColumnInfo(name = "search_text") val searchText: String,
+    /** The collator's key of the name, or of the artist's sort tag (docs/library.md §11.1). */
+    @ColumnInfo(name = "sort_key", typeAffinity = ColumnInfo.BLOB) val sortKey: ByteArray,
 )
 
 /**
@@ -197,7 +204,7 @@ data class VolumeSyncStateEntity(
         TrackGenreEntity::class,
         FingerprintEntity::class,
     ],
-    version = 8,
+    version = 9,
     exportSchema = false,
 )
 abstract class LibraryDatabase : RoomDatabase() {

@@ -2,7 +2,7 @@ package io.github.lorddetson.piplayer.library.values
 
 import io.github.lorddetson.piplayer.identification.text.TextNormalizer
 import io.github.lorddetson.piplayer.library.lists.AlbumCredit
-import io.github.lorddetson.piplayer.library.lists.SortKeys
+import io.github.lorddetson.piplayer.library.sort.SortKeys
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 
@@ -100,14 +100,80 @@ class GroupingValuesTest {
     }
 
     @Test
-    fun `the sort keys are the names normalized as for search`() {
+    fun `the artist key is the normalized name, which pages are found by`() {
         val values = read(name = "07 Ёжик.flac")
 
-        assertThat(SortKeys.of("Ёлка, The")).isEqualTo(TextNormalizer.normalize("Ёлка, The"))
-        assertThat(values.artistKey).isEqualTo(SortKeys.of("Ёлка feat. Other"))
-        assertThat(values.albumTitleKey).isEqualTo(SortKeys.of("Tag Album"))
-        assertThat(values.fileKey).isEqualTo(SortKeys.of("07 Ёжик"))
+        assertThat(values.artistKey).isEqualTo(TextNormalizer.normalize("Ёлка feat. Other"))
         assertThat(values.albumSearch.split(' ')).contains("tag", "album", "artist")
+    }
+
+    @Test
+    fun `before the read the sort keys come from the index's values and the file name`() {
+        val values = unread(name = "07 Ёжик.flac")
+
+        assertThat(values.titleSort).isEqualTo(SortKeys.of("Index title"))
+        assertThat(values.artistSort).isEqualTo(SortKeys.of("Index artist"))
+        assertThat(values.albumSort).isEqualTo(SortKeys.of("Index album"))
+        assertThat(values.albumArtistSort).isEqualTo(SortKeys.of("Index album artist"))
+        assertThat(values.fileSort).isEqualTo(SortKeys.of("07 Ёжик"))
+        assertThat(values.displayArtists.single().sortKey).isEqualTo(SortKeys.of("Index artist"))
+    }
+
+    @Test
+    fun `after the read the sort tags make the keys, and without them the names do`() {
+        val sorted = TrackTags.from(
+            mapOf(
+                "TITLE" to listOf("The Title"), "TITLESORT" to listOf("Title, The"),
+                "ARTIST" to listOf("The Beatles"), "ARTISTSORT" to listOf("Beatles, The"),
+                "ALBUM" to listOf("The Album"), "ALBUMSORT" to listOf("Album, The"),
+                "ALBUMARTIST" to listOf("The Band"), "ALBUMARTISTSORT" to listOf("Band, The"),
+            ),
+        )
+
+        val values = read(sorted)
+
+        assertThat(values.titleSort).isEqualTo(SortKeys.of("Title, The"))
+        assertThat(values.artistSort).isEqualTo(SortKeys.of("Beatles, The"))
+        assertThat(values.albumSort).isEqualTo(SortKeys.of("Album, The"))
+        assertThat(values.albumArtistSort).isEqualTo(SortKeys.of("Band, The"))
+        assertThat(values.displayArtists.single().sortKey).isEqualTo(SortKeys.of("Beatles, The"))
+        assertThat(read().titleSort).isEqualTo(SortKeys.of("Tag title"))
+        assertThat(read().albumArtistSort).isEqualTo(SortKeys.of("Tag album artist"))
+    }
+
+    @Test
+    fun `an artist's sort tag names their row only when the file has one artist`() {
+        val two = TrackTags.from(mapOf("ARTISTS" to listOf("Ёлка", "Other"), "ARTISTSORT" to listOf("Ёлка and Other")))
+
+        val values = read(two)
+
+        assertThat(values.displayArtists.map { it.sortKey }).containsExactly(SortKeys.of("Ёлка"), SortKeys.of("Other"))
+        assertThat(values.artistSort).isEqualTo(SortKeys.of("Ёлка and Other"))
+    }
+
+    @Test
+    fun `an artist's sort tag does not name an artist taken from the file name`() {
+        val leftover = TrackTags.from(mapOf("TITLE" to listOf("Bohemian Rhapsody"), "ARTISTSORT" to listOf("Beatles, The")))
+
+        val values = read(leftover, name = "Queen - Bohemian Rhapsody.mp3")
+
+        assertThat(values.artist).isEqualTo("Queen")
+        assertThat(values.artistSort).isEqualTo(SortKeys.of("Queen"))
+        assertThat(values.displayArtists.single().sortKey).isEqualTo(SortKeys.of("Queen"))
+    }
+
+    @Test
+    fun `a value of levels 1 and 2 ignores the sort tag of the field it replaces`() {
+        val sorted = TrackTags.from(mapOf("TITLE" to listOf("The Title"), "TITLESORT" to listOf("Title, The"), "ARTIST" to listOf("The Beatles"), "ARTISTSORT" to listOf("Beatles, The")))
+
+        val values = MergedValues.of(
+            "07 Song.mp3", index, sorted, read = true, overrides = FieldOverrides(title = "My title", artist = "My artist"),
+            volume = volume, relativePath = "Music/",
+        )
+
+        assertThat(values.titleSort).isEqualTo(SortKeys.of("My title"))
+        assertThat(values.artistSort).isEqualTo(SortKeys.of("My artist"))
+        assertThat(values.displayArtists.single().sortKey).isEqualTo(SortKeys.of("My artist"))
     }
 
     @Test

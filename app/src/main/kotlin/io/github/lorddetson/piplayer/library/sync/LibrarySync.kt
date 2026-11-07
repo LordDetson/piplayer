@@ -1,5 +1,7 @@
 package io.github.lorddetson.piplayer.library.sync
 
+import io.github.lorddetson.piplayer.library.sort.Collation
+import io.github.lorddetson.piplayer.library.sort.SortKeys
 import android.util.Log
 import androidx.room3.TransactionScope
 import androidx.room3.withWriteTransaction
@@ -36,7 +38,13 @@ import kotlinx.coroutines.sync.withLock
  * the folders that hold audio: whether its database holds the result of a sync that succeeded, in this process or an
  * earlier one; a failed sync makes the library ready, not known (docs/library.md §1.3).
  */
-data class LibraryStatus(val ready: Boolean = false, val revision: Long = 0, val known: Boolean = false)
+data class LibraryStatus(
+    val ready: Boolean = false,
+    val revision: Long = 0,
+    val known: Boolean = false,
+    /** The collation the stored sort keys were made by, once a sync has looked (docs/library.md §11.1). */
+    val collation: String? = null,
+)
 
 /** Keeps the library database up to date with the media index (docs/library.md §1.3). */
 class LibrarySync(
@@ -178,24 +186,29 @@ class LibrarySync(
         matcher = FolderRuleMatcher(rules.rules())
         val rulesChanged = userCounter != dao.mirroredUserCounter()
         val attached = index.volumes()
-        val plans = attached.mapNotNull { volume -> plan(volume, stored[volume]) }
+        // One collation for every key this sync makes; a change of language meanwhile asks for the next sync.
+        val collation = SortKeys.current()
+        val plans = attached.mapNotNull { volume -> plan(volume, stored[volume], collation) }
         val detached = SyncPlanner.detached(stored.keys, attached)
         val detachedFiles = detached.flatMap { volume -> dao.storedFiles(volume).map { it.fileId } }
 
         // Derived before the writes below, which then replace what they change themselves.
-        val newDisplayVersion = dao.displayVersion() != TrackDisplayWriter.VERSION
+        // Another collation is a new display version too: every sort key is made again (docs/library.md §11.1).
+        val storedCollation = dao.collation()
+        val newDisplayVersion = dao.displayVersion() != TrackDisplayWriter.VERSION || storedCollation != collation.name
         val allInputs = if (newDisplayVersion) displays.allInputs() else emptyList()
-        val derived = TrackDisplayWriter.resolve(allInputs)
+        val derived = TrackDisplayWriter.resolve(allInputs, collation)
 
         val filesChanged = plans.any { !it.changes.isEmpty } || detachedFiles.isNotEmpty() || rulesChanged || allInputs.isNotEmpty()
         if (!filesChanged && !newDisplayVersion && plans.none { it.stateChanged } && detached.isEmpty()) {
-            markKnown()
+            mutableStatus.update { it.copy(ready = true, known = true, collation = storedCollation) }
             return false
         }
         database.withWriteTransaction {
             if (newDisplayVersion) {
                 with(TrackDisplayWriter) { write(allInputs.map { it.fileId }, derived) }
                 dao.setDisplayVersion(TrackDisplayWriter.VERSION)
+                dao.setCollation(collation.name)
             }
             delete(detachedFiles)
             detached.forEach { dao.forgetVolume(it) }
@@ -215,11 +228,18 @@ class LibrarySync(
             }
         }
         if (seed.isNotEmpty()) seed = seed - plans.map { it.state.volumeName }.toSet()
-        mutableStatus.update { it.copy(ready = true, known = true, revision = if (filesChanged) it.revision + 1 else it.revision) }
+        mutableStatus.update {
+            it.copy(
+                ready = true,
+                known = true,
+                revision = if (filesChanged) it.revision + 1 else it.revision,
+                collation = if (newDisplayVersion) collation.name else storedCollation,
+            )
+        }
         return filesChanged
     }
 
-    private suspend fun plan(volume: String, stored: VolumeSyncStateEntity?): VolumePlan? {
+    private suspend fun plan(volume: String, stored: VolumeSyncStateEntity?, collation: Collation): VolumePlan? {
         val version = index.version(volume) ?: return null
         // Read before the rows: a change that lands while they are read is read again by the next sync.
         val generation = index.generation(volume)
@@ -252,7 +272,7 @@ class LibrarySync(
         val inputs = changes.updated.map { update ->
             input(update.fileId, update.row, reads[update.fileId]?.takeIf { it.holdsFor(update.row) })
         } + changes.added.map { input(fileId = 0, it, read = null) }
-        return VolumePlan(state, stateChanged = state != stored, changes, rows, TrackDisplayWriter.resolve(inputs), changedFiles, movedFiles)
+        return VolumePlan(state, stateChanged = state != stored, changes, rows, TrackDisplayWriter.resolve(inputs, collation), changedFiles, movedFiles)
     }
 
     private fun ReadFileRow.holdsFor(row: IndexRow) = size == row.size && mtime == row.modifiedSeconds

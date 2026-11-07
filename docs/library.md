@@ -35,7 +35,8 @@ The data model it implements is sketched in track-identification.md §10 (TI bel
       empty: the index no longer fills it, only the file name.
     - The album is the tag or, until the read, the index's value. The length is the exact one once measured (step 7),
       then the index's, then the tag reader's estimate (a length of 0 counts as none).
-    - The title key is the title normalized as for search (TI §4.1).
+    - The title key is the title normalized as for search (TI §4.1). Step 11 replaced it with the collator's key of the
+      title, `title_sort` (§11.1).
     - The search text joins the normalized title, all artists, album, composers, genres and display name without its
       extension with spaces, leaving out empty values, and keeps the glued forms of each field's names (TI §10.1).
       Search itself arrives in step 12; the column and its index exist now, so that
@@ -94,7 +95,8 @@ The data model it implements is sketched in track-identification.md §10 (TI bel
 - The Songs screen and the playback service list the songs of the library: the files the index counts as music,
   as in M1 (playback.md §2.1). A song's URI is the index's content URI; since step 8 its ID is the file ID of
   PiPlayer (§8.4), which queue requests and the session's media IDs carry.
-- Order: by the title key, compared as Unicode code points, then by the index's ID. The database sorts; the list
+- Order: by the title key, compared as Unicode code points, then by the index's ID (since step 11, by the collator's key,
+  §11.1). The database sorts; the list
   keeps the order it is given.
 - The screen shows "Loading" until the library is ready, so a first launch never shows "No songs" while the first
   sync runs. It reads the list from the library when it starts and again after every sync that changed files; it no
@@ -458,7 +460,8 @@ keeps playing meanwhile, and the crash leaves a native crash report of `:tagger`
 ### 6.2 Grouping
 
 - `track_display` also holds what groups and sorts a file: the album key, the album artist, the compilation flag, the
-  year, the disc and track numbers, and the sort keys of the artist, the album and the file name. One resolver derives
+  year, the disc and track numbers, and the sort keys of the artist, the album and the file name (since step 11 the
+  collator's keys of §11.1, with the album artist's and the title's). One resolver derives
   them with the other display values (§1.2), from the tags once the tag pass has read the file, and from the index's
   values until then, so that the first launch groups at once and is not slowed down.
     - The album key is the one the tag pass gives (§5.2): the release ID, or else the normalized album and album artist
@@ -492,8 +495,8 @@ keeps playing meanwhile, and the crash leaves a native crash report of `:tagger`
   before the title. A missing value (no length, no year, no track number) sorts last. Albums and artists tie by their
   keys.
 - The choice is kept per kind of list, not per album or folder, in the settings file that is backed up (§3.2).
-- Sorting compares sort keys by code point. The keys are the names normalized as for search (TI §4.1) and come from one
-  function; step 11 replaces it with locale-aware keys that honour sort tags, without changing the queries.
+- Sorting compares sort keys, which come from one function. Step 6 made them the names normalized as for search (TI
+  §4.1); step 11 made them locale-aware ICU keys that honour sort tags, without changing the queries (§11.1).
 - The search action opens a field over the current tab or page that filters it as the user types (the list is read
   once typing pauses for a quarter of a second): songs by their search
   text (§1.2), albums by their title and artist, artists by their name, folders by their name (then any folder of the
@@ -695,3 +698,88 @@ Instrumented tests on the API 30 emulator:
 - Step 4 on real fingerprints: a WAV file and a copy with one changed sample at another place (another key, nearly the
   same sound) attach to the identity of the first through a cached fingerprint, when that identity holds user data in
   the test.
+
+## 11. Sorting, the scroll thumb and grids (M2a step 11)
+
+### 11.1 Collation
+
+- Lists sort with `android.icu.text.Collator` for the app's language (the first locale of the app's configuration, which
+  follows the system unless the app has a language of its own): Russian puts Cyrillic before Latin and ё with е,
+  English puts Latin first. The collator compares case and accents only as tie-breaks (tertiary strength), orders
+  digits by their value (`Track 2` before `Track 10`) and ignores spaces and punctuation (`(I Can't Get No)
+  Satisfaction` sorts under I). It is frozen once and shared by all threads.
+- A sort key is the collator's key of a text as bytes, stored as a BLOB. SQLite compares BLOBs byte by byte, which is
+  the collator's order, so the queries of §6.3 keep their shape. `track_display` holds `title_sort`, `artist_sort`,
+  `album_sort`, `album_artist_sort` and `file_sort`, and `display_artist` holds `sort_key`. The text keys `title_key`,
+  `album_title_key` and `file_key` are gone. `artist_key` stays: it is the artist's identity, the normalized name their
+  page is found by (§6.2), not an order.
+- What a key is made from: the title's sort tag (TITLESORT), else the title; the artist's (ARTISTSORT), else the artist;
+  the album's (ALBUMSORT), else the album; the album artist's (ALBUMARTISTSORT), else the album artist; the file name
+  without its extension. A sort tag counts only while its field comes from the tags: before the tag pass has read the
+  file the index gives no sort tags, and a value of levels 1 and 2 (M3) ignores the tag. An artist of `display_artist`
+  takes ARTISTSORT when the file has exactly one artist, otherwise their name. Articles are not dropped: "The Beatles"
+  sorts under B only with a sort tag such as "Beatles, The".
+- Ties go as in §6.3: by the title's key, then by the index's ID. Albums by artist sort by their album artist's key,
+  else the lowest artist key of their songs; artists by name by the lowest key of their rows, so that a sort tag on any
+  of their files counts. Songs by album and by "album by year" sort each album by the lowest album key of its songs, so
+  that songs that spell the album differently ("Greatest Hits", "Greatest hits") stay together in disc and track order.
+  Subfolders sort by name with the same collator.
+- The collation is named `<language tag>/<collator version>/<UCA version>/<rules version>` and stored in
+  `library_meta.collation`. The tag keeps the language, script, region and a collation keyword (`-u-co-`), not the
+  regional preferences that Android 14 adds to the locale (first day of the week, units), which do not change the order.
+  When a sync finds another name (the app's language changed, Android brought another ICU, the rules changed), it
+  derives every display row again in its transaction, as for a new display version (§6.2). A change of the app's
+  language while the process runs asks for a sync at once, without a run of the tag pass. Lists sort anew when it has
+  written, keeping the row at the top in view; a song list kept in its order during the tag pass (§5.4) takes the new
+  order too, because it was read under another collation. A saved queue read again by its request (playback.md §4) may
+  come in the new order; its current song stays.
+- The keys are computed by the resolver with the other display values, off the transaction, on all cores. A frozen
+  collator makes one key at a time behind a lock, so each chunk takes a thawed copy of its own, and keeps the keys of
+  the texts it has seen, so an artist or an album of many songs costs one key. The keys replace three normalizations of
+  step 6. `library.db` is version 9.
+
+### 11.2 The scroll thumb
+
+- Every list of the tabs and pages longer than five screens gets a thumb at its right edge (it goes again only below
+  four, so that partly visible rows do not make it come and go). It shows while the list scrolls and hides 1.5 s after
+  the last scroll or drag. Dragging it moves the list in proportion, the thumb's place being the row at the top as at
+  rest, and shows a bubble with that row's section beside the thumb. The menu items "Reverse order" and "Show as grid"
+  tell TalkBack whether they are on.
+- Sections: the letter for orders by title, artist, album, name and file name; the year for orders by year and "album
+  by year" (the album's year); the whole minute for length (`3:00`); the number of songs for "number of songs". Orders
+  by disc and track have no bubble, only the thumb. A row without the value (no year, no length) shows `?`.
+- Letters come from `android.icu.text.AlphabeticIndex` built on the same collator, with the letters of the app's
+  languages and of English; digits, symbols and empty names go under `#`, other scripts under `…`. A row's letter is
+  found from its stored key: the key's primary part (up to the first level separator, the byte 01) is compared with the
+  primary keys of the runs the letters start. A letter starts a run at itself; the Latin letters of Chinese pinyin start
+  a second run at the collator's own boundary among the Han characters; a bucket of other scripts starts a run at each
+  script the index files into it. So the letter agrees with the order and with ICU's own index exactly, sort tags
+  included, and costs nothing at the first launch. The letters are built on a background thread when the collation is
+  chosen, before a list needs them. The controller tree of step 10 uses the same letters.
+- Each row carries its section as text (`Song.section`, `AlbumGroup.section`, `ArtistGroup.section`,
+  `FolderEntry.section`), set when the list is read. A row the tag pass changes in place keeps its section until the
+  list is read again.
+
+### 11.3 List or grid
+
+- The sort menus of the Albums and Artists tabs have "Show as grid". The choice is kept per tab in the settings file
+  that is backed up (§3.2); a list is the default. The albums of an artist page follow the Albums tab.
+- A grid has columns at least 150 dp wide, two on a phone held upright; an artist page's albums take as many columns as
+  the Albums tab. An album's tile is a square placeholder (covers
+  come with step 13), its title, then its artist and year; an artist's tile is a circle with the artist's letter, their
+  name, then the numbers of albums and songs. The thumb works over grids too.
+
+### 11.4 Checks
+
+JVM tests (with ICU4J as a test dependency): letters found from keys for Cyrillic, Latin, Chinese, digits, punctuation,
+both cases, equal to ICU's own index; keys from sort tags only after the read, only for a field from the tags and never
+over levels 1 and 2; the artist's sort tag with one and with two artists; sections for every order; subfolders by the
+collator; regional preferences keep the collation's name; a song list read under another collation takes its order.
+
+Instrumented tests on the API 30 emulator: the platform's collator for Russian (Cyrillic first, ё with е) and English,
+digits by value, punctuation ignored, letters equal to `AlphabeticIndex`'s own for a mixed set of names; the lists of
+§6.3 in Russian order with sort tags after the read, albums and artists by their keys, an album spelled two ways kept
+together, sections of the Songs, Albums and Artists lists; a sync under another collation writes every key again and a
+sync under the same one writes none; on the screen, the thumb on a long list and over a grid shows its letter and moves
+the list, no thumb on a short list, and "Show as grid" on Albums and Artists with its state for TalkBack, kept after the
+activity is recreated, and followed by an artist page. The quiet timing pass keeps the first launch under 5 s and a later launch under 1 s.

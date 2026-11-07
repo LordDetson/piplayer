@@ -12,6 +12,8 @@ import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipeUp
 import androidx.media3.session.MediaController
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.github.lorddetson.piplayer.MainActivity
@@ -256,4 +258,12 @@ class LibraryTabsScreenTest {
         waitFor(hasText("Bob") and hasAnyAncestor(hasTestTag(LibraryTags.TOP_BAR)))
     }
 
+    @Test
+    fun aShortListHasNoScrollThumb() {
+        waitFor(hasText("Alpha") and inSongs)
+        compose.onNode(hasTestTag(SongsTags.LIST)).performTouchInput { swipeUp() }
+        compose.waitForIdle()
+
+        compose.onNode(hasTestTag(ScrollThumbTags.THUMB)).assertDoesNotExist()
+    }
 }

@@ -1,5 +1,13 @@
 package io.github.lorddetson.piplayer.ui.library
 
+import androidx.compose.ui.platform.LocalWindowInfo
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
+import androidx.compose.runtime.remember
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Box
 import android.app.Application
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -132,6 +140,10 @@ fun ArtistPage(key: String, host: LibraryHost, onBack: () -> Unit) {
     }
     val state = header.state.collectAsStateWithLifecycle().value
     val page = (state as? GroupsState.Loaded)?.value
+    // The albums follow the Albums tab's choice of list or grid (docs/library.md §11.3), with as many columns as its grid.
+    val grid by header.albumsGrid.collectAsStateWithLifecycle()
+    val columns = gridColumns(with(LocalDensity.current) { LocalWindowInfo.current.containerSize.width.toDp().value.toInt() })
+    val albumRows = page?.albums.orEmpty().let { if (grid) it.chunked(columns) else it.map(::listOf) }
     PageScaffold(
         title = page?.artist?.name.orEmpty(),
         host = host,
@@ -155,12 +167,22 @@ fun ArtistPage(key: String, host: LibraryHost, onBack: () -> Unit) {
                 menu = host.menu,
                 listTag = LibraryTags.LIST,
                 emptyText = stringResource(R.string.search_nothing_found),
-                headerItems = page.albums.size + if (page.albums.isEmpty()) 1 else 2,
+                headerItems = albumRows.size + if (page.albums.isEmpty()) 1 else 2,
             ) {
                 if (page.albums.isNotEmpty()) {
                     item(key = "albums heading") { SectionHeading(stringResource(R.string.artist_albums)) }
-                    for (album in page.albums) {
-                        item(key = "album " + album.key) { AlbumRow(album) { host.openAlbum(album.key) } }
+                    for (row in albumRows) {
+                        item(key = "album " + row.first().key) {
+                            if (grid) {
+                                Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp).testTag(LibraryTags.GRID)) {
+                                    for (album in row) Box(Modifier.weight(1f)) { AlbumTile(album) { host.openAlbum(album.key) } }
+                                    repeat(columns - row.size) { Spacer(Modifier.weight(1f)) }
+                                }
+                            } else {
+                                val album = row.single()
+                                AlbumRow(album) { host.openAlbum(album.key) }
+                            }
+                        }
                     }
                 }
                 item(key = "songs heading") { SectionHeading(stringResource(R.string.artist_songs)) }

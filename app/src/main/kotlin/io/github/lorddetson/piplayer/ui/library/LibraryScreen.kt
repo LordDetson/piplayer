@@ -1,5 +1,20 @@
 package io.github.lorddetson.piplayer.ui.library
 
+import androidx.compose.ui.state.ToggleableState
+import androidx.compose.ui.semantics.toggleableState
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.LazyGridScope
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.background
 import android.app.Application
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -86,6 +101,7 @@ object LibraryTags {
     const val TABS = "library_tabs"
     const val LIST = "library_list"
     const val TOP_BAR = "library_top_bar"
+    const val GRID = "library_grid"
 }
 
 /** What the library screens need from the app: playing, the mini player, and the way to the pages. */
@@ -132,8 +148,14 @@ fun LibraryScreen(host: LibraryHost, onOpenSettings: () -> Unit) {
     val sortControl: @Composable () -> Unit = {
         when (tab) {
             LibraryTab.SONGS -> SortButton(ListName.SONGS, songs.order.collectAsStateWithLifecycle().value, songs::setOrder)
-            LibraryTab.ALBUMS -> SortButton(ListName.ALBUMS, albums.order.collectAsStateWithLifecycle().value, albums::setOrder)
-            LibraryTab.ARTISTS -> SortButton(ListName.ARTISTS, artists.order.collectAsStateWithLifecycle().value, artists::setOrder)
+            LibraryTab.ALBUMS -> SortButton(
+                ListName.ALBUMS, albums.order.collectAsStateWithLifecycle().value, albums::setOrder,
+                grid = albums.grid.collectAsStateWithLifecycle().value, onGrid = albums::setGrid,
+            )
+            LibraryTab.ARTISTS -> SortButton(
+                ListName.ARTISTS, artists.order.collectAsStateWithLifecycle().value, artists::setOrder,
+                grid = artists.grid.collectAsStateWithLifecycle().value, onGrid = artists::setGrid,
+            )
             LibraryTab.FOLDERS -> SortButton(ListName.FOLDERS, folders.order.collectAsStateWithLifecycle().value, folders::setOrder)
         }
     }
@@ -178,20 +200,33 @@ fun LibraryScreen(host: LibraryHost, onOpenSettings: () -> Unit) {
                 menu = host.menu,
                 emptyText = if (search.isBlank()) null else stringResource(R.string.search_nothing_found),
             )
-            LibraryTab.ALBUMS -> Groups(access, albums, modifier, search) { list -> albumItems(list, host.openAlbum) }
-            LibraryTab.ARTISTS -> Groups(access, artists, modifier, search) { list -> artistItems(list, host.openArtist) }
+            LibraryTab.ALBUMS -> Groups(
+                access, albums, modifier, search,
+                sections = { list -> list.map { it.section } },
+                tiles = { list -> albumTiles(list, host.openAlbum) },
+            ) { list -> albumItems(list, host.openAlbum) }
+            LibraryTab.ARTISTS -> Groups(
+                access, artists, modifier, search,
+                sections = { list -> list.map { it.section } },
+                tiles = { list -> artistTiles(list, host.openArtist) },
+            ) { list -> artistItems(list, host.openArtist) }
             LibraryTab.FOLDERS -> FolderContent(access, folders, folder = null, host, modifier, search)
         }
     }
 }
 
-/** A list of groups bound to [viewModel], or the permission card without access. */
+/**
+ * A list or grid of groups bound to [viewModel] (docs/library.md §11.3), or the permission card without access; a long one
+ * has the scroll thumb, whose bubble shows the groups' [sections].
+ */
 @Composable
 private fun <T : List<*>> Groups(
     access: AudioAccess,
     viewModel: GroupsViewModel<T>,
     modifier: Modifier,
     search: String,
+    sections: (T) -> List<String?>,
+    tiles: LazyGridScope.(T) -> Unit,
     items: LazyListScope.(T) -> Unit,
 ) {
     if (!access.granted) return PermissionCard(access.deniedForGood, access.request, access.openSettings, modifier)
@@ -204,8 +239,91 @@ private fun <T : List<*>> Groups(
         is GroupsState.Loaded -> if (state.value.isEmpty()) {
             Empty(stringResource(if (search.isBlank()) R.string.list_empty else R.string.search_nothing_found), modifier)
         } else {
-            LazyColumn(modifier.testTag(LibraryTags.LIST)) { items(state.value) }
+            val grid by viewModel.grid.collectAsStateWithLifecycle()
+            val labels = remember(state.value) { sections(state.value) }
+            Box(modifier.fillMaxSize()) {
+                if (grid) {
+                    val gridState = rememberLazyGridState()
+                    LazyVerticalGrid(
+                        columns = GridCells.Adaptive(TILE_MIN_WIDTH),
+                        state = gridState,
+                        contentPadding = PaddingValues(GRID_PADDING),
+                        modifier = Modifier.fillMaxSize().testTag(LibraryTags.GRID),
+                    ) { tiles(state.value) }
+                    ScrollThumb(gridState, { labels.getOrNull(it) }, Modifier.align(Alignment.TopEnd))
+                } else {
+                    val listState = rememberLazyListState()
+                    LazyColumn(Modifier.fillMaxSize().testTag(LibraryTags.LIST), state = listState) { items(state.value) }
+                    ScrollThumb(listState, { labels.getOrNull(it) }, Modifier.align(Alignment.TopEnd))
+                }
+            }
         }
+    }
+}
+
+/** Grid columns are at least this wide: two on a phone held upright (docs/library.md §11.3). */
+internal val TILE_MIN_WIDTH = 150.dp
+
+/** The padding around a grid's tiles. */
+private val GRID_PADDING = 8.dp
+
+/** The columns of a grid as wide as the window, as [GridCells.Adaptive] gives them inside [GRID_PADDING]. */
+internal fun gridColumns(widthDp: Int): Int =
+    ((widthDp - 2 * GRID_PADDING.value) / TILE_MIN_WIDTH.value).toInt().coerceAtLeast(1)
+
+private fun LazyGridScope.albumTiles(albums: List<AlbumGroup>, open: (String) -> Unit) {
+    items(albums, key = { "album " + it.key }) { album -> AlbumTile(album) { open(album.key) } }
+}
+
+private fun LazyGridScope.artistTiles(artists: List<ArtistGroup>, open: (String) -> Unit) {
+    items(artists, key = { "artist " + it.key }) { artist -> ArtistTile(artist) { open(artist.key) } }
+}
+
+/** An album in a grid: a square placeholder until covers come (step 13), its title, then its artist and year. */
+@Composable
+internal fun AlbumTile(album: AlbumGroup, onClick: () -> Unit) {
+    val details = listOfNotNull(creditText(album.credit), album.year?.toString()).joinToString(" · ")
+    Tile(album.title, details, stringResource(R.string.open_album), onClick) {
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier.fillMaxWidth().aspectRatio(1f)
+                .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(12.dp)),
+        ) {
+            Icon(painterResource(R.drawable.ic_album), contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+/** An artist in a grid: a circle with their letter, their name, then their numbers of albums and songs. */
+@Composable
+internal fun ArtistTile(artist: ArtistGroup, onClick: () -> Unit) {
+    val counts = pluralStringResource(R.plurals.albums_count, artist.albums, artist.albums) + " · " +
+        pluralStringResource(R.plurals.songs_count, artist.songs, artist.songs)
+    Tile(artist.name, counts, stringResource(R.string.open_artist), onClick) {
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier.fillMaxWidth().aspectRatio(1f).background(MaterialTheme.colorScheme.primaryContainer, CircleShape),
+        ) {
+            Text(
+                artist.name.firstOrNull { it.isLetterOrDigit() }?.uppercase() ?: "#",
+                style = MaterialTheme.typography.displaySmall,
+                color = MaterialTheme.colorScheme.onPrimaryContainer,
+            )
+        }
+    }
+}
+
+@Composable
+private fun Tile(title: String, details: String, clickLabel: String, onClick: () -> Unit, picture: @Composable () -> Unit) {
+    Column(
+        modifier = Modifier
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(onClickLabel = clickLabel, role = Role.Button, onClick = onClick)
+            .padding(8.dp),
+    ) {
+        picture()
+        Text(title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 8.dp))
+        Text(details, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
@@ -282,7 +400,11 @@ internal fun FolderContent(
     if (at == null) {
         // A top of volumes: no songs of its own.
         if (page.entries.isEmpty()) return Empty(stringResource(if (search.isBlank()) R.string.list_empty else R.string.search_nothing_found), modifier)
-        return LazyColumn(modifier.testTag(LibraryTags.LIST)) { folderItems() }
+        return Box(modifier.fillMaxSize()) {
+            val listState = rememberLazyListState()
+            LazyColumn(Modifier.fillMaxSize().testTag(LibraryTags.LIST), state = listState) { folderItems() }
+            ScrollThumb(listState, { page.entries.getOrNull(it)?.section }, Modifier.align(Alignment.TopEnd))
+        }
     }
     val songs = viewModel(key = "folder songs " + at.key) { SongsViewModel(app, SongQuery.folder(at.volume, at.relativePath), ListName.FOLDERS) }
     LaunchedEffect(songs, search) { songs.setSearch(search) }
@@ -299,6 +421,7 @@ internal fun FolderContent(
         listTag = LibraryTags.LIST,
         emptyText = stringResource(if (search.isBlank()) R.string.list_empty else R.string.search_nothing_found),
         headerItems = page.entries.size + if (playAll) 1 else 0,
+        headerSections = (if (playAll) listOf(null) else emptyList()) + page.entries.map { it.section },
     ) {
         if (playAll) item(key = "play all") {
             Button(
@@ -336,9 +459,12 @@ private val SORT_LABELS = mapOf(
     "file" to R.string.sort_file_name,
 )
 
-/** The sort action of a top bar: the list's fields and "Reverse order" (docs/library.md §6.3). */
+/**
+ * The sort action of a top bar: the list's fields and "Reverse order" (docs/library.md §6.3), and "Show as grid" when
+ * [grid] says whether the list shows as one (§11.3).
+ */
 @Composable
-internal fun SortButton(list: ListName, order: ListOrder, onOrder: (ListOrder) -> Unit) {
+internal fun SortButton(list: ListName, order: ListOrder, onOrder: (ListOrder) -> Unit, grid: Boolean? = null, onGrid: (Boolean) -> Unit = {}) {
     var open by remember { mutableStateOf(false) }
     Box {
         IconButton(onClick = { open = true }) {
@@ -366,13 +492,31 @@ internal fun SortButton(list: ListName, order: ListOrder, onOrder: (ListOrder) -
             DropdownMenuItem(
                 text = { Text(stringResource(R.string.sort_reverse)) },
                 leadingIcon = { Checkbox(checked = order.reversed, onCheckedChange = null) },
+                modifier = Modifier.checkbox(order.reversed),
                 onClick = {
                     open = false
                     onOrder(order.copy(reversed = !order.reversed))
                 },
             )
+            if (grid != null) {
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.sort_show_as_grid)) },
+                    leadingIcon = { Checkbox(checked = grid, onCheckedChange = null) },
+                    modifier = Modifier.checkbox(grid),
+                    onClick = {
+                        open = false
+                        onGrid(!grid)
+                    },
+                )
+            }
         }
     }
+}
+
+/** A menu item with a check box says to TalkBack whether it is on; the box alone, without a click of its own, does not. */
+private fun Modifier.checkbox(checked: Boolean) = semantics {
+    role = Role.Checkbox
+    toggleableState = ToggleableState(checked)
 }
 
 /** A top bar with an optional back action, a search field that opens over the title, the sort action and [actions]. */

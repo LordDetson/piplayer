@@ -1,5 +1,7 @@
 package io.github.lorddetson.piplayer.ui.library
 
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.SharingStarted
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -49,6 +51,10 @@ abstract class GroupsViewModel<T>(application: Application, val list: ListName?)
 
     private val mutableOrder = MutableStateFlow(ListOrder(list?.defaultField.orEmpty()))
     val order: StateFlow<ListOrder> = mutableOrder.asStateFlow()
+
+    /** Whether the list shows as a grid (docs/library.md §11.3); only lists that offer one. */
+    private val mutableGrid = MutableStateFlow(false)
+    val grid: StateFlow<Boolean> = mutableGrid.asStateFlow()
     private val search = MutableStateFlow("")
     private val again = MutableStateFlow(0)
     private var readAfterPasses = -1L
@@ -59,6 +65,15 @@ abstract class GroupsViewModel<T>(application: Application, val list: ListName?)
 
     init {
         list?.let { name -> viewModelScope.launch { ListSorts(application).order(name).collect { mutableOrder.value = it } } }
+        list?.takeIf { it.offersGrid }?.let { name ->
+            viewModelScope.launch { ListSorts(application).grid(name).collect { mutableGrid.value = it } }
+        }
+    }
+
+    fun setGrid(grid: Boolean) {
+        val name = list?.takeIf { it.offersGrid } ?: return
+        mutableGrid.value = grid
+        viewModelScope.launch { ListSorts(getApplication()).setGrid(name, grid) }
     }
 
     protected abstract fun read(lists: LibraryLists, order: ListOrder, search: String): T
@@ -128,6 +143,11 @@ class AlbumPageViewModel(application: Application, private val key: String) : Gr
 data class ArtistPage(val artist: ArtistGroup, val albums: List<AlbumGroup>)
 
 class ArtistPageViewModel(application: Application, private val key: String) : GroupsViewModel<ArtistPage?>(application, null) {
+
+    /** Whether the page shows its albums as a grid, as the Albums tab does (docs/library.md §11.3); kept with the page. */
+    val albumsGrid: StateFlow<Boolean> = ListSorts(application).grid(ListName.ALBUMS)
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
     override fun read(lists: LibraryLists, order: ListOrder, search: String): ArtistPage? {
         val artist = lists.artist(key) ?: return null
         val albums = lists.artistAlbums(key)

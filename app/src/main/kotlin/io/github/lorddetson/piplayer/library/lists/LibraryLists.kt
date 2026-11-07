@@ -11,6 +11,10 @@ import io.github.lorddetson.piplayer.library.db.ListSongRow
 import io.github.lorddetson.piplayer.library.search.SearchTerms
 import io.github.lorddetson.piplayer.library.search.SearchText
 import io.github.lorddetson.piplayer.library.songs.Song
+import io.github.lorddetson.piplayer.library.sort.SortKey
+import io.github.lorddetson.piplayer.library.sort.SortKeys
+import io.github.lorddetson.piplayer.library.sort.Sections
+import io.github.lorddetson.piplayer.identification.text.TextNormalizer
 import io.github.lorddetson.piplayer.settings.HiddenFiles
 import kotlinx.coroutines.runBlocking
 
@@ -27,12 +31,22 @@ data class AlbumGroup(
     val credit: AlbumCredit,
     val year: Int?,
     val songs: Int,
-    internal val titleKey: String,
-    internal val artistKey: String?,
+    internal val titleSort: SortKey,
+    internal val artistSort: SortKey?,
+    /** The section of the scroll thumb's bubble, by the list's order (docs/library.md §11.2). */
+    val section: String? = null,
 )
 
 /** An artist as lists show it; [key] is the normalized name, which its page is found by. */
-data class ArtistGroup(val key: String, val name: String, val songs: Int, val albums: Int)
+data class ArtistGroup(
+    val key: String,
+    val name: String,
+    val songs: Int,
+    val albums: Int,
+    /** The section of the scroll thumb's bubble, by the list's order (docs/library.md §11.2). */
+    val section: String? = null,
+    internal val sortKey: SortKey? = null,
+)
 
 /** What a song's menu and Now Playing go to (docs/library.md §6.1). */
 data class SongLinks(val albumKey: String?, val artists: List<ArtistLink>, val folder: FolderKey)
@@ -40,16 +54,19 @@ data class SongLinks(val albumKey: String?, val artists: List<ArtistLink>, val f
 data class ArtistLink(val key: String, val name: String)
 
 /** An artist of a file as lists group it: the name, its key and its search text (docs/library.md §6.2). */
-data class DisplayArtist(val name: String, val key: String, val searchText: String)
+data class DisplayArtist(val name: String, val key: String, val searchText: String, val sortKey: SortKey = SortKey.EMPTY)
 
 /** The artist key of a name (docs/library.md §6.2). */
 object DisplayArtists {
     /** A name of punctuation alone, such as `+`, normalizes to nothing and keeps itself. */
-    fun keyOf(name: String): String = SortKeys.of(name).ifEmpty { name.lowercase() }
+    fun keyOf(name: String): String = TextNormalizer.normalize(name).ifEmpty { name.lowercase() }
 
-    /** [names] as rows, one per key, in order. */
-    fun of(names: List<String>): List<DisplayArtist> =
-        names.map { DisplayArtist(it, keyOf(it), SearchText.of(it)) }.distinctBy { it.key }
+    /**
+     * [names] as rows, one per key, in order, each sorted by [keys] of its name; [sortTag], the artist's sort tag, names
+     * a single artist (docs/library.md §11.1).
+     */
+    fun of(names: List<String>, keys: (String) -> SortKey = SortKeys::of, sortTag: String? = null): List<DisplayArtist> =
+        names.map { DisplayArtist(it, keyOf(it), SearchText.of(it), keys(sortTag ?: it)) }.distinctBy { it.key }
 }
 
 /**
@@ -60,8 +77,13 @@ class LibraryLists(private val database: LibraryDatabase, private val hidden: Hi
 
     private val dao get() = database.library()
 
-    /** The songs of [query] in its order, the first [limit] when given. */
-    fun songs(query: SongQuery, limit: Int? = null): List<Song> = rows(query, limit).map { row ->
+    /** The songs of [query] in its order, the first [limit] when given, each with its section (docs/library.md §11.2). */
+    fun songs(query: SongQuery, limit: Int? = null): List<Song> {
+        val section = sectionOf(query.sort)
+        return rows(query, limit).map { row -> song(row, section(row)) }
+    }
+
+    private fun song(row: ListSongRow, section: String?) =
         Song(
             id = row.fileId,
             uri = ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, row.mediaStoreId).toString(),
@@ -71,7 +93,18 @@ class LibraryLists(private val database: LibraryDatabase, private val hidden: Hi
             durationMs = row.durationMs,
             discNumber = row.discNumber,
             mediaStoreId = row.mediaStoreId,
+            section = section,
         )
+
+    /** How a row of [sort] finds its section from what the query selected for it. */
+    private fun sectionOf(sort: SongSort): (ListSongRow) -> String? = when (sort) {
+        SongSort.TITLE, SongSort.ARTIST, SongSort.ALBUM, SongSort.FILE_NAME -> {
+            val buckets = SortKeys.current().buckets
+            { row -> Sections.letter(SortKey.of(row.sectionKey), buckets) }
+        }
+        SongSort.LENGTH -> { row -> Sections.minutes(row.sectionNumber) }
+        SongSort.YEAR -> { row -> Sections.year(row.sectionNumber?.toInt()) }
+        SongSort.TRACK -> { _ -> null }
     }
 
     private fun rows(query: SongQuery, limit: Int?): List<ListSongRow> {
@@ -82,7 +115,7 @@ class LibraryLists(private val database: LibraryDatabase, private val hidden: Hi
         val sql = Sql(hidden)
         sql.where(filterOf(query) ?: return emptyList())
         sql.search("d.search_text", query.search)
-        return run(sql.songs(orderOf(query.sort, query.reversed), limit))
+        return run(sql.songs(query.sort, orderOf(query.sort, query.reversed), limit))
     }
 
     /** A folder with its subfolders: each folder in the order of its tree, its own songs in the query's sort. */
@@ -97,7 +130,7 @@ class LibraryLists(private val database: LibraryDatabase, private val hidden: Hi
             sql.where("f.relative_path >= ? AND f.relative_path < ?", folder.relativePath, folder.relativePath + MAX_CODE_POINT)
         }
         sql.search("d.search_text", query.search)
-        val byFolder = run(sql.songs(orderOf(query.sort, reversed = false), limit = null)).groupBy { it.relativePath }
+        val byFolder = run(sql.songs(query.sort, orderOf(query.sort, reversed = false), limit = null)).groupBy { it.relativePath }
         val songs = order.flatMap { byFolder[it].orEmpty() }
         return if (query.reversed) songs.reversed() else songs
     }
@@ -107,11 +140,20 @@ class LibraryLists(private val database: LibraryDatabase, private val hidden: Hi
         sql.having("d.album_search", search)
         val albums = runAlbums(sql)
         val comparator = when (sort) {
-            AlbumSort.TITLE -> compareBy<AlbumGroup> { it.titleKey }
-            AlbumSort.ARTIST -> compareBy<AlbumGroup, String?>(nullsLast()) { it.artistKey }.thenBy { it.titleKey }
-            AlbumSort.YEAR -> compareBy<AlbumGroup, Int?>(nullsLast()) { it.year }.thenBy { it.titleKey }
+            AlbumSort.TITLE -> compareBy<AlbumGroup> { it.titleSort }
+            AlbumSort.ARTIST -> compareBy<AlbumGroup, SortKey?>(nullsLast()) { it.artistSort }.thenBy { it.titleSort }
+            AlbumSort.YEAR -> compareBy<AlbumGroup, Int?>(nullsLast()) { it.year }.thenBy { it.titleSort }
         }.thenBy { it.key }
-        return albums.sortedWith(if (reversed) comparator.reversed() else comparator)
+        val buckets by lazy(LazyThreadSafetyMode.NONE) { SortKeys.current().buckets }
+        return albums.sortedWith(if (reversed) comparator.reversed() else comparator).map { album ->
+            album.copy(
+                section = when (sort) {
+                    AlbumSort.TITLE -> Sections.letter(album.titleSort, buckets)
+                    AlbumSort.ARTIST -> Sections.letter(album.artistSort, buckets)
+                    AlbumSort.YEAR -> Sections.year(album.year)
+                },
+            )
+        }
     }
 
     /** The album of [key], or null when no visible song has it. */
@@ -125,17 +167,26 @@ class LibraryLists(private val database: LibraryDatabase, private val hidden: Hi
                 visible("g", "t") + ")",
             artistKey, hidden.showSystemSounds, hidden.showRecordings, hidden.minLengthMs,
         )
-        return runAlbums(sql).sortedWith(compareBy<AlbumGroup, Int?>(nullsLast()) { it.year }.thenBy { it.titleKey }.thenBy { it.key })
+        return runAlbums(sql).sortedWith(compareBy<AlbumGroup, Int?>(nullsLast()) { it.year }.thenBy { it.titleSort }.thenBy { it.key })
     }
 
     fun artists(sort: ArtistSort = ArtistSort.NAME, reversed: Boolean = false, search: String = ""): List<ArtistGroup> {
         val sql = Sql(hidden)
         sql.having("a.search_text", search)
+        val byName = compareBy<ArtistGroup, SortKey?>(nullsLast()) { it.sortKey }.thenBy { it.key }
         val comparator = when (sort) {
-            ArtistSort.NAME -> compareBy<ArtistGroup> { it.key }
-            ArtistSort.SONGS -> compareByDescending<ArtistGroup> { it.songs }.thenBy { it.key }
+            ArtistSort.NAME -> byName
+            ArtistSort.SONGS -> compareByDescending<ArtistGroup> { it.songs }.then(byName)
         }
-        return runArtists(sql).sortedWith(if (reversed) comparator.reversed() else comparator)
+        val buckets by lazy(LazyThreadSafetyMode.NONE) { SortKeys.current().buckets }
+        return runArtists(sql).sortedWith(if (reversed) comparator.reversed() else comparator).map { artist ->
+            artist.copy(
+                section = when (sort) {
+                    ArtistSort.NAME -> Sections.letter(artist.sortKey, buckets)
+                    ArtistSort.SONGS -> Sections.count(artist.songs)
+                },
+            )
+        }
     }
 
     /** The artist of [key], or null when no visible song has them. */
@@ -182,8 +233,9 @@ class LibraryLists(private val database: LibraryDatabase, private val hidden: Hi
                 "SELECT d.album_key AS albumKey, MIN(d.album) AS title, MAX(d.album_artist) AS albumArtist, " +
                     "MAX(d.compilation) AS compilation, MIN(d.artist) AS artist, " +
                     "(COUNT(d.artist_key) = COUNT(*) AND MIN(d.artist_key) = MAX(d.artist_key)) AS oneArtist, " +
-                    "MIN(d.artist_key) AS firstArtistKey, MIN(d.year) AS year, COUNT(*) AS songs, " +
-                    "MIN(d.album_title_key) AS titleKey FROM track_display d JOIN audio_file f ON f.id = d.file_id " +
+                    "MIN(d.year) AS year, COUNT(*) AS songs, MIN(d.album_sort) AS titleSort, " +
+                    "COALESCE(MAX(d.album_artist_sort), MIN(d.artist_sort)) AS artistSort " +
+                    "FROM track_display d JOIN audio_file f ON f.id = d.file_id " +
                     "WHERE d.album_key IS NOT NULL AND ${sql.conditions()} GROUP BY d.album_key${sql.havingClause()}",
             ),
         )
@@ -197,8 +249,8 @@ class LibraryLists(private val database: LibraryDatabase, private val hidden: Hi
             credit = credit,
             year = row.year,
             songs = row.songs,
-            titleKey = row.titleKey.orEmpty(),
-            artistKey = row.albumArtist?.let(SortKeys::of) ?: row.firstArtistKey,
+            titleSort = SortKey.of(row.titleSort) ?: SortKey.EMPTY,
+            artistSort = SortKey.of(row.artistSort),
         )
     }
 
@@ -206,11 +258,11 @@ class LibraryLists(private val database: LibraryDatabase, private val hidden: Hi
         dao.artistGroups(
             sql.raw(
                 "SELECT a.artist_key AS artistKey, MIN(a.name) AS name, COUNT(DISTINCT a.file_id) AS songs, " +
-                    "COUNT(DISTINCT d.album_key) AS albums FROM display_artist a JOIN track_display d ON d.file_id = a.file_id " +
+                    "COUNT(DISTINCT d.album_key) AS albums, MIN(a.sort_key) AS sortKey FROM display_artist a JOIN track_display d ON d.file_id = a.file_id " +
                     "JOIN audio_file f ON f.id = a.file_id WHERE ${sql.conditions()} GROUP BY a.artist_key${sql.havingClause()}",
             ),
         )
-    }.map { ArtistGroup(it.artistKey, it.name, it.songs, it.albums) }
+    }.map { ArtistGroup(it.artistKey, it.name, it.songs, it.albums, sortKey = SortKey.of(it.sortKey)) }
 
     /** A query's conditions and their arguments, bound in the order they appear. */
     private class Sql(private val hidden: HiddenFiles) {
@@ -251,9 +303,9 @@ class LibraryLists(private val database: LibraryDatabase, private val hidden: Hi
             return (listOf(visible("f", "d")) + where).joinToString(" AND ")
         }
 
-        fun songs(order: String, limit: Int?): RoomRawQuery = raw(
+        fun songs(sort: SongSort, order: String, limit: Int?): RoomRawQuery = raw(
             "SELECT f.id AS fileId, f.media_store_id AS mediaStoreId, d.title, d.artist, d.album, d.duration_ms AS durationMs, " +
-                "d.disc_number AS discNumber, f.relative_path AS relativePath " +
+                "d.disc_number AS discNumber, f.relative_path AS relativePath, ${SECTIONS.getValue(sort)} " +
                 "FROM track_display d JOIN audio_file f ON f.id = d.file_id WHERE ${conditions()} " +
                 "ORDER BY $order" + (limit?.let { " LIMIT $it" } ?: ""),
         )
@@ -284,28 +336,48 @@ class LibraryLists(private val database: LibraryDatabase, private val hidden: Hi
         /** U+10FFFF, after which no character sorts. */
         private const val MAX_CODE_POINT = "\uDBFF\uDFFF"
 
+        /**
+         * The lowest album key of the list's songs on the album, so that songs that spell it differently stay together
+         * (docs/library.md §11.1); songs without an album have none.
+         */
+        private const val ALBUM_SORT = "MIN(d.album_sort) OVER (PARTITION BY d.album_key)"
+
         /** The earliest year of the list's songs on the album; songs without an album group on their own. */
         private const val ALBUM_YEAR = "MIN(d.year) OVER (PARTITION BY d.album_key)"
 
-        /** The terms of each order, ascending; a missing value sorts last. Ties go by title, then the index's ID. */
+        /**
+         * The terms of each order, ascending; a missing value sorts last. Ties go by title, then the index's ID. The sort
+         * keys are BLOBs, which SQLite compares byte by byte: the collator's order (docs/library.md §11.1).
+         */
         private val ORDERS = mapOf(
-            SongSort.TITLE to listOf("d.title_key"),
-            SongSort.ARTIST to listOf("d.artist_key IS NULL", "d.artist_key", "d.title_key"),
+            SongSort.TITLE to listOf("d.title_sort"),
+            SongSort.ARTIST to listOf("d.artist_sort IS NULL", "d.artist_sort", "d.title_sort"),
             SongSort.ALBUM to listOf(
-                "d.album_title_key IS NULL", "d.album_title_key", "d.album_key", "d.disc_number IS NULL", "d.disc_number",
-                "d.track_number IS NULL", "d.track_number", "d.title_key",
+                "$ALBUM_SORT IS NULL", ALBUM_SORT, "d.album_key", "d.disc_number IS NULL", "d.disc_number",
+                "d.track_number IS NULL", "d.track_number", "d.title_sort",
             ),
-            SongSort.LENGTH to listOf("d.duration_ms IS NULL", "d.duration_ms", "d.title_key"),
+            SongSort.LENGTH to listOf("d.duration_ms IS NULL", "d.duration_ms", "d.title_sort"),
             SongSort.TRACK to listOf(
-                "d.disc_number IS NULL", "d.disc_number", "d.track_number IS NULL", "d.track_number", "d.file_key", "d.title_key",
+                "d.disc_number IS NULL", "d.disc_number", "d.track_number IS NULL", "d.track_number", "d.file_sort", "d.title_sort",
             ),
             // Each album stays together, by its earliest year; songs without an album come last, by their own year.
             SongSort.YEAR to listOf(
-                "d.album_key IS NULL", "$ALBUM_YEAR IS NULL", ALBUM_YEAR, "d.album_title_key", "d.album_key",
+                "d.album_key IS NULL", "$ALBUM_YEAR IS NULL", ALBUM_YEAR, ALBUM_SORT, "d.album_key",
                 "d.disc_number IS NULL", "d.disc_number", "d.track_number IS NULL", "d.track_number", "d.year IS NULL",
-                "d.year", "d.title_key",
+                "d.year", "d.title_sort",
             ),
-            SongSort.FILE_NAME to listOf("d.file_key", "d.title_key"),
+            SongSort.FILE_NAME to listOf("d.file_sort", "d.title_sort"),
+        )
+
+        /** What each order's section is found from (docs/library.md §11.2): the key it sorts by first, or a number. */
+        private val SECTIONS = mapOf(
+            SongSort.TITLE to "d.title_sort AS sectionKey, NULL AS sectionNumber",
+            SongSort.ARTIST to "d.artist_sort AS sectionKey, NULL AS sectionNumber",
+            SongSort.ALBUM to "$ALBUM_SORT AS sectionKey, NULL AS sectionNumber",
+            SongSort.FILE_NAME to "d.file_sort AS sectionKey, NULL AS sectionNumber",
+            SongSort.LENGTH to "NULL AS sectionKey, d.duration_ms AS sectionNumber",
+            SongSort.YEAR to "NULL AS sectionKey, CASE WHEN d.album_key IS NULL THEN d.year ELSE $ALBUM_YEAR END AS sectionNumber",
+            SongSort.TRACK to "NULL AS sectionKey, NULL AS sectionNumber",
         )
 
         /** [sort]'s terms, all reversed for [reversed], which reverses the whole list since the ID makes it total. */

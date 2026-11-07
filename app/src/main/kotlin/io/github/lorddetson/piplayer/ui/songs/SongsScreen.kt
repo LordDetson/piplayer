@@ -100,6 +100,7 @@ fun SongsScreen(
     emptyText: String? = null,
     discHeaders: Boolean = false,
     headerItems: Int = 0,
+    headerSections: List<String?> = emptyList(),
     header: LazyListScope.() -> Unit = {},
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -128,6 +129,7 @@ fun SongsScreen(
         emptyText = emptyText,
         discHeaders = discHeaders,
         headerItems = headerItems,
+        headerSections = headerSections,
         header = header,
     )
 }

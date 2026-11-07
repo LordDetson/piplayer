@@ -1,7 +1,5 @@
 package io.github.lorddetson.piplayer.library.lists
 
-import io.github.lorddetson.piplayer.identification.text.TextNormalizer
-
 /** Who an album is shown by (docs/library.md §6.2). */
 sealed interface AlbumCredit {
     data class Named(val name: String) : AlbumCredit
@@ -20,10 +18,4 @@ sealed interface AlbumCredit {
             else -> Various
         }
     }
-}
-
-/** The sort keys of names (docs/library.md §6.3): the one place step 11 changes for locale-aware keys. */
-object SortKeys {
-    /** The key of [text]: normalized as for search, so that case, diacritics and ё do not change the order. */
-    fun of(text: String): String = TextNormalizer.normalize(text)
 }

@@ -1,6 +1,6 @@
 package io.github.lorddetson.piplayer.library.sync
 
-import io.github.lorddetson.piplayer.identification.text.TextNormalizer
+import io.github.lorddetson.piplayer.library.sort.SortKeys
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 
@@ -32,10 +32,8 @@ class DisplayValuesTest {
     }
 
     @Test
-    fun `the title key is the title normalized as for search`() {
-        assertThat(DisplayValues.of(row(title = "The Ёжик, Part II")).titleKey)
-            .isEqualTo(TextNormalizer.normalize("The Ёжик, Part II"))
-            .isEqualTo("the ежик part ii")
+    fun `the title sorts by the collator's key of the title`() {
+        assertThat(DisplayValues.of(row(title = "The Ёжик, Part II")).titleSort).isEqualTo(SortKeys.of("The Ёжик, Part II"))
     }
 
     @Test

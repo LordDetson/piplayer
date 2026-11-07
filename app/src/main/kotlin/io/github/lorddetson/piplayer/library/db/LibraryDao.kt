@@ -117,6 +117,16 @@ interface LibraryDao {
     )
     suspend fun setDisplayVersion(version: Int)
 
+    /** The collation the sort keys were made by (docs/library.md §11.1), or null before the first sync. */
+    @Query("SELECT collation FROM library_meta WHERE id = 1")
+    suspend fun collation(): String?
+
+    @Query(
+        "INSERT INTO library_meta (id, mirrored_user_counter, collation) VALUES (1, 0, :collation) " +
+            "ON CONFLICT(id) DO UPDATE SET collation = :collation",
+    )
+    suspend fun setCollation(collation: String)
+
     /** What the tag pass found in a file. */
     @Query(
         "UPDATE audio_file SET tag_pass_at = :at, reader_version = :readerVersion, tag_failure = NULL, format = :format, " +
@@ -174,7 +184,7 @@ interface LibraryDao {
             "f.size, f.mtime FROM audio_file f LEFT JOIN track_display d ON d.file_id = f.id " +
             "WHERE (f.reader_version IS NULL OR f.reader_version < :readerVersion) AND f.unsafe_count < :unsafeCount " +
             "AND f.folder_rule != 2 " +
-            "ORDER BY (f.is_ringtone OR f.is_notification OR f.is_alarm OR f.recording), d.title_key, f.id",
+            "ORDER BY (f.is_ringtone OR f.is_notification OR f.is_alarm OR f.recording), d.title_sort, f.id",
     )
     suspend fun unreadFiles(readerVersion: Int, unsafeCount: Int): List<PassFile>
 
@@ -196,7 +206,7 @@ interface LibraryDao {
             "FROM audio_file f LEFT JOIN track_display d ON d.file_id = f.id " +
             "WHERE f.duration_source IN ('${DurationSource.PENDING_WALK}', '${DurationSource.PENDING_FLAC_END}') " +
             "AND f.unsafe_count < :unsafeCount AND f.folder_rule != 2 " +
-            "ORDER BY (f.is_ringtone OR f.is_notification OR f.is_alarm OR f.recording), d.title_key, f.id",
+            "ORDER BY (f.is_ringtone OR f.is_notification OR f.is_alarm OR f.recording), d.title_sort, f.id",
     )
     suspend fun pendingDurations(unsafeCount: Int): List<PendingDuration>
 
@@ -397,6 +407,9 @@ data class ListSongRow(
     val durationMs: Long?,
     val discNumber: Int?,
     val relativePath: String,
+    /** What the row's section is found from, by the list's order (docs/library.md §11.2): a sort key or a number. */
+    val sectionKey: ByteArray? = null,
+    val sectionNumber: Long? = null,
 )
 
 /** An album key with what its visible songs say of it. */
@@ -407,13 +420,14 @@ data class AlbumGroupRow(
     val compilation: Boolean,
     val artist: String?,
     val oneArtist: Boolean,
-    val firstArtistKey: String?,
     val year: Int?,
     val songs: Int,
-    val titleKey: String?,
+    val titleSort: ByteArray?,
+    /** The album artist's key, else the lowest artist key of the songs (docs/library.md §11.1). */
+    val artistSort: ByteArray?,
 )
 
-data class ArtistGroupRow(val artistKey: String, val name: String, val songs: Int, val albums: Int)
+data class ArtistGroupRow(val artistKey: String, val name: String, val songs: Int, val albums: Int, val sortKey: ByteArray?)
 
 data class FolderCountRow(val volume: String, val relativePath: String, val songs: Int)
 
@@ -483,6 +497,11 @@ data class ReadFileRow(
     val trackNumber: Int?,
     val discNumber: Int?,
     val volume: String,
+    /** The sort tags, which make the sort keys (docs/library.md §11.1). */
+    val titleSort: String? = null,
+    val artistSort: String? = null,
+    val albumSort: String? = null,
+    val albumArtistSort: String? = null,
 )
 
 /** What the display needs of a file's index values. */
@@ -553,7 +572,8 @@ private const val READ_FILES = "SELECT t.file_id AS fileId, t.title, t.artist, t
     "f.relative_path AS relativePath, " +
     "f.embedded_cover_present AS embeddedCover, f.tag_length_ms AS tagLengthMs, f.duration_ms AS exactDurationMs, " +
     "t.album_artist AS albumArtist, t.release_mbid AS releaseMbid, t.compilation, t.date, t.original_date AS originalDate, " +
-    "t.track_number AS trackNumber, t.disc_number AS discNumber, f.volume_name AS volume " +
+    "t.track_number AS trackNumber, t.disc_number AS discNumber, f.volume_name AS volume, " +
+    "t.title_sort AS titleSort, t.artist_sort AS artistSort, t.album_sort AS albumSort, t.album_artist_sort AS albumArtistSort " +
     "FROM track t JOIN audio_file f ON f.id = t.file_id"
 
 private const val INDEX_INPUTS = "SELECT f.id AS fileId, f.display_name AS displayName, e.title, e.artist, e.album, " +

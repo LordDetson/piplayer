@@ -162,6 +162,8 @@
     <string name="sort_album_year">Album by year</string>
     <string name="sort_file_name">File name</string>
     <string name="sort_reverse">Reverse order</string>
+    <string name="sort_show_as_grid">Show as grid</string>
+    <string name="scroll_thumb">Scroll thumb</string>
     <string name="various_artists">Various artists</string>
     <string name="internal_storage">Internal storage</string>
     <string name="album_disc">Disc %1$d</string>

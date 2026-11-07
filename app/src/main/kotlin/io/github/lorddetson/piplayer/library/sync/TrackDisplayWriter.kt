@@ -9,6 +9,9 @@ import io.github.lorddetson.piplayer.library.db.LibraryDatabase
 import io.github.lorddetson.piplayer.library.db.ReadFileRow
 import io.github.lorddetson.piplayer.library.db.TrackEntity
 import io.github.lorddetson.piplayer.library.db.replaceAll
+import io.github.lorddetson.piplayer.library.sort.Collation
+import io.github.lorddetson.piplayer.library.sort.SortKey
+import io.github.lorddetson.piplayer.library.sort.SortKeys
 import io.github.lorddetson.piplayer.library.values.IndexValues
 import io.github.lorddetson.piplayer.library.values.MergedValues
 import kotlinx.coroutines.Dispatchers
@@ -27,7 +30,7 @@ internal class DisplayInput(
     private val relativePath: String = "",
 ) {
     /** Normalizes, so not on a thread that playback or a list waits for. */
-    fun resolve(): DisplayValues = MergedValues.of(
+    fun resolve(keys: (String) -> SortKey = SortKeys::of): DisplayValues = MergedValues.of(
         displayName,
         index,
         read?.let(TrackEntity::tagsOf),
@@ -37,6 +40,7 @@ internal class DisplayInput(
         embeddedCover = read?.embeddedCover == true,
         volume = volume,
         relativePath = relativePath,
+        keys = keys,
     )
 }
 
@@ -86,23 +90,29 @@ class TrackDisplayWriter(private val database: LibraryDatabase) {
         private const val RESOLVE_CHUNK = 2_000
 
         private val COLUMNS = listOf(
-            "file_id", "title", "artist", "album", "duration_ms", "title_key", "search_text", "missing_info_reasons",
+            "file_id", "title", "artist", "album", "duration_ms", "search_text", "missing_info_reasons",
             "album_key", "album_artist", "compilation", "year", "disc_number", "track_number", "artist_key",
-            "album_title_key", "album_search", "file_key",
+            "album_search", "title_sort", "artist_sort", "album_sort", "album_artist_sort", "file_sort",
         )
-        private val ARTIST_COLUMNS = listOf("file_id", "position", "artist_key", "name", "search_text")
+        private val BLOBS = setOf("title_sort", "artist_sort", "album_sort", "album_artist_sort", "file_sort")
+        private val ARTIST_COLUMNS = listOf("file_id", "position", "artist_key", "name", "search_text", "sort_key")
 
-        /** Normalizing 20 000 titles and search texts takes about a second on one core, so the cores share it. */
-        internal suspend fun resolve(inputs: List<DisplayInput>): List<DisplayValues> = coroutineScope {
-            inputs.chunked(RESOLVE_CHUNK)
-                .map { chunk -> async(Dispatchers.Default) { chunk.map { it.resolve() } } }
-                .awaitAll()
-                .flatten()
-        }
+        /**
+         * Normalizing 20 000 titles and search texts takes about a second on one core, so the cores share it. Each chunk
+         * remembers the sort keys of the texts it has seen, so an artist or an album of many songs costs one key; all
+         * use [collation], which the caller stores with them (docs/library.md §11.1).
+         */
+        internal suspend fun resolve(inputs: List<DisplayInput>, collation: Collation = SortKeys.current()): List<DisplayValues> =
+            coroutineScope {
+                inputs.chunked(RESOLVE_CHUNK)
+                    .map { chunk -> async(Dispatchers.Default) { SortKeys.Cache(collation).let { keys -> chunk.map { it.resolve(keys::of) } } } }
+                    .awaitAll()
+                    .flatten()
+            }
 
         /** Writes [values] for [fileIds], in the same order. */
         internal suspend fun PooledConnection.write(fileIds: List<Long>, values: List<DisplayValues>) {
-            replaceAll("track_display", COLUMNS, fileIds.indices.toList()) { i -> display(fileIds[i], values[i]) }
+            replaceAll("track_display", COLUMNS, fileIds.indices.toList(), blobs = BLOBS) { i -> display(fileIds[i], values[i]) }
             // A file may now have fewer artists than before.
             for (chunk in fileIds.chunked(DELETE_CHUNK)) {
                 usePrepared("DELETE FROM display_artist WHERE file_id IN (SELECT value FROM json_each(?))") { statement ->
@@ -114,12 +124,13 @@ class TrackDisplayWriter(private val database: LibraryDatabase) {
             val artists = fileIds.indices.flatMap { i ->
                 values[i].displayArtists.mapIndexed { position, artist -> Triple(fileIds[i], position, artist) }
             }
-            replaceAll("display_artist", ARTIST_COLUMNS, artists) { (fileId, position, artist) ->
+            replaceAll("display_artist", ARTIST_COLUMNS, artists, blobs = setOf("sort_key")) { (fileId, position, artist) ->
                 long(fileId)
                 long(position.toLong())
                 text(artist.key)
                 text(artist.name)
                 text(artist.searchText)
+                blob(artist.sortKey.bytes)
             }
         }
 
@@ -129,7 +140,6 @@ class TrackDisplayWriter(private val database: LibraryDatabase) {
             text(values.artist)
             text(values.album)
             long(values.durationMs)
-            text(values.titleKey)
             text(values.searchText)
             long(values.reasons?.toLong())
             text(values.albumKey)
@@ -139,9 +149,12 @@ class TrackDisplayWriter(private val database: LibraryDatabase) {
             long(values.discNumber?.toLong())
             long(values.trackNumber?.toLong())
             text(values.artistKey)
-            text(values.albumTitleKey)
             text(values.albumSearch)
-            text(values.fileKey)
+            blob(values.titleSort.bytes)
+            blob(values.artistSort?.bytes)
+            blob(values.albumSort?.bytes)
+            blob(values.albumArtistSort?.bytes)
+            blob(values.fileSort.bytes)
         }
     }
 }

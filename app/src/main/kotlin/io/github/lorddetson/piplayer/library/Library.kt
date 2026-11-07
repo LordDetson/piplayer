@@ -255,6 +255,9 @@ object Library {
     /** How many syncs have changed the library in this process; null before it is opened. */
     fun revision(): Long? = opened.value?.sync?.status?.value?.revision
 
+    /** The collation of the stored sort keys, once a sync has looked (docs/library.md §11.1). */
+    fun collation(): String? = opened.value?.sync?.status?.value?.collation
+
     /**
      * Closes the library as the end of the process would, deleting its database when [empty], and opens it again on
      * [index], or the device's media index. Nothing syncs until [start].

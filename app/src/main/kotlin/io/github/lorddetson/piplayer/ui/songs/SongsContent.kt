@@ -1,5 +1,6 @@
 package io.github.lorddetson.piplayer.ui.songs
 
+import io.github.lorddetson.piplayer.ui.library.ScrollThumb
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -85,6 +86,8 @@ class SongMenu(
 /**
  * A song list without its state holder: the permission card, the list or its empty state. [header] comes before the
  * songs, as a page's albums or subfolders; [discHeaders] starts each disc with a header when the songs have more than one.
+ * A long list has the scroll thumb (docs/library.md §11.2), whose bubble shows the songs' sections and [headerSections]
+ * for the items of [header].
  */
 @Composable
 fun SongsContent(
@@ -102,6 +105,7 @@ fun SongsContent(
     emptyText: String? = null,
     discHeaders: Boolean = false,
     headerItems: Int = 0,
+    headerSections: List<String?> = emptyList(),
     header: LazyListScope.() -> Unit = {},
 ) {
     when (state) {
@@ -168,6 +172,18 @@ fun SongsContent(
                         }
                     }
                 }
+                ScrollThumb(
+                    list,
+                    label = { item ->
+                        if (item < headerItems) {
+                            headerSections.getOrNull(item)
+                        } else {
+                            val row = item - headerItems
+                            if (discRows == null) state.songs.getOrNull(row)?.section else (discRows.getOrNull(row) as? DiscRow.Song)?.song?.section
+                        }
+                    },
+                    modifier = Modifier.align(Alignment.TopEnd),
+                )
                 if (passProgress.running && passProgress.total >= MIN_FILES_FOR_PROGRESS) {
                     val description = stringResource(R.string.songs_tag_progress, passProgress.done, passProgress.total)
                     LinearProgressIndicator(

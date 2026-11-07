@@ -9,6 +9,7 @@ profileinstaller = "1.4.1"
 datastore = "1.2.1"
 junit = "5.14.4"
 assertj = "3.27.7"
+icu4j = "77.1"
 benchmark = "1.5.0"
 uiautomator = "2.4.0"
 androidxTestRunner = "1.7.0"
@@ -50,6 +51,7 @@ junit-bom = { module = "org.junit:junit-bom", version.ref = "junit" }
 junit-jupiter = { module = "org.junit.jupiter:junit-jupiter" }
 junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher" }
 assertj-core = { module = "org.assertj:assertj-core", version.ref = "assertj" }
+icu4j = { module = "com.ibm.icu:icu4j", version.ref = "icu4j" }
 androidx-benchmark-macro-junit4 = { module = "androidx.benchmark:benchmark-macro-junit4", version.ref = "benchmark" }
 androidx-test-uiautomator = { module = "androidx.test.uiautomator:uiautomator", version.ref = "uiautomator" }
 

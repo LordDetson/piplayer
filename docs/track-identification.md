@@ -949,7 +949,8 @@ made live in the user database.
   normalized the same way and split into words (no repeats, longest first, at most 8), and every word must occur in
   the text, tested with `instr()` (in the M0 spike on the platform's SQLite, LIKE went through ICU and was two to three
   times slower). The library database uses the SQLite bundled with the app (library.md §1.1).
-  An index on (`title_key`, `search_text`) lets a search walk the titles in order and stop at the first page of 50.
+  An index on (`title_sort`, `search_text`) (the collator's key of the title since M2a step 11, library.md §11.1) lets
+  a search walk the titles in order and stop at the first page of 50.
   `missing_info_reasons` is the set of §1 reasons, written by
   the precedence resolver; `missing_info_decision` is none, keep_as_is or skipped.
 - `fingerprint(content_key, fingerprint, format, acoustid_id, decoder_path, computed_at)`: a cache for identification

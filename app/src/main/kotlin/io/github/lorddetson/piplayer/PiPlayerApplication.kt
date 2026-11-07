@@ -3,9 +3,11 @@ package io.github.lorddetson.piplayer
 import android.app.Activity
 import android.app.Application
 import android.content.Context
+import android.content.res.Configuration
 import android.os.Bundle
 import io.github.lorddetson.piplayer.crash.CrashReports
 import io.github.lorddetson.piplayer.library.Library
+import io.github.lorddetson.piplayer.library.sort.SortKeys
 import kotlin.concurrent.thread
 
 /** Tells the tag pass when the app shows (docs/library.md §5.5). */
@@ -47,8 +49,28 @@ class PiPlayerApplication : Application() {
         if (ProcessRole.current(this) == ProcessRole.MAIN) {
             thread(name = "crash-reports", priority = Thread.MIN_PRIORITY) { crashReports.refresh() }
             registerActivityLifecycleCallbacks(PassGateActivities)
+            // Lists sort in the app's language (docs/library.md §11.1); the first sync stores its collation.
+            SortKeys.use(languages(resources.configuration))
+            warmLetters()
             // The library follows the media index for as long as the process lives (docs/library.md §1.3).
             Library.start(this)
         }
     }
+
+    /** Another language of the app makes every sort key again, by a sync now (docs/library.md §11.1). */
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        if (ProcessRole.current(this) == ProcessRole.MAIN && SortKeys.use(languages(newConfig))) {
+            Library.sync(this).request()
+            warmLetters()
+        }
+    }
+
+    /** Builds the letters of the scroll thumb off the main thread, before a list reads them (docs/library.md §11.2). */
+    private fun warmLetters() {
+        val collation = SortKeys.current()
+        thread(name = "sort-letters", priority = Thread.MIN_PRIORITY) { collation.buckets }
+    }
+
+    private fun languages(configuration: Configuration) = configuration.locales.let { list -> (0 until list.size()).map { list[it] } }
 }

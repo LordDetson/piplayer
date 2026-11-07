@@ -34,6 +34,21 @@ internal class JsonRows {
             )
         }
 
+        /** As hex text, which [replaceAll] turns back into a BLOB for the columns it is told are blobs. */
+        fun blob(value: ByteArray?) {
+            separate()
+            if (value == null) {
+                json.append("null")
+            } else {
+                json.append('"')
+                for (byte in value) {
+                    val b = byte.toInt() and 0xff
+                    json.append(HEX[b ushr 4]).append(HEX[b and 0xf])
+                }
+                json.append('"')
+            }
+        }
+
         private fun separate() {
             if (values++ > 0) json.append(',')
         }
@@ -72,6 +87,7 @@ internal class JsonRows {
 
     private companion object {
         const val REPLACEMENT = '\uFFFD'
+        const val HEX = "0123456789abcdef"
     }
 }
 
@@ -80,7 +96,7 @@ internal class JsonRows {
  * its rows as one JSON parameter: binding every value on its own made up most of a first sync of 20 000 files (docs/
  * library.md §1.7). [values] gives one row's [columns] in order. [computed] adds columns whose values are SQL
  * expressions; they may read the row's values as `value->>i` (i its index in [columns]) and, through [join], the rows
- * the table held before the statement.
+ * the table held before the statement. The columns in [blobs] are written with [JsonRows.Row.blob].
  */
 internal suspend fun <T> PooledConnection.replaceAll(
     table: String,
@@ -88,11 +104,13 @@ internal suspend fun <T> PooledConnection.replaceAll(
     rows: List<T>,
     computed: Map<String, String> = emptyMap(),
     join: String = "",
+    blobs: Set<String> = emptySet(),
     values: JsonRows.Row.(T) -> Unit,
 ) {
-    // `->>` gives the SQL value of each JSON value: integer, text or null.
+    // `->>` gives the SQL value of each JSON value: integer, text or null; a blob travels as hex text.
+    val selected = columns.mapIndexed { i, column -> if (column in blobs) "unhex(value->>$i)" else "value->>$i" }
     val sql = "INSERT OR REPLACE INTO $table (${(columns + computed.keys).joinToString(",")}) " +
-        "SELECT ${(columns.indices.map { "value->>$it" } + computed.values).joinToString(",")} FROM json_each(?) $join"
+        "SELECT ${(selected + computed.values).joinToString(",")} FROM json_each(?) $join"
     for (chunk in rows.chunked(ROWS_PER_STATEMENT)) {
         val json = JsonRows().apply { chunk.forEach { row -> row { values(row) } } }.toString()
         usePrepared(sql) { statement ->

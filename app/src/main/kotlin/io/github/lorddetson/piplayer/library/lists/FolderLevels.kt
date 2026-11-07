@@ -1,12 +1,16 @@
 package io.github.lorddetson.piplayer.library.lists
 
+import io.github.lorddetson.piplayer.identification.text.TextNormalizer
 import io.github.lorddetson.piplayer.library.search.SearchTerms
+import io.github.lorddetson.piplayer.library.sort.Sections
+import io.github.lorddetson.piplayer.library.sort.SortKey
+import io.github.lorddetson.piplayer.library.sort.SortKeys
 
 /** A folder with the number of visible songs right in it. */
 data class FolderSongs(val volume: String, val relativePath: String, val songs: Int)
 
 /** A folder as a level lists it: [songs] counts those in its subfolders too; a volume's root has the volume as [name]. */
-data class FolderEntry(val volume: String, val relativePath: String, val name: String, val songs: Int)
+data class FolderEntry(val volume: String, val relativePath: String, val name: String, val songs: Int, val section: String? = null)
 
 /** The top of the Folders tab: one volume's root ([folder]), or the volumes themselves when there are more. */
 data class TopLevel(val volumeLevel: Boolean, val folder: Pair<String, String>?, val entries: List<FolderEntry>)
@@ -24,9 +28,12 @@ class FolderLevels(folders: List<FolderSongs>) {
         val children = HashMap<String, Node>()
         val name: String = path.dropLast(1).substringAfterLast('/')
 
-        /** Normalized once: levels sort and search by it on every read. */
-        val sortKey: String by lazy(LazyThreadSafetyMode.NONE) { SortKeys.of(name) }
-        val glued: String by lazy(LazyThreadSafetyMode.NONE) { sortKey.replace(" ", "") }
+        /** Normalized once: levels search by it on every read. */
+        val searchKey: String by lazy(LazyThreadSafetyMode.NONE) { TextNormalizer.normalize(name) }
+        val glued: String by lazy(LazyThreadSafetyMode.NONE) { searchKey.replace(" ", "") }
+
+        /** The collator's key of the name, which levels sort by (docs/library.md §11.1). */
+        val sortKey: SortKey by lazy(LazyThreadSafetyMode.NONE) { SortKeys.of(name) }
         val sorted: List<Node> by lazy(LazyThreadSafetyMode.NONE) {
             children.values.sortedWith(compareBy<Node> { it.sortKey }.thenBy { it.path })
         }
@@ -100,7 +107,7 @@ class FolderLevels(folders: List<FolderSongs>) {
         val found = ArrayList<FolderEntry>()
         fun walk(node: Node) {
             for (child in sortedChildren(node)) {
-                if (terms.all { child.sortKey.contains(it) || child.glued.contains(it) }) found += child.entry()
+                if (terms.all { child.searchKey.contains(it) || child.glued.contains(it) }) found += child.entry()
                 walk(child)
             }
         }
@@ -122,7 +129,9 @@ class FolderLevels(folders: List<FolderSongs>) {
 
     private fun sortedChildren(node: Node): List<Node> = node.sorted
 
-    private fun Node.entry() = FolderEntry(volume, path, name, total)
+    private fun Node.entry() = FolderEntry(volume, path, name, total, Sections.letter(sortKey, buckets))
+
+    private val buckets by lazy(LazyThreadSafetyMode.NONE) { SortKeys.current().buckets }
 
     companion object {
         const val PRIMARY = "external_primary"

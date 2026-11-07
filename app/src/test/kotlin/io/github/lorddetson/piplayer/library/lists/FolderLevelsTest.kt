@@ -1,7 +1,9 @@
 package io.github.lorddetson.piplayer.library.lists
 
+import io.github.lorddetson.piplayer.library.sort.SortKeys
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import java.util.Locale
 
 /** The levels of the Folders tab and the folder pages (docs/library.md §6.1, §6.3, §6.4). */
 class FolderLevelsTest {
@@ -90,5 +92,21 @@ class FolderLevelsTest {
         assertThat(levels.search("cd2").paths()).containsExactly("Music/Rock/album a/CD2/")
         assertThat(levels.search("елки").paths()).containsExactly("Music/Ёлки/")
         assertThat(levels.search("  ").paths()).isEmpty()
+    }
+
+    @Test
+    fun `subfolders sort by the collator of the app's language and carry their letters`() {
+        val names = listOf("Жуки", "Ёлка", "Abba", "Аквариум", "10 Years", "2 Unlimited")
+        val mixed = FolderLevels(names.map { FolderSongs(primary, "Music/$it/", 1) })
+        try {
+            SortKeys.use(listOf(Locale.forLanguageTag("ru")))
+
+            val children = mixed.children(primary, "Music/")
+
+            assertThat(children.map { it.name }).containsExactly("2 Unlimited", "10 Years", "Аквариум", "Ёлка", "Жуки", "Abba")
+            assertThat(children.map { it.section }).containsExactly("#", "#", "А", "Е", "Ж", "A")
+        } finally {
+            SortKeys.use(listOf(Locale.ENGLISH))
+        }
     }
 }

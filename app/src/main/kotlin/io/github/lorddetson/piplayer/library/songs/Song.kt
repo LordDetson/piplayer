@@ -15,6 +15,8 @@ data class Song(
     val mediaStoreId: Long? = null,
     /** The disc number, for the disc headers of an album page (docs/library.md §6.1). */
     val discNumber: Int? = null,
+    /** The section of the scroll thumb's bubble at this row, by the list's order (docs/library.md §11.2). */
+    val section: String? = null,
 )
 
 /** Where the songs of the list come from: the library, or a test's own list. */

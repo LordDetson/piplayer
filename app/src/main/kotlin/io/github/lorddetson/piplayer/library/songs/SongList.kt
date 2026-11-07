@@ -39,6 +39,8 @@ object SongList {
         val read: Long,
         val frozen: Boolean,
         val resortDue: Boolean,
+        /** The collation its sort keys were made by (docs/library.md §11.1). */
+        val collation: String? = null,
     )
 
     /** In the order of last use, so that the oldest goes first. Guarded by [lock]. */
@@ -73,7 +75,7 @@ object SongList {
         Library.awaitReady(app, READY_TIMEOUT_MS)
         val hidden = LibrarySettings(app).readHiddenFiles()
         return Library.read(app) { database ->
-            load(LibrarySongSource(database, hidden, query), Library.revision() to hidden, fresh, query)
+            load(LibrarySongSource(database, hidden, query), Library.revision() to hidden, fresh, query, Library.collation())
         }
     }
 
@@ -106,6 +108,7 @@ object SongList {
         key: Pair<Long?, HiddenFiles>? = null,
         fresh: Boolean = false,
         query: SongQuery = SongQuery.SONGS,
+        collation: String? = null,
     ): List<Song> {
         var batchesAtStart = 0L
         val read = synchronized(lock) {
@@ -125,7 +128,8 @@ object SongList {
             val patched = if (racing.isEmpty()) list else list.withValues(racing)
             readEnded()
             val old = kept[query]
-            val keepsOrder = old != null && (old.frozen || passRunning) && !fresh
+            // Keys of another collation are another order: the list takes it, even while the pass runs (§11.1).
+            val keepsOrder = old != null && (old.frozen || passRunning) && !fresh && old.collation == collation
             val shown = if (keepsOrder) FrozenOrder.merge(old!!.songs, patched) else patched
             var frozen = old?.frozen == true || passRunning
             var resortDue = old?.resortDue == true
@@ -136,7 +140,7 @@ object SongList {
             }
             // A fresh read ends the order that a newer read may have been merged against, so it replaces that one too.
             if (fresh || old == null || read > old.read) {
-                kept[query] = Kept(shown, key, maxOf(read, old?.read ?: 0), frozen, resortDue)
+                kept[query] = Kept(shown, key, maxOf(read, old?.read ?: 0), frozen, resortDue, collation)
                 evict()
             }
             shown
@@ -197,7 +201,7 @@ object SongList {
             val byId = rows.associateBy { it.fileId }
             for (entry in kept.entries) {
                 val list = entry.value
-                entry.setValue(Kept(list.songs.withValues(byId), list.key, list.read, list.frozen || freezing, list.resortDue))
+                entry.setValue(Kept(list.songs.withValues(byId), list.key, list.read, list.frozen || freezing, list.resortDue, list.collation))
             }
         }
         mutableBatches.update { it + 1 }
@@ -206,7 +210,7 @@ object SongList {
     /** The tag pass starts: from now on a read keeps the order of its list, unless asked for a fresh one. */
     fun passStarted() = synchronized(lock) {
         passRunning = true
-        mapKept { Kept(it.songs, it.key, it.read, frozen = true, it.resortDue) }
+        mapKept { Kept(it.songs, it.key, it.read, frozen = true, it.resortDue, it.collation) }
     }
 
     /** The tag pass ended: if it changed rows, one fresh read of each kept list is due at the next chance (§5.4). */
@@ -215,7 +219,7 @@ object SongList {
         val changed = changedByPass
         changedByPass = false
         if (changed) changingPasses++
-        mapKept { if (changed) Kept(it.songs, it.key, it.read, frozen = true, resortDue = true) else Kept(it.songs, it.key, it.read, false, it.resortDue) }
+        mapKept { if (changed) Kept(it.songs, it.key, it.read, frozen = true, resortDue = true, it.collation) else Kept(it.songs, it.key, it.read, false, it.resortDue, it.collation) }
     }
 
     private inline fun mapKept(change: (Kept) -> Kept) {

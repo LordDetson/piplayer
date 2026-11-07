@@ -98,6 +98,18 @@ class SongListTest {
     }
 
     @Test
+    fun `a list read under another collation takes its new order even while the pass runs`() {
+        SongList.load(SongSource { listOf(song(1, "Abba"), song(2, "Ёжик")) }, collation = "en")
+        SongList.passStarted()
+
+        SongList.load(SongSource { listOf(song(2, "Ёжик"), song(1, "Abba")) }, collation = "en")
+        assertThat(SongList.current()!!.map { it.id }).describedAs("same collation").containsExactly(1L, 2L)
+
+        SongList.load(SongSource { listOf(song(2, "Ёжик"), song(1, "Abba")) }, collation = "ru")
+        assertThat(SongList.current()!!.map { it.id }).describedAs("another collation").containsExactly(2L, 1L)
+    }
+
+    @Test
     fun `while the pass runs a list keeps its order, and a new list is read as it comes`() {
         SongList.load(SongSource { listOf(song(1, "A"), song(2, "B")) })
         SongList.passStarted()

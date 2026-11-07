@@ -160,6 +160,8 @@ dependencies {
     testImplementation(libs.junit.jupiter)
     testRuntimeOnly(libs.junit.platform.launcher)
     testImplementation(libs.assertj.core)
+    // The platform's ICU on the JVM, for the sort keys and letters (docs/library.md §11.4); tests only.
+    testImplementation(libs.icu4j)
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.okhttp.mockwebserver3)
     testImplementation(libs.okhttp.mockwebserver3.junit5)

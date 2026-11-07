@@ -1,5 +1,6 @@
 package io.github.lorddetson.piplayer.library.sync
 
+import io.github.lorddetson.piplayer.library.sort.SortKeys
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.github.lorddetson.piplayer.TestFiles
 import io.github.lorddetson.piplayer.library.FakeMediaIndex
@@ -83,7 +84,7 @@ class LibrarySyncTest {
         with(displays.getValue(files.getValue(1).id)) {
             assertThat(title).isEqualTo("Ёжик в тумане")
             assertThat(artist).isNull()
-            assertThat(titleKey).isEqualTo("ежик в тумане")
+            assertThat(titleSort).isEqualTo(SortKeys.of("Ёжик в тумане").bytes)
         }
         with(displays.getValue(files.getValue(3).id)) {
             assertThat(title).isEqualTo("Без тегов")
@@ -396,7 +397,7 @@ class LibrarySyncTest {
             assertThat(title).isEqualTo("Tag title")
             assertThat(artist).isEqualTo("Tag artist")
             assertThat(album).isEqualTo("Tag album")
-            assertThat(titleKey).isEqualTo("tag title")
+            assertThat(titleSort).isEqualTo(SortKeys.of("Tag title").bytes)
             assertThat(missingInfoReasons).isNotNull()
         }
     }
@@ -510,7 +511,7 @@ class LibrarySyncTest {
         sync.sync()
         readByThePass(1, tagged)
         database.withWriteTransaction {
-            usePrepared("UPDATE track_display SET title = 'stale', title_key = 'stale'") { it.step() }
+            usePrepared("UPDATE track_display SET title = 'stale', title_sort = x'00'") { it.step() }
         }
         dao.setDisplayVersion(TrackDisplayWriter.VERSION - 1)
         val revision = sync.status.value.revision
