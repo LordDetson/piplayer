@@ -61,7 +61,8 @@ val nativeLibraries = listOf(
     NativeLibrary("SQLite (in androidx.sqlite:sqlite-bundled)", "bundled with 2.7.1", "Public domain", listOf("licenses/sqlite-public-domain.txt")),
     NativeLibrary(
         "Public Suffix List (in OkHttp)", "bundled with OkHttp", "Mozilla Public License 2.0",
-        listOf("licenses/publicsuffix-MPL-2.0.txt"),
+        // MPL 2.0 §3.2(a): where the Source Code Form of the processed list is, then the licence.
+        listOf("licenses/publicsuffix-source.txt", "licenses/publicsuffix-MPL-2.0.txt"),
     ),
 )
 

@@ -983,7 +983,8 @@ Instrumented tests (on GitHub Actions, API 30 and 36):
 - The native components come from a list in `app/build.gradle.kts` with their licences and their own licence files,
   which `:nativelib` already puts into the assets under `licenses/` (with their copyright lines). The same list names
   what Maven modules carry under a licence of their own: SQLite in `androidx.sqlite:sqlite-bundled` (public domain) and
-  the Public Suffix List in OkHttp's assets (MPL 2.0), with their texts in the app's own assets.
+  the Public Suffix List in OkHttp's assets (MPL 2.0), with their texts in the app's own assets. The list ships in a
+  processed form, so its entry also says where its Source Code Form is (MPL 2.0 §3.2(a)).
 - Output, in the variant's assets: `licenses/dependencies.json` (the modules sorted by coordinates, the native
   components, and the kinds with the asset path of their texts) and `licenses/kinds/<SPDX id>.txt`. Debug builds list
   their own runtime classpath, which has the debug-only tooling modules as well.

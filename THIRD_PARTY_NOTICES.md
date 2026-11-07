@@ -60,7 +60,9 @@ under `third_party/`, pinned to the release tags named below.
 
 - OkHttp (Apache License 2.0) ships the Public Suffix List as the data file `PublicSuffixDatabase.list` in its Android
   library, which ends up in the APK's assets. Source: https://publicsuffix.org/list/.
-- License: Mozilla Public License 2.0; the full text is in `licenses/publicsuffix-MPL-2.0.txt`.
+- License: Mozilla Public License 2.0; the full text is in `licenses/publicsuffix-MPL-2.0.txt`. The file in the APK is
+  a processed form of the list, so `licenses/publicsuffix-source.txt` says where its Source Code Form is
+  (https://publicsuffix.org/list/, as carried by OkHttp 5.5.0), as the licence's section 3.2(a) asks.
 
 The app carries all of these texts in its assets under `licenses/`. The Maven modules of the runtime classpath, with their
 licences, are listed on the app's licences screen (docs/library.md §14.2).

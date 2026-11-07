@@ -1,0 +1,8 @@
+Public Suffix List
+
+OkHttp 5.5.0 (com.squareup.okhttp3:okhttp-android) carries the Public Suffix List in a processed form, as the file
+PublicSuffixDatabase.list in its assets, and PiPlayer's APK contains that file unmodified.
+
+The list is covered by the Mozilla Public License 2.0, whose text follows. Its Source Code Form is available from the
+Public Suffix List project at https://publicsuffix.org/list/ (the file public_suffix_list.dat), and its history at
+https://github.com/publicsuffix/list.
