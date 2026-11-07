@@ -78,7 +78,7 @@ class MediaCodecPcmSource(private val context: Context, private val fd: FileDesc
             val endedEarly = try {
                 codec.configure(format, null, null, 0)
                 codec.start()
-                pump(samples, codec, consumer)
+                pump(samples, codec, consumer, holdLast = mimeType == MIME_FLAC)
             } catch (e: MediaCodec.CodecException) {
                 throw DecodingException.Failed("The decoder $name failed: ${e.diagnosticInfo}", e)
             } finally {
@@ -95,8 +95,19 @@ class MediaCodecPcmSource(private val context: Context, private val fd: FileDesc
      * free input buffer and every ready output buffer is taken without waiting; the loop waits briefly only when
      * neither side moved. A decoder error after some audio came out ends the stream there (a file cut off in the middle
      * of its last frame, for example) and is returned; an error before any audio fails the file.
+     *
+     * A decoder in error gives no more output, also none it had already decoded. So with [holdLast] (FLAC, whose
+     * decoders put out one buffer per frame) the stream's last sample, which is the one a cut file leaves broken, waits in
+     * its input buffer until every frame queued before it has come out. Otherwise the frames the decoder still held when
+     * it failed on the cut one were lost, as many as timing left there: 1 to 6 of 30 in about a quarter of the decodes on
+     * the API 30 emulator. A decoder that keeps frames back gets the sample after [MAX_HOLD_POLLS] waits.
      */
-    private fun pump(samples: SampleReader, codec: MediaCodec, consumer: (ByteBuffer, PcmFormat) -> Boolean): String? {
+    private fun pump(
+        samples: SampleReader,
+        codec: MediaCodec,
+        consumer: (ByteBuffer, PcmFormat) -> Boolean,
+        holdLast: Boolean,
+    ): String? {
         val info = MediaCodec.BufferInfo()
         var inputDone = false
         var format: PcmFormat? = null
@@ -104,9 +115,22 @@ class MediaCodecPcmSource(private val context: Context, private val fd: FileDesc
         var received = 0
         var inConsumer = false
         var idle = 0
+        // The last sample, read into the input buffer [held] but not queued yet.
+        var held = -1
+        var heldSize = 0
+        var heldTimeUs = 0L
+        var heldPolls = 0
         while (true) try {
             var progress = false
             while (!inputDone) {
+                if (held >= 0) {
+                    if (received < queued && heldPolls < MAX_HOLD_POLLS) break
+                    codec.queueInputBuffer(held, 0, heldSize, heldTimeUs, 0)
+                    queued++
+                    held = -1
+                    progress = true
+                    continue
+                }
                 val index = codec.dequeueInputBuffer(0)
                 if (index < 0) break
                 progress = true
@@ -114,6 +138,11 @@ class MediaCodecPcmSource(private val context: Context, private val fd: FileDesc
                 if (size < 0) {
                     codec.queueInputBuffer(index, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
                     inputDone = true
+                } else if (holdLast && samples.last && received < queued) {
+                    held = index
+                    heldSize = size
+                    heldTimeUs = samples.timeUs
+                    heldPolls = 0
                 } else {
                     codec.queueInputBuffer(index, 0, size, samples.timeUs, 0)
                     queued++
@@ -145,6 +174,7 @@ class MediaCodecPcmSource(private val context: Context, private val fd: FileDesc
                 }
                 if (!keepGoing || info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) return null
             }
+            if (held >= 0 && !progress) heldPolls++
             idle = if (progress) 0 else idle + 1
             if (idle > MAX_IDLE_POLLS) {
                 throw DecodingException.Failed(
@@ -190,6 +220,10 @@ class MediaCodecPcmSource(private val context: Context, private val fd: FileDesc
         var timeUs = 0L
             private set
 
+        /** Whether the sample [read] returned last is the stream's last: no sample, or only a repeat, follows it. */
+        var last = false
+            private set
+
         /** Reads the next sample into [buffer] (between its position and limit); -1 at the end of the stream. */
         fun read(buffer: ByteBuffer): Int {
             if (ended || extractor.sampleTrackIndex < 0) return end()
@@ -200,6 +234,7 @@ class MediaCodecPcmSource(private val context: Context, private val fd: FileDesc
             lastTimeUs = time
             timeUs = time
             if (!extractor.advance()) ended = true
+            last = ended || extractor.sampleTrackIndex < 0 || (repeatsLastFrame && extractor.sampleTime == time)
             return size
         }
 
@@ -244,5 +279,8 @@ class MediaCodecPcmSource(private val context: Context, private val fd: FileDesc
 
         /** Waits in a row without any input taken or output given, about five seconds: the decoder is stuck. */
         const val MAX_IDLE_POLLS = 500
+
+        /** Waits without output for the frames before a held last sample, about half a second, well before [MAX_IDLE_POLLS]. */
+        const val MAX_HOLD_POLLS = 50
     }
 }
