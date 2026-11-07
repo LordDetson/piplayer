@@ -68,6 +68,14 @@ class CoverDiskCache(
         trim(files)
     }
 
+    /** Deletes every file. */
+    @Synchronized
+    fun clear() {
+        dir.listFiles().orEmpty().forEach { it.delete() }
+        index = LinkedHashMap(64, 0.75f, true)
+        total = 0
+    }
+
     /** What the files count in all. */
     val size: Long
         @Synchronized get() {

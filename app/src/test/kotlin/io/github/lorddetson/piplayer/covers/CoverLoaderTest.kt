@@ -3,6 +3,8 @@ package io.github.lorddetson.piplayer.covers
 import java.io.File
 import java.io.IOException
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -40,7 +42,8 @@ class CoverLoaderTest {
 
         override suspend fun load(step: CoverStep, size: Int): String? {
             reads += step
-            gate?.await()
+            // Not cancellable, as a blocking call is not: it returns after the load was cancelled.
+            gate?.let { withContext(NonCancellable) { it.await() } }
             if (step in failing) throw IOException("cannot open now")
             return pictures[step]?.let { "$it@$size" }
         }
@@ -210,6 +213,21 @@ class CoverLoaderTest {
         assertThat(loader.load(request, 96)).isNull()
         failing = false
         assertThat(loader.load(request, 96)).isEqualTo("E@96")
+    }
+
+    @Test
+    fun clearingForgetsMemoryAndDisk() = runTest {
+        sources.pictures[embedded] = "E"
+        val loader = loader()
+        loader.load(request, 96)
+        sources.reads.clear()
+
+        loader.clear()
+
+        assertThat(loader.peek(request, 96)).isNull()
+        assertThat(disk.size).isZero()
+        assertThat(loader.load(request, 96)).isEqualTo("E@96")
+        assertThat(sources.reads).containsExactly(own, embedded)
     }
 
     @Test

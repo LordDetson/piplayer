@@ -215,4 +215,5 @@
     <string name="cover_removed">Своя обложка убрана</string>
     <string name="cover_not_read">Теги песни ещё читаются. Попробуйте чуть позже.</string>
     <string name="cover_no_image">Не удалось прочитать изображение</string>
+    <string name="cover_failed">Не удалось изменить обложку</string>
 </resources>

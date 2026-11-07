@@ -1,6 +1,5 @@
 package io.github.lorddetson.piplayer.covers
 
-import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
@@ -51,8 +50,12 @@ class CoverLoader<I : Any>(
     /** At most [PARALLEL_LOADS] loads at a time, also while one waits on a thread of its own (a binder call, a read). */
     private val permits = Semaphore(PARALLEL_LOADS)
 
-    /** Raised by [invalidate]; a load that began before a change does not keep its result in memory. */
-    private val generation = AtomicLong()
+    /**
+     * Raised by [invalidate]; a load that began before a change does not keep its result in memory. Compared and put, and
+     * raised and cleared, under one lock, so that no old result lands between a raise and its clearing.
+     */
+    private var generation = 0L
+    private val memoryLock = Any()
 
     private fun memoryKey(request: CoverRequest, step: Int) = "$request@$step"
 
@@ -65,7 +68,7 @@ class CoverLoader<I : Any>(
         val cached = CoverSizes.cached(step)
         val key = memoryKey(request, step)
         if (cached) memory.get(key)?.let { return it.image }
-        val started = generation.get()
+        val started = synchronized(memoryLock) { generation }
         return permits.withPermit { loadNow(request, step, cached, key, started) }
     }
 
@@ -100,7 +103,7 @@ class CoverLoader<I : Any>(
                 }
             }
             ensureActive()
-            if (cached && known && generation.get() == started) memory.put(key, Slot(image))
+            if (cached && known) synchronized(memoryLock) { if (generation == started) memory.put(key, Slot(image)) }
             image
         }
 
@@ -124,10 +127,18 @@ class CoverLoader<I : Any>(
         return image
     }
 
-    /** Own covers changed: what memory holds may be stale. */
+    /** Own covers or the library changed: what memory holds may be stale. */
     fun invalidate() {
-        generation.incrementAndGet()
-        memory.clear()
+        synchronized(memoryLock) {
+            generation++
+            memory.clear()
+        }
+    }
+
+    /** Forgets everything, on disk too; tests start so. */
+    fun clear() {
+        invalidate()
+        disk?.clear()
     }
 
     companion object {

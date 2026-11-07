@@ -140,6 +140,21 @@ class OwnCoversTest {
     }
 
     @Test
+    fun theLoaderForgetsBeforeTheViewsHearOfAChange() = runBlocking<Unit> {
+        covers.load()
+        val seen = mutableListOf<Long>()
+        covers.onChange = { seen += covers.version.value }
+        val before = covers.version.value
+
+        covers.setAlbum("album", copyOf(image(100)))
+        covers.removeAlbum("album")
+
+        // Each time the version was still the old one when the loader was told.
+        assertThat(seen).containsExactly(before, before + 1)
+        assertThat(covers.version.value).isEqualTo(before + 2)
+    }
+
+    @Test
     fun aCopyThatNoReferenceNamesIsDeletedWhenTheCoversAreRead() = runBlocking<Unit> {
         val kept = copyOf(image(100))
         val left = copyOf(image(100))

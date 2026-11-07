@@ -23,6 +23,7 @@ import java.util.concurrent.ExecutionException
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.coroutineScope
@@ -126,8 +127,8 @@ class AndroidCoverSources(private val context: Context, private val ownDir: File
     /** The system thumbnail of [uri], or null when Android has none; a load cut short cancels the request. */
     private suspend fun thumbnail(uri: Uri, size: Int): Bitmap? = coroutineScope {
         val signal = CancellationSignal()
-        // Not on the loader's threads, which the request itself may all be holding.
-        val watcher = launch(Dispatchers.Default) {
+        // Started at once and resumed in the thread that cancels: a busy pool must not keep the signal from going off.
+        val watcher = launch(Dispatchers.Unconfined, start = CoroutineStart.UNDISPATCHED) {
             try {
                 awaitCancellation()
             } finally {

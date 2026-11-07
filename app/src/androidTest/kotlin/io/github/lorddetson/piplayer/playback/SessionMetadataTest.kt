@@ -148,6 +148,72 @@ class SessionMetadataTest {
         onMain { assertThat(session.mediaMetadata.artworkData).isEqualTo(own) }
     }
 
+    private fun sessionCovers(changes: kotlinx.coroutines.flow.Flow<Long>, resolve: suspend (Long) -> ByteArray?) = onMain {
+        SessionCovers(session, resolve, changes, kotlinx.coroutines.MainScope()).also { it.start() }
+    }
+
+    @Test
+    fun theServiceGivesEachLibrarySongItsPictureAtItsTransition() {
+        val pictures = mapOf(1L to io.github.lorddetson.piplayer.ui.player.TestImages.png(8), 2L to io.github.lorddetson.piplayer.ui.player.TestImages.png(16))
+        playFirst(item(1, LONG_FIXTURE, "One"), item(2, LONG_FIXTURE, "Two"))
+        val covers = sessionCovers(kotlinx.coroutines.flow.MutableStateFlow(0L)) { pictures[it] }
+        try {
+            eventually("the first song has its picture") { onMain { session.mediaMetadata.artworkData.contentEquals(pictures[1]) } }
+
+            onMain { session.seekToNextMediaItem() }
+
+            eventually("the second song has its picture") { onMain { session.mediaMetadata.artworkData.contentEquals(pictures[2]) } }
+        } finally {
+            onMain { covers.stop() }
+        }
+    }
+
+    @Test
+    fun aChangeOfOwnCoversLooksAgainAndAFailureKeepsTheStreamsPicture() {
+        val changes = kotlinx.coroutines.flow.MutableStateFlow(0L)
+        var picture: ByteArray? = io.github.lorddetson.piplayer.ui.player.TestImages.png(8)
+        var failing = false
+        playFirst(item(1, "playback/cover-front.mp3"))
+        eventually("the stream's cover has arrived") { onMain { exo.mediaMetadata.artworkData != null } }
+        val stream = onMain { exo.mediaMetadata.artworkData }
+        val covers = sessionCovers(changes) { if (failing) throw IllegalStateException("closed") else picture }
+        try {
+            eventually("the own cover shows") { onMain { session.mediaMetadata.artworkData.contentEquals(picture) } }
+
+            picture = null
+            onMain { changes.value = 1 }
+            eventually("the stream's picture is back") { onMain { session.mediaMetadata.artworkData.contentEquals(stream) } }
+
+            failing = true
+            onMain { changes.value = 2 }
+            Thread.sleep(500)
+            onMain { assertThat(session.mediaMetadata.artworkData).isEqualTo(stream) }
+        } finally {
+            onMain { covers.stop() }
+        }
+    }
+
+    @Test
+    fun aFileOpenedFromAnotherAppKeepsTheStreamsPicture() {
+        val opened = MediaItem.Builder()
+            .setMediaId("content://test/opened")
+            .setUri(Uri.fromFile(TestFiles.copy("playback/cover-front.mp3")))
+            .setMediaMetadata(MediaMetadata.Builder().setTitle("Opened").build())
+            .build()
+        var asked = 0
+        playFirst(opened)
+        val covers = sessionCovers(kotlinx.coroutines.flow.MutableStateFlow(0L)) { asked++; io.github.lorddetson.piplayer.ui.player.TestImages.png(8) }
+        try {
+            eventually("the stream's cover has arrived") { onMain { session.mediaMetadata.artworkData != null } }
+            onMain {
+                assertThat(session.mediaMetadata.artworkData).isEqualTo(exo.mediaMetadata.artworkData)
+                assertThat(asked).isZero()
+            }
+        } finally {
+            onMain { covers.stop() }
+        }
+    }
+
     @Test
     fun theListenerWrapperPassesOnEveryEvent() {
         val forwarded = ForwardingListener::class.java.declaredMethods.map { it.name to it.parameterTypes.toList() }.toSet()

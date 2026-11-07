@@ -6,7 +6,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.produceState
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -61,10 +63,11 @@ private fun Cover(
     val context = LocalContext.current
     val loader = remember(context) { Covers.loader(context) }
     val version by remember(context) { Covers.own(context).version }.collectAsState()
-    val image by produceState<ImageBitmap?>(loader.peek(request, px)?.asImageBitmap(), request, px, version) {
-        // Another request in the same place shows nothing of the one before.
-        value = loader.peek(request, px)?.asImageBitmap()
-        value = loader.load(request, px)?.asImageBitmap()
+    // Another request in the same place starts from what memory holds for it, never from the one before; a change of own
+    // covers keeps the picture on screen until the new one is loaded, so that covers do not blink.
+    var image by remember(request, px) { mutableStateOf(loader.peek(request, px)?.asImageBitmap()) }
+    LaunchedEffect(request, px, version) {
+        image = loader.load(request, px)?.asImageBitmap()
     }
     val shown = image
     if (shown == null && fallback != null) fallback(modifier) else CoverImage(shown, modifier, noteSize, placeholderName)

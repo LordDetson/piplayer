@@ -109,8 +109,16 @@ class CoversScreenTest {
     private val cover = hasTestTag(PlayerTags.COVER)
     private val placeholder = hasTestTag(PlayerTags.COVER_PLACEHOLDER)
 
-    /** The colors at the middle of each picture [matcher] finds. */
-    private fun colors(matcher: SemanticsMatcher): List<Int> = compose.onAllNodes(matcher, useUnmergedTree = true)
+    /** The colors at the middle of each picture [matcher] finds; none while a node goes away under the capture. */
+    private fun colors(matcher: SemanticsMatcher): List<Int> = try {
+        colorsNow(matcher)
+    } catch (_: AssertionError) {
+        emptyList()
+    } catch (_: IllegalStateException) {
+        emptyList()
+    }
+
+    private fun colorsNow(matcher: SemanticsMatcher): List<Int> = compose.onAllNodes(matcher, useUnmergedTree = true)
         .fetchSemanticsNodes().indices.map { i ->
             val image = compose.onAllNodes(matcher, useUnmergedTree = true)[i].captureToImage().toPixelMap()
             image[image.width / 2, image.height / 2].let { (it.alpha * 255).toInt() shl 24 or ((it.red * 255).toInt() shl 16) or ((it.green * 255).toInt() shl 8) or (it.blue * 255).toInt() }
@@ -138,7 +146,9 @@ class CoversScreenTest {
 
         compose.onNode(hasContentDescription(text(R.string.library_sort))).performClick()
         tap(hasText(text(R.string.sort_show_as_grid)))
-        waitFor(cover and hasAnyAncestor(hasTestTag(LibraryTags.GRID)))
+        val inGrid = hasAnyAncestor(hasTestTag(LibraryTags.GRID))
+        waitFor(cover and inGrid)
+        assertThat(colors(cover and inGrid)).isNotEmpty().allMatch { near(it, RED) }
 
         tap(hasText("Red Album"))
         // The page's header and its two songs.
@@ -162,7 +172,10 @@ class CoversScreenTest {
 
     @Test
     fun withoutACoverTheAlbumsColorShows() {
+        // Every row is a placeholder until its load ends; once the red album's two covers show, the one left is Plain's.
+        waitFor(cover and inSongs, count = 2)
         waitFor(placeholder and inSongs)
+        assertThat(compose.onAllNodes(placeholder and inSongs, useUnmergedTree = true).fetchSemanticsNodes()).hasSize(1)
 
         val node = compose.onAllNodes(placeholder and inSongs, useUnmergedTree = true)[0].captureToImage().toPixelMap()
         val pixel = node[node.width / 2, node.height / 10]

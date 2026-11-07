@@ -191,11 +191,18 @@ class SessionPlayer(private val player: ExoPlayer) : ForwardingPlayer(player) {
      * or gives the stream's back with null. Call it on the player's thread.
      */
     fun setArtwork(mediaId: String, data: ByteArray?) {
-        if (data == null) artworks.remove(mediaId) else artworks[mediaId] = data
+        val before = if (data == null) artworks.remove(mediaId) else artworks.put(mediaId, data)
+        // The same picture again is no news: each change makes the platform session draw its notification again.
+        if (before.contentEquals(data)) return
         // Only a change of what the current item shows is news to the listeners.
         if (mediaId != currentMediaItem?.mediaId) return
         val metadata = getMediaMetadata()
         filtered.keys.toList().forEach { it.onMediaMetadataChanged(metadata) }
+    }
+
+    /** Forgets the pictures of every item but [mediaId]: own covers changed, so they may be stale. */
+    fun keepArtworkOf(mediaId: String?) {
+        artworks.keys.retainAll(setOfNotNull(mediaId))
     }
 
     /** The pictures that replace the stream's, by media ID: the current item's and the last few before it. */

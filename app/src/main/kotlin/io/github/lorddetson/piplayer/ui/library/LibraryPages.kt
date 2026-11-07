@@ -4,6 +4,7 @@ import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.key
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.Row
@@ -195,7 +196,8 @@ fun ArtistPage(key: String, host: LibraryHost, onBack: () -> Unit) {
                         item(key = "album " + row.first().key) {
                             if (grid) {
                                 Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp).testTag(LibraryTags.GRID)) {
-                                    for (album in row) Box(Modifier.weight(1f)) { AlbumTile(album, host) }
+                                    // Keyed, so that a tile's cover stays with its album when the row changes.
+                                    for (album in row) key(album.key) { Box(Modifier.weight(1f)) { AlbumTile(album, host) } }
                                     repeat(columns - row.size) { Spacer(Modifier.weight(1f)) }
                                 }
                             } else {

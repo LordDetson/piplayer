@@ -15,7 +15,13 @@ import io.github.lorddetson.piplayer.library.identity.LibraryTrackRefs
 import io.github.lorddetson.piplayer.userdata.UserData
 import io.github.lorddetson.piplayer.userdata.UserDatabase
 import java.io.File
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
+import io.github.lorddetson.piplayer.library.tagpass.TagPassState
 import kotlinx.coroutines.withContext
 
 /** The library database's answers for covers (docs/library.md §13.1), with each file's identity from [user]. */
@@ -100,10 +106,20 @@ object Covers {
                 failures = { e -> android.util.Log.i(TAG, "A cover could not be loaded now", e) },
             ).also { loader ->
                 own.onChange = loader::invalidate
+                scope.launch {
+                    CoverInvalidations.of(Library.status(app).map { it.revision }, TagPassState.progress.map { it.running })
+                        .collect { loader.invalidate() }
+                }
                 coverLoader = loader
             }
         }
     }
+
+    /** Lives as long as the process, as the loader does. */
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    /** Forgets every cached cover, in memory and on disk; tests start so. */
+    fun clearCaches(context: Context) = loader(context).clear()
 
     /** An eighth of the heap, at most 32 MB (docs/library.md §13.3). */
     private fun memoryWeight(): Long = minOf(Runtime.getRuntime().maxMemory() / 8, 32L * 1024 * 1024)
@@ -120,7 +136,7 @@ object Covers {
 /** What the screens do with own covers (docs/library.md §13.2). */
 class CoverChoices(context: Context) {
 
-    enum class Result { SAVED, NOT_READ, NO_IMAGE }
+    enum class Result { SAVED, NOT_READ, NO_IMAGE, FAILED, REMOVED }
 
     private val app = context.applicationContext
     private val own = Covers.own(app)
@@ -129,19 +145,29 @@ class CoverChoices(context: Context) {
     private suspend fun identityOf(fileId: Long): Long? = Covers.facts(app).file(fileId)?.identityId
 
     /** Whether the song [fileId] can have an own cover now. */
-    suspend fun canChooseForSong(fileId: Long): Boolean = identityOf(fileId) != null
+    suspend fun canChooseForSong(fileId: Long): Boolean = safely(false) { identityOf(fileId) != null }
 
-    suspend fun chooseForSong(fileId: Long, image: Uri): Result {
-        val identity = identityOf(fileId) ?: return Result.NOT_READ
-        val copy = copy(image) ?: return Result.NO_IMAGE
+    suspend fun chooseForSong(fileId: Long, image: Uri): Result = safely(Result.FAILED) {
+        val identity = identityOf(fileId) ?: return@safely Result.NOT_READ
+        val copy = copy(image) ?: return@safely Result.NO_IMAGE
         own.setTrack(identity, copy)
-        return Result.SAVED
+        Result.SAVED
     }
 
-    suspend fun chooseForAlbum(albumKey: String, image: Uri): Result {
-        val copy = copy(image) ?: return Result.NO_IMAGE
+    suspend fun chooseForAlbum(albumKey: String, image: Uri): Result = safely(Result.FAILED) {
+        val copy = copy(image) ?: return@safely Result.NO_IMAGE
         own.setAlbum(albumKey, copy)
-        return Result.SAVED
+        Result.SAVED
+    }
+
+    /** [block], or [fallback] when a database cannot be read or written now; the screens must not go down for it. */
+    private suspend fun <T> safely(fallback: T, block: suspend () -> T): T = try {
+        block()
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        android.util.Log.w("CoverChoices", "An own cover could not be changed", e)
+        fallback
     }
 
     private suspend fun copy(image: Uri): CoverCopy? {
@@ -150,19 +176,31 @@ class CoverChoices(context: Context) {
         return withContext(Dispatchers.IO) { CoverImport.copy(app, image, own.dir) }
     }
 
-    suspend fun removeForSong(fileId: Long) {
+    suspend fun removeForSong(fileId: Long): Result = safely(Result.FAILED) {
         identityOf(fileId)?.let { own.removeTrack(it) }
+        Result.REMOVED
     }
 
-    suspend fun removeForAlbum(albumKey: String) = own.removeAlbum(albumKey)
-
-    suspend fun songHasOwn(fileId: Long): Boolean {
-        own.load()
-        return identityOf(fileId)?.let(own::track) != null
+    suspend fun removeForAlbum(albumKey: String): Result = safely(Result.FAILED) {
+        own.removeAlbum(albumKey)
+        Result.REMOVED
     }
 
-    suspend fun albumHasOwn(albumKey: String): Boolean {
+    suspend fun songHasOwn(fileId: Long): Boolean = safely(false) {
         own.load()
-        return own.album(albumKey) != null
+        identityOf(fileId)?.let(own::track) != null
+    }
+
+    suspend fun albumHasOwn(albumKey: String): Boolean = safely(false) {
+        own.load()
+        own.album(albumKey) != null
+    }
+
+    companion object {
+        /**
+         * Changes run here, not in a screen's scope: a rotation while a chosen image is copied must not cut the change
+         * short after the copy is written.
+         */
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     }
 }

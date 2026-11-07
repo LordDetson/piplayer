@@ -22,6 +22,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.async
 import kotlinx.coroutines.withContext
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -282,22 +283,31 @@ private fun rememberCoverActions(snackbar: SnackbarHostState): CoverActions {
     // "song:<file ID>" or "album:<album key>".
     var choosingFor by rememberSaveable { mutableStateOf<String?>(null) }
     val say = { id: Int -> scope.launch { snackbar.showSnackbar(resources.getString(id)) }; Unit }
+    /** Changes [change] outside the screen's scope, and says how it went while the screen is there. */
+    val run = { change: suspend () -> CoverChoices.Result ->
+        val result = CoverChoices.scope.async { change() }
+        scope.launch {
+            say(
+                when (result.await()) {
+                    CoverChoices.Result.SAVED -> R.string.cover_saved
+                    CoverChoices.Result.REMOVED -> R.string.cover_removed
+                    CoverChoices.Result.NOT_READ -> R.string.cover_not_read
+                    CoverChoices.Result.NO_IMAGE -> R.string.cover_no_image
+                    CoverChoices.Result.FAILED -> R.string.cover_failed
+                },
+            )
+        }
+        Unit
+    }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { image ->
         val target = choosingFor
         choosingFor = null
         if (image == null || target == null) return@rememberLauncherForActivityResult
-        scope.launch {
-            val result = when {
+        run {
+            when {
                 target.startsWith(SONG_TARGET) -> choices.chooseForSong(target.removePrefix(SONG_TARGET).toLong(), image)
                 else -> choices.chooseForAlbum(target.removePrefix(ALBUM_TARGET), image)
             }
-            say(
-                when (result) {
-                    CoverChoices.Result.SAVED -> R.string.cover_saved
-                    CoverChoices.Result.NOT_READ -> R.string.cover_not_read
-                    CoverChoices.Result.NO_IMAGE -> R.string.cover_no_image
-                },
-            )
         }
     }
     val pick = { target: String ->
@@ -309,20 +319,10 @@ private fun rememberCoverActions(snackbar: SnackbarHostState): CoverActions {
             chooseForSong = { song ->
                 scope.launch { if (choices.canChooseForSong(song.id)) pick(SONG_TARGET + song.id) else say(R.string.cover_not_read) }
             },
-            removeForSong = { song ->
-                scope.launch {
-                    choices.removeForSong(song.id)
-                    say(R.string.cover_removed)
-                }
-            },
+            removeForSong = { song -> run { choices.removeForSong(song.id) } },
             songHasOwn = { song -> choices.songHasOwn(song.id) },
             chooseForAlbum = { key -> pick(ALBUM_TARGET + key) },
-            removeForAlbum = { key ->
-                scope.launch {
-                    choices.removeForAlbum(key)
-                    say(R.string.cover_removed)
-                }
-            },
+            removeForAlbum = { key -> run { choices.removeForAlbum(key) } },
             albumHasOwn = { key -> choices.albumHasOwn(key) },
         )
     }

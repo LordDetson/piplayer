@@ -121,6 +121,22 @@ class CoverDiskCacheTest {
     }
 
     @Test
+    fun clearingDeletesEveryFile() {
+        val cache = cache()
+        cache.write("a", bytes(100))
+        cache.write("b", null)
+
+        cache.clear()
+
+        assertThat(cache.read("a")).isNull()
+        assertThat(cache.read("b")).isNull()
+        assertThat(cache.size).isZero()
+        assertThat(dir.listFiles()).isEmpty()
+        cache.write("a", bytes(10))
+        assertThat(cache.bytesOf("a")).isEqualTo(bytes(10))
+    }
+
+    @Test
     fun keysOfAnyTextAreSafeFileNames() {
         val cache = cache()
         val key = "embedded/1/2/3@192 ../../evil\u0000"

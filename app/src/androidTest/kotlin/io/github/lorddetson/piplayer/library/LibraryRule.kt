@@ -49,8 +49,10 @@ class LibraryRule(private val index: () -> MediaIndex? = { null }) : ExternalRes
             val context = TestFiles.targetContext
             val rules = UserData.folderRules(context)
             for (rule in rules.all()) rules.remove(rule.volumeName, rule.relativePath)
-            // Own covers refer to identities and album keys of the test before (docs/library.md §13.2).
+            // Own covers refer to identities and album keys of the test before (docs/library.md §13.2), and the cached
+            // covers to its files, whose IDs, sizes and times come again.
             Covers.own(context).clear()
+            Covers.clearCaches(context)
             UserData.database(context).identities().deleteAll()
             val settings = LibrarySettings(context)
             settings.setShowSystemSounds(false)

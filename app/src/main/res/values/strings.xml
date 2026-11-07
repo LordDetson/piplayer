@@ -218,4 +218,5 @@
     <string name="cover_removed">Own cover removed</string>
     <string name="cover_not_read">The song\'s tags are still being read. Try again in a moment.</string>
     <string name="cover_no_image">The image could not be read</string>
+    <string name="cover_failed">The cover could not be changed</string>
 </resources>

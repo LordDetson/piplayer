@@ -8,6 +8,8 @@ import androidx.media3.common.Player
 import io.github.lorddetson.piplayer.covers.BitmapCodec
 import io.github.lorddetson.piplayer.covers.CoverRequest
 import io.github.lorddetson.piplayer.covers.Covers
+import android.util.Log
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -38,7 +40,12 @@ class SessionCovers(
 
     fun start() {
         player.addListener(listener)
-        watching = scope.launch { changes.drop(1).collect { refresh() } }
+        watching = scope.launch {
+            changes.drop(1).collect {
+                player.keepArtworkOf(player.currentMediaItem?.mediaId)
+                refresh()
+            }
+        }
         refresh()
     }
 
@@ -53,13 +60,25 @@ class SessionCovers(
         val mediaId = player.currentMediaItem?.mediaId ?: return
         // An added entry plays a library song too (docs/playback.md §9.4); an opened file keeps the stream's picture.
         val fileId = QueueIds.fileId(mediaId) ?: return
-        loading = scope.launch { player.setArtwork(mediaId, resolve(fileId)) }
+        loading = scope.launch {
+            val picture = try {
+                resolve(fileId)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // A database that cannot be read now must not take playback down; the stream's picture stays.
+                Log.w(TAG, "No session cover for $mediaId", e)
+                null
+            }
+            player.setArtwork(mediaId, picture)
+        }
     }
 
     companion object {
         /** An own cover is sent at this step, a thumbnail at [THUMBNAIL_PX]. */
         private const val OWN_PX = 1_024
         private const val THUMBNAIL_PX = 512
+        private const val TAG = "SessionCovers"
 
         /** The picture that replaces the stream's for the file [fileId], as JPEG bytes, or null when the stream's stays. */
         suspend fun pictureOf(context: Context, fileId: Long): ByteArray? {

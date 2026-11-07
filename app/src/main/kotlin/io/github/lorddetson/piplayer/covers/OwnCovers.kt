@@ -107,8 +107,9 @@ class OwnCovers(private val database: UserDatabase, val dir: File, private val c
             val next = block(current)
             if (next === current) return
             snapshot = next
+            // The loader forgets first: a view that hears the new version at once must not get the old cover from memory.
+            onChange?.invoke()
             mutableVersion.value++
         }
-        onChange?.invoke()
     }
 }

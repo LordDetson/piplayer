@@ -80,6 +80,9 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
 
     private var coverBytes: ByteArray? = null
     private var coverId: String? = null
+
+    /** Whether the cover shown is the session's picture rather than the loader's, so that a change of it counts. */
+    private var coverFromStream = false
     private var decoding: Job? = null
     private val covers = AppCovers.loader(application)
 
@@ -306,17 +309,24 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
         if (!newSong && !reload) {
             if (bytes === coverBytes) return
             coverBytes = bytes
-            // Only a picture of the stream that came late can help, while nothing is shown and nothing is loading.
-            if (bytes == null || mutableCover.value != null || decoding?.isActive == true) return
+            if (decoding?.isActive == true) return
+            // A picture of the stream that came late helps while nothing is shown; a shown picture of the session that
+            // changed or went (an own cover removed, which the session showed) is looked up again.
+            if (mutableCover.value != null && !coverFromStream) return
+            if (bytes == null && mutableCover.value == null) return
         }
         coverId = id
         coverBytes = bytes
         decoding?.cancel()
-        if (newSong) mutableCover.value = null
+        if (newSong) {
+            mutableCover.value = null
+            coverFromStream = false
+        }
         if (id == null) return
         decoding = viewModelScope.launch {
             val loaded = fileId?.let { covers.load(CoverRequest.Track(it), coverSizePx) }
             val image = loaded ?: coverBytes?.let { stream -> withContext(Dispatchers.Default) { Covers.decode(stream, coverSizePx) } }
+            coverFromStream = loaded == null && image != null
             mutableCover.value = image?.asImageBitmap()
         }
     }

@@ -33,6 +33,9 @@ class LibraryCoverFactsTest {
             row(3, "Three", path = "Music/Ann/Old/", artist = "Ann", album = "Old", year = 1990, trackNumber = 3),
             row(4, "Four", path = "Music/Ann/New/", artist = "Ann", album = "New", year = 2020, trackNumber = 1),
             row(5, "Five", path = "Music/", artist = "Bob", album = null),
+            // A compilation: Ann's song on it is from 2010, the album from 1980, so it comes before her 1990 album.
+            row(6, "Six", path = "Music/Comp/", artist = "Ann", album = "Comp", year = 2010, trackNumber = 2),
+            row(7, "Seven", path = "Music/Comp/", artist = "Cid", album = "Comp", year = 1980, trackNumber = 1),
         )
     }
 
@@ -111,8 +114,33 @@ class LibraryCoverFactsTest {
 
         val albums = facts.artistAlbums(ann)
 
-        assertThat(albums).containsExactly(ArtistAlbum(albumKey(1), embedded = false), ArtistAlbum(albumKey(4), embedded = true))
+        assertThat(albums).containsExactly(
+            ArtistAlbum(albumKey(6), embedded = false),
+            ArtistAlbum(albumKey(1), embedded = false),
+            ArtistAlbum(albumKey(4), embedded = true),
+        )
         assertThat(facts.artistAlbums(DisplayArtists.keyOf("Bob"))).isEmpty()
+    }
+
+    @Test
+    fun aSongsOwnCoverFollowsItsIdentityToAMovedFile() = runBlocking<Unit> {
+        val key = "%064x".format(42)
+        val dao = Library.database(context).library()
+        dao.setContent(fileId(5), key, 60_000, DurationSource.HEADER)
+        Library.identities(context).attach()
+        val identity = UserData.database(context).identities().identities().single().id
+        val own = Covers.own(context)
+        own.setTrack(identity, CoverCopy("moved-test.jpg", 10, 10))
+
+        // The file moves: the index gives it another ID and place; the same audio has the same key.
+        synchronized(index) { index.volume().rows = index.volume().rows.filter { it.mediaStoreId != 5L } + row(8, "Five", path = "Music/Moved/", artist = "Bob", album = null) }
+        Library.sync(context).sync()
+        dao.setContent(fileId(8), key, 60_000, DurationSource.HEADER)
+        Library.identities(context).attach()
+
+        val moved = facts.file(fileId(8))!!
+        assertThat(moved.identityId).isEqualTo(identity)
+        assertThat(CoverPlan.of(CoverRequest.Track(moved.fileId), facts, own).first()).isEqualTo(CoverStep.Own("moved-test.jpg"))
     }
 
     @Test
