@@ -51,7 +51,10 @@ class LibraryListsTest {
         database.close()
     }
 
-    private fun ids(query: SongQuery, limit: Int? = null) = lists.songs(query, limit).map { it.id }
+    /** The songs of [query] by their media index IDs, which the test chose; their file IDs are the library's. */
+    private fun ids(query: SongQuery, limit: Int? = null) = lists.songs(query, limit).map { it.mediaStoreId }
+
+    private fun fileOf(mediaStoreId: Long) = runBlocking { database.library().files() }.single { it.mediaStoreId == mediaStoreId }.id
 
     private val first get() = lists.albums().single { it.title == "First" }
     private val second get() = lists.albums().single { it.title == "Second" }
@@ -200,12 +203,12 @@ class LibraryListsTest {
 
     @Test
     fun aSongLinksToItsAlbumArtistsAndFolder() {
-        val links = lists.links(3)!!
+        val links = lists.links(fileOf(3))!!
 
         assertThat(links.albumKey).isEqualTo(second.key)
         assertThat(links.artists.map { it.name }).containsExactly("Bob")
         assertThat(links.folder).isEqualTo(io.github.lorddetson.piplayer.library.db.FolderKey(PRIMARY, "Music/Bob/Second/CD1/"))
-        assertThat(lists.links(7)!!.albumKey).isNull()
+        assertThat(lists.links(fileOf(7))!!.albumKey).isNull()
         assertThat(lists.links(999)).isNull()
     }
 

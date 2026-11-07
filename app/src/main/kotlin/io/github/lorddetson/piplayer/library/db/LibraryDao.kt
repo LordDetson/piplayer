@@ -11,9 +11,11 @@ import io.github.lorddetson.piplayer.library.tagpass.DurationSource
 import io.github.lorddetson.piplayer.library.tagpass.PassFile
 import io.github.lorddetson.piplayer.tagging.contentkey.DurationCheck
 import io.github.lorddetson.piplayer.tagging.contentkey.DurationPlan
+import java.util.UUID
 
-/** A song as lists show it, with the media index's ID. */
+/** A song as lists show it, with the file ID of PiPlayer and the ID of the media index. */
 data class SongRow(
+    val fileId: Long,
     val mediaStoreId: Long,
     val title: String,
     val artist: String?,
@@ -210,7 +212,7 @@ interface LibraryDao {
     suspend fun readAgain(fileIds: List<Long>)
 
     @Query(
-        "SELECT f.media_store_id AS mediaStoreId, d.title, d.artist, d.album, d.duration_ms AS durationMs " +
+        "SELECT f.id AS fileId, f.media_store_id AS mediaStoreId, d.title, d.artist, d.album, d.duration_ms AS durationMs " +
             "FROM track_display d JOIN audio_file f ON f.id = d.file_id WHERE d.file_id IN (:fileIds)",
     )
     suspend fun songRowsOf(fileIds: List<Long>): List<SongRow>
@@ -230,9 +232,9 @@ interface LibraryDao {
 
     @Query(
         "SELECT d.file_id AS fileId, d.album_key AS albumKey, f.volume_name AS volume, f.relative_path AS relativePath " +
-            "FROM track_display d JOIN audio_file f ON f.id = d.file_id WHERE f.media_store_id = :mediaStoreId LIMIT 1",
+            "FROM track_display d JOIN audio_file f ON f.id = d.file_id WHERE d.file_id = :fileId",
     )
-    suspend fun songPlace(mediaStoreId: Long): SongPlaceRow?
+    suspend fun songPlace(fileId: Long): SongPlaceRow?
 
     @Query("SELECT * FROM display_artist WHERE file_id = :fileId ORDER BY position")
     suspend fun displayArtists(fileId: Long): List<DisplayArtistEntity>
@@ -245,6 +247,90 @@ interface LibraryDao {
 
     @Query("SELECT * FROM genre")
     suspend fun genres(): List<GenreEntity>
+
+    @Query("SELECT library_id FROM library_meta WHERE id = 1")
+    suspend fun storedLibraryId(): String?
+
+    @Query(
+        "INSERT INTO library_meta (id, mirrored_user_counter, library_id) VALUES (1, 0, :libraryId) " +
+            "ON CONFLICT(id) DO UPDATE SET library_id = COALESCE(library_id, :libraryId)",
+    )
+    suspend fun keepLibraryId(libraryId: String)
+
+    /** Gives the library [libraryId]: a rebuild keeps the one it had (docs/library.md §8.5). */
+    @Query(
+        "INSERT INTO library_meta (id, mirrored_user_counter, library_id) VALUES (1, 0, :libraryId) " +
+            "ON CONFLICT(id) DO UPDATE SET library_id = :libraryId",
+    )
+    suspend fun setLibraryId(libraryId: String)
+
+    /** The ID of the library, made the first time it is asked for (docs/library.md §8.4). */
+    suspend fun libraryId(): String {
+        storedLibraryId()?.let { return it }
+        keepLibraryId(UUID.randomUUID().toString())
+        return checkNotNull(storedLibraryId())
+    }
+
+    /** The highest file ID ever given (docs/library.md §8.4). */
+    @Query("SELECT COALESCE((SELECT last_file_id FROM library_meta WHERE id = 1), 0)")
+    suspend fun lastGivenFileId(): Long
+
+    @Query(
+        "INSERT INTO library_meta (id, mirrored_user_counter, last_file_id) VALUES (1, 0, :fileId) " +
+            "ON CONFLICT(id) DO UPDATE SET last_file_id = MAX(last_file_id, :fileId)",
+    )
+    suspend fun raiseLastFileId(fileId: Long)
+
+    /** Every file with its place: what a rebuild keeps (docs/library.md §8.5). */
+    @Query(
+        "SELECT id AS fileId, volume_name AS volume, relative_path AS relativePath, display_name AS displayName " +
+            "FROM audio_file",
+    )
+    suspend fun places(): List<StoredPlace>
+
+    /** The files whose content key is known, as the attach pass needs them (docs/library.md §8.2). */
+    @Query(
+        "SELECT f.id AS fileId, f.content_key AS contentKey, f.volume_name AS volume, f.relative_path AS relativePath, " +
+            "f.display_name AS displayName, f.size, f.duration_ms AS durationMs, f.duration_source AS durationSource, " +
+            "t.recording_mbid AS recordingMbid, f.format, t.file_id IS NOT NULL AS tagsRead FROM audio_file f " +
+            "LEFT JOIN track t ON t.file_id = f.id AND t.start_ms = 0 WHERE f.content_key IS NOT NULL",
+    )
+    suspend fun keyedFiles(): List<KeyedFileRow>
+
+    @Query("$FOUND_FILES WHERE f.id = :fileId")
+    suspend fun foundFile(fileId: Long): FoundFileRow?
+
+    @Query("$FOUND_FILES WHERE f.content_key = :contentKey")
+    suspend fun foundFilesWithKey(contentKey: String): List<FoundFileRow>
+
+    @Query("$FOUND_FILES WHERE f.volume_name = :volume AND f.relative_path = :relativePath AND f.display_name = :displayName")
+    suspend fun foundFilesAt(volume: String, relativePath: String, displayName: String): List<FoundFileRow>
+
+    @Query("SELECT media_store_id FROM audio_file WHERE id = :fileId")
+    suspend fun mediaStoreIdOf(fileId: Long): Long?
+
+    /** The file of a media index ID, for a saved queue of schema 2 (docs/playback.md §4.8). */
+    @Query("SELECT id FROM audio_file WHERE media_store_id = :mediaStoreId ORDER BY id LIMIT 1")
+    suspend fun fileIdOfMediaStoreId(mediaStoreId: Long): Long?
+
+    @Query("SELECT * FROM fingerprint WHERE content_key = :contentKey")
+    suspend fun fingerprint(contentKey: String): FingerprintEntity?
+
+    @Upsert
+    suspend fun saveFingerprint(fingerprint: FingerprintEntity)
+
+    @Query("SELECT content_key FROM fingerprint")
+    suspend fun fingerprintKeys(): List<String>
+
+    /** Cached fingerprints older than [before] whose key no file holds; the caller keeps those of identities. */
+    @Query(
+        "SELECT content_key FROM fingerprint WHERE computed_at < :before " +
+            "AND content_key NOT IN (SELECT content_key FROM audio_file WHERE content_key IS NOT NULL)",
+    )
+    suspend fun staleFingerprints(before: Long): List<String>
+
+    @Query("DELETE FROM fingerprint WHERE content_key IN (:keys)")
+    suspend fun deleteFingerprints(keys: List<String>)
 
     @Query("SELECT * FROM track_artist")
     suspend fun trackArtists(): List<TrackArtistEntity>
@@ -303,6 +389,7 @@ interface LibraryDao {
 
 /** A song of a list, with what the list groups it by. */
 data class ListSongRow(
+    val fileId: Long,
     val mediaStoreId: Long,
     val title: String,
     val artist: String?,
@@ -331,6 +418,34 @@ data class ArtistGroupRow(val artistKey: String, val name: String, val songs: In
 data class FolderCountRow(val volume: String, val relativePath: String, val songs: Int)
 
 data class SongPlaceRow(val fileId: Long, val albumKey: String?, val volume: String, val relativePath: String)
+
+/** A file with its ID and place, as a rebuild keeps it (docs/library.md §8.5). */
+data class StoredPlace(val fileId: Long, val volume: String, val relativePath: String, val displayName: String)
+
+/** A file with its content key, as the attach pass reads it. */
+data class KeyedFileRow(
+    val fileId: Long,
+    val contentKey: String,
+    val volume: String,
+    val relativePath: String,
+    val displayName: String,
+    val size: Long,
+    val durationMs: Long?,
+    val durationSource: String?,
+    val recordingMbid: String?,
+    val format: String?,
+    val tagsRead: Boolean,
+)
+
+/** A file as a saved track reference is looked up: its place, key and the length lists show. */
+data class FoundFileRow(
+    val fileId: Long,
+    val volume: String,
+    val relativePath: String,
+    val displayName: String,
+    val contentKey: String?,
+    val durationMs: Long?,
+)
 
 /** A file's size, modification time and place as the database holds them now. */
 data class FileState(
@@ -428,6 +543,10 @@ data class PendingDuration(
 }
 
 data class FolderRuleRow(val volume: String, val relativePath: String, val rule: Int)
+
+private const val FOUND_FILES = "SELECT f.id AS fileId, f.volume_name AS volume, f.relative_path AS relativePath, " +
+    "f.display_name AS displayName, f.content_key AS contentKey, COALESCE(d.duration_ms, f.duration_ms) AS durationMs " +
+    "FROM audio_file f LEFT JOIN track_display d ON d.file_id = f.id"
 
 private const val READ_FILES = "SELECT t.file_id AS fileId, t.title, t.artist, t.artists, t.album, t.composers, t.genres, " +
     "t.recording_mbid AS recordingMbid, f.size, f.mtime, f.display_name AS displayName, " +

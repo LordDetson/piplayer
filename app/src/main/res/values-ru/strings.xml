@@ -110,6 +110,11 @@
     <string name="settings_refresh_library_summary">Найти новые и изменённые файлы сейчас</string>
     <string name="settings_reread_tags">Перечитать все теги</string>
     <string name="settings_reread_tags_summary">Заново прочитать теги всех файлов в фоне</string>
+    <string name="settings_rebuild_library">Пересобрать библиотеку</string>
+    <string name="settings_rebuild_library_summary">Собрать библиотеку заново по файлам; избранное и другие данные останутся</string>
+    <string name="settings_rebuild_library_question">Пересобрать библиотеку?</string>
+    <string name="settings_rebuild_library_explained">Списки ненадолго опустеют, а все теги будут заново прочитаны в фоне. Избранное, плейлисты и другие данные останутся.</string>
+    <string name="settings_rebuild_library_confirm">Пересобрать</string>
     <string name="settings_library_folders">Папки библиотеки</string>
     <string name="settings_library_folders_summary">Выберите папки, которые входят в библиотеку</string>
     <string name="folders_empty">Папок с аудио пока нет</string>

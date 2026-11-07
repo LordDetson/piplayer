@@ -11,6 +11,9 @@ import io.github.lorddetson.piplayer.settings.ThemeMode
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
 /** The Settings screen's state (docs/library.md §3.6). */
@@ -46,5 +49,15 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     /** Has the tag pass read every file again; lists keep what they show meanwhile (docs/library.md §5.6). */
     fun readAllTagsAgain() {
         viewModelScope.launch { Library.readAllTagsAgain(getApplication()) }
+    }
+
+    /** Builds the library database anew, keeping user data (docs/library.md §8.5); it outlives the screen. */
+    fun rebuildLibrary() {
+        val app = getApplication<Application>()
+        rebuilds.launch { Library.rebuild(app) }
+    }
+
+    private companion object {
+        val rebuilds = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     }
 }

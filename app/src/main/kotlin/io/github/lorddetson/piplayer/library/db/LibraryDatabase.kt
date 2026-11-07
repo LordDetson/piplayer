@@ -18,7 +18,10 @@ import kotlinx.coroutines.Dispatchers
  */
 // Not unique: within one sync's transaction an index rebuild can hand a stored ID to another file before its old owner
 // has taken its new one.
-@Entity(tableName = "audio_file", indices = [Index("media_store_id"), Index("volume_name", "relative_path")])
+@Entity(
+    tableName = "audio_file",
+    indices = [Index("media_store_id"), Index("volume_name", "relative_path"), Index("content_key")],
+)
 data class AudioFileEntity(
     @PrimaryKey val id: Long,
     @ColumnInfo(name = "media_store_id") val mediaStoreId: Long,
@@ -77,7 +80,26 @@ data class LibraryMetaEntity(
     @ColumnInfo(name = "mirrored_user_counter") val mirroredUserCounter: Long,
     /** The version of the rules `track_display` was derived by (`TrackDisplayWriter.VERSION`). */
     @ColumnInfo(name = "display_version", defaultValue = "0") val displayVersion: Int = 0,
+    /** A random ID made with the database; file IDs mean something only under it (docs/library.md §8.4). */
+    @ColumnInfo(name = "library_id") val libraryId: String? = null,
+    /** The highest file ID ever given, so that no ID goes to a second file (docs/library.md §8.4). */
+    @ColumnInfo(name = "last_file_id", defaultValue = "0") val lastFileId: Long = 0,
 )
+
+/** A cached fingerprint (TI §10.1, docs/library.md §8.3): the raw items of Chromaprint, by the key of their file. */
+@Entity(tableName = "fingerprint")
+data class FingerprintEntity(
+    @PrimaryKey @ColumnInfo(name = "content_key") val contentKey: String,
+    /** The raw items as 4-byte big-endian integers. */
+    val fingerprint: ByteArray,
+    val format: String?,
+    @ColumnInfo(name = "computed_at") val computedAt: Long,
+) {
+    override fun equals(other: Any?): Boolean = other is FingerprintEntity && contentKey == other.contentKey &&
+        fingerprint.contentEquals(other.fingerprint) && format == other.format && computedAt == other.computedAt
+
+    override fun hashCode(): Int = contentKey.hashCode()
+}
 
 /** The media index's values for a file, as it gives them (TI §10.1, precedence level 4). */
 @Entity(tableName = "media_index_entry")
@@ -173,8 +195,9 @@ data class VolumeSyncStateEntity(
         TrackArtistEntity::class,
         GenreEntity::class,
         TrackGenreEntity::class,
+        FingerprintEntity::class,
     ],
-    version = 6,
+    version = 8,
     exportSchema = false,
 )
 abstract class LibraryDatabase : RoomDatabase() {

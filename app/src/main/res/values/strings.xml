@@ -120,6 +120,11 @@
     <string name="settings_refresh_library_summary">Look for new and changed files now</string>
     <string name="settings_reread_tags">Read all tags again</string>
     <string name="settings_reread_tags_summary">Reads the tags of every file again in the background</string>
+    <string name="settings_rebuild_library">Rebuild the library</string>
+    <string name="settings_rebuild_library_summary">Builds the library again from your files; favorites and other data stay</string>
+    <string name="settings_rebuild_library_question">Rebuild the library?</string>
+    <string name="settings_rebuild_library_explained">The lists empty for a moment and all tags are read again in the background. Favorites, playlists and other data stay.</string>
+    <string name="settings_rebuild_library_confirm">Rebuild</string>
     <string name="settings_library_folders">Library folders</string>
     <string name="settings_library_folders_summary">Choose the folders the library includes</string>
     <string name="folders_empty">No folders with audio yet</string>

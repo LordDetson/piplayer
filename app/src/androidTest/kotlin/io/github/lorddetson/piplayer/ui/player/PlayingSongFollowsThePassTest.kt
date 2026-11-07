@@ -61,7 +61,7 @@ class PlayingSongFollowsThePassTest {
                 }
             })
         }
-        SongList.applyInPlace(listOf(SongRow(1, "Changed", "New artist", "New album", 60_000)))
+        SongList.applyInPlace(listOf(SongRow(1, 1, "Changed", "New artist", "New album", 60_000)))
 
         compose.waitUntil(10_000) { onMain { connected.mediaMetadata.title?.toString() == "Changed" } }
         compose.waitUntil(10_000) { compose.onAllNodes(hasText("Changed")).fetchSemanticsNodes().size == 2 }

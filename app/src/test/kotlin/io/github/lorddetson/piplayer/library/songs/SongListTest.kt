@@ -74,7 +74,7 @@ class SongListTest {
         SongList.load(SongSource { listOf(song(1, "A"), song(2, "B")) })
         SongList.load(SongSource { listOf(song(2, "B"), song(1, "A")) }, query = byLength)
 
-        SongList.applyInPlace(listOf(SongRow(mediaStoreId = 2, title = "Zulu", artist = null, album = null, durationMs = null)))
+        SongList.applyInPlace(listOf(SongRow(fileId = 2, mediaStoreId = 2, title = "Zulu", artist = null, album = null, durationMs = null)))
 
         assertThat(SongList.current()!!.map { it.title }).containsExactly("A", "Zulu")
         assertThat(SongList.current(byLength)!!.map { it.title }).containsExactly("Zulu", "A")
@@ -85,7 +85,7 @@ class SongListTest {
         SongList.load(SongSource { listOf(song(1, "A")) })
         SongList.load(SongSource { listOf(song(1, "A")) }, query = album)
         SongList.passStarted()
-        SongList.applyInPlace(listOf(SongRow(1, "Zulu", null, null, null)))
+        SongList.applyInPlace(listOf(SongRow(1, 1, "Zulu", null, null, null)))
         SongList.passFinished()
 
         assertThat(SongList.resortDue()).isTrue()

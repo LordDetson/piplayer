@@ -1,5 +1,6 @@
 package io.github.lorddetson.piplayer.library
 
+import android.content.ContentUris
 import android.content.Context
 import android.content.pm.PackageManager
 import android.content.res.Resources
@@ -9,9 +10,15 @@ import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
 import android.provider.MediaStore
+import android.util.Log
 import androidx.annotation.VisibleForTesting
 import io.github.lorddetson.piplayer.ProcessRole
 import io.github.lorddetson.piplayer.library.db.LibraryDatabase
+import io.github.lorddetson.piplayer.library.db.StoredPlace
+import io.github.lorddetson.piplayer.library.identity.FingerprintStep
+import io.github.lorddetson.piplayer.library.identity.IdentityAttacher
+import io.github.lorddetson.piplayer.library.identity.LibraryFingerprints
+import io.github.lorddetson.piplayer.library.identity.LibraryTrackRefs
 import io.github.lorddetson.piplayer.library.rules.FolderRule
 import io.github.lorddetson.piplayer.library.rules.RulesSource
 import io.github.lorddetson.piplayer.library.songs.AudioPermission
@@ -45,12 +52,20 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.sync.Mutex
+import androidx.room3.withWriteTransaction
+import io.github.lorddetson.piplayer.userdata.UserDatabase
 import kotlinx.coroutines.withTimeoutOrNull
 
 /** The library of this process: its database and its sync, opened once, in the main process only (docs/library.md §1). */
 object Library {
 
-    private class Opened(val database: LibraryDatabase, val sync: LibrarySync) {
+    private class Opened(
+        val database: LibraryDatabase,
+        val sync: LibrarySync,
+        val identities: IdentityAttacher,
+        val trackRefs: LibraryTrackRefs,
+    ) {
         @Volatile
         var pass: TagPassRunner? = null
     }
@@ -81,6 +96,22 @@ object Library {
 
     fun sync(context: Context): LibrarySync = opened(context).sync
 
+    /** The attach pass of the track identities (docs/library.md §8.2). */
+    fun identities(context: Context): IdentityAttacher = opened(context).identities
+
+    /**
+     * Track references of the saved queue (docs/playback.md §4.8). They read the library through [read], so a rebuild
+     * never closes the database under them.
+     */
+    fun trackRefs(context: Context): LibraryTrackRefs = opened(context).trackRefs
+
+    private fun newTrackRefs(context: Context, user: UserDatabase = UserData.database(context)) = LibraryTrackRefs(
+        object : LibraryTrackRefs.Access {
+            override fun <T> read(block: (LibraryDatabase) -> T): T = read(context, block)
+        },
+        user,
+    )
+
     /** The status of the library's sync; it follows the library across [reopen]. */
     @OptIn(ExperimentalCoroutinesApi::class)
     fun status(context: Context): Flow<LibraryStatus> {
@@ -97,6 +128,7 @@ object Library {
         if (!mayRead(app)) return
         val sync = sync(app)
         startTagPass(app)
+        identities(app).request()
         synchronized(lock) {
             if (observer != null) return
             // Every change of the index's audio rows, on every volume; a burst brings one sync a second later.
@@ -146,7 +178,7 @@ object Library {
             onBatch = SongList::applyInPlace,
         )
         val walks = DurationWalks(library.database, library.sync, reader, passGate, onBatch = SongList::applyLengths)
-        return TagPassRunner(pass, library.sync.status, passGate, walks = walks)
+        return TagPassRunner(pass, library.sync.status, passGate, walks = walks, onRunEnd = library.identities::request)
     }
 
     /** A sync now, and a run of the tag pass after it; what the settings offer (docs/library.md §5.6). */
@@ -161,6 +193,58 @@ object Library {
         val library = opened(context.applicationContext)
         library.sync.exclusive { library.database.library().forgetReaderVersions() }
         library.pass?.readAllAgain()
+    }
+
+    /**
+     * Deletes the library database and builds it again (docs/library.md §8.5): the files that are still at their places
+     * keep their IDs and the library its ID, as long as the old database can be read. User data is not touched; the
+     * identities attach again as the tag pass brings the keys back.
+     */
+    suspend fun rebuild(context: Context) {
+        // A second confirmation while one runs is ignored.
+        if (!rebuilding.tryLock()) return
+        try {
+            rebuildOnce(context.applicationContext)
+        } finally {
+            rebuilding.unlock()
+        }
+    }
+
+    private val rebuilding = Mutex()
+
+    private suspend fun rebuildOnce(app: Context) {
+        val old = opened(app)
+        stop(old)
+        val kept = try {
+            val dao = old.database.library()
+            Kept(dao.places(), dao.libraryId(), maxOf(dao.lastGivenFileId(), dao.lastFileId()))
+        } catch (e: Exception) {
+            Log.w(TAG, "The library database could not be read before the rebuild", e)
+            null
+        }
+        access.write {
+            synchronized(lock) {
+                old.database.close()
+                SQLiteDatabase.deleteDatabase(file(app))
+                opened.value = open(app, kept)
+            }
+        }
+        SongList.forget()
+        if (mayRead(app)) {
+            startTagPass(app)
+            identities(app).request()
+            sync(app).request()
+        }
+    }
+
+    /** Ends the work on [library], so that its database may be closed. */
+    private suspend fun stop(library: Opened) {
+        library.pass?.stopAndJoin()
+        library.sync.awaitIdle()
+        // A sync asked for after that, by a change of the index or of the user data, must not run while the database
+        // closes under it.
+        library.sync.closeAndJoin()
+        library.identities.closeAndJoin()
     }
 
     /** Waits, off the main thread, until the library is ready, or [timeoutMs] has passed (docs/library.md §1.4). */
@@ -179,11 +263,7 @@ object Library {
     suspend fun reopen(context: Context, index: MediaIndex? = null, empty: Boolean = false) {
         val app = context.applicationContext
         val old = synchronized(lock) { opened.value }
-        old?.pass?.stopAndJoin()
-        old?.sync?.awaitIdle()
-        // A sync asked for after that, by a change of the index or of the user data, must not run while the database
-        // closes under it.
-        old?.sync?.closeAndJoin()
+        old?.let { stop(it) }
         // After the reads under way, before any new one.
         access.write {
             synchronized(lock) {
@@ -199,16 +279,45 @@ object Library {
         opened.value ?: open(context.applicationContext).also { opened.value = it }
     }
 
-    private fun open(context: Context): Opened {
+    /** What a rebuild takes from the old library database (docs/library.md §8.5). */
+    private class Kept(val places: List<StoredPlace>, val libraryId: String, val lastFileId: Long)
+
+    private fun open(context: Context, kept: Kept? = null): Opened {
         ProcessRole.current(context).requireMain("The library")
         val database = LibraryDatabase.open(context, file(context))
+        if (kept != null) {
+            runBlocking {
+                // Together, so that a process that dies before the first sync never gives old IDs under the old library ID.
+                database.withWriteTransaction {
+                    database.library().setLibraryId(kept.libraryId)
+                    // Not even the ID of a file that is gone goes to another one.
+                    database.library().raiseLastFileId(maxOf(kept.lastFileId, kept.places.maxOfOrNull { it.fileId } ?: 0))
+                }
+            }
+        }
+        val seed = kept?.places.orEmpty()
         val sync = LibrarySync(
             database,
             indexOverride ?: MediaStoreIndex(context),
             mayRead = { mayRead(context) },
             rules = userRules(context),
+            seed = seed,
         )
-        return Opened(database, sync)
+        val user = UserData.database(context)
+        val fingerprints = LibraryFingerprints(context, database, uriOf = { file ->
+            val id = runBlocking { database.library().mediaStoreIdOf(file.fileId) } ?: -1L
+            ContentUris.withAppendedId(MediaStore.Audio.Media.getContentUri(file.place.volume), id)
+        })
+        val identities = IdentityAttacher(
+            database,
+            user,
+            sync,
+            fingerprints = FingerprintStep(fingerprints),
+            // Before the first sync every identity would look missing.
+            ready = { sync.status.value.known },
+        )
+        identities.follow(sync.status)
+        return Opened(database, sync, identities, newTrackRefs(context))
     }
 
     /** The folder rules of the user database (docs/library.md §3.4). */
@@ -220,6 +329,8 @@ object Library {
     }
 
     private fun file(context: Context) = File(context.noBackupFilesDir, LibraryDatabase.FILE_NAME)
+
+    private const val TAG = "Library"
 
     /** Whether the app may read the media index; without it the library is neither synced nor listed. */
     fun mayRead(context: Context) =

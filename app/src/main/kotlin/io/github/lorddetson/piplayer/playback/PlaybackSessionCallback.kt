@@ -28,13 +28,15 @@ import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.MoreExecutors
 import com.google.common.util.concurrent.SettableFuture
 import io.github.lorddetson.piplayer.R
-import io.github.lorddetson.piplayer.library.songs.AudioPermission
-import io.github.lorddetson.piplayer.library.songs.Song
 import io.github.lorddetson.piplayer.library.Library
+import io.github.lorddetson.piplayer.library.identity.LibraryTrackRefs
+import io.github.lorddetson.piplayer.library.songs.AudioPermission
 import io.github.lorddetson.piplayer.library.lists.LibraryLists
 import io.github.lorddetson.piplayer.library.lists.ListKind
-import io.github.lorddetson.piplayer.settings.LibrarySettings
+import io.github.lorddetson.piplayer.library.songs.Song
 import io.github.lorddetson.piplayer.library.songs.SongList
+import io.github.lorddetson.piplayer.settings.LibrarySettings
+import java.util.Random
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -46,6 +48,15 @@ class PlaybackSessionCallback(
     private val context: Context,
     private val store: PlaybackStateStore,
     private val controls: PlaybackControls = PlaybackControls.NONE,
+    /** Finds the saved current song again (docs/playback.md §4.8); null where there is no library. */
+    private val trackRefs: () -> LibraryTrackRefs? = {
+        try {
+            Library.trackRefs(context)
+        } catch (e: Exception) {
+            Log.w(TAG, "No library to find saved songs in", e)
+            null
+        }
+    },
     private val onQueueRequest: (QueueState?) -> Unit,
 ) : MediaLibrarySession.Callback {
 
@@ -178,11 +189,12 @@ class PlaybackSessionCallback(
             )
         }
         return expansion.submit<MediaItemsWithStartPosition> {
+            val libraryId = libraryIdNow()
             val songs = songsFor(request)
             val start = QueueRequest.startIndex(songs, request)
             if (start < 0) throw UnsupportedOperationException("The song list is empty")
             if (token != restoreGeneration.get()) throw UnsupportedOperationException("The queue request was superseded")
-            val state = QueueState(request, emptyList())
+            val state = QueueState(request, emptyList(), libraryId)
             currentOrigin = state
             openGrants.keepOnly(emptyList())
             report(state)
@@ -299,6 +311,7 @@ class PlaybackSessionCallback(
                             result.setException(IllegalStateException("A queue is already loaded"))
                         else -> {
                             sendOpenSkipped(mediaSession, skipped)
+                            restored.order?.let { (player as? SessionPlayer)?.awaitOrder(it, restored.items.map { item -> item.mediaId }) }
                             player.shuffleModeEnabled = snapshot.shuffle
                             player.repeatMode = snapshot.repeatMode
                             commit(restored.state)
@@ -344,9 +357,12 @@ class PlaybackSessionCallback(
                     } else {
                         sendOpenSkipped(mediaSession, skipped)
                         player.pause()
-                        player.setMediaItems(restored.items, restored.start.index, restored.start.positionMs)
+                        // Shuffle first, while the player is still empty: the queue then takes the restored order,
+                        // or starts a new one at the restored song, instead of shuffle starting one afterwards.
+                        restored.order?.let { (player as? SessionPlayer)?.awaitOrder(it, restored.items.map { item -> item.mediaId }) }
                         player.shuffleModeEnabled = snapshot.shuffle
                         player.repeatMode = snapshot.repeatMode
+                        player.setMediaItems(restored.items, restored.start.index, restored.start.positionMs)
                         commit(restored.state)
                         player.prepare()
                         result.set(SessionResult(SessionResult.RESULT_SUCCESS))
@@ -458,16 +474,26 @@ class PlaybackSessionCallback(
 
     /** The saved queue with the readable opened files put back and the item and command state that belongs to it. */
     private fun restoredQueue(snapshot: PlaybackSnapshot, openItems: List<SavedOpenItem>): RestoredQueue? {
-        val queue = snapshot.queue?.let { followed(it, snapshot.songId) }
-        val library = queue?.let { request ->
-            runCatching { songsFor(request) }.getOrElse { e ->
+        val refs = trackRefs()
+        val libraryId = libraryIdNow(refs)
+        // Schema 2 named songs by their media index IDs (docs/playback.md §4.8).
+        val request = snapshot.queue?.let { request ->
+            if (!snapshot.mediaIndexIds) {
+                request
+            } else {
+                request.copy(startSongId = refs.lookup { it.fileOfMediaStoreId(request.startSongId) } ?: -1)
+            }
+        }?.let { followed(it, currentFileId(snapshot, refs)) }
+        val library = request?.let {
+            runCatching { songsFor(it) }.getOrElse { e ->
                 Log.w(TAG, "Could not read the library part of the saved queue", e)
                 emptyList()
             }
         }.orEmpty()
         val order = QueueRestore.order(library, snapshot, openItems)
         if (order.isEmpty()) return null
-        val start = QueueRestore.choose(order, snapshot) ?: return null
+        val currentFileId = currentFileId(snapshot, refs)
+        val start = QueueRestore.choose(order, snapshot, currentFileId) ?: return null
         val items = order.map { slot ->
             when (slot) {
                 is QueueSlot.Library -> mediaItem(slot.song)
@@ -475,8 +501,58 @@ class PlaybackSessionCallback(
             }
         }
         val openItems = QueueRestore.openItems(order)
-        val libraryRequest = if (order.any { it is QueueSlot.Library }) queue else null
-        return RestoredQueue(items, start, QueueState(libraryRequest, openItems))
+        val libraryRequest = if (order.any { it is QueueSlot.Library }) request else null
+        val shuffled = savedOrder(snapshot, order, start.index, currentFileId, libraryId)
+        return RestoredQueue(items, start, QueueState(libraryRequest, openItems, libraryId), shuffled)
+    }
+
+    /** The file ID of the saved current song as the library has it now, or null when it is gone or an opened file. */
+    private fun currentFileId(snapshot: PlaybackSnapshot, refs: LibraryTrackRefs?): Long? {
+        if (snapshot.songId < 0) return null
+        val current = snapshot.current
+        return when {
+            snapshot.mediaIndexIds -> refs.lookup { it.fileOfMediaStoreId(snapshot.songId) }
+            current != null && refs != null -> refs.lookup { it.resolve(current, snapshot.libraryId) }
+            // Without a library to ask, the ID is taken as it is.
+            else -> snapshot.songId
+        }
+    }
+
+    /** A lookup in the library that fails gives null: the restore goes on without it, as with a gone song. */
+    private fun <T> LibraryTrackRefs?.lookup(block: (LibraryTrackRefs) -> T?): T? {
+        val refs = this ?: return null
+        return try {
+            block(refs)
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not look up a saved song", e)
+            null
+        }
+    }
+
+    private fun libraryIdNow(refs: LibraryTrackRefs? = trackRefs()): String? = refs.lookup { it.libraryId() }
+
+    /** The saved shuffle order over the restored queue, or null for a new one (docs/playback.md §4.8). */
+    private fun savedOrder(
+        snapshot: PlaybackSnapshot,
+        order: List<QueueSlot>,
+        current: Int,
+        currentFileId: Long?,
+        libraryId: String?,
+    ): IntArray? {
+        if (!snapshot.shuffle || snapshot.queueRevision <= 0) return null
+        val file = store.readQueueBlocking() ?: return null
+        val saved = file.order ?: return null
+        if (file.revision != snapshot.queueRevision) return null
+        if (order.any { it is QueueSlot.Library } && file.libraryId != libraryId) return null
+        val keys = order.mapIndexed { index, slot ->
+            when {
+                // The current song moved and has another file ID now; in the saved order it has its old one.
+                index == current && slot is QueueSlot.Library && slot.song.id == currentFileId -> EntryKey.Song(snapshot.songId)
+                slot is QueueSlot.Library -> EntryKey.Song(slot.song.id)
+                else -> EntryKey.Opened(snapshot.openItems.indexOf((slot as QueueSlot.Open).item))
+            }
+        }
+        return QueueOrder.restore(saved, keys, current, Random())
     }
 
     /** Tells the saver the queue's state, and keeps the list it plays while it plays (docs/library.md §6.4). */
@@ -489,9 +565,11 @@ class PlaybackSessionCallback(
      * A saved album or artist whose key names nothing any more, because the tag pass has read its files since (a release
      * ID, another album artist), follows the saved song to its album or artist now (docs/library.md §6.5).
      */
-    private fun followed(request: QueueRequest, songId: Long): QueueRequest {
+    private fun followed(request: QueueRequest, songId: Long?): QueueRequest {
         val kind = request.list.kind
-        if ((kind != ListKind.ALBUM && kind != ListKind.ARTIST) || SongList.sourceOverride != null || !Library.mayRead(context)) {
+        if (songId == null || (kind != ListKind.ALBUM && kind != ListKind.ARTIST) || SongList.sourceOverride != null ||
+            !Library.mayRead(context)
+        ) {
             return request
         }
         return runCatching {
@@ -516,7 +594,13 @@ class PlaybackSessionCallback(
         report(state)
     }
 
-    private data class RestoredQueue(val items: List<MediaItem>, val start: QueueStart, val state: QueueState)
+    private data class RestoredQueue(
+        val items: List<MediaItem>,
+        val start: QueueStart,
+        val state: QueueState,
+        /** The restored shuffle order, or null for a new one. */
+        val order: IntArray?,
+    )
 
     /**
      * Whether [controller] may read the user's music library through the session: PiPlayer itself, the controllers

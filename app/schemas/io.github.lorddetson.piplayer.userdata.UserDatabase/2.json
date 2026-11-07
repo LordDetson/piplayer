@@ -1,0 +1,152 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 2,
+    "identityHash": "99459ad216cdb432aba64652523d33f7",
+    "entities": [
+      {
+        "tableName": "library_folder_rule",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`volume_name` TEXT NOT NULL, `relative_path` TEXT NOT NULL, `mode` INTEGER NOT NULL, PRIMARY KEY(`volume_name`, `relative_path`))",
+        "fields": [
+          {
+            "fieldPath": "volumeName",
+            "columnName": "volume_name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "relativePath",
+            "columnName": "relative_path",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "mode",
+            "columnName": "mode",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "volume_name",
+            "relative_path"
+          ]
+        }
+      },
+      {
+        "tableName": "user_meta",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER NOT NULL, `change_counter` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "changeCounter",
+            "columnName": "change_counter",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        }
+      },
+      {
+        "tableName": "track_identity",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `content_key` BLOB NOT NULL, `start_ms` INTEGER NOT NULL DEFAULT 0, `duration_ms` INTEGER, `recording_mbid` BLOB, `hint_volume_name` TEXT, `hint_relative_path` TEXT, `hint_display_name` TEXT, `hint_size` INTEGER, `created_at` INTEGER NOT NULL, `missing_since` INTEGER)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "contentKey",
+            "columnName": "content_key",
+            "affinity": "BLOB",
+            "notNull": true
+          },
+          {
+            "fieldPath": "startMs",
+            "columnName": "start_ms",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          },
+          {
+            "fieldPath": "durationMs",
+            "columnName": "duration_ms",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "recordingMbid",
+            "columnName": "recording_mbid",
+            "affinity": "BLOB"
+          },
+          {
+            "fieldPath": "hintVolumeName",
+            "columnName": "hint_volume_name",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "hintRelativePath",
+            "columnName": "hint_relative_path",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "hintDisplayName",
+            "columnName": "hint_display_name",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "hintSize",
+            "columnName": "hint_size",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "created_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "missingSince",
+            "columnName": "missing_since",
+            "affinity": "INTEGER"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_track_identity_content_key_start_ms",
+            "unique": true,
+            "columnNames": [
+              "content_key",
+              "start_ms"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_track_identity_content_key_start_ms` ON `${TABLE_NAME}` (`content_key`, `start_ms`)"
+          }
+        ]
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '99459ad216cdb432aba64652523d33f7')"
+    ]
+  }
+}

@@ -42,10 +42,15 @@ object QueueRestore {
     }
 
     /**
-     * The saved current item by its URI when it is an opened file, or by its media index ID when it is a song. If it is
-     * gone, the saved row is used with position zero: the position belonged to another file.
+     * The saved current item by its URI when it is an opened file, or by [currentFileId] when it is a song: the file the
+     * saved song is now (docs/playback.md §4.8), null when it is gone. If it is gone, the saved row is used with position
+     * zero: the position belonged to another file.
      */
-    fun choose(order: List<QueueSlot>, snapshot: PlaybackSnapshot): QueueStart? {
+    fun choose(
+        order: List<QueueSlot>,
+        snapshot: PlaybackSnapshot,
+        currentFileId: Long? = snapshot.songId.takeIf { it >= 0 },
+    ): QueueStart? {
         if (order.isEmpty()) return null
         val fallback = snapshot.row.coerceIn(0, order.lastIndex)
         if (snapshot.songId < 0) {
@@ -55,8 +60,8 @@ object QueueRestore {
             val exact = matches.firstOrNull { it == fallback } ?: matches.firstOrNull()
             if (exact != null) return QueueStart(exact, snapshot.positionMs)
         } else {
-            val exact = order.indexOfFirst { it is QueueSlot.Library && it.song.id == snapshot.songId }
-            if (exact >= 0) return QueueStart(exact, snapshot.positionMs)
+            val exact = order.indexOfFirst { it is QueueSlot.Library && it.song.id == currentFileId }
+            if (currentFileId != null && exact >= 0) return QueueStart(exact, snapshot.positionMs)
         }
         return QueueStart(fallback, 0)
     }

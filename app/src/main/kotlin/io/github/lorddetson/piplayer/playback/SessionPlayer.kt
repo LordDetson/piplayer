@@ -2,6 +2,7 @@ package io.github.lorddetson.piplayer.playback
 
 import androidx.annotation.OptIn
 import androidx.media3.common.ForwardingPlayer
+import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
@@ -36,6 +37,56 @@ class SessionPlayer(private val player: ExoPlayer) : ForwardingPlayer(player) {
             player.setShuffleOrder(order.startingAt(player.mediaItemCount, player.currentMediaItemIndex))
         }
         super.setShuffleModeEnabled(shuffleModeEnabled)
+    }
+
+    /**
+     * The next queue of [order]'s length plays in [order]: a restored shuffle order (docs/playback.md §4.8). Only while
+     * the player is empty.
+     */
+    fun awaitOrder(order: IntArray, mediaIds: List<String>) {
+        if (player.mediaItemCount > 0) return
+        val current = player.shuffleOrder as? StartFirstShuffleOrder ?: StartFirstShuffleOrder()
+        player.setShuffleOrder(current.waitingFor(order))
+        awaitedIds = mediaIds
+    }
+
+    /** The queue a waiting order belongs to; another queue makes it go, even of the same length. */
+    private var awaitedIds: List<String>? = null
+
+    private fun beforeNewQueue(items: List<MediaItem>) {
+        val awaited = awaitedIds ?: return
+        awaitedIds = null
+        if (items.map { it.mediaId } != awaited && player.mediaItemCount == 0) player.setShuffleOrder(StartFirstShuffleOrder())
+    }
+
+    override fun setMediaItems(mediaItems: List<MediaItem>) {
+        beforeNewQueue(mediaItems)
+        super.setMediaItems(mediaItems)
+    }
+
+    override fun setMediaItems(mediaItems: List<MediaItem>, resetPosition: Boolean) {
+        beforeNewQueue(mediaItems)
+        super.setMediaItems(mediaItems, resetPosition)
+    }
+
+    override fun setMediaItems(mediaItems: List<MediaItem>, startIndex: Int, startPositionMs: Long) {
+        beforeNewQueue(mediaItems)
+        super.setMediaItems(mediaItems, startIndex, startPositionMs)
+    }
+
+    override fun setMediaItem(mediaItem: MediaItem) {
+        beforeNewQueue(listOf(mediaItem))
+        super.setMediaItem(mediaItem)
+    }
+
+    override fun setMediaItem(mediaItem: MediaItem, resetPosition: Boolean) {
+        beforeNewQueue(listOf(mediaItem))
+        super.setMediaItem(mediaItem, resetPosition)
+    }
+
+    override fun setMediaItem(mediaItem: MediaItem, startPositionMs: Long) {
+        beforeNewQueue(listOf(mediaItem))
+        super.setMediaItem(mediaItem, startPositionMs)
     }
 
     override fun getMediaMetadata(): MediaMetadata = itemMetadata(super.getMediaMetadata())

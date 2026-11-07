@@ -43,11 +43,12 @@ class LibraryRule(private val index: () -> MediaIndex? = { null }) : ExternalRes
     }
 
     companion object {
-        /** No folder rules and the default hidden files (docs/library.md §3.4, §3.5). */
+        /** No folder rules, no track identities and the default hidden files (docs/library.md §3.4, §3.5, §8). */
         suspend fun cleanUserData() {
             val context = TestFiles.targetContext
             val rules = UserData.folderRules(context)
             for (rule in rules.all()) rules.remove(rule.volumeName, rule.relativePath)
+            UserData.database(context).identities().deleteAll()
             val settings = LibrarySettings(context)
             settings.setShowSystemSounds(false)
             settings.setShowRecordings(false)

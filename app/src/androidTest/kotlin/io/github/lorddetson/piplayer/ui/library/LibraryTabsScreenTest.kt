@@ -83,9 +83,18 @@ class LibraryTabsScreenTest {
 
     private fun tab(id: Int) = tap(hasText(text(id)) and hasAnyAncestor(hasTestTag(LibraryTags.TABS)))
 
-    /** The queue the tap built, as media IDs. */
-    private fun waitForQueue(vararg ids: Long) = controller.waitUntil("the queue ${ids.toList()}") {
-        mediaItemCount == ids.size && (0 until mediaItemCount).map { getMediaItemAt(it).mediaId } == ids.map { it.toString() }
+    /** The file IDs the library gave the songs of these media index IDs, which the test chose. */
+    private fun fileIds(vararg mediaStoreIds: Long): List<Long> {
+        val files = runBlocking { Library.database(TestFiles.targetContext).library().files() }
+        return mediaStoreIds.map { id -> files.single { it.mediaStoreId == id }.id }
+    }
+
+    /** The queue the tap built, named by the songs' media index IDs; media IDs are file IDs (docs/library.md §8). */
+    private fun waitForQueue(vararg ids: Long) {
+        val expected = fileIds(*ids).map { it.toString() }
+        controller.waitUntil("the queue ${ids.toList()}") {
+            mediaItemCount == ids.size && (0 until mediaItemCount).map { getMediaItemAt(it).mediaId } == expected
+        }
     }
 
     @Test
@@ -233,7 +242,7 @@ class LibraryTabsScreenTest {
         // The index's files do not exist, so the player skips them and stops at the last one, Delta: wait for that, then
         // the song it stopped at is the playing one.
         controller.waitUntil("playback stops") { playerError != null }
-        assertThat(onMain { controller.currentMediaItem?.mediaId }).isEqualTo("4")
+        assertThat(onMain { controller.currentMediaItem?.mediaId }).isEqualTo(fileIds(4).single().toString())
         waitFor(hasText("Delta") and inPage and SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, text(R.string.song_playing)))
 
         back()

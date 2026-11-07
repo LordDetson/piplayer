@@ -16,7 +16,7 @@ import org.junit.runner.RunWith
 class SongListInPlaceTest {
 
     private fun song(id: Long, title: String) = Song(id, "uri$id", title, "Artist", "Album", 1_000)
-    private fun row(id: Long, title: String) = SongRow(id, title, "New artist", "New album", 2_000)
+    private fun row(id: Long, title: String) = SongRow(id, id, title, "New artist", "New album", 2_000)
 
     @Before
     @After

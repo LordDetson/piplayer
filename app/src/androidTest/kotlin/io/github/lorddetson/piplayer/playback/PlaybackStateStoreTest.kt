@@ -3,6 +3,8 @@ package io.github.lorddetson.piplayer.playback
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import io.github.lorddetson.piplayer.library.identity.Place
+import io.github.lorddetson.piplayer.library.identity.TrackRef
 import java.io.File
 import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
@@ -23,6 +25,18 @@ class PlaybackStateStoreTest {
 
     private val context = InstrumentationRegistry.getInstrumentation().targetContext
     private val file = File(context.cacheDir, "playback-state-${UUID.randomUUID()}.preferences_pb")
+    private val queueFile = File(context.cacheDir, "queue-${UUID.randomUUID()}.bin")
+
+    /** The library a store asks for track references (docs/playback.md §4.8). */
+    private val tracks = object : PlaybackStateStore.TrackSource {
+        @Volatile
+        var libraryId = "lib-1"
+
+        override suspend fun refOf(fileId: Long) =
+            TrackRef(fileId, identityId = 9, contentKey = "aa", Place("external_primary", "Music/", "$fileId.mp3"), 180_000)
+
+        override suspend fun libraryId() = libraryId
+    }
     private lateinit var store: PlaybackStateStore
     private lateinit var scope: CoroutineScope
 
@@ -37,6 +51,55 @@ class PlaybackStateStoreTest {
     fun closeStore() {
         close(store, scope)
         file.delete()
+        queueFile.delete()
+    }
+
+    @Test
+    fun `a library song gets its track reference and the library id when it is written`() {
+        runBlocking {
+            store.write(snapshot())
+
+            val read = store.read()!!
+            assertThat(read.current).isEqualTo(TrackRef(42, 9, "aa", Place("external_primary", "Music/", "42.mp3"), 180_000))
+            assertThat(read.libraryId).isEqualTo("lib-1")
+        }
+    }
+
+    @Test
+    fun `file ids read under another library get no track reference`() {
+        runBlocking {
+            tracks.libraryId = "lib-2"
+
+            store.write(snapshot().copy(libraryId = "lib-1"))
+
+            assertThat(store.read()!!.current).isNull()
+            assertThat(store.read()!!.libraryId).isEqualTo("lib-1")
+        }
+    }
+
+    @Test
+    fun `the queue file is written whole and read back and cleared with the snapshot`() {
+        runBlocking {
+            val queue = QueueFile(revision = 5, libraryId = null, order = listOf(EntryKey.Song(2), EntryKey.Song(1)))
+
+            store.write(queue)
+            store.write(snapshot().copy(queueRevision = 5))
+
+            assertThat(store.readQueue()).isEqualTo(queue.copy(libraryId = "lib-1"))
+            assertThat(store.read()!!.queueRevision).isEqualTo(5)
+            store.clear()
+            assertThat(store.readQueue()).isNull()
+            assertThat(queueFile.exists()).isFalse()
+        }
+    }
+
+    @Test
+    fun `a damaged queue file is no queue`() {
+        runBlocking {
+            queueFile.writeBytes(byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13))
+
+            assertThat(store.readQueue()).isNull()
+        }
     }
 
     @Test
@@ -46,7 +109,7 @@ class PlaybackStateStoreTest {
 
             store.write(saved)
 
-            assertThat(store.read()).isEqualTo(saved)
+            assertThat(store.read()?.copy(current = null, libraryId = null)).isEqualTo(saved)
         }
     }
 
@@ -59,7 +122,7 @@ class PlaybackStateStoreTest {
             store.enqueue(first)
             store.enqueue(second)
 
-            assertThat(store.read()).isEqualTo(second)
+            assertThat(store.read()?.positionMs).isEqualTo(2_000)
         }
     }
 
@@ -89,7 +152,7 @@ class PlaybackStateStoreTest {
 
             val reopened = open()
             try {
-                assertThat(reopened.first.read()).isEqualTo(saved)
+                assertThat(reopened.first.read()?.copy(current = null, libraryId = null)).isEqualTo(saved)
             } finally {
                 close(reopened.first, reopened.second)
             }
@@ -99,7 +162,7 @@ class PlaybackStateStoreTest {
     private fun open(): Pair<PlaybackStateStore, CoroutineScope> {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
         val dataStore = PreferenceDataStoreFactory.create(scope = scope, produceFile = { file })
-        return PlaybackStateStore(dataStore) to scope
+        return PlaybackStateStore(dataStore, queueFile, tracks) to scope
     }
 
     private fun close(store: PlaybackStateStore, scope: CoroutineScope) {

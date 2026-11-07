@@ -37,6 +37,8 @@ data class SavedOpenItem(val index: Int, val file: OpenedFile) {
 data class QueueState(
     val library: QueueRequest?,
     val openItems: List<SavedOpenItem>,
+    /** The library ID the songs' file IDs were read under (docs/library.md §8.4); null without library songs. */
+    val libraryId: String? = null,
 ) {
 
     init {
@@ -57,11 +59,11 @@ data class QueueState(
      */
     fun withInserted(currentIndex: Int, files: List<OpenedFile>): QueueState {
         if (files.isEmpty()) return this
-        if (currentIndex < 0) return QueueState(null, files.mapIndexed { row, file -> SavedOpenItem(row, file) })
+        if (currentIndex < 0) return QueueState(null, files.mapIndexed { row, file -> SavedOpenItem(row, file) }, libraryId)
         val inserted = files.mapIndexed { offset, file -> SavedOpenItem(currentIndex + 1 + offset, file) }
         val shifted = openItems.map { item ->
             if (item.index > currentIndex) item.copy(index = item.index + files.size) else item
         }
-        return QueueState(library, (shifted + inserted).sortedBy { it.index })
+        return QueueState(library, (shifted + inserted).sortedBy { it.index }, libraryId)
     }
 }

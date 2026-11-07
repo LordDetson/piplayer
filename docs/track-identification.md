@@ -227,19 +227,19 @@ apps do not change it.
   is recorded in the same user database transaction that checks the key once more (§7.2 step 6).
 - Re-attachment of an identity to a file, in this order:
   1. the content key;
-  2. the same location (volume, relative path and display name, or an unchanged media index ID) with a duration
-     within 1 s;
+  2. the same location (volume, relative path and display name) with a duration within 1 s;
   3. the identity's recording MBID, when exactly one unattached file carries it in its tags and that file's duration
      is within 1 s;
-  4. while the library database survives: an unattached file of the same format, with a duration within 1 s, whose
-     fingerprint is similar to the one cached for the identity's old key (§10.1). These candidates are fingerprinted
-     on demand at background priority, as a one-off for identities that hold user data and stayed unmatched; this is
-     not part of the library scan (§8);
+  4. while the library database survives: a file of the same format, with a duration within 1 s, whose fingerprint
+     is similar to the one cached for the identity's old key (§10.1), and that is unattached or holds a newer identity
+     without user data, which then goes. These candidates are fingerprinted on demand at background priority, as a
+     one-off for identities that hold user data and stayed unmatched; this is not part of the library scan (§8);
   5. for playlist entries also their hints (path, name, duration, recording MBID).
 
-  A file is unattached when no identity holds its key. Re-attachment runs after media index rebuilds, SD card
-  changes, moves, library rebuilds and restores from backup. Favorites, statistics, playlists, identification results
-  and undo records depend on it.
+  A file is unattached when no identity holds its key; a file whose length still waits for a walk is not matched yet.
+  Every file left unattached gets a new identity. Re-attachment runs after media index rebuilds, SD card changes,
+  moves, library rebuilds and restores from backup. Favorites, statistics, playlists, identification results and undo
+  records depend on it. The attach pass of M2a is described in library.md §8.
 - Known limits of the layout, accepted when it was frozen:
   - The same master with a short edit in a place no window covers shares a key in WAV, in CBR MP3 and in Opus, whose
     length field does not see the bytes. Someone must own both editions for this to matter.
@@ -905,9 +905,9 @@ Where things live:
   `device_state` (rate-limiter last-request times, and from M2a "stop after current track" and the permission flag
   of library.md §3.2) is not.
 - Library folder rules are user decisions and live in the user database.
-- The persisted queue (M1) lives in its own DataStore file, `playback_state`, which the backup rules leave out: it
-  refers to track identities and, for files opened from other apps, to their URIs, which do not carry over to another
-  device.
+- The persisted queue lives in its own DataStore file, `playback_state`, and in `queue.bin` under the no-backup files
+  (playback.md §4.8), which the backup rules leave out: it refers to tracks by file ID, identity, content key and
+  location and, for files opened from other apps, to their URIs, which do not carry over to another device.
 
 ### 10.1 Library database (`library.db`): rebuildable, excluded from backup
 
@@ -951,9 +951,10 @@ made live in the user database.
   An index on (`title_key`, `search_text`) lets a search walk the titles in order and stop at the first page of 50.
   `missing_info_reasons` is the set of §1 reasons, written by
   the precedence resolver; `missing_info_decision` is none, keep_as_is or skipped.
-- `fingerprint(content_key, fingerprint, acoustid_id, decoder_path, computed_at)`: a cache for identification and
-  re-attachment, kept by content key, so the fingerprint of a file that left the media index stays available for
-  re-attachment (§3.1); rows that no file or identity refers to are dropped after 30 days.
+- `fingerprint(content_key, fingerprint, format, acoustid_id, decoder_path, computed_at)`: a cache for identification
+  and re-attachment, kept by content key, so the fingerprint of a file that left the media index stays available for
+  re-attachment (§3.1); rows that no file or identity refers to are dropped after 30 days. M2a creates it without
+  `acoustid_id` and `decoder_path`, which identification adds (M3).
 - `lookup_job(file_id, batch_uuid, phase, status, attempts, next_attempt_at, last_error)` and
   `candidate(file_id, source, recording_mbid, release_mbid, score, reason, payload_json)`.
 - `identification_trace(file_id, run_id, started_at, stage, provider, http_status, result_count, best_score,
@@ -969,9 +970,11 @@ What the user decided or did; it is never rebuilt from files. MBIDs and other UU
 content keys as 32-byte blobs. Per-file records are found through the identity and the file location when they are
 used, never through a stored content URI, which goes stale after a media index rebuild.
 
-- `track_identity(id, track_key, duration_ms, recording_mbid, hint_volume_name, hint_relative_path,
-  hint_display_name, hint_size, created_at, last_seen_at)`: the stable track identity that all user data refers to;
-  re-attachment (§3.1) updates `track_key` and the hints.
+- `track_identity(id, content_key, start_ms, duration_ms, recording_mbid, hint_volume_name, hint_relative_path,
+  hint_display_name, hint_size, created_at, missing_since)`: the stable track identity that all user data refers to;
+  the content key and the start form the track key. Every file with a known content key has one (M2a). Re-attachment
+  (§3.1) updates the key, the length and the hints. `missing_since` is set while no file holds the key; an identity
+  without user data that has been missing for 30 days is deleted, one with user data never.
 - `decision(id, identity_id, batch_uuid, kind, fields, release_choice_id, recording_mbid, release_track_mbid,
   acoustid_id, confidence, reason, provider, fetched_at, license_class, file_size, file_mtime, created_at, undone_at,
   lapsed_at)`: one row per track and decision. `kind` is apply, edit, revert_field, keep_as_is or skip; `fields` is the

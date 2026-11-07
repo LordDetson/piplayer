@@ -63,13 +63,14 @@ class LibraryLists(private val database: LibraryDatabase, private val hidden: Hi
     /** The songs of [query] in its order, the first [limit] when given. */
     fun songs(query: SongQuery, limit: Int? = null): List<Song> = rows(query, limit).map { row ->
         Song(
-            id = row.mediaStoreId,
+            id = row.fileId,
             uri = ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, row.mediaStoreId).toString(),
             title = row.title,
             artist = row.artist,
             album = row.album,
             durationMs = row.durationMs,
             discNumber = row.discNumber,
+            mediaStoreId = row.mediaStoreId,
         )
     }
 
@@ -155,9 +156,9 @@ class LibraryLists(private val database: LibraryDatabase, private val hidden: Hi
         return FolderLevels(rows.map { FolderSongs(it.volume, it.relativePath, it.songs) })
     }
 
-    /** Where the song of [mediaStoreId] belongs, or null for none in the library. */
-    fun links(mediaStoreId: Long): SongLinks? = runBlocking {
-        val place = dao.songPlace(mediaStoreId) ?: return@runBlocking null
+    /** Where the song of [fileId] belongs, or null for none in the library. */
+    fun links(fileId: Long): SongLinks? = runBlocking {
+        val place = dao.songPlace(fileId) ?: return@runBlocking null
         SongLinks(
             albumKey = place.albumKey,
             artists = dao.displayArtists(place.fileId).map { ArtistLink(it.artistKey, it.name) },
@@ -251,7 +252,7 @@ class LibraryLists(private val database: LibraryDatabase, private val hidden: Hi
         }
 
         fun songs(order: String, limit: Int?): RoomRawQuery = raw(
-            "SELECT f.media_store_id AS mediaStoreId, d.title, d.artist, d.album, d.duration_ms AS durationMs, " +
+            "SELECT f.id AS fileId, f.media_store_id AS mediaStoreId, d.title, d.artist, d.album, d.duration_ms AS durationMs, " +
                 "d.disc_number AS discNumber, f.relative_path AS relativePath " +
                 "FROM track_display d JOIN audio_file f ON f.id = d.file_id WHERE ${conditions()} " +
                 "ORDER BY $order" + (limit?.let { " LIMIT $it" } ?: ""),

@@ -38,7 +38,7 @@ class LibrarySongSourceTest {
         return LibrarySongSource(database, hidden).songs()
     }
 
-    private fun ids(vararg rows: IndexRow, hidden: HiddenFiles = HiddenFiles()) = songs(*rows, hidden = hidden).map { it.id }
+    private fun ids(vararg rows: IndexRow, hidden: HiddenFiles = HiddenFiles()) = songs(*rows, hidden = hidden).map { it.mediaStoreId }
 
     private fun titles(vararg titles: String) =
         songs(*titles.mapIndexed { i, title -> row(i + 1L, title) }.toTypedArray()).map { it.title }
@@ -98,21 +98,22 @@ class LibrarySongSourceTest {
     fun theFirstSongsFollowTheSameFilter() {
         songs(music, ringtone, short, unknownLength)
 
-        assertThat(LibrarySongSource(database, HiddenFiles()).firstSongs(10).map { it.id }).containsExactly(1L, 7L)
+        assertThat(LibrarySongSource(database, HiddenFiles()).firstSongs(10).map { it.mediaStoreId }).containsExactly(1L, 7L)
     }
 
     @Test
-    fun aSongCarriesTheIndexIdItsContentUriAndWhatListsShow() {
+    fun aSongCarriesItsFileIdTheIndexIdItsContentUriAndWhatListsShow() {
         val song = songs(row(42, title = "Halo", artist = "<unknown>", album = "I Am... Sasha Fierce", durationMs = 0)).single()
 
         assertThat(song).isEqualTo(
             Song(
-                id = 42,
+                id = 1,
                 uri = "content://media/external/audio/media/42",
                 title = "Halo",
                 artist = null,
                 album = "I Am... Sasha Fierce",
                 durationMs = null,
+                mediaStoreId = 42,
             ),
         )
     }
@@ -149,7 +150,7 @@ class LibrarySongSourceTest {
     fun equalTitlesKeepTheOrderOfTheirIndexIds() {
         val songs = songs(row(9, "Same"), row(3, "same"), row(5, "SAME"))
 
-        assertThat(songs.map { it.id }).containsExactly(3L, 5L, 9L)
+        assertThat(songs.map { it.mediaStoreId }).containsExactly(3L, 5L, 9L)
     }
 
     @Test

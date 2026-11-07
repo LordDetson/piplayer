@@ -84,6 +84,27 @@ fun SettingsScreen(onBack: () -> Unit, onOpenFolders: () -> Unit, viewModel: Set
                 stringResource(R.string.settings_reread_tags_summary),
                 viewModel::readAllTagsAgain,
             )
+            var confirmRebuild by rememberSaveable { mutableStateOf(false) }
+            TextRow(
+                stringResource(R.string.settings_rebuild_library),
+                stringResource(R.string.settings_rebuild_library_summary),
+            ) { confirmRebuild = true }
+            if (confirmRebuild) {
+                AlertDialog(
+                    onDismissRequest = { confirmRebuild = false },
+                    title = { Text(stringResource(R.string.settings_rebuild_library_question)) },
+                    text = { Text(stringResource(R.string.settings_rebuild_library_explained)) },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            confirmRebuild = false
+                            viewModel.rebuildLibrary()
+                        }) { Text(stringResource(R.string.settings_rebuild_library_confirm)) }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { confirmRebuild = false }) { Text(stringResource(R.string.settings_dialog_cancel)) }
+                    },
+                )
+            }
             SectionTitle(stringResource(R.string.settings_appearance))
             ThemeChoice(theme, viewModel::setTheme)
         }

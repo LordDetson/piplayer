@@ -92,8 +92,8 @@ The data model it implements is sketched in track-identification.md §10 (TI bel
 ### 1.4 Songs from the library
 
 - The Songs screen and the playback service list the songs of the library: the files the index counts as music,
-  as in M1 (playback.md §2.1). A song's ID stays the index's ID and its URI the index's content URI, so queue
-  requests, the saved queue and the session's media IDs do not change.
+  as in M1 (playback.md §2.1). A song's URI is the index's content URI; since step 8 its ID is the file ID of
+  PiPlayer (§8.4), which queue requests and the session's media IDs carry.
 - Order: by the title key, compared as Unicode code points, then by the index's ID. The database sorts; the list
   keeps the order it is given.
 - The screen shows "Loading" until the library is ready, so a first launch never shows "No songs" while the first
@@ -188,7 +188,8 @@ The data model it implements is sketched in track-identification.md §10 (TI bel
     - `library_folder_rule(volume_name, relative_path, mode)`: a folder the user included or excluded (§3.4);
     - `user_meta(id, change_counter)`: one row whose counter goes up in the same transaction as every write of user
       data, so that the library database can tell whether it still mirrors it (TI §10.3).
-- Later tables (track identities, favorites, playlists, statistics, decisions) arrive with their milestones.
+- Version 2 adds the track identities (§8.1). Later tables (favorites, playlists, statistics, decisions) arrive with
+  their milestones.
 
 ### 3.2 Settings files
 
@@ -429,7 +430,7 @@ keeps playing meanwhile, and the crash leaves a native crash report of `:tagger`
   runs by itself when the index reports a change (§1.3), so this is for when something seems to be missing.
 - **Read all tags again**: every file is read again, those that failed before too. `tag_pass_at` stays set, so lists keep
   showing what they show until the new values land.
-- A rebuild that keeps the user data comes after step 8, because it relies on re-attachment (TI §6).
+- **Rebuild the library**, which keeps the user data, came with step 8, because it relies on re-attachment (§8.5).
 
 ## 6. Library tabs and pages (M2a step 6)
 
@@ -507,7 +508,7 @@ keeps playing meanwhile, and the crash leaves a native crash report of `:tagger`
 
 - A tap sends a compact request of version 2 (playback.md §2.3) that names the list, its key, the sort, the reverse
   and the search: `q2/<list>?key=<key>&sort=<field>&rev=<0|1>&q=<query>&start=<ID>&index=<row>`, the key and the query
-  percent-encoded. The lists are `songs` (no key), `album` (its album key), `artist` (its artist key), `folder` (the
+  percent-encoded, the start the song's file ID (§8.4). The lists are `songs` (no key), `album` (its album key), `artist` (its artist key), `folder` (the
   volume, `/` and the relative path) and `tree` (a folder with all its subfolders).
 - `tree` plays the folder's own songs first, in the folder page's sort, then each subfolder in name order, in turn with
   its own songs first. "Reverse order" reverses the whole list.
@@ -597,3 +598,100 @@ On the phone (`TagPassScreenOffTest`, which waits for the walks too): after a pa
 19 499 lengths in 1 155 s (17 a second) with the FLAC album on repeat, the screen off and no charger: no underrun, no
 stall, no new audio output, and a worst lateness of the playback thread's looper of 71 ms during the walks (116 ms during
 the pass; the earlier control minute without either measured 82 ms).
+
+## 8. Track identity and re-attachment (M2a step 8)
+
+The rules are in TI §3.1 (re-attachment) and §10.2 (`track_identity`). This step builds them for the library; the
+saved queue that refers to identities is in playback.md §4.
+
+### 8.1 Identities
+
+- `user.db` version 2 adds `track_identity(id, content_key, start_ms, duration_ms, recording_mbid, hint_volume_name,
+  hint_relative_path, hint_display_name, hint_size, created_at, missing_since)`. The content key is a 32-byte blob and
+  the recording MBID a 16-byte blob; `(content_key, start_ms)` is unique. Version 1 migrates by adding the table.
+- Every file whose content key is known gets an identity, so that re-attachment runs on the whole library from the
+  first day, not only once favorites arrive. 20 000 identities take about 4 MB of the backup (TI §10.2).
+- A file is attached when an identity holds its key. Byte-identical audio in two places shares one identity; its hints
+  name one of the places, the one it named before while that file is still there.
+- `missing_since` is empty while a file holds the identity's key and is set when none does any more. An identity that
+  holds no user data and has been missing for 30 days is deleted: a deleted file, an SD card left out of the phone. An
+  identity that holds user data is never deleted. M2a has no user data that refers to identities; favorites, playlists
+  and statistics (M2b) and decisions (M3) will.
+- Attaching changes no user data, so it does not raise the user database's change counter (§3.1), which would ask
+  for a sync. Nothing is written into the library database: lists do not need the identity, and the two files keep no
+  row IDs of each other (TI §10).
+
+### 8.2 The attach pass
+
+- One pass at a time, in the main process, on a background thread. It runs when the library starts, after a sync that
+  changed files and after a run of the tag pass and its walks; requests during a pass collapse into one more pass.
+- It reads the files of the library database while no sync writes, and then writes only the user database, in one
+  transaction. It writes only what changed: new identities, new keys and hints, `missing_since`, deletions.
+- A file is a candidate once its key is known and its length settled: a length still waiting for a walk or a check of
+  FLAC's end (§7.2) could fall outside the 1 s window of steps 2 and 3. Such a file gets no identity until it settles.
+- In each pass, in this order (TI §3.1):
+  1. Identities whose key a file holds are attached; their hints follow the file when it moved.
+  2. A missing identity takes the key of an unattached file at its hinted place (volume, relative path, display name)
+     whose length is within 1 s of the identity's. The key changed in place: a gain tool rewrote the frames.
+  3. A missing identity with a recording MBID takes the key of the one unattached file that carries that MBID in its
+     tags, when the length is within 1 s and no other unattached file and no other missing identity has that MBID.
+  4. Missing identities that hold user data try the fingerprint cache (§8.3).
+  5. Every unattached file left gets a new identity.
+- Taking a key moves the identity: `content_key`, `duration_ms` and the hints become the file's, and `missing_since` is
+  cleared. When two missing identities could take one file, the newest one takes it.
+- The identity's recording MBID follows the file's tags while it is attached. A decided MBID of M3 will win over tags.
+
+### 8.3 The fingerprint cache
+
+- `library.db` gets `fingerprint(content_key, fingerprint, computed_at)`, the cache of TI §10.1 without the columns of
+  identification (M3). A row whose key no file and no identity holds is dropped after 30 days.
+- Step 4 runs only for missing identities that hold user data and whose old key has a cached fingerprint. Candidates are
+  attached files of the same format, with a length within 1 s, whose identity holds no user data and is newer than the
+  missing one: the file came after the identity went missing, so the pass of step 5 may already have given it a new
+  identity. Candidates without a cached fingerprint are fingerprinted at background priority (the decoders of TI §3.2,
+  at most 120 s of audio) and cached by their key.
+- A match is a bit error rate of at most 10 % at the best offset (`FingerprintComparison`, as in M0). With exactly one
+  match the missing identity takes the file's key and the new identity is deleted; with none or more it stays missing.
+- Each pair of identity and file is tried once per process. The library scan never fingerprints (TI §3.1).
+- In M2a nothing fills the cache and no identity holds user data, so this step does not run yet; identification (M3)
+  fills the cache and favorites (M2b) make identities hold data.
+
+### 8.4 File IDs
+
+- Lists, queue requests and the session's media IDs now use PiPlayer's own file ID (`audio_file.id`) instead of the
+  media index's ID. A file keeps it when the index is rebuilt (§1.3) and when the library is rebuilt (§8.5); only the
+  content URI the player opens still carries the index's ID.
+- A file ID is never given to another file: `library_meta.last_file_id` keeps the highest ID ever given, so a deleted
+  file's ID is not used again.
+- `library_meta.library_id` is a random ID made when the library database is created. A saved queue stores it, and file
+  IDs saved under another library ID mean nothing (playback.md §4).
+
+### 8.5 Rebuilding the library
+
+- Settings, Library: **Rebuild library**, after a confirmation that says that lists empty for a moment and tags are read
+  again, and that favorites and other user data stay.
+- The tag pass stops, the library database is read for its files (ID, volume, relative path, display name) and its
+  library ID, deleted and created anew. The first sync matches the index's rows to those files by place, as a full sync
+  does (§1.3), so every file that is still there keeps its ID and a playing queue keeps playing. Then the tag pass reads
+  everything and identities attach again by key as the keys come back. A library database that cannot be read is
+  rebuilt with new IDs and a new library ID.
+- Lists show "Loading" until the first sync has finished, as on a first launch.
+
+### 8.6 Checks
+
+JVM tests: the attach pass on tables of files and identities: each step of TI §3.1 and its order, another song at the
+same place 3 s off is not attached, two unattached files with one MBID attach neither, a file with a pending length is
+left alone, byte-identical copies share one identity and keep its hint, `missing_since` and the 30-day deletion without
+user data, never with it; step 4 with fake fingerprints (one match, two matches, a different format, a length 2 s off,
+an older identity, once per process).
+
+Instrumented tests on the API 30 emulator:
+
+- `user.db` from version 1 to 2 with a row of version 1 (`MigrationTestHelper`), and the exported schema.
+- Through the real library, the sync and the tag pass on generated files: a file moved to another folder, a renamed
+  file and an index rebuild with new IDs keep their identity; a file whose audio changed at the same place keeps it; a
+  moved Ogg file whose comments an external tool rewrote keeps its key and identity; a deleted file's identity goes
+  missing and is deleted 30 days later; rebuilding the library keeps file IDs and identities.
+- Step 4 on real fingerprints: a WAV file and a copy with one changed sample at another place (another key, nearly the
+  same sound) attach to the identity of the first through a cached fingerprint, when that identity holds user data in
+  the test.

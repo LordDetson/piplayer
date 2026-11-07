@@ -103,7 +103,7 @@ class GeneratedLibraryTest {
         assertThat(files).hasSizeGreaterThanOrEqualTo(FILES)
         // The default limit of 10 s hides its 100 files of 3 s, and the VBR MP3 files without a frame-count header whose
         // length the index estimates under 10 s, until the tag pass measures them (docs/library.md §3.5).
-        val listed = Library.read(context) { LibrarySongSource(it).songs() }.map { it.id }.toSet()
+        val listed = Library.read(context) { LibrarySongSource(it).songs() }.map { it.mediaStoreId }.toSet()
         val hidden = files.filter { it.mediaStoreId !in listed }.map { displays.getValue(it.id).durationMs }
         assertThat(hidden).allSatisfy { assertThat(it).isNotNull().isLessThan(10_000L) }
         assertThat(hidden.count { it!! <= 3_500L }).isEqualTo(100)

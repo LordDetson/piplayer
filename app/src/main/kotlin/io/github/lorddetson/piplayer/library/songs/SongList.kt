@@ -193,8 +193,8 @@ object SongList {
         synchronized(lock) {
             if (freezing) changedByPass = true
             batchCount++
-            if (activeReads > 0) rows.forEach { racing[it.mediaStoreId] = it }
-            val byId = rows.associateBy { it.mediaStoreId }
+            if (activeReads > 0) rows.forEach { racing[it.fileId] = it }
+            val byId = rows.associateBy { it.fileId }
             for (entry in kept.entries) {
                 val list = entry.value
                 entry.setValue(Kept(list.songs.withValues(byId), list.key, list.read, list.frozen || freezing, list.resortDue))
