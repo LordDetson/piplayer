@@ -47,6 +47,23 @@ object QueueEditing {
         return Insertion(row, position, keys, state.copy(openItems = openRows(state.openItems, newKeys), edits = newEdits))
     }
 
+    /**
+     * [tracks] added by a controller as the entries [keys] at list [row], where Media3 puts them (docs/playback.md §10.3):
+     * not part of the up-next run.
+     */
+    fun insertAt(state: QueueState, view: QueueView, row: Int, keys: List<EntryKey.Added>, tracks: List<TrackRef>): QueueState {
+        require(keys.size == tracks.size && keys.isNotEmpty())
+        val edits = state.edits
+        val newKeys = view.keys.toMutableList().apply { addAll(row, keys) }
+        val insert = QueueEdit.Insert(anchorBefore(newKeys, row), keys, laneRow(newKeys, row))
+        val newEdits = edits.copy(
+            added = edits.added + keys.zip(tracks) { key, track -> AddedEntry(key.number, track) },
+            journal = edits.journal + insert,
+            nextNumber = maxOf(edits.nextNumber, keys.maxOf { it.number } + 1),
+        )
+        return state.copy(openItems = openRows(state.openItems, newKeys), edits = newEdits)
+    }
+
     /** The entries from [from] to [to] removed; null when that empties the queue. */
     fun removeRange(state: QueueState, view: QueueView, from: Int, to: Int): QueueState? {
         var result = state

@@ -5,12 +5,6 @@ import io.github.lorddetson.piplayer.library.lists.SongLinks
 import io.github.lorddetson.piplayer.library.lists.SongQuery
 import io.github.lorddetson.piplayer.library.lists.SongSort
 import io.github.lorddetson.piplayer.library.songs.Song
-import java.net.URLDecoder
-import java.nio.ByteBuffer
-import java.net.URLEncoder
-import java.nio.charset.CharacterCodingException
-import java.nio.charset.CodingErrorAction
-import java.nio.charset.StandardCharsets
 
 /**
  * A compact queue request (docs/playback.md §2.3, docs/library.md §6.4): play [list] from [startSongId], found at
@@ -24,8 +18,8 @@ data class QueueRequest(val startSongId: Long, val startRow: Int, val list: Song
     }
 
     val mediaId: String
-        get() = "q2/${list.kind.token}?key=${encode(list.key)}&sort=${list.sort.token}&rev=${if (list.reversed) 1 else 0}" +
-            "&q=${encode(list.search)}&start=$startSongId&index=$startRow"
+        get() = "q2/${list.kind.token}?key=${MediaIdText.encode(list.key)}&sort=${list.sort.token}&rev=${if (list.reversed) 1 else 0}" +
+            "&q=${MediaIdText.encode(list.search)}&start=$startSongId&index=$startRow"
 
     companion object {
         /** Version 1, the song list by title, which saved queues may still hold. */
@@ -44,8 +38,8 @@ data class QueueRequest(val startSongId: Long, val startRow: Int, val list: Song
             val (kindToken, rawKey, sortToken, reversed, rawSearch, start, index) = match.destructured
             val kind = ListKind.of(kindToken) ?: return null
             val sort = SongSort.of(sortToken) ?: return null
-            val key = decode(rawKey) ?: return null
-            val search = decode(rawSearch) ?: return null
+            val key = MediaIdText.decode(rawKey) ?: return null
+            val search = MediaIdText.decode(rawSearch) ?: return null
             if ((kind == ListKind.SONGS) != key.isEmpty()) return null
             val list = SongQuery(kind, key, sort, reversed == "1", search)
             if ((kind == ListKind.FOLDER || kind == ListKind.TREE) && list.folder == null) return null
@@ -70,29 +64,6 @@ data class QueueRequest(val startSongId: Long, val startRow: Int, val list: Song
             if (songs.isEmpty()) return -1
             val index = songs.indexOfFirst { it.id == request.startSongId }
             return if (index >= 0) index else request.startRow.coerceAtMost(songs.lastIndex)
-        }
-
-        /** Percent-encoding with `%20` for spaces, so the media ID holds no space, `&`, `=`, `#` or control character. */
-        // The overloads that take a Charset need Android 13.
-        private fun encode(text: String): String = URLEncoder.encode(text, "UTF-8").replace("+", "%20")
-
-        /** Null for text that is not percent-encoded UTF-8. */
-        private fun decode(text: String): String? {
-            if ('+' in text) return null
-            val bytes = try {
-                URLDecoder.decode(text, "ISO-8859-1").toByteArray(StandardCharsets.ISO_8859_1)
-            } catch (_: IllegalArgumentException) {
-                return null
-            }
-            return try {
-                StandardCharsets.UTF_8.newDecoder()
-                    .onMalformedInput(CodingErrorAction.REPORT)
-                    .onUnmappableCharacter(CodingErrorAction.REPORT)
-                    .decode(ByteBuffer.wrap(bytes))
-                    .toString()
-            } catch (_: CharacterCodingException) {
-                null
-            }
         }
     }
 }

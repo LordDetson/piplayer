@@ -124,7 +124,8 @@ class PlaybackServiceTest {
     }
 
     @Test
-    fun theLibraryRootIsAnEmptyFolderUntilTheLibraryArrives() {
+    fun theLibraryRootHoldsTheFourTabs() {
+        // The tree itself is checked on a library of the test's own (LibraryTreeTest, docs/playback.md §10).
         val browser = connectBrowser()
         try {
             val root = onMain { browser.getLibraryRoot(null) }.get(10, TimeUnit.SECONDS)
@@ -136,7 +137,7 @@ class PlaybackServiceTest {
 
             val children = onMain { browser.getChildren(item.mediaId, 0, 100, null) }.get(10, TimeUnit.SECONDS)
             assertThat(children.resultCode).isEqualTo(LibraryResult.RESULT_SUCCESS)
-            assertThat(children.value).isEmpty()
+            assertThat(children.value!!.map { it.mediaId }).containsExactly("songs", "albums", "artists", "folders")
         } finally {
             onMain { browser.release() }
         }
