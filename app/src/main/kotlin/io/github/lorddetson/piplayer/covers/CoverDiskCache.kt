@@ -25,11 +25,20 @@ class CoverDiskCache(
 ) {
 
     /** File name to what it counts, least recently used first; read from the folder at the first call. */
+    @Volatile
     private var index: LinkedHashMap<String, Long>? = null
     private var total = 0L
 
-    @Synchronized
+    /** Held while the folder is read, so that one thread reads it while the others wait without holding the cache. */
+    private val scanning = Any()
+
     fun read(key: String): Cached? {
+        opened()
+        return readNow(key)
+    }
+
+    @Synchronized
+    private fun readNow(key: String): Cached? {
         val files = files()
         val name = nameOf(key)
         if (name !in files) return null
@@ -47,8 +56,13 @@ class CoverDiskCache(
     }
 
     /** Stores [bytes] for [key], or that its source had none when they are null. */
-    @Synchronized
     fun write(key: String, bytes: ByteArray?) {
+        opened()
+        writeNow(key, bytes)
+    }
+
+    @Synchronized
+    private fun writeNow(key: String, bytes: ByteArray?) {
         val files = files()
         val name = nameOf(key)
         forget(name)
@@ -80,9 +94,9 @@ class CoverDiskCache(
 
     /** What the files count in all. */
     val size: Long
-        @Synchronized get() {
-            files()
-            return total
+        get() {
+            opened()
+            return synchronized(this) { total }
         }
 
     private fun forget(name: String) {
@@ -101,17 +115,31 @@ class CoverDiskCache(
         }
     }
 
-    private fun files(): LinkedHashMap<String, Long> = index ?: LinkedHashMap<String, Long>(64, 0.75f, true).also { files ->
-        val found = dir.listFiles().orEmpty().filter { it.isFile }
-        // A write that died before its rename.
-        found.filter { it.name.endsWith(".tmp") }.forEach { it.delete() }
-        for (file in found.filterNot { it.name.endsWith(".tmp") }.sortedBy { modifiedAt(it) }) {
-            val weight = weightOf(file.length())
-            files[file.name] = weight
-            total += weight
+    private fun files(): LinkedHashMap<String, Long> = checkNotNull(index) { "The cache is not open" }
+
+    /**
+     * Reads the folder once (docs/library.md §13.3): each file's time and length once, sorted outside the cache's lock, so
+     * that the first covers of a cold start do not wait behind a scan of thousands of files.
+     */
+    private fun opened() {
+        if (index != null) return
+        synchronized(scanning) {
+            if (index != null) return
+            val found = dir.listFiles().orEmpty().filter { it.isFile && !it.name.endsWith(".tmp") }
+                .map { Triple(it.name, weightOf(it.length()), modifiedAt(it)) }
+                .sortedBy { it.third }
+            synchronized(this) {
+                // No write runs now (each holds the lock): a temporary file left is one whose write died before its rename.
+                dir.listFiles().orEmpty().filter { it.name.endsWith(".tmp") }.forEach { it.delete() }
+                val files = LinkedHashMap<String, Long>(maxOf(64, found.size * 2), 0.75f, true)
+                for ((name, weight) in found) {
+                    files[name] = weight
+                    total += weight
+                }
+                index = files
+                trim(files)
+            }
         }
-        index = files
-        trim(files)
     }
 
     private fun weightOf(length: Long) = maxOf(length, MIN_FILE_BYTES)

@@ -12,8 +12,8 @@ import kotlinx.coroutines.flow.scan
 /**
  * When the loader's memory may no longer hold what the library would give (docs/library.md §13.3): a sync changed the
  * library (a new revision after the first one seen), or a run of the tag pass ended, which may have found pictures and
- * chosen other songs to stand for albums. Not at every batch of a pass, so that scrolling back during a pass finds its
- * covers in memory.
+ * chosen other songs to stand for albums; or an attach pass wrote identities, so that an own cover may follow its identity
+ * to another file. Not at every batch of a pass, so that scrolling back during a pass finds its covers in memory.
  */
 object CoverInvalidations {
 
@@ -23,5 +23,6 @@ object CoverInvalidations {
             .scan(false to false) { (_, was), now -> was to now }
             .filter { (was, now) -> was && !now }
             .map { },
+        identityChanges.distinctUntilChanged().drop(1).map { },
     )
 }

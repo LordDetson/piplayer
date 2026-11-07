@@ -42,8 +42,16 @@ class OwnCovers(private val database: UserDatabase, val dir: File, private val c
 
     /** The covers, read if they are not yet, keeping the copy [keep] that a change is about to name; holds the lock. */
     private suspend fun loaded(keep: String? = null): Snapshot = snapshot ?: run {
-        val tracks = dao.trackCovers()
-        val albums = dao.albumCovers()
+        // A reference whose copy is missing counts as no own cover (§13.2): after a restore, user.db came back and the
+        // no-backup files did not. Such references go, so that no menu, artist or session takes them for covers.
+        val (tracks, lostTracks) = dao.trackCovers().partition { File(dir, it.fileName).isFile }
+        val (albums, lostAlbums) = dao.albumCovers().partition { File(dir, it.fileName).isFile }
+        if (lostTracks.isNotEmpty() || lostAlbums.isNotEmpty()) {
+            database.withWriteTransaction {
+                lostTracks.forEach { dao.removeTrackCover(it.identityId) }
+                lostAlbums.forEach { dao.removeAlbumCover(it.albumKey) }
+            }
+        }
         val names = tracks.map { it.fileName }.toSet() + albums.map { it.fileName } + listOfNotNull(keep)
         dir.listFiles().orEmpty().filter { it.isFile && it.name !in names }.forEach(File::delete)
         Snapshot(tracks.associate { it.identityId to it.fileName }, albums.associate { it.albumKey to it.fileName })

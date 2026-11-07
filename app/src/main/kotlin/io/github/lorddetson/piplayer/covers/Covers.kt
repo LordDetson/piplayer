@@ -11,6 +11,10 @@ import io.github.lorddetson.piplayer.library.Library
 import io.github.lorddetson.piplayer.library.db.CoverFileRow
 import io.github.lorddetson.piplayer.library.db.LibraryDatabase
 import io.github.lorddetson.piplayer.library.identity.Hex
+import io.github.lorddetson.piplayer.library.identity.IdentityAttacher
+import io.github.lorddetson.piplayer.library.lists.LibraryLists
+import io.github.lorddetson.piplayer.settings.HiddenFiles
+import io.github.lorddetson.piplayer.settings.LibrarySettings
 import io.github.lorddetson.piplayer.library.identity.LibraryTrackRefs
 import io.github.lorddetson.piplayer.userdata.UserData
 import io.github.lorddetson.piplayer.userdata.UserDatabase
@@ -25,7 +29,12 @@ import io.github.lorddetson.piplayer.library.tagpass.TagPassState
 import kotlinx.coroutines.withContext
 
 /** The library database's answers for covers (docs/library.md §13.1), with each file's identity from [user]. */
-class LibraryCoverFacts(private val access: LibraryTrackRefs.Access, private val user: UserDatabase) : CoverFacts {
+class LibraryCoverFacts(
+    private val access: LibraryTrackRefs.Access,
+    private val user: UserDatabase,
+    /** The hidden files of the lists (§3.5), so that an artist's albums are those of the artist page. */
+    private val hidden: () -> HiddenFiles = { HiddenFiles() },
+) : CoverFacts {
 
     private suspend fun <T> read(block: suspend (LibraryDatabase) -> T): T = withContext(Dispatchers.IO) {
         access.read { database -> kotlinx.coroutines.runBlocking { block(database) } }
@@ -35,8 +44,14 @@ class LibraryCoverFacts(private val access: LibraryTrackRefs.Access, private val
 
     override suspend fun albumFile(albumKey: String): CoverFile? = read { it.library().albumCoverFile(albumKey) }?.let { cover(it) }
 
-    override suspend fun artistAlbums(artistKey: String): List<ArtistAlbum> =
-        read { it.library().artistCoverAlbums(artistKey) }.map { ArtistAlbum(it.albumKey, it.embedded) }
+    override suspend fun artistAlbums(artistKey: String): List<ArtistAlbum> {
+        val shown = hidden()
+        return read { database ->
+            val albums = LibraryLists(database, shown).artistAlbums(artistKey).map { it.key }
+            val withPictures = albums.chunked(KEY_CHUNK).flatMap { database.library().albumsWithPictures(it) }.toSet()
+            albums.map { ArtistAlbum(it, it in withPictures) }
+        }
+    }
 
     override suspend fun artistFile(artistKey: String): CoverFile? = read { it.library().artistCoverFile(artistKey) }?.let { cover(it) }
 
@@ -49,6 +64,11 @@ class LibraryCoverFacts(private val access: LibraryTrackRefs.Access, private val
         identityId = row.contentKey?.let { user.identities().idOfKey(Hex.bytes(it)) },
         albumKey = row.albumKey,
     )
+
+    private companion object {
+        /** Album keys bound in one query, well under SQLite's limit of arguments. */
+        const val KEY_CHUNK = 500
+    }
 }
 
 /** Facts of a library that may not be read: nothing. */
@@ -87,6 +107,7 @@ object Covers {
                 override fun <T> read(block: (LibraryDatabase) -> T): T = Library.read(app, block)
             },
             UserData.database(app),
+            hidden = { LibrarySettings(app).readHiddenFiles() },
         )
     }
 
@@ -107,7 +128,11 @@ object Covers {
             ).also { loader ->
                 own.onChange = loader::invalidate
                 scope.launch {
-                    CoverInvalidations.of(Library.status(app).map { it.revision }, TagPassState.progress.map { it.running })
+                    CoverInvalidations.of(
+                        Library.status(app).map { it.revision },
+                        TagPassState.progress.map { it.running },
+                        IdentityAttacher.changes,
+                    )
                         .collect { loader.invalidate() }
                 }
                 coverLoader = loader

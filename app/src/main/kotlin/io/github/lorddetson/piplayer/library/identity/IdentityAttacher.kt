@@ -112,7 +112,10 @@ class IdentityAttacher(
         val stored = dao.identities()
         val holding = holders()
         val plan = IdentityMatcher.plan(files, stored.map(::identity), holding, now)
-        if (!plan.isEmpty) write(plan, stored.associateBy { it.id }, now)
+        if (!plan.isEmpty) {
+            write(plan, stored.associateBy { it.id }, now)
+            changes.value++
+        }
         fingerprints?.let { step -> takeOver(step, files, holding) }
         dropStaleFingerprints(now)
         plan
@@ -146,6 +149,7 @@ class IdentityAttacher(
             dao.delete(takeovers.map { it.replacedId })
             dao.updateAll(takeovers.map { identity(byId.getValue(it.missingId)).following(it.file).entity(byId.getValue(it.missingId)) })
         }
+        changes.value++
     }
 
     private suspend fun dropStaleFingerprints(now: Long) {

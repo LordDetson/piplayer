@@ -137,8 +137,9 @@ class LibraryCoverFactsTest {
         File(own.dir, "moved-test.jpg").apply { parentFile!!.mkdirs(); writeBytes(ByteArray(10)) }
         own.setTrack(identity, CoverCopy("moved-test.jpg", 10, 10))
 
-        // The file moves: the index gives it another ID and place; the same audio has the same key.
-        synchronized(index) { index.volume().rows = index.volume().rows.filter { it.mediaStoreId != 5L } + row(8, "Five", path = "Music/Moved/", artist = "Bob", album = null) }
+        // The file moves: the index gives it another ID and place, at a generation past every row so that the sync reads
+        // it; the same audio has the same key.
+        synchronized(index) { index.volume().rows = index.volume().rows.filter { it.mediaStoreId != 5L } + row(8, "Five", path = "Music/Moved/", artist = "Bob", album = null, generation = 100) }
         Library.sync(context).sync()
         dao.setContent(fileId(8), key, 60_000, DurationSource.HEADER)
         val changes = IdentityAttacher.changes.value

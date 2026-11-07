@@ -809,7 +809,8 @@ the cover provider that serves the library tree's `artworkUri` to controllers ou
 - An album's cover is its own cover, otherwise the embedded picture or system thumbnail of one of its songs: the first by
   disc, track and file name among the songs whose picture the tag pass found, then among the unread ones, then among the
   rest. A song's own cover stands for that song only, never for its album. Hidden files (§3.5) may stand for an album too:
-  their pictures are the album's all the same.
+  their pictures are the album's all the same. An artist's albums, though, are exactly those of the artist page, with
+  its rule for hidden files.
 - An artist's cover is the cover of one of their albums, taken in the artist page's order (the album's year, then its
   title, over all its songs, so that a compilation sorts by its own year): the first
   with an own cover, otherwise the first with an embedded picture, otherwise the first. An artist without albums shows
@@ -847,7 +848,9 @@ the cover provider that serves the library tree's `artworkUri` to controllers ou
 - Setting or removing a cover does not raise the change counter of §3.1: the library database mirrors nothing of it, and
   a raised counter would ask for a sync.
 - Backup: the references are backed up with `user.db`; the copies, in the no-backup files, are not (TI §10.3). After a
-  restore a reference whose copy is missing counts as no own cover, and the next source shows.
+  restore a reference whose copy is missing counts as no own cover, and the next source shows: the first read of the own
+  covers drops such references, so that neither the menus ("Remove own cover"), nor an artist's choice of album, nor the
+  session takes them for covers.
 
 ### 13.3 Loading
 
@@ -861,11 +864,14 @@ the cover provider that serves the library tree's `artworkUri` to controllers ou
 - A memory cache keeps decoded pictures, an eighth of the heap and at most 32 MB, the least recently used going first.
   It also remembers that a source had no picture. A change of own covers empties it, and the covers on screen load again,
   each keeping its picture until the new one is there. A sync that changed the library and the end of a run of the tag
-  pass empty it too (not every batch, so that scrolling back during a pass finds its covers); views on screen then keep
+  pass empty it too (not every batch, so that scrolling back during a pass finds its covers), and so does an attach pass
+  that wrote identities, since an own cover follows its identity to another file (§8.2); views on screen then keep
   what they show until they are drawn anew.
 - A disk cache keeps the pictures of steps up to 768 px as JPEG at quality 90, and an empty file for an embedded picture
-  or a thumbnail that a file does not have, in `cache/covers/` (a missing own copy is only looked for again): at most 100 MB, the least recently used file going first. Keys name the source and its
-  state: an own cover by its copy's name; a picture of a file by the file ID, size and modification time, so that a
+  that a file does not have, in `cache/covers/`. A missing thumbnail is not remembered on disk: an image put into the
+  folder later changes neither the file's size nor its time, and a passing error of the media index must not stick. A
+  missing own copy is only looked for again. The cache holds at most 100 MB, the least recently used file going first.
+  It reads its folder once, each file's time once, outside its lock. Keys name the source and its state: an own cover by its copy's name; a picture of a file by the file ID, size and modification time, so that a
   changed file is read again. The cache is cleared with the app's caches and is never backed up (§3.3). A picture of
   Now Playing's size is decoded from its source each time.
 - Own covers are read from `user.db` once and kept in memory; a change replaces them and raises a version that the

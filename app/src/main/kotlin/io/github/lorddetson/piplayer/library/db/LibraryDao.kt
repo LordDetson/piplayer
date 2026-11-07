@@ -411,18 +411,12 @@ interface LibraryDao {
     )
     suspend fun albumCoverFile(albumKey: String): CoverFileRow?
 
-    /**
-     * An artist's albums in the artist page's order, by the year and title of the whole album (not of the artist's songs on
-     * it), each with whether one of its songs has a picture.
-     */
+    /** Which of the albums [albumKeys] have a song whose embedded picture the tag pass found. */
     @Query(
-        "SELECT g.album_key AS albumKey, MAX(f.embedded_cover_present IS 1) AS embedded, MIN(g.year) AS year, " +
-            "MIN(g.album_sort) AS albumSort FROM track_display g JOIN audio_file f ON f.id = g.file_id " +
-            "WHERE g.album_key IN (SELECT d.album_key FROM display_artist a JOIN track_display d ON d.file_id = a.file_id " +
-            "WHERE a.artist_key = :artistKey AND d.album_key IS NOT NULL) GROUP BY g.album_key " +
-            "ORDER BY year IS NULL, year, albumSort, g.album_key",
+        "SELECT DISTINCT d.album_key FROM track_display d JOIN audio_file f ON f.id = d.file_id " +
+            "WHERE d.album_key IN (:albumKeys) AND f.embedded_cover_present = 1",
     )
-    suspend fun artistCoverAlbums(artistKey: String): List<ArtistCoverAlbumRow>
+    suspend fun albumsWithPictures(albumKeys: List<String>): List<String>
 
     /** An artist's first song by title, for an artist without albums. */
     @Query(
@@ -450,8 +444,6 @@ data class CoverFileRow(
     val albumKey: String?,
 )
 
-/** An album of an artist for its cover. */
-data class ArtistCoverAlbumRow(val albumKey: String, val embedded: Boolean, val year: Int?, val albumSort: ByteArray?)
 
 /** A song of a list, with what the list groups it by. */
 data class ListSongRow(

@@ -121,8 +121,10 @@ class CoverLoader<I : Any>(
         // A load cancelled meanwhile stores nothing.
         coroutineContext.ensureActive()
         if (cached && disk != null) {
-            // A missing own copy is not remembered: checking for the file costs next to nothing.
-            if (image != null) codec.encode(image)?.let { disk.write(diskKey, it) } else if (source !is CoverStep.Own) disk.write(diskKey, null)
+            // Only an embedded picture's absence is remembered on disk: it holds while the file stays the same. A missing own
+            // copy costs a look at the file, and a missing thumbnail may come with an image put into the folder later, which
+            // changes nothing of the file (memory still remembers it until the library changes).
+            if (image != null) codec.encode(image)?.let { disk.write(diskKey, it) } else if (source is CoverStep.Embedded) disk.write(diskKey, null)
         }
         return image
     }
