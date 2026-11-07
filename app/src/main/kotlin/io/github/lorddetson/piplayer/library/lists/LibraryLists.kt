@@ -1,0 +1,314 @@
+package io.github.lorddetson.piplayer.library.lists
+
+import android.content.ContentUris
+import android.provider.MediaStore
+import androidx.room3.RoomRawQuery
+import io.github.lorddetson.piplayer.library.db.AlbumGroupRow
+import io.github.lorddetson.piplayer.library.db.ArtistGroupRow
+import io.github.lorddetson.piplayer.library.db.FolderKey
+import io.github.lorddetson.piplayer.library.db.LibraryDatabase
+import io.github.lorddetson.piplayer.library.db.ListSongRow
+import io.github.lorddetson.piplayer.library.search.SearchTerms
+import io.github.lorddetson.piplayer.library.search.SearchText
+import io.github.lorddetson.piplayer.library.songs.Song
+import io.github.lorddetson.piplayer.settings.HiddenFiles
+import kotlinx.coroutines.runBlocking
+
+/** The orders of the Albums tab (docs/library.md §6.3). */
+enum class AlbumSort { TITLE, ARTIST, YEAR }
+
+/** The orders of the Artists tab; [SONGS] puts the artist with the most songs first. */
+enum class ArtistSort { NAME, SONGS }
+
+/** An album as lists show it; [key] is its album key, which its page is found by (docs/library.md §6.5). */
+data class AlbumGroup(
+    val key: String,
+    val title: String,
+    val credit: AlbumCredit,
+    val year: Int?,
+    val songs: Int,
+    internal val titleKey: String,
+    internal val artistKey: String?,
+)
+
+/** An artist as lists show it; [key] is the normalized name, which its page is found by. */
+data class ArtistGroup(val key: String, val name: String, val songs: Int, val albums: Int)
+
+/** What a song's menu and Now Playing go to (docs/library.md §6.1). */
+data class SongLinks(val albumKey: String?, val artists: List<ArtistLink>, val folder: FolderKey)
+
+data class ArtistLink(val key: String, val name: String)
+
+/** An artist of a file as lists group it: the name, its key and its search text (docs/library.md §6.2). */
+data class DisplayArtist(val name: String, val key: String, val searchText: String)
+
+/** The artist key of a name (docs/library.md §6.2). */
+object DisplayArtists {
+    /** A name of punctuation alone, such as `+`, normalizes to nothing and keeps itself. */
+    fun keyOf(name: String): String = SortKeys.of(name).ifEmpty { name.lowercase() }
+
+    /** [names] as rows, one per key, in order. */
+    fun of(names: List<String>): List<DisplayArtist> =
+        names.map { DisplayArtist(it, keyOf(it), SearchText.of(it)) }.distinctBy { it.key }
+}
+
+/**
+ * The lists of the library tabs and pages on the library database, without the hidden files (docs/library.md §6). The
+ * calls block; make them off the main thread.
+ */
+class LibraryLists(private val database: LibraryDatabase, private val hidden: HiddenFiles = HiddenFiles()) {
+
+    private val dao get() = database.library()
+
+    /** The songs of [query] in its order, the first [limit] when given. */
+    fun songs(query: SongQuery, limit: Int? = null): List<Song> = rows(query, limit).map { row ->
+        Song(
+            id = row.mediaStoreId,
+            uri = ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, row.mediaStoreId).toString(),
+            title = row.title,
+            artist = row.artist,
+            album = row.album,
+            durationMs = row.durationMs,
+            discNumber = row.discNumber,
+        )
+    }
+
+    private fun rows(query: SongQuery, limit: Int?): List<ListSongRow> {
+        if (query.kind == ListKind.TREE) {
+            val songs = treeSongs(query)
+            return if (limit == null) songs else songs.take(limit)
+        }
+        val sql = Sql(hidden)
+        sql.where(filterOf(query) ?: return emptyList())
+        sql.search("d.search_text", query.search)
+        return run(sql.songs(orderOf(query.sort, query.reversed), limit))
+    }
+
+    /** A folder with its subfolders: each folder in the order of its tree, its own songs in the query's sort. */
+    private fun treeSongs(query: SongQuery): List<ListSongRow> {
+        val folder = query.folder ?: return emptyList()
+        val order = folders().treeOrder(folder.volume, folder.relativePath)
+        if (order.isEmpty()) return emptyList()
+        val sql = Sql(hidden)
+        sql.where("f.volume_name = ?", folder.volume)
+        if (folder.relativePath.isNotEmpty()) {
+            // Every path that starts with the folder's sorts between it and it followed by the highest code point.
+            sql.where("f.relative_path >= ? AND f.relative_path < ?", folder.relativePath, folder.relativePath + MAX_CODE_POINT)
+        }
+        sql.search("d.search_text", query.search)
+        val byFolder = run(sql.songs(orderOf(query.sort, reversed = false), limit = null)).groupBy { it.relativePath }
+        val songs = order.flatMap { byFolder[it].orEmpty() }
+        return if (query.reversed) songs.reversed() else songs
+    }
+
+    fun albums(sort: AlbumSort = AlbumSort.TITLE, reversed: Boolean = false, search: String = ""): List<AlbumGroup> {
+        val sql = Sql(hidden)
+        sql.having("d.album_search", search)
+        val albums = runAlbums(sql)
+        val comparator = when (sort) {
+            AlbumSort.TITLE -> compareBy<AlbumGroup> { it.titleKey }
+            AlbumSort.ARTIST -> compareBy<AlbumGroup, String?>(nullsLast()) { it.artistKey }.thenBy { it.titleKey }
+            AlbumSort.YEAR -> compareBy<AlbumGroup, Int?>(nullsLast()) { it.year }.thenBy { it.titleKey }
+        }.thenBy { it.key }
+        return albums.sortedWith(if (reversed) comparator.reversed() else comparator)
+    }
+
+    /** The album of [key], or null when no visible song has it. */
+    fun album(key: String): AlbumGroup? = runAlbums(Sql(hidden).where("d.album_key = ?", key)).singleOrNull()
+
+    /** The albums [artistKey] has songs on, by year, then title. */
+    fun artistAlbums(artistKey: String): List<AlbumGroup> {
+        val sql = Sql(hidden).where(
+            "d.album_key IN (SELECT t.album_key FROM display_artist a JOIN track_display t ON t.file_id = a.file_id " +
+                "JOIN audio_file g ON g.id = a.file_id WHERE a.artist_key = ? AND t.album_key IS NOT NULL AND " +
+                visible("g", "t") + ")",
+            artistKey, hidden.showSystemSounds, hidden.showRecordings, hidden.minLengthMs,
+        )
+        return runAlbums(sql).sortedWith(compareBy<AlbumGroup, Int?>(nullsLast()) { it.year }.thenBy { it.titleKey }.thenBy { it.key })
+    }
+
+    fun artists(sort: ArtistSort = ArtistSort.NAME, reversed: Boolean = false, search: String = ""): List<ArtistGroup> {
+        val sql = Sql(hidden)
+        sql.having("a.search_text", search)
+        val comparator = when (sort) {
+            ArtistSort.NAME -> compareBy<ArtistGroup> { it.key }
+            ArtistSort.SONGS -> compareByDescending<ArtistGroup> { it.songs }.thenBy { it.key }
+        }
+        return runArtists(sql).sortedWith(if (reversed) comparator.reversed() else comparator)
+    }
+
+    /** The artist of [key], or null when no visible song has them. */
+    fun artist(key: String): ArtistGroup? = runArtists(Sql(hidden).where("a.artist_key = ?", key)).singleOrNull()
+
+    /** The folder levels of the visible songs. */
+    fun folders(): FolderLevels {
+        val sql = Sql(hidden)
+        val rows = runBlocking {
+            dao.folderCounts(
+                sql.raw(
+                    "SELECT f.volume_name AS volume, f.relative_path AS relativePath, COUNT(*) AS songs " +
+                        "FROM track_display d JOIN audio_file f ON f.id = d.file_id WHERE ${sql.conditions()} " +
+                        "GROUP BY f.volume_name, f.relative_path",
+                ),
+            )
+        }
+        return FolderLevels(rows.map { FolderSongs(it.volume, it.relativePath, it.songs) })
+    }
+
+    /** Where the song of [mediaStoreId] belongs, or null for none in the library. */
+    fun links(mediaStoreId: Long): SongLinks? = runBlocking {
+        val place = dao.songPlace(mediaStoreId) ?: return@runBlocking null
+        SongLinks(
+            albumKey = place.albumKey,
+            artists = dao.displayArtists(place.fileId).map { ArtistLink(it.artistKey, it.name) },
+            folder = FolderKey(place.volume, place.relativePath),
+        )
+    }
+
+    private fun filterOf(query: SongQuery): Pair<String, List<Any>>? = when (query.kind) {
+        ListKind.SONGS -> "1" to emptyList()
+        ListKind.ALBUM -> "d.album_key = ?" to listOf(query.key)
+        ListKind.ARTIST -> "d.file_id IN (SELECT file_id FROM display_artist WHERE artist_key = ?)" to listOf(query.key)
+        ListKind.FOLDER -> query.folder?.let { "f.volume_name = ? AND f.relative_path = ?" to listOf(it.volume, it.relativePath) }
+        ListKind.TREE -> null
+    }
+
+    private fun run(query: RoomRawQuery): List<ListSongRow> = runBlocking { dao.listSongs(query) }
+
+    private fun runAlbums(sql: Sql): List<AlbumGroup> = runBlocking {
+        dao.albumGroups(
+            sql.raw(
+                "SELECT d.album_key AS albumKey, MIN(d.album) AS title, MAX(d.album_artist) AS albumArtist, " +
+                    "MAX(d.compilation) AS compilation, MIN(d.artist) AS artist, " +
+                    "(COUNT(d.artist_key) = COUNT(*) AND MIN(d.artist_key) = MAX(d.artist_key)) AS oneArtist, " +
+                    "MIN(d.artist_key) AS firstArtistKey, MIN(d.year) AS year, COUNT(*) AS songs, " +
+                    "MIN(d.album_title_key) AS titleKey FROM track_display d JOIN audio_file f ON f.id = d.file_id " +
+                    "WHERE d.album_key IS NOT NULL AND ${sql.conditions()} GROUP BY d.album_key${sql.havingClause()}",
+            ),
+        )
+    }.map(::albumOf)
+
+    private fun albumOf(row: AlbumGroupRow): AlbumGroup {
+        val credit = AlbumCredit.of(row.albumArtist, row.compilation, row.artist, row.oneArtist)
+        return AlbumGroup(
+            key = row.albumKey,
+            title = row.title,
+            credit = credit,
+            year = row.year,
+            songs = row.songs,
+            titleKey = row.titleKey.orEmpty(),
+            artistKey = row.albumArtist?.let(SortKeys::of) ?: row.firstArtistKey,
+        )
+    }
+
+    private fun runArtists(sql: Sql): List<ArtistGroup> = runBlocking {
+        dao.artistGroups(
+            sql.raw(
+                "SELECT a.artist_key AS artistKey, MIN(a.name) AS name, COUNT(DISTINCT a.file_id) AS songs, " +
+                    "COUNT(DISTINCT d.album_key) AS albums FROM display_artist a JOIN track_display d ON d.file_id = a.file_id " +
+                    "JOIN audio_file f ON f.id = a.file_id WHERE ${sql.conditions()} GROUP BY a.artist_key${sql.havingClause()}",
+            ),
+        )
+    }.map { ArtistGroup(it.artistKey, it.name, it.songs, it.albums) }
+
+    /** A query's conditions and their arguments, bound in the order they appear. */
+    private class Sql(private val hidden: HiddenFiles) {
+        private val where = mutableListOf<String>()
+        private val whereArgs = mutableListOf<Any>()
+        private var having: String? = null
+        private val havingArgs = mutableListOf<Any>()
+        private var visibleArgs = emptyList<Any>()
+
+        fun where(condition: String, vararg args: Any) = apply {
+            where += condition
+            whereArgs.addAll(args)
+        }
+
+        fun where(condition: Pair<String, List<Any>>) = apply {
+            where += condition.first
+            whereArgs.addAll(condition.second)
+        }
+
+        /** Every word of [search] in [column]. */
+        fun search(column: String, search: String) {
+            for (term in SearchTerms.of(search)) where("instr($column, ?) > 0", term)
+        }
+
+        /** Groups with a row that holds every word of [search] in [column]. */
+        fun having(column: String, search: String) {
+            val terms = SearchTerms.of(search)
+            if (terms.isEmpty()) return
+            having = "MAX(" + terms.joinToString(" AND ") { "instr($column, ?) > 0" } + ")"
+            havingArgs.addAll(terms)
+        }
+
+        fun havingClause() = having?.let { " HAVING $it" }.orEmpty()
+
+        /** The visibility of docs/library.md §3.5 and the conditions; its arguments come first. */
+        fun conditions(): String {
+            visibleArgs = listOf(hidden.showSystemSounds, hidden.showRecordings, hidden.minLengthMs)
+            return (listOf(visible("f", "d")) + where).joinToString(" AND ")
+        }
+
+        fun songs(order: String, limit: Int?): RoomRawQuery = raw(
+            "SELECT f.media_store_id AS mediaStoreId, d.title, d.artist, d.album, d.duration_ms AS durationMs, " +
+                "d.disc_number AS discNumber, f.relative_path AS relativePath " +
+                "FROM track_display d JOIN audio_file f ON f.id = d.file_id WHERE ${conditions()} " +
+                "ORDER BY $order" + (limit?.let { " LIMIT $it" } ?: ""),
+        )
+
+        fun raw(sql: String): RoomRawQuery {
+            val args = visibleArgs + whereArgs + havingArgs
+            return RoomRawQuery(sql) { statement ->
+                args.forEachIndexed { i, arg ->
+                    when (arg) {
+                        is String -> statement.bindText(i + 1, arg)
+                        is Boolean -> statement.bindLong(i + 1, if (arg) 1 else 0)
+                        is Number -> statement.bindLong(i + 1, arg.toLong())
+                        else -> error("Cannot bind $arg")
+                    }
+                }
+            }
+        }
+    }
+
+    companion object {
+        // Excluded folders never; included folders whole; elsewhere every file but the hidden kinds and short files. A file
+        // whose length is unknown is never short (docs/library.md §3.5).
+        // Its arguments: whether system sounds and recordings show, and the shortest length shown.
+        private fun visible(f: String, d: String) = "$f.folder_rule != 2 AND ($f.folder_rule = 1 OR (" +
+            "(? OR NOT ($f.is_ringtone OR $f.is_notification OR $f.is_alarm)) AND (? OR NOT $f.recording) " +
+            "AND ($d.duration_ms IS NULL OR $d.duration_ms >= ?)))"
+
+        /** U+10FFFF, after which no character sorts. */
+        private const val MAX_CODE_POINT = "\uDBFF\uDFFF"
+
+        /** The earliest year of the list's songs on the album; songs without an album group on their own. */
+        private const val ALBUM_YEAR = "MIN(d.year) OVER (PARTITION BY d.album_key)"
+
+        /** The terms of each order, ascending; a missing value sorts last. Ties go by title, then the index's ID. */
+        private val ORDERS = mapOf(
+            SongSort.TITLE to listOf("d.title_key"),
+            SongSort.ARTIST to listOf("d.artist_key IS NULL", "d.artist_key", "d.title_key"),
+            SongSort.ALBUM to listOf(
+                "d.album_title_key IS NULL", "d.album_title_key", "d.album_key", "d.disc_number IS NULL", "d.disc_number",
+                "d.track_number IS NULL", "d.track_number", "d.title_key",
+            ),
+            SongSort.LENGTH to listOf("d.duration_ms IS NULL", "d.duration_ms", "d.title_key"),
+            SongSort.TRACK to listOf(
+                "d.disc_number IS NULL", "d.disc_number", "d.track_number IS NULL", "d.track_number", "d.file_key", "d.title_key",
+            ),
+            // Each album stays together, by its earliest year; songs without an album come last, by their own year.
+            SongSort.YEAR to listOf(
+                "d.album_key IS NULL", "$ALBUM_YEAR IS NULL", ALBUM_YEAR, "d.album_title_key", "d.album_key",
+                "d.disc_number IS NULL", "d.disc_number", "d.track_number IS NULL", "d.track_number", "d.year IS NULL",
+                "d.year", "d.title_key",
+            ),
+            SongSort.FILE_NAME to listOf("d.file_key", "d.title_key"),
+        )
+
+        /** [sort]'s terms, all reversed for [reversed], which reverses the whole list since the ID makes it total. */
+        fun orderOf(sort: SongSort, reversed: Boolean): String =
+            (ORDERS.getValue(sort) + "f.media_store_id").joinToString(", ") { if (reversed) "$it DESC" else it }
+    }
+}

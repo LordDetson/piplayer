@@ -11,6 +11,8 @@ data class Song(
     val artist: String?,
     val album: String?,
     val durationMs: Long?,
+    /** The disc number, for the disc headers of an album page (docs/library.md §6.1). */
+    val discNumber: Int? = null,
 )
 
 /** Where the songs of the list come from: the library, or a test's own list. */

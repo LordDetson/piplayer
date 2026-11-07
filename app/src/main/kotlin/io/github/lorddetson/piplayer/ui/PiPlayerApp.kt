@@ -1,6 +1,24 @@
 package io.github.lorddetson.piplayer.ui
 
 import android.content.ActivityNotFoundException
+import android.content.Context
+import androidx.compose.runtime.DisposableEffect
+import androidx.lifecycle.viewmodel.navigation3.rememberViewModelStoreNavEntryDecorator
+import androidx.navigation3.runtime.rememberSaveableStateHolderNavEntryDecorator
+import io.github.lorddetson.piplayer.library.Library
+import io.github.lorddetson.piplayer.library.lists.LibraryLists
+import io.github.lorddetson.piplayer.library.lists.SongLinks
+import io.github.lorddetson.piplayer.settings.LibrarySettings
+import io.github.lorddetson.piplayer.ui.library.AlbumPage
+import io.github.lorddetson.piplayer.ui.library.ArtistPage
+import io.github.lorddetson.piplayer.ui.library.FolderPage
+import io.github.lorddetson.piplayer.ui.library.LibraryHost
+import io.github.lorddetson.piplayer.ui.library.LibraryScreen
+import io.github.lorddetson.piplayer.ui.songs.SongMenu
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.OptIn
@@ -53,8 +71,6 @@ import androidx.navigation3.runtime.rememberNavBackStack
 import androidx.navigation3.ui.NavDisplay
 import io.github.lorddetson.piplayer.R
 import io.github.lorddetson.piplayer.crash.CrashReports
-import io.github.lorddetson.piplayer.debug.DebugEntry
-import io.github.lorddetson.piplayer.library.songs.Song
 import io.github.lorddetson.piplayer.ui.crash.CrashPrompt
 import io.github.lorddetson.piplayer.ui.player.EqualizerPanel
 import io.github.lorddetson.piplayer.ui.player.ExtraControls
@@ -63,12 +79,23 @@ import io.github.lorddetson.piplayer.ui.player.NowPlaying
 import io.github.lorddetson.piplayer.ui.player.PlayerViewModel
 import io.github.lorddetson.piplayer.ui.settings.FoldersScreen
 import io.github.lorddetson.piplayer.ui.settings.SettingsScreen
-import io.github.lorddetson.piplayer.ui.songs.SongsScreen
 import kotlinx.serialization.Serializable
 
-/** The song list with the mini player. */
+/** The library tabs with the mini player (docs/library.md §6.1). */
 @Serializable
 data object SongsRoute : NavKey
+
+/** An album page, found by its album key (docs/library.md §6.5). */
+@Serializable
+data class AlbumRoute(val key: String) : NavKey
+
+/** An artist page, found by its artist key. */
+@Serializable
+data class ArtistRoute(val key: String) : NavKey
+
+/** A folder page, found by its volume and relative path. */
+@Serializable
+data class LibraryFolderRoute(val volume: String, val relativePath: String) : NavKey
 
 @Serializable
 data object NowPlayingRoute : NavKey
@@ -105,22 +132,54 @@ fun PiPlayerApp(viewModel: PlayerViewModel = viewModel()) {
     }
     val backStack = rememberNavBackStack(SongsRoute)
     val close = { if (backStack.size > 1) backStack.removeLastOrNull() }
+    // A page opens over the library or the page it was opened from; Now Playing gives way to it.
+    val open = { route: NavKey ->
+        if (backStack.lastOrNull() == NowPlayingRoute) backStack.removeLastOrNull()
+        if (backStack.lastOrNull() != route) backStack.add(route)
+    }
+    val context = LocalContext.current
+    val currentSongId = rememberCurrentSongId(player)
+    val menu = remember {
+        SongMenu(
+            links = { song -> linksOf(context, song.id) },
+            openAlbum = { open(AlbumRoute(it)) },
+            openArtist = { open(ArtistRoute(it)) },
+            openFolder = { volume, path -> open(LibraryFolderRoute(volume, path)) },
+        )
+    }
+    val host = LibraryHost(
+        player = player,
+        cover = cover,
+        snackbar = snackbar,
+        currentSongId = currentSongId,
+        menu = menu,
+        play = viewModel::play,
+        openNowPlaying = { if (backStack.lastOrNull() != NowPlayingRoute) backStack.add(NowPlayingRoute) },
+        openAlbum = menu.openAlbum,
+        openArtist = menu.openArtist,
+        openFolder = menu.openFolder,
+    )
+    // What the artist and the album on Now Playing open (docs/library.md §6.1).
+    var playingLinks by remember { mutableStateOf<SongLinks?>(null) }
+    LaunchedEffect(currentSongId) {
+        playingLinks = null
+        playingLinks = currentSongId?.let { linksOf(context, it) }
+    }
     NavDisplay(
         backStack = backStack,
         onBack = { close() },
+        entryDecorators = listOf(rememberSaveableStateHolderNavEntryDecorator(), rememberViewModelStoreNavEntryDecorator()),
         transitionSpec = { slideInVertically(initialOffsetY = { it }) togetherWith ExitTransition.KeepUntilTransitionsFinished },
         popTransitionSpec = { EnterTransition.None togetherWith slideOutVertically(targetOffsetY = { it }) },
         predictivePopTransitionSpec = { EnterTransition.None togetherWith slideOutVertically(targetOffsetY = { it }) },
         entryProvider = entryProvider {
             entry<SongsRoute> {
-                SongsEntry(
-                    player,
-                    cover,
-                    snackbar,
-                    onSongClick = viewModel::play,
-                    onOpenNowPlaying = { if (backStack.lastOrNull() != NowPlayingRoute) backStack.add(NowPlayingRoute) },
-                    onOpenSettings = { if (backStack.lastOrNull() != SettingsRoute) backStack.add(SettingsRoute) },
-                )
+                LibraryScreen(host, onOpenSettings = { if (backStack.lastOrNull() != SettingsRoute) backStack.add(SettingsRoute) })
+            }
+            entry<AlbumRoute>(metadata = FROM_THE_SIDE) { route -> AlbumPage(route.key, host, onBack = { close() }) }
+            entry<ArtistRoute>(metadata = FROM_THE_SIDE) { route -> ArtistPage(route.key, host, onBack = { close() }) }
+            entry<LibraryFolderRoute>(metadata = FROM_THE_SIDE) { route ->
+                FolderPage(route.volume, route.relativePath, host, onBack = { close() })
             }
             entry<SettingsRoute>(metadata = FROM_THE_SIDE) {
                 SettingsScreen(
@@ -133,7 +192,26 @@ fun PiPlayerApp(viewModel: PlayerViewModel = viewModel()) {
             }
             entry<NowPlayingRoute> {
                 Box(Modifier.fillMaxSize()) {
-                    NowPlaying(player, cover, onClose = { close() }, controls = rememberExtraControls(viewModel, player))
+                    val links = playingLinks
+                    val scope = rememberCoroutineScope()
+                    // The keys are read again at the tap: the tag pass may have changed them since the song began.
+                    val openLatest = { route: (SongLinks) -> NavKey? ->
+                        scope.launch {
+                            val latest = currentSongId?.let { linksOf(context, it) }
+                            latest?.let(route)?.let(open)
+                        }
+                        Unit
+                    }
+                    NowPlaying(
+                        player,
+                        cover,
+                        onClose = { close() },
+                        controls = rememberExtraControls(viewModel, player),
+                        onOpenArtist = links?.artists?.firstOrNull()?.let {
+                            { openLatest { latest -> latest.artists.firstOrNull()?.let { ArtistRoute(it.key) } } }
+                        },
+                        onOpenAlbum = links?.albumKey?.let { { openLatest { latest -> latest.albumKey?.let(::AlbumRoute) } } },
+                    )
                     SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).windowInsetsPadding(WindowInsets.navigationBars))
                 }
             }
@@ -142,40 +220,27 @@ fun PiPlayerApp(viewModel: PlayerViewModel = viewModel()) {
     if (CrashReports.promptEnabled) CrashPrompt(CrashReports.of(LocalContext.current))
 }
 
+/** The current song's ID in the library, or null for an opened file or nothing. */
 @Composable
-private fun SongsEntry(
-    player: Player?,
-    cover: ImageBitmap?,
-    snackbar: SnackbarHostState,
-    onSongClick: (row: Int, song: Song) -> Unit,
-    onOpenNowPlaying: () -> Unit,
-    onOpenSettings: () -> Unit,
-) {
-    Scaffold(
-        bottomBar = { MiniPlayer(player, cover, onOpen = onOpenNowPlaying) },
-        snackbarHost = { SnackbarHost(snackbar) },
-    ) { padding ->
-        Column(
-            modifier = Modifier
-                .padding(padding)
-                .consumeWindowInsets(padding)
-                .padding(start = 24.dp, top = 24.dp, end = 24.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = stringResource(R.string.app_name),
-                    style = MaterialTheme.typography.headlineMedium,
-                    modifier = Modifier.weight(1f),
-                )
-                IconButton(onClick = onOpenSettings) {
-                    Icon(painterResource(R.drawable.ic_settings), stringResource(R.string.settings_open))
-                }
+private fun rememberCurrentSongId(player: Player?): Long? {
+    var id by remember(player) { mutableStateOf(player?.currentMediaItem?.mediaId?.toLongOrNull()) }
+    DisposableEffect(player) {
+        val listener = object : Player.Listener {
+            override fun onEvents(player: Player, events: Player.Events) {
+                id = player.currentMediaItem?.mediaId?.toLongOrNull()
             }
-            DebugEntry()
-            SongsScreen(onSongClick = onSongClick, modifier = Modifier.weight(1f))
         }
+        player?.addListener(listener)
+        onDispose { player?.removeListener(listener) }
     }
+    return id
+}
+
+/** Where the song of [id] belongs in the library, read off the main thread. */
+private suspend fun linksOf(context: Context, id: Long): SongLinks? = withContext(Dispatchers.IO) {
+    if (!Library.mayRead(context)) return@withContext null
+    val hidden = LibrarySettings(context).readHiddenFiles()
+    Library.read(context) { LibraryLists(it, hidden).links(id) }
 }
 
 /**

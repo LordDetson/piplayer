@@ -23,6 +23,8 @@ internal class DisplayInput(
     val index: IndexValues?,
     val read: ReadFileRow? = null,
     private val exactDurationMs: Long? = read?.exactDurationMs,
+    private val volume: String = "",
+    private val relativePath: String = "",
 ) {
     /** Normalizes, so not on a thread that playback or a list waits for. */
     fun resolve(): DisplayValues = MergedValues.of(
@@ -33,6 +35,8 @@ internal class DisplayInput(
         exactDurationMs = exactDurationMs,
         tagLengthMs = read?.tagLengthMs,
         embeddedCover = read?.embeddedCover == true,
+        volume = volume,
+        relativePath = relativePath,
     )
 }
 
@@ -66,21 +70,27 @@ class TrackDisplayWriter(private val database: LibraryDatabase) {
     private fun IndexInputRow.toInput(read: ReadFileRow?) = DisplayInput(
         fileId,
         displayName,
-        IndexValues(title, artist, album, composer, genre, durationMs),
+        IndexValues(title, artist, album, composer, genre, durationMs, albumArtist, year, trackNumber),
         read,
         exactDurationMs,
+        volume = volume,
+        relativePath = relativePath,
     )
 
     companion object {
         /** A change of the rules that derive the display values raises this; the next sync derives them all again. */
-        const val VERSION = 1
+        const val VERSION = 2
 
         private const val CHUNK = 500
+        private const val DELETE_CHUNK = 2_000
         private const val RESOLVE_CHUNK = 2_000
 
         private val COLUMNS = listOf(
             "file_id", "title", "artist", "album", "duration_ms", "title_key", "search_text", "missing_info_reasons",
+            "album_key", "album_artist", "compilation", "year", "disc_number", "track_number", "artist_key",
+            "album_title_key", "album_search", "file_key",
         )
+        private val ARTIST_COLUMNS = listOf("file_id", "position", "artist_key", "name", "search_text")
 
         /** Normalizing 20 000 titles and search texts takes about a second on one core, so the cores share it. */
         internal suspend fun resolve(inputs: List<DisplayInput>): List<DisplayValues> = coroutineScope {
@@ -93,6 +103,24 @@ class TrackDisplayWriter(private val database: LibraryDatabase) {
         /** Writes [values] for [fileIds], in the same order. */
         internal suspend fun PooledConnection.write(fileIds: List<Long>, values: List<DisplayValues>) {
             replaceAll("track_display", COLUMNS, fileIds.indices.toList()) { i -> display(fileIds[i], values[i]) }
+            // A file may now have fewer artists than before.
+            for (chunk in fileIds.chunked(DELETE_CHUNK)) {
+                usePrepared("DELETE FROM display_artist WHERE file_id IN (SELECT value FROM json_each(?))") { statement ->
+                    statement.bindText(1, chunk.joinToString(",", "[", "]"))
+                    statement.step()
+                }
+            }
+            // Resolved with the other values, off this transaction.
+            val artists = fileIds.indices.flatMap { i ->
+                values[i].displayArtists.mapIndexed { position, artist -> Triple(fileIds[i], position, artist) }
+            }
+            replaceAll("display_artist", ARTIST_COLUMNS, artists) { (fileId, position, artist) ->
+                long(fileId)
+                long(position.toLong())
+                text(artist.key)
+                text(artist.name)
+                text(artist.searchText)
+            }
         }
 
         private fun JsonRows.Row.display(id: Long, values: DisplayValues) {
@@ -104,6 +132,16 @@ class TrackDisplayWriter(private val database: LibraryDatabase) {
             text(values.titleKey)
             text(values.searchText)
             long(values.reasons?.toLong())
+            text(values.albumKey)
+            text(values.albumArtist)
+            flag(values.compilation)
+            long(values.year?.toLong())
+            long(values.discNumber?.toLong())
+            long(values.trackNumber?.toLong())
+            text(values.artistKey)
+            text(values.albumTitleKey)
+            text(values.albumSearch)
+            text(values.fileKey)
         }
     }
 }

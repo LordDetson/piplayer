@@ -176,10 +176,12 @@ is heard as a click. The becoming-noisy broadcast is protected, so emulator test
 ### 2.3 Compact queue request
 
 - Tapping a song plays the whole list from that song. The screen sends one media item whose media ID names the list,
-  its order and the tapped song: `q1/songs?sort=title&start=<ID>&index=<row>`; it also carries the song's title and
-  artist, so that the screen shows them at once. The UI never builds thousands of media items.
-- The playback service expands the request in `onSetMediaItems`, on a background thread: it takes the shared list (or
-  reads it, if the service runs without the screen), builds one media item per song (media ID, content URI, title,
+  its order and the tapped song; it also carries the song's title and artist, so that the screen shows them at once.
+  The UI never builds thousands of media items. M1 had one form, `q1/songs?sort=title&start=<ID>&index=<row>`, which is
+  still read; since M2a step 6 a request names any list of the library with its sort, reverse and search
+  (`q2/...`, library.md §6.4).
+- The playback service expands the request in `onSetMediaItems`, on a background thread: it takes the shared list of
+  the request's list (or reads it, if the service runs without the screen or no longer keeps it), builds one media item per song (media ID, content URI, title,
   artist, album, length, music type; no artwork and no request metadata, which would be published to other apps) and
   starts at the tapped song. If the song is gone, it starts at the same row, or the last one. A request whose list is
   empty, or that cannot be read, is refused.

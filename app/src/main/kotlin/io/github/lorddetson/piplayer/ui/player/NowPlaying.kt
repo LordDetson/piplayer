@@ -28,6 +28,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.semantics.Role
+import androidx.compose.foundation.clickable
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -71,6 +74,8 @@ fun NowPlaying(
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
     controls: ExtraControls = ExtraControls(),
+    onOpenArtist: (() -> Unit)? = null,
+    onOpenAlbum: (() -> Unit)? = null,
 ) {
     val metadata = rememberCurrentItemState(player).mediaMetadata
     val pane = stringResource(R.string.player_now_playing)
@@ -109,6 +114,7 @@ fun NowPlaying(
             textAlign = TextAlign.Center,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.opens(onOpenArtist, R.string.open_artist),
         )
         metadata.albumTitle?.let { album ->
             Text(
@@ -118,6 +124,7 @@ fun NowPlaying(
                 textAlign = TextAlign.Center,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.opens(onOpenAlbum, R.string.open_album),
             )
         }
         Spacer(Modifier.height(4.dp))
@@ -223,3 +230,12 @@ internal fun progressTicks(widthPx: Int, durationMs: Long): Int =
     if (widthPx <= 0 || durationMs <= 0) 0 else minOf(widthPx.toLong(), durationMs / MIN_TICK_MS).toInt().coerceAtLeast(1)
 
 private const val MIN_TICK_MS = 16L
+
+/** A text that opens a page when [open] is given (docs/library.md §6.1). */
+@Composable
+private fun Modifier.opens(open: (() -> Unit)?, label: Int): Modifier =
+    if (open == null) {
+        this
+    } else {
+        minimumInteractiveComponentSize().clickable(onClickLabel = stringResource(label), role = Role.Button, onClick = open)
+    }

@@ -22,6 +22,7 @@ import io.github.lorddetson.piplayer.playback.PlaybackConnection
 import io.github.lorddetson.piplayer.playback.PlaybackExtras
 import io.github.lorddetson.piplayer.playback.PlaybackSessionCallback
 import io.github.lorddetson.piplayer.playback.QueueRequest
+import io.github.lorddetson.piplayer.library.lists.SongQuery
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
@@ -122,11 +123,14 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
         sendCustomCommand(PlaybackSessionCallback.STOP_AFTER_CURRENT_COMMAND, args)
     }
 
-    /** Plays the whole list from [song], shown at [row] (§2.3). */
-    fun play(row: Int, song: Song) {
+    /**
+     * Plays the whole [list] from [song], shown at [row] (§2.3, docs/library.md §6.4); without a song, from the start, as
+     * "Play all" of a folder does.
+     */
+    fun play(row: Int, song: Song?, list: SongQuery = SongQuery.SONGS) {
         val item = MediaItem.Builder()
-            .setMediaId(QueueRequest(song.id, row).mediaId)
-            .setMediaMetadata(MediaMetadata.Builder().setTitle(song.title).setArtist(song.artist).build())
+            .setMediaId(QueueRequest(song?.id ?: NO_SONG, row, list).mediaId)
+            .setMediaMetadata(MediaMetadata.Builder().setTitle(song?.title).setArtist(song?.artist).build())
             .build()
         connection.whenConnected {
             setMediaItem(item)
@@ -185,5 +189,10 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     override fun onCleared() {
         controller?.removeListener(listener)
         connection.release()
+    }
+
+    private companion object {
+        /** No song of the library has it, so a request with it starts at its row. */
+        const val NO_SONG = -1L
     }
 }

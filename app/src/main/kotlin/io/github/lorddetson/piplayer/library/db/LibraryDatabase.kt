@@ -97,7 +97,7 @@ data class MediaIndexEntryEntity(
 /** What lists show, sort and search by (docs/library.md §1.2). */
 // Covering the search text too: a search walks this index in title order and never reads the table for rows that do
 // not match (M0 spike).
-@Entity(tableName = "track_display", indices = [Index("title_key", "search_text")])
+@Entity(tableName = "track_display", indices = [Index("title_key", "search_text"), Index("album_key")])
 data class TrackDisplayEntity(
     @PrimaryKey @ColumnInfo(name = "file_id") val fileId: Long,
     val title: String,
@@ -108,6 +108,30 @@ data class TrackDisplayEntity(
     @ColumnInfo(name = "search_text") val searchText: String,
     /** The reasons of `MergedValues`, null until the tag pass has read the file. */
     @ColumnInfo(name = "missing_info_reasons") val missingInfoReasons: Int? = null,
+    /** What groups and sorts the file (docs/library.md §6.2); the keys are those of `SortKeys`. */
+    @ColumnInfo(name = "album_key") val albumKey: String? = null,
+    @ColumnInfo(name = "album_artist") val albumArtist: String? = null,
+    @ColumnInfo(defaultValue = "0") val compilation: Boolean = false,
+    val year: Int? = null,
+    @ColumnInfo(name = "disc_number") val discNumber: Int? = null,
+    @ColumnInfo(name = "track_number") val trackNumber: Int? = null,
+    @ColumnInfo(name = "artist_key") val artistKey: String? = null,
+    @ColumnInfo(name = "album_title_key") val albumTitleKey: String? = null,
+    @ColumnInfo(name = "album_search", defaultValue = "") val albumSearch: String = "",
+    @ColumnInfo(name = "file_key", defaultValue = "") val fileKey: String = "",
+)
+
+/**
+ * An artist of a file as lists group it (docs/library.md §6.2): each artist of its tags once read, otherwise the displayed
+ * one; [artistKey] is the normalized name, which the artist's page is found by.
+ */
+@Entity(tableName = "display_artist", primaryKeys = ["file_id", "position"], indices = [Index("artist_key")])
+data class DisplayArtistEntity(
+    @ColumnInfo(name = "file_id") val fileId: Long,
+    val position: Int,
+    @ColumnInfo(name = "artist_key") val artistKey: String,
+    val name: String,
+    @ColumnInfo(name = "search_text") val searchText: String,
 )
 
 /**
@@ -139,6 +163,7 @@ data class VolumeSyncStateEntity(
         AudioFileEntity::class,
         MediaIndexEntryEntity::class,
         TrackDisplayEntity::class,
+        DisplayArtistEntity::class,
         VolumeSyncStateEntity::class,
         LibraryMetaEntity::class,
         OutsideFileEntity::class,
@@ -149,7 +174,7 @@ data class VolumeSyncStateEntity(
         GenreEntity::class,
         TrackGenreEntity::class,
     ],
-    version = 5,
+    version = 6,
     exportSchema = false,
 )
 abstract class LibraryDatabase : RoomDatabase() {

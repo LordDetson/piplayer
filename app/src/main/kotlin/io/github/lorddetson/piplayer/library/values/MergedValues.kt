@@ -3,6 +3,8 @@ package io.github.lorddetson.piplayer.library.values
 import android.provider.MediaStore
 import io.github.lorddetson.piplayer.identification.text.FileNameParser
 import io.github.lorddetson.piplayer.identification.text.TextNormalizer
+import io.github.lorddetson.piplayer.library.lists.DisplayArtists
+import io.github.lorddetson.piplayer.library.lists.SortKeys
 import io.github.lorddetson.piplayer.library.search.SearchText
 import io.github.lorddetson.piplayer.library.sync.DisplayValues
 
@@ -14,6 +16,10 @@ data class IndexValues(
     val composer: String? = null,
     val genre: String? = null,
     val durationMs: Long? = null,
+    val albumArtist: String? = null,
+    /** The index's year, and its track number with the disc in the thousands. */
+    val year: Int? = null,
+    val trackNumber: Int? = null,
 )
 
 /** The winners of levels 1 and 2 per field, which M3 fills from the user database (TI §7.1). */
@@ -46,6 +52,8 @@ object MergedValues {
         tagLengthMs: Long? = null,
         embeddedCover: Boolean = false,
         overrides: FieldOverrides = FieldOverrides.NONE,
+        volume: String = "",
+        relativePath: String = "",
     ): DisplayValues {
         val tagValues = tags.takeIf { read }
         val indexValues = index.takeIf { !read }
@@ -61,7 +69,27 @@ object MergedValues {
             !tagValues?.artists.isNullOrEmpty() -> tagValues!!.artists.joinToString(" ")
             else -> artist
         }
+        val albumArtist = if (read) tagValues?.albumArtist else indexValues?.albumArtist.present()
+        val compilation = tagValues?.compilation == true
+        val albumTags = album?.let { TrackTags(album = it, albumArtist = albumArtist, releaseMbid = tagValues?.releaseMbid, compilation = compilation) }
+        val (disc, track) = if (read) tagValues?.discNumber to tagValues?.trackNumber else splitTrackNumber(indexValues?.trackNumber)
+        val artists = when {
+            overrides.artist != null -> listOf(overrides.artist)
+            !tagValues?.artists.isNullOrEmpty() -> tagValues!!.artists
+            else -> listOfNotNull(artist)
+        }
         return DisplayValues(
+            albumKey = albumTags?.let { AlbumKey.of(it, volume, relativePath) },
+            albumArtist = albumArtist,
+            compilation = compilation,
+            year = if (read) yearOf(tagValues?.date) ?: yearOf(tagValues?.originalDate) else indexValues?.year?.takeIf { it > 0 },
+            discNumber = disc,
+            trackNumber = track,
+            displayArtists = DisplayArtists.of(artists),
+            artistKey = artist?.let(SortKeys::of),
+            albumTitleKey = album?.let(SortKeys::of),
+            albumSearch = if (album == null) "" else SearchText.of(album, albumArtist ?: artist),
+            fileKey = SortKeys.of(fileName),
             title = title,
             artist = artist,
             album = album,
@@ -89,6 +117,17 @@ object MergedValues {
                 reasons
             },
         )
+    }
+
+    private val fourDigits = Regex("""^\d{4}""")
+
+    /** The year of a date tag: its first four digits, or null. */
+    private fun yearOf(date: String?): Int? = date?.trim()?.let { fourDigits.find(it) }?.value?.toInt()?.takeIf { it > 0 }
+
+    /** The index's track number holds the disc in its thousands (`2005` is disc 2, track 5); 0 is none. */
+    private fun splitTrackNumber(number: Int?): Pair<Int?, Int?> {
+        if (number == null || number <= 0) return null to null
+        return if (number >= 1000) number / 1000 to (number % 1000).takeIf { it > 0 } else null to number
     }
 
     /** Media index placeholders count as empty. */

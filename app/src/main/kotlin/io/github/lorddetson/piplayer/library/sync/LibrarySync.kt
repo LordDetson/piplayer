@@ -245,8 +245,10 @@ class LibrarySync(
     private fun input(fileId: Long, row: IndexRow, read: ReadFileRow?) = DisplayInput(
         fileId,
         row.displayName,
-        IndexValues(row.title, row.artist, row.album, row.composer, row.genre, row.durationMs),
+        IndexValues(row.title, row.artist, row.album, row.composer, row.genre, row.durationMs, row.albumArtist, row.year, row.trackNumber),
         read,
+        volume = row.volume,
+        relativePath = row.relativePath,
     )
 
     /** Updated files keep their row IDs and added ones take the next free IDs; each table is written in bulk. */
@@ -276,6 +278,7 @@ class LibrarySync(
             dao.deleteTrackGenres(chunk)
             dao.deleteTracks(chunk)
             dao.deleteDisplays(chunk)
+            dao.deleteDisplayArtists(chunk)
             dao.deleteEntries(chunk)
             dao.deleteFiles(chunk)
         }

@@ -136,4 +136,52 @@
     <string name="folders_not_found_included">Included on %1$s</string>
     <string name="folders_not_found_excluded">Excluded on %1$s</string>
     <string name="folders_remove">Remove</string>
+    <!-- The library tabs and pages (docs/library.md §6). -->
+    <string name="tab_songs">Songs</string>
+    <string name="tab_albums">Albums</string>
+    <string name="tab_artists">Artists</string>
+    <string name="tab_folders">Folders</string>
+    <string name="library_search">Search</string>
+    <string name="library_search_hint">Search in this list</string>
+    <string name="library_search_close">Close search</string>
+    <string name="library_sort">Sort</string>
+    <string name="library_back">Back</string>
+    <string name="sort_title">Title</string>
+    <string name="sort_artist">Artist</string>
+    <string name="sort_album">Album</string>
+    <string name="sort_length">Length</string>
+    <string name="sort_year">Year</string>
+    <string name="sort_name">Name</string>
+    <string name="sort_songs">Number of songs</string>
+    <string name="sort_track">Disc and track</string>
+    <string name="sort_album_year">Album by year</string>
+    <string name="sort_file_name">File name</string>
+    <string name="sort_reverse">Reverse order</string>
+    <string name="various_artists">Various artists</string>
+    <string name="internal_storage">Internal storage</string>
+    <string name="album_disc">Disc %1$d</string>
+    <string name="album_not_found">This album is no longer in the library.</string>
+    <string name="artist_not_found">This artist is no longer in the library.</string>
+    <string name="folder_not_found">This folder is no longer in the library.</string>
+    <string name="folder_play_all">Play all, with subfolders</string>
+    <string name="list_empty">Nothing here.</string>
+    <string name="search_nothing_found">Nothing found.</string>
+    <string name="artist_albums">Albums</string>
+    <string name="artist_songs">Songs</string>
+    <string name="song_menu">More for %1$s</string>
+    <string name="song_playing">Playing</string>
+    <string name="go_to_album">Go to album</string>
+    <string name="go_to_artist">Go to artist: %1$s</string>
+    <string name="go_to_folder">Go to folder</string>
+    <string name="open_album">Open album</string>
+    <string name="open_artist">Open artist</string>
+    <string name="open_folder">Open folder</string>
+    <plurals name="songs_count">
+        <item quantity="one">%1$d song</item>
+        <item quantity="other">%1$d songs</item>
+    </plurals>
+    <plurals name="albums_count">
+        <item quantity="one">%1$d album</item>
+        <item quantity="other">%1$d albums</item>
+    </plurals>
 </resources>

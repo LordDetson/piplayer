@@ -13,12 +13,15 @@ import io.github.lorddetson.piplayer.MainActivity
 import io.github.lorddetson.piplayer.TestFiles
 import io.github.lorddetson.piplayer.TimingTest
 import io.github.lorddetson.piplayer.library.search.LibrarySearchSpikeTest
-import io.github.lorddetson.piplayer.library.search.SearchTerms
+import io.github.lorddetson.piplayer.library.lists.FolderLevels
+import io.github.lorddetson.piplayer.library.lists.LibraryLists
+import io.github.lorddetson.piplayer.library.lists.SongQuery
+import io.github.lorddetson.piplayer.library.lists.SongSort
+import io.github.lorddetson.piplayer.settings.HiddenFiles
 import io.github.lorddetson.piplayer.library.songs.LibrarySongSource
 import io.github.lorddetson.piplayer.library.songs.SongList
 import io.github.lorddetson.piplayer.ui.GrantAudioPermission
 import io.github.lorddetson.piplayer.ui.songs.SongsTags
-import androidx.room3.useReaderConnection
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.nanoseconds
 import kotlin.time.measureTime
@@ -151,20 +154,10 @@ class GeneratedLibraryTest {
         val database = Library.database(context)
 
         val found = mutableMapOf<String, Int>()
+        val lists = LibraryLists(database, HiddenFiles())
         val p95 = LibrarySearchSpikeTest.QUERIES.associateWith { query ->
-            val terms = SearchTerms.of(query)
-            val sql = "SELECT d.file_id FROM track_display d JOIN audio_file f ON f.id = d.file_id WHERE f.is_music AND " +
-                terms.joinToString(" AND ") { "instr(d.search_text, ?) > 0" } + " ORDER BY d.title_key LIMIT $PAGE"
-            fun search() = runBlocking {
-                database.useReaderConnection { connection ->
-                    connection.usePrepared(sql) { statement ->
-                        terms.forEachIndexed { i, term -> statement.bindText(i + 1, term) }
-                        var rows = 0
-                        while (statement.step()) rows++
-                        rows
-                    }
-                }
-            }
+            // The query the Songs tab runs (docs/library.md §6.3).
+            fun search() = lists.songs(SongQuery.SONGS.copy(search = query), limit = PAGE).size
             found[query] = search()
             repeat(WARM_UP) { search() }
             val times = List(RUNS) { measureTime { search() } }.sorted()
@@ -175,6 +168,33 @@ class GeneratedLibraryTest {
         assertThat(found["ка"]).describedAs("rows found for 'ка'").isEqualTo(PAGE)
         assertThat(found["zzzq"]).describedAs("rows found for 'zzzq'").isZero()
         assertThat(p95.values.max().inWholeMilliseconds).describedAs("slowest p95").isLessThanOrEqualTo(50L)
+    }
+
+    /** The tabs and a page on 20 000 songs; no limit is set for them, so the times are logged (docs/library.md §6.6). */
+    @Test
+    @TimingTest
+    fun theTabsReadTheGeneratedLibrary() {
+        runBlocking { Library.sync(context).awaitIdle() }
+        val lists = LibraryLists(Library.database(context), HiddenFiles())
+        fun <T> timed(name: String, read: () -> T): T {
+            repeat(WARM_UP) { read() }
+            val times = List(5) { measureTime { read() } }.sorted()
+            Log.i(TAG, "$name: median ${times[2]}")
+            return read()
+        }
+
+        val albums = timed("Albums tab") { lists.albums() }
+        val artists = timed("Artists tab") { lists.artists() }
+        val folders = timed("Folder levels") { lists.folders() }
+        timed("Album search 'ка'") { lists.albums(search = "ка") }
+        timed("Songs by artist, first page") { lists.songs(SongQuery.SONGS.copy(sort = SongSort.ARTIST), limit = PAGE) }
+        timed("Songs by artist, whole list") { lists.songs(SongQuery.SONGS.copy(sort = SongSort.ARTIST)) }
+        timed("Tree of the generated library") { lists.songs(SongQuery.tree(FolderLevels.PRIMARY, ROOT)) }
+        timed("An artist page") { lists.songs(SongQuery.artist(artists.first().key)) }
+
+        assertThat(albums.size).describedAs("albums").isGreaterThan(1_000)
+        assertThat(artists.size).describedAs("artists").isGreaterThan(300)
+        assertThat(folders.contains(FolderLevels.PRIMARY, ROOT)).isTrue()
     }
 
     private companion object {

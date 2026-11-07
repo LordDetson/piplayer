@@ -30,6 +30,10 @@ import com.google.common.util.concurrent.SettableFuture
 import io.github.lorddetson.piplayer.R
 import io.github.lorddetson.piplayer.library.songs.AudioPermission
 import io.github.lorddetson.piplayer.library.songs.Song
+import io.github.lorddetson.piplayer.library.Library
+import io.github.lorddetson.piplayer.library.lists.LibraryLists
+import io.github.lorddetson.piplayer.library.lists.ListKind
+import io.github.lorddetson.piplayer.settings.LibrarySettings
 import io.github.lorddetson.piplayer.library.songs.SongList
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicInteger
@@ -166,7 +170,7 @@ class PlaybackSessionCallback(
                     if (token == restoreGeneration.get()) {
                         currentOrigin = null
                         openGrants.keepOnly(emptyList())
-                        onQueueRequest(null)
+                        report(null)
                     }
                     MediaItemsWithStartPosition(items, startIndex, startPositionMs)
                 },
@@ -181,7 +185,7 @@ class PlaybackSessionCallback(
             val state = QueueState(request, emptyList())
             currentOrigin = state
             openGrants.keepOnly(emptyList())
-            onQueueRequest(state)
+            report(state)
             MediaItemsWithStartPosition(songs.map(::mediaItem), start, startPositionMs)
         }
     }
@@ -415,7 +419,7 @@ class PlaybackSessionCallback(
                     currentOrigin = newState
                     openGrants.take(newState.openItems.map { it.uri })
                     openGrants.keepOnly(newState.openItems.map { it.uri })
-                    onQueueRequest(newState)
+                    report(newState)
                     result.set(
                         SessionResult(
                             SessionResult.RESULT_SUCCESS,
@@ -454,7 +458,8 @@ class PlaybackSessionCallback(
 
     /** The saved queue with the readable opened files put back and the item and command state that belongs to it. */
     private fun restoredQueue(snapshot: PlaybackSnapshot, openItems: List<SavedOpenItem>): RestoredQueue? {
-        val library = snapshot.queue?.let { request ->
+        val queue = snapshot.queue?.let { followed(it, snapshot.songId) }
+        val library = queue?.let { request ->
             runCatching { songsFor(request) }.getOrElse { e ->
                 Log.w(TAG, "Could not read the library part of the saved queue", e)
                 emptyList()
@@ -470,8 +475,37 @@ class PlaybackSessionCallback(
             }
         }
         val openItems = QueueRestore.openItems(order)
-        val libraryRequest = if (order.any { it is QueueSlot.Library }) snapshot.queue else null
+        val libraryRequest = if (order.any { it is QueueSlot.Library }) queue else null
         return RestoredQueue(items, start, QueueState(libraryRequest, openItems))
+    }
+
+    /** Tells the saver the queue's state, and keeps the list it plays while it plays (docs/library.md §6.4). */
+    private fun report(state: QueueState?) {
+        SongList.hold(this, state?.library?.list)
+        onQueueRequest(state)
+    }
+
+    /**
+     * A saved album or artist whose key names nothing any more, because the tag pass has read its files since (a release
+     * ID, another album artist), follows the saved song to its album or artist now (docs/library.md §6.5).
+     */
+    private fun followed(request: QueueRequest, songId: Long): QueueRequest {
+        val kind = request.list.kind
+        if ((kind != ListKind.ALBUM && kind != ListKind.ARTIST) || SongList.sourceOverride != null || !Library.mayRead(context)) {
+            return request
+        }
+        return runCatching {
+            Library.awaitReady(context, READY_TIMEOUT_MS)
+            val hidden = LibrarySettings(context).readHiddenFiles()
+            Library.read(context) { database ->
+                val lists = LibraryLists(database, hidden)
+                val exists = if (kind == ListKind.ALBUM) lists.album(request.list.key) != null else lists.artist(request.list.key) != null
+                QueueRequest.rekeyed(request, exists, if (exists) null else lists.links(songId))
+            }
+        }.getOrElse { e ->
+            Log.w(TAG, "Could not follow the saved list", e)
+            request
+        }
     }
 
     /** Makes a restored or new queue the one the saver writes and the one opened files are inserted into. */
@@ -479,7 +513,7 @@ class PlaybackSessionCallback(
         currentOrigin = state
         openGrants.take(state.openItems.map { it.uri })
         openGrants.keepOnly(state.openItems.map { it.uri })
-        onQueueRequest(state)
+        report(state)
     }
 
     private data class RestoredQueue(val items: List<MediaItem>, val start: QueueStart, val state: QueueState)
@@ -498,10 +532,10 @@ class PlaybackSessionCallback(
     private fun holdsAudioPermission(controller: MediaSession.ControllerInfo): Boolean =
         context.checkPermission(AudioPermission.name, -1, controller.uid) == PackageManager.PERMISSION_GRANTED
 
-    /** The list a saved or requested queue names; the list on screen first, as a tap uses it (§2.3). */
+    /** The list a saved or requested queue names; the list on screen first, as a tap uses it (§2.3, library.md §6.4). */
     private fun songsFor(request: QueueRequest): List<Song> =
-        SongList.current()?.takeIf { list -> list.any { it.id == request.startSongId } }
-            ?: SongList.load(context)
+        SongList.current(request.list)?.takeIf { list -> list.any { it.id == request.startSongId } }
+            ?: SongList.load(context, query = request.list)
 
     /** Releases the expansion thread; the service calls it when it is destroyed. */
     fun release() {
@@ -602,6 +636,9 @@ class PlaybackSessionCallback(
         )
 
         private const val TAG = "PlaybackSession"
+
+        /** As long as a list read waits for the first sync (docs/library.md §1.4). */
+        private const val READY_TIMEOUT_MS = 30_000L
 
         private val ROOT = MediaItem.Builder()
             .setMediaId(ROOT_ID)

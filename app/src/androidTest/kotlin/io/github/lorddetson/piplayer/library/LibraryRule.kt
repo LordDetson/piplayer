@@ -5,13 +5,14 @@ import io.github.lorddetson.piplayer.library.songs.SongList
 import io.github.lorddetson.piplayer.library.sync.MediaIndex
 import io.github.lorddetson.piplayer.settings.HiddenFiles
 import io.github.lorddetson.piplayer.settings.LibrarySettings
+import io.github.lorddetson.piplayer.settings.ListSorts
 import io.github.lorddetson.piplayer.userdata.UserData
 import kotlinx.coroutines.runBlocking
 import org.junit.rules.ExternalResource
 
 /**
  * Starts a test on an empty library database over [index] (the device's media index when null), as a first launch
- * would, without folder rules and with the default hidden files, and syncs it as the grant of access would. Afterwards the library starts empty again over the device's index,
+ * would, without folder rules, with the default hidden files and list orders, and syncs it as the grant of access would. Afterwards the library starts empty again over the device's index,
  * so that no test row stays behind.
  */
 class LibraryRule(private val index: () -> MediaIndex? = { null }) : ExternalResource() {
@@ -51,6 +52,7 @@ class LibraryRule(private val index: () -> MediaIndex? = { null }) : ExternalRes
             settings.setShowSystemSounds(false)
             settings.setShowRecordings(false)
             settings.setMinLengthSeconds(HiddenFiles.DEFAULT_MIN_LENGTH_SECONDS)
+            ListSorts(context).clear()
         }
 
         /**

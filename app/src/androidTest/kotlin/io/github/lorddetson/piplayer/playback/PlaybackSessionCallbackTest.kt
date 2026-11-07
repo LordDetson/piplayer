@@ -23,8 +23,10 @@ import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionResult
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.github.lorddetson.piplayer.TestFiles
+import io.github.lorddetson.piplayer.library.lists.SongQuery
 import io.github.lorddetson.piplayer.library.songs.AudioPermission
 import io.github.lorddetson.piplayer.library.songs.SongList
+import io.github.lorddetson.piplayer.library.songs.SongSource
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.LONG_FIXTURE
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.SHORT_FIXTURE
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.eventually
@@ -316,6 +318,21 @@ class PlaybackSessionCallbackTest {
         assertThat(bravo.mediaMetadata.isPlayable).isTrue()
         // Nothing for other apps to read from the published items beyond what the notification shows.
         assertThat(bravo.requestMetadata).isEqualTo(MediaItem.RequestMetadata.EMPTY)
+        assertThat(queueRequests.last()).isEqualTo(QueueState(request, emptyList()))
+    }
+
+    @Test
+    fun aRequestOfVersion2ExpandsTheListTheScreenShowsForIt() {
+        songs.songs = listOf(SongSourceRule.song(1, "A"), SongSourceRule.song(2, "B"), SongSourceRule.song(3, "C"))
+        val album = SongQuery.album("album key").copy(reversed = true, search = "a c")
+        // What the album page shows (docs/library.md §6.4), unlike the whole list.
+        SongList.load(SongSource { listOf(SongSourceRule.song(3, "C"), SongSourceRule.song(1, "A")) }, query = album)
+        val request = QueueRequest(startSongId = 1, startRow = 1, list = album)
+
+        val result = setItems(piPlayer, request)
+
+        assertThat(result.mediaItems.map { it.mediaId }).containsExactly("3", "1")
+        assertThat(result.startIndex).isEqualTo(1)
         assertThat(queueRequests.last()).isEqualTo(QueueState(request, emptyList()))
     }
 

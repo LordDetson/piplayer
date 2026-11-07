@@ -431,6 +431,119 @@ keeps playing meanwhile, and the crash leaves a native crash report of `:tagger`
   showing what they show until the new values land.
 - A rebuild that keeps the user data comes after step 8, because it relies on re-attachment (TI §6).
 
+## 6. Library tabs and pages (M2a step 6)
+
+### 6.1 Screens
+
+- The library screen has a top bar with the app's name and actions for search, sort and the settings, then the tabs
+  Songs, Albums, Artists and Folders, and the mini player at the bottom. Without the audio permission every tab and page
+  shows the permission card of playback.md §2.2; access granted from any of them starts the library.
+- A tap on an album, an artist or a folder opens its page, which comes in from the side and has its own top bar with
+  back, search and sort, and the mini player.
+    - **Album page:** the album's title, its artist and year, then its songs. When its songs carry more than one disc
+      number, each disc starts with a header.
+    - **Artist page:** the artist's albums, then all of the artist's songs, in one scroll.
+    - **Folder page:** a button that plays the folder with all its subfolders (when it holds any song), the subfolders,
+      then the folder's own songs.
+    - A page whose search finds nothing says so under its header. Another order or search starts the list at the top.
+- The Folders tab is the page of the top level: with one volume, the folders at its root and the songs right in it;
+  with more, one entry per volume (the primary one named "Internal storage").
+- A tap on a song plays the list it was tapped in, from that song, in the order and with the search shown (§6.4).
+- The playing song is marked in every list. On Now Playing the artist and the album open their pages, as found at the
+  tap. Each song row
+  has a menu with "Go to album", "Go to artist" (one entry per artist) and "Go to folder".
+- The debug entry moves from the list into the top bar.
+
+### 6.2 Grouping
+
+- `track_display` also holds what groups and sorts a file: the album key, the album artist, the compilation flag, the
+  year, the disc and track numbers, and the sort keys of the artist, the album and the file name. One resolver derives
+  them with the other display values (§1.2), from the tags once the tag pass has read the file, and from the index's
+  values until then, so that the first launch groups at once and is not slowed down.
+    - The album key is the one the tag pass gives (§5.2): the release ID, or else the normalized album and album artist
+      within a folder, a last folder named like a disc not counting, plus the compilation flag. A file without an album
+      belongs to none.
+    - The index gives the track number with the disc in its thousands (`2005` is disc 2, track 5); the resolver splits it.
+      The year is the first four digits of the date, or else of the original date; from the index, its year.
+- `display_artist` lists each artist of a file in order: all the artists of its tags once read, otherwise the displayed
+  artist. An artist is one by its normalized name, which is also the key its page is found by: the key stays the same
+  when the tag pass reads the file, and two artists of one name are one. Album artists and composers are not listed.
+- An album shows its album artist; without one, its artist when all its songs share it (by its key, so "Queen" and
+  "QUEEN" are one), otherwise "Various artists"; with no artist on any song, "Unknown artist". A compilation without an
+  album artist shows "Various artists" too.
+- Hidden files (§3.5) count nowhere: an album, artist or folder whose songs are all hidden is not listed.
+- An album's year is the earliest year of its songs. Albums sort by artist with the key of their album artist, or else
+  the lowest artist key of their songs.
+
+### 6.3 Sorting and search
+
+| List | Sort fields | Default |
+|---|---|---|
+| Songs | title, artist, album, length | title |
+| Albums | title, artist, year | title |
+| Artists | name, number of songs (most first) | name |
+| Album page | disc and track | disc and track |
+| Artist page songs | album by year, title | album by year |
+| Folders tab and folder pages | songs by file name or title; subfolders always by name | file name |
+
+- Every list also has "Reverse order", which reverses the whole list (on a folder page, its subfolders too). Ties go by
+  title, then by the index's ID, so that the order is total and the reverse exact; disc and track go by the file name
+  before the title. A missing value (no length, no year, no track number) sorts last. Albums and artists tie by their
+  keys.
+- The choice is kept per kind of list, not per album or folder, in the settings file that is backed up (§3.2).
+- Sorting compares sort keys by code point. The keys are the names normalized as for search (TI §4.1) and come from one
+  function; step 11 replaces it with locale-aware keys that honour sort tags, without changing the queries.
+- The search action opens a field over the current tab or page that filters it as the user types (the list is read
+  once typing pauses for a quarter of a second): songs by their search
+  text (§1.2), albums by their title and artist, artists by their name, folders by their name (then any folder of the
+  library that matches, with its path). The words of the query must all occur, as in §1.2. A search does not change the
+  sort.
+- On an artist page the artist's albums are sorted by year, then title; they are every album with a visible song of
+  theirs. Its songs "by album by year" keep each album together: albums by the earliest year of the artist's songs on
+  them, each by disc and track, and songs without an album last, by their own year.
+- "Play all, with subfolders" plays the folder's tree with the page's sort and search, from its first song.
+
+### 6.4 Queue requests
+
+- A tap sends a compact request of version 2 (playback.md §2.3) that names the list, its key, the sort, the reverse
+  and the search: `q2/<list>?key=<key>&sort=<field>&rev=<0|1>&q=<query>&start=<ID>&index=<row>`, the key and the query
+  percent-encoded. The lists are `songs` (no key), `album` (its album key), `artist` (its artist key), `folder` (the
+  volume, `/` and the relative path) and `tree` (a folder with all its subfolders).
+- `tree` plays the folder's own songs first, in the folder page's sort, then each subfolder in name order, in turn with
+  its own songs first. "Reverse order" reverses the whole list.
+- The service expands a request from the list the screen shows when it holds the start song, otherwise by reading the
+  list again. The screens and the service share one kept list per request without its start, so that a tap plays
+  exactly what is visible: each screen holds the list it shows and the service the list it plays, and besides those the
+  last six lists read are kept. A batch of the tag pass changes the rows of every kept list in place, and every kept
+  list follows the rules of §5.4.
+- A saved queue of an album or an artist whose key names nothing any more when it is restored (the tag pass has found a
+  release ID or another album artist since) follows its saved song to that song's album or first artist, and the saved
+  request takes the new key.
+- Requests of version 1 still name the Songs list by title, so that saved queues stay valid.
+
+### 6.5 Routes
+
+- Pages are found by natural keys, not by row IDs: an album by its album key, an artist by its artist key, a folder by
+  its volume and relative path. They survive a rebuild of the library database and a new index. A key that no longer
+  names anything (the tag pass found a release ID, the folder is gone) shows that the album, artist or folder is not
+  found, with the way back.
+- While the tag pass runs, the lists of albums, artists and folders are not grouped again under the user's finger:
+  they are read when the screen first starts, after a sync that changed the library, after a change of the hidden files,
+  the order or the search, and once more at the first return after a pass that changed rows; a return or a switch of
+  tabs reads nothing else. The songs on pages change in place as in §5.4.
+
+### 6.6 Checks
+
+JVM tests: the request of version 2 for every list, keys with every kind of character, version 1 still read; the folder
+level of one or more volumes with counts that include subfolders; the track number with its disc; the display values of
+grouping before and after the read; kept lists per request.
+
+Instrumented tests: on the library database, albums grouped from index values and from tags, `CD1` and `CD2` as one
+album, compilations, multi-value artists, the songs of each list in every sort and its reverse, the search of each list,
+hidden files left out, the `tree` order; through the service, requests of version 2 expand to the visible list; on the
+screen, the tabs, the pages, a page found again after the library database is rebuilt, the sort and search controls, the
+Now Playing links, the mark of the playing song and the song menu.
+
 ## 7. Content key and exact duration (M2a step 7)
 
 The layout of the key and the rules for lengths are in TI §3.1. This step builds them behind `:tagger`.

@@ -147,6 +147,13 @@ data class TrackEntity(
             composers = row.composers.values(),
             genres = row.genres.values(),
             recordingMbid = row.recordingMbid,
+            albumArtist = row.albumArtist,
+            releaseMbid = row.releaseMbid,
+            compilation = row.compilation,
+            date = row.date,
+            originalDate = row.originalDate,
+            trackNumber = row.trackNumber,
+            discNumber = row.discNumber,
         )
     }
 }

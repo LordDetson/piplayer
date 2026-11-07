@@ -3,6 +3,8 @@ package io.github.lorddetson.piplayer.library.db
 import androidx.room3.Dao
 import androidx.room3.Insert
 import androidx.room3.Query
+import androidx.room3.RawQuery
+import androidx.room3.RoomRawQuery
 import androidx.room3.Upsert
 import io.github.lorddetson.piplayer.library.sync.StoredFile
 import io.github.lorddetson.piplayer.library.tagpass.DurationSource
@@ -50,13 +52,8 @@ interface LibraryDao {
     @Query("DELETE FROM track_display WHERE file_id IN (:fileIds)")
     suspend fun deleteDisplays(fileIds: List<Long>)
 
-    /** The songs of the library in list order, without the hidden files (docs/library.md §1.4, §3.5). */
-    @Query("$SONGS ORDER BY d.title_key, f.media_store_id")
-    suspend fun songs(showSystemSounds: Boolean, showRecordings: Boolean, minLengthMs: Long): List<SongRow>
-
-    /** The first [count] songs of [songs]. */
-    @Query("$SONGS ORDER BY d.title_key, f.media_store_id LIMIT :count")
-    suspend fun firstSongs(showSystemSounds: Boolean, showRecordings: Boolean, minLengthMs: Long, count: Int): List<SongRow>
+    @Query("DELETE FROM display_artist WHERE file_id IN (:fileIds)")
+    suspend fun deleteDisplayArtists(fileIds: List<Long>)
 
     /** Every folder that holds a file, with its volume. */
     @Query("SELECT DISTINCT volume_name AS volume, relative_path AS relativePath FROM audio_file")
@@ -218,6 +215,28 @@ interface LibraryDao {
     )
     suspend fun songRowsOf(fileIds: List<Long>): List<SongRow>
 
+    /** The songs of a list (docs/library.md §6.3), built by `LibraryLists`. */
+    @RawQuery
+    suspend fun listSongs(query: RoomRawQuery): List<ListSongRow>
+
+    @RawQuery
+    suspend fun albumGroups(query: RoomRawQuery): List<AlbumGroupRow>
+
+    @RawQuery
+    suspend fun artistGroups(query: RoomRawQuery): List<ArtistGroupRow>
+
+    @RawQuery
+    suspend fun folderCounts(query: RoomRawQuery): List<FolderCountRow>
+
+    @Query(
+        "SELECT d.file_id AS fileId, d.album_key AS albumKey, f.volume_name AS volume, f.relative_path AS relativePath " +
+            "FROM track_display d JOIN audio_file f ON f.id = d.file_id WHERE f.media_store_id = :mediaStoreId LIMIT 1",
+    )
+    suspend fun songPlace(mediaStoreId: Long): SongPlaceRow?
+
+    @Query("SELECT * FROM display_artist WHERE file_id = :fileId ORDER BY position")
+    suspend fun displayArtists(fileId: Long): List<DisplayArtistEntity>
+
     @Query("SELECT * FROM album")
     suspend fun albums(): List<AlbumEntity>
 
@@ -282,6 +301,37 @@ interface LibraryDao {
     suspend fun deleteGenresWithoutTracks()
 }
 
+/** A song of a list, with what the list groups it by. */
+data class ListSongRow(
+    val mediaStoreId: Long,
+    val title: String,
+    val artist: String?,
+    val album: String?,
+    val durationMs: Long?,
+    val discNumber: Int?,
+    val relativePath: String,
+)
+
+/** An album key with what its visible songs say of it. */
+data class AlbumGroupRow(
+    val albumKey: String,
+    val title: String,
+    val albumArtist: String?,
+    val compilation: Boolean,
+    val artist: String?,
+    val oneArtist: Boolean,
+    val firstArtistKey: String?,
+    val year: Int?,
+    val songs: Int,
+    val titleKey: String?,
+)
+
+data class ArtistGroupRow(val artistKey: String, val name: String, val songs: Int, val albums: Int)
+
+data class FolderCountRow(val volume: String, val relativePath: String, val songs: Int)
+
+data class SongPlaceRow(val fileId: Long, val albumKey: String?, val volume: String, val relativePath: String)
+
 /** A file's size, modification time and place as the database holds them now. */
 data class FileState(
     val id: Long,
@@ -310,6 +360,14 @@ data class ReadFileRow(
     val embeddedCover: Boolean?,
     val tagLengthMs: Long?,
     val exactDurationMs: Long?,
+    val albumArtist: String?,
+    val releaseMbid: String?,
+    val compilation: Boolean,
+    val date: String?,
+    val originalDate: String?,
+    val trackNumber: Int?,
+    val discNumber: Int?,
+    val volume: String,
 )
 
 /** What the display needs of a file's index values. */
@@ -323,10 +381,29 @@ data class IndexInputRow(
     val genre: String?,
     val durationMs: Long?,
     val exactDurationMs: Long?,
+    val albumArtist: String?,
+    val year: Int?,
+    val trackNumber: Int?,
+    val volume: String,
+    val relativePath: String,
 )
 
 /** A folder of a volume, as the media index gives its path. */
-data class FolderKey(val volume: String, val relativePath: String)
+data class FolderKey(val volume: String, val relativePath: String) {
+    /** The volume, `/` and the path: what routes and queue requests name the folder by (docs/library.md §6.5). */
+    val key: String get() = "$volume/$relativePath"
+
+    companion object {
+        /** The folder [key] names, or null. */
+        fun parse(key: String): FolderKey? {
+            val slash = key.indexOf('/')
+            if (slash <= 0) return null
+            val path = key.substring(slash + 1)
+            if (path.isNotEmpty() && !path.endsWith('/')) return null
+            return FolderKey(key.substring(0, slash), path)
+        }
+    }
+}
 
 /** A folder with a rule its files carry. */
 /** A file with a length still to settle; [durationSource] says what is left to do. */
@@ -355,18 +432,12 @@ data class FolderRuleRow(val volume: String, val relativePath: String, val rule:
 private const val READ_FILES = "SELECT t.file_id AS fileId, t.title, t.artist, t.artists, t.album, t.composers, t.genres, " +
     "t.recording_mbid AS recordingMbid, f.size, f.mtime, f.display_name AS displayName, " +
     "f.relative_path AS relativePath, " +
-    "f.embedded_cover_present AS embeddedCover, f.tag_length_ms AS tagLengthMs, f.duration_ms AS exactDurationMs " +
+    "f.embedded_cover_present AS embeddedCover, f.tag_length_ms AS tagLengthMs, f.duration_ms AS exactDurationMs, " +
+    "t.album_artist AS albumArtist, t.release_mbid AS releaseMbid, t.compilation, t.date, t.original_date AS originalDate, " +
+    "t.track_number AS trackNumber, t.disc_number AS discNumber, f.volume_name AS volume " +
     "FROM track t JOIN audio_file f ON f.id = t.file_id"
 
 private const val INDEX_INPUTS = "SELECT f.id AS fileId, f.display_name AS displayName, e.title, e.artist, e.album, " +
-    "e.composer, e.genre, e.duration_ms AS durationMs, f.duration_ms AS exactDurationMs " +
+    "e.composer, e.genre, e.duration_ms AS durationMs, f.duration_ms AS exactDurationMs, e.album_artist AS albumArtist, " +
+    "e.year, e.track_number AS trackNumber, f.volume_name AS volume, f.relative_path AS relativePath " +
     "FROM audio_file f LEFT JOIN media_index_entry e ON e.file_id = f.id"
-
-// Excluded folders never; included folders whole; elsewhere every file but the hidden kinds and short files. A file
-// whose length is unknown is never short (docs/library.md §3.5).
-private const val SONGS = "SELECT f.media_store_id AS mediaStoreId, d.title, d.artist, d.album, d.duration_ms AS durationMs " +
-    "FROM track_display d JOIN audio_file f ON f.id = d.file_id " +
-    "WHERE f.folder_rule != 2 AND (f.folder_rule = 1 OR (" +
-    "(:showSystemSounds OR NOT (f.is_ringtone OR f.is_notification OR f.is_alarm)) " +
-    "AND (:showRecordings OR NOT f.recording) " +
-    "AND (d.duration_ms IS NULL OR d.duration_ms >= :minLengthMs)))"
