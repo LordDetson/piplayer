@@ -13,18 +13,24 @@ class OpenSourceLicensesTest {
     /** The generated asset folder; Gradle passes it to the debug unit tests. */
     private val assets = File(requireNotNull(System.getProperty("piplayer.licenses.dir")) { "Run through Gradle" })
 
-    /** "group:name:version" of every module of the debug runtime classpath, from the listing task. */
+    /**
+     * "group:name:version" of the modules whose files the debug APK packages, from the listing task, which finds them
+     * from the packaged artifacts rather than the graph the list walks.
+     */
     private val components = File(requireNotNull(System.getProperty("piplayer.licenses.components")) { "Run through Gradle" })
         .readLines().filter { it.isNotBlank() }
 
     private val list by lazy { OpenSourceLicenses.parse(assets.resolve(OpenSourceLicenses.LIST).readText()) }
 
     @Test
-    fun everyRuntimeModuleIsListedAndNothingElse() {
+    fun everyModuleWhoseFilesThePackageHoldsIsListed() {
         val listed = list.libraries.map { "${it.group}:${it.name}:${it.version}" }
 
-        assertThat(components).describedAs("the listing task found the runtime modules").hasSizeGreaterThan(50)
-        assertThat(listed).containsExactlyInAnyOrderElementsOf(components)
+        assertThat(components).describedAs("the listing task found the packaged modules").hasSizeGreaterThan(50)
+        assertThat(listed).doesNotHaveDuplicates().containsAll(components)
+        // Media3, the native list's neighbours and the modules a new dependency would be likeliest to join.
+        assertThat(components).anyMatch { it.startsWith("androidx.media3:media3-exoplayer:") }
+            .anyMatch { it.startsWith("com.squareup.okhttp3:okhttp-android:") }
     }
 
     @Test

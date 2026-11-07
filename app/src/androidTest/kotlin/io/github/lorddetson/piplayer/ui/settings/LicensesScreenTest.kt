@@ -2,6 +2,7 @@ package io.github.lorddetson.piplayer.ui.settings
 
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
@@ -67,6 +68,7 @@ class LicensesScreenTest {
         compose.onNodeWithTag(LicensesTags.LIST).performScrollToNode(media3)
         val taglib = hasText("TagLib")
         compose.onNodeWithTag(LicensesTags.LIST).performScrollToNode(taglib)
+        compose.onNodeWithTag(LicensesTags.LIST).performScrollToNode(hasText("Public Suffix List (in OkHttp)"))
     }
 
     @Test
@@ -78,7 +80,8 @@ class LicensesScreenTest {
         compose.onNode(media3).performClick()
 
         waitFor(hasTestTag(LicensesTags.TEXT))
-        waitFor(hasText("Apache License", substring = true))
+        // The row's own "Apache License 2.0" stays on screen while the page slides in: only the page's text counts.
+        waitFor(hasText("TERMS AND CONDITIONS FOR USE", substring = true) and hasAnyAncestor(hasTestTag(LicensesTags.TEXT)))
     }
 
     @Test
@@ -89,7 +92,7 @@ class LicensesScreenTest {
 
         compose.onNode(taglib).performClick()
 
-        waitFor(hasText("GNU LESSER GENERAL PUBLIC LICENSE", substring = true))
+        waitFor(hasText("GNU LESSER GENERAL PUBLIC LICENSE", substring = true) and hasAnyAncestor(hasTestTag(LicensesTags.TEXT)))
     }
 }
 

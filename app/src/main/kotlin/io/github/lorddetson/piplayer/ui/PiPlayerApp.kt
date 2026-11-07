@@ -213,7 +213,11 @@ fun PiPlayerApp(viewModel: PlayerViewModel = viewModel()) {
         predictivePopTransitionSpec = { EnterTransition.None togetherWith slideOutVertically(targetOffsetY = { it }) },
         entryProvider = entryProvider {
             entry<SongsRoute> {
-                OnboardingGate(onboarding) {
+                OnboardingGate(
+                    onboarding,
+                    bottomBar = { MiniPlayer(host.player, host.cover, onOpen = host.openNowPlaying) },
+                    snackbarHost = { SnackbarHost(host.snackbar) },
+                ) {
                     LibraryScreen(host, onOpenSettings = { if (backStack.lastOrNull() != SettingsRoute) backStack.add(SettingsRoute) })
                 }
             }

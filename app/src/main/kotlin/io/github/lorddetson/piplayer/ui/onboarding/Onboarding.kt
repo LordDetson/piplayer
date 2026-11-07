@@ -9,12 +9,11 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
@@ -110,6 +109,8 @@ fun rememberOnboarding(): OnboardingState {
     }
     LifecycleResumeEffect(Unit) {
         if (context.hasAudioPermission()) {
+            // Granted in the system settings: the library starts here, whichever tab shows first.
+            Library.start(context)
             if (state.showing) finish()
             // A phone that already gave access never sees onboarding, now or later.
             scope.launch { if (!Onboarding.isDone(context)) Onboarding.markDone(context) }
@@ -122,20 +123,33 @@ fun rememberOnboarding(): OnboardingState {
 private fun Context.hasAudioPermission() =
     ContextCompat.checkSelfPermission(this, AudioPermission.name) == PackageManager.PERMISSION_GRANTED
 
-/** Onboarding while [state] shows it, otherwise [content] (the library). */
+/**
+ * Onboarding while [state] shows it, otherwise [content] (the library). Onboarding keeps the library's [bottomBar] (the
+ * mini player of a file opened from another app, which plays without the permission) and [snackbarHost].
+ */
 @Composable
-fun OnboardingGate(state: OnboardingState, content: @Composable () -> Unit) {
-    if (state.showing) OnboardingScreen(onAllow = state::allow) else content()
+fun OnboardingGate(
+    state: OnboardingState,
+    bottomBar: @Composable () -> Unit = {},
+    snackbarHost: @Composable () -> Unit = {},
+    content: @Composable () -> Unit,
+) {
+    if (state.showing) OnboardingScreen(onAllow = state::allow, bottomBar = bottomBar, snackbarHost = snackbarHost) else content()
 }
 
 /** What PiPlayer is, why it needs access to the audio files, and "Allow" (docs/library.md §14.1). */
 @Composable
-fun OnboardingScreen(onAllow: () -> Unit, modifier: Modifier = Modifier) {
-    Surface(modifier.fillMaxSize().testTag(OnboardingTags.SCREEN)) {
+fun OnboardingScreen(
+    onAllow: () -> Unit,
+    modifier: Modifier = Modifier,
+    bottomBar: @Composable () -> Unit = {},
+    snackbarHost: @Composable () -> Unit = {},
+) {
+    Scaffold(modifier.fillMaxSize().testTag(OnboardingTags.SCREEN), bottomBar = bottomBar, snackbarHost = snackbarHost) { padding ->
         Column(
             verticalArrangement = Arrangement.spacedBy(16.dp),
             modifier = Modifier
-                .safeDrawingPadding()
+                .padding(padding)
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 24.dp, vertical = 48.dp),
         ) {

@@ -98,9 +98,11 @@ class MediaCodecPcmSource(private val context: Context, private val fd: FileDesc
      *
      * A decoder in error gives no more output, also none it had already decoded. So with [holdLast] (FLAC, whose
      * decoders put out one buffer per frame) the stream's last sample, which is the one a cut file leaves broken, waits in
-     * its input buffer until every frame queued before it has come out. Otherwise the frames the decoder still held when
-     * it failed on the cut one were lost, as many as timing left there: 1 to 6 of 30 in about a quarter of the decodes on
-     * the API 30 emulator. A decoder that keeps frames back gets the sample after [MAX_HOLD_POLLS] waits.
+     * its input buffer until the decoder has put out the frame queued just before it (an output with that frame's time;
+     * counting buffers would be thrown off by empty or extra ones). Otherwise the frames the decoder still held when it
+     * failed on the cut one were lost, as many as timing left there: 1 to 6 of 30 in about a quarter of the decodes on
+     * the API 30 emulator. A decoder that keeps frames back or changes their times gets the sample after [MAX_HOLD_POLLS]
+     * waits without output.
      */
     private fun pump(
         samples: SampleReader,
@@ -120,11 +122,14 @@ class MediaCodecPcmSource(private val context: Context, private val fd: FileDesc
         var heldSize = 0
         var heldTimeUs = 0L
         var heldPolls = 0
+        // The time of the last sample queued, and the latest time the decoder has put out.
+        var lastQueuedUs = Long.MIN_VALUE
+        var putOutUs = Long.MIN_VALUE
         while (true) try {
             var progress = false
             while (!inputDone) {
                 if (held >= 0) {
-                    if (received < queued && heldPolls < MAX_HOLD_POLLS) break
+                    if (putOutUs < lastQueuedUs && heldPolls < MAX_HOLD_POLLS) break
                     codec.queueInputBuffer(held, 0, heldSize, heldTimeUs, 0)
                     queued++
                     held = -1
@@ -138,7 +143,7 @@ class MediaCodecPcmSource(private val context: Context, private val fd: FileDesc
                 if (size < 0) {
                     codec.queueInputBuffer(index, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
                     inputDone = true
-                } else if (holdLast && samples.last && received < queued) {
+                } else if (holdLast && samples.last && queued > 0) {
                     held = index
                     heldSize = size
                     heldTimeUs = samples.timeUs
@@ -146,6 +151,7 @@ class MediaCodecPcmSource(private val context: Context, private val fd: FileDesc
                 } else {
                     codec.queueInputBuffer(index, 0, size, samples.timeUs, 0)
                     queued++
+                    lastQueuedUs = samples.timeUs
                 }
             }
             while (true) {
@@ -161,6 +167,7 @@ class MediaCodecPcmSource(private val context: Context, private val fd: FileDesc
                 val pcmFormat = format ?: toPcmFormat(codec.outputFormat).also { format = it }
                 val keepGoing = try {
                     val isConfig = info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG != 0
+                    if (!isConfig) putOutUs = maxOf(putOutUs, info.presentationTimeUs)
                     if (info.size > 0 && !isConfig) {
                         val buffer = requireNotNull(codec.getOutputBuffer(index))
                         buffer.position(info.offset).limit(info.offset + info.size)
@@ -280,7 +287,10 @@ class MediaCodecPcmSource(private val context: Context, private val fd: FileDesc
         /** Waits in a row without any input taken or output given, about five seconds: the decoder is stuck. */
         const val MAX_IDLE_POLLS = 500
 
-        /** Waits without output for the frames before a held last sample, about half a second, well before [MAX_IDLE_POLLS]. */
-        const val MAX_HOLD_POLLS = 50
+        /**
+         * Waits without output for the frame before a held last sample, about two seconds: long enough for a decoder
+         * thread starved on a loaded machine, well before [MAX_IDLE_POLLS].
+         */
+        const val MAX_HOLD_POLLS = 200
     }
 }

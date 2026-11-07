@@ -39,8 +39,8 @@ room3 {
     schemaDirectory("$projectDir/schemas")
 }
 
-// The native components of THIRD_PARTY_NOTICES.md, with the licence files :nativelib puts into the assets; the open-source
-// licences screen lists them after the Maven modules (docs/library.md §14.2).
+// The native components and bundled data of THIRD_PARTY_NOTICES.md, with their licence files in the assets (from :nativelib
+// or this module); the open-source licences screen lists them after the Maven modules (docs/library.md §14.2).
 val nativeLibraries = listOf(
     NativeLibrary("TagLib", "2.3.2", "GNU LGPL 2.1", listOf("licenses/taglib-COPYING.LGPL")),
     NativeLibrary("utfcpp", "pinned by TagLib 2.3.2", "Boost Software License 1.0", listOf("licenses/utfcpp-LICENSE")),
@@ -56,6 +56,12 @@ val nativeLibraries = listOf(
     NativeLibrary(
         "LLVM libc++ and libc++abi", "NDK 30.0.16248370", "Apache License 2.0 with LLVM Exceptions",
         listOf("licenses/libc++-LICENSE.txt"),
+    ),
+    // Inside Maven modules, under licences of their own; their texts are in src/main/assets/licenses.
+    NativeLibrary("SQLite (in androidx.sqlite:sqlite-bundled)", "bundled with 2.7.1", "Public domain", listOf("licenses/sqlite-public-domain.txt")),
+    NativeLibrary(
+        "Public Suffix List (in OkHttp)", "bundled with OkHttp", "Mozilla Public License 2.0",
+        listOf("licenses/publicsuffix-MPL-2.0.txt"),
     ),
 )
 
@@ -83,6 +89,8 @@ androidComponents {
             val expected = components.flatMap { it.output }
             inputs.dir(list).withPropertyName("licenseList").withPathSensitivity(PathSensitivity.RELATIVE)
             inputs.file(expected).withPropertyName("runtimeComponents").withPathSensitivity(PathSensitivity.NONE)
+            inputs.file(rootProject.layout.projectDirectory.file("THIRD_PARTY_NOTICES.md"))
+                .withPropertyName("thirdPartyNotices").withPathSensitivity(PathSensitivity.NONE)
             jvmArgumentProviders += CommandLineArgumentProvider {
                 listOf(
                     "-Dpiplayer.licenses.dir=${list.get().asFile.path}",

@@ -72,6 +72,16 @@ class OnboardingScreenTest {
     }
 
     @Test
+    fun onboardingKeepsTheMiniPlayerOfAFileOpenedFromAnotherApp() {
+        compose.setContent {
+            OnboardingGate(OnboardingState(showing = true, ask = {}), bottomBar = { Text("Mini player") }) { Text("The library") }
+        }
+
+        compose.onNodeWithTag(OnboardingTags.SCREEN).assertIsDisplayed()
+        compose.onNodeWithText("Mini player").assertIsDisplayed()
+    }
+
+    @Test
     fun aGateNotShowingGoesStraightToTheLibrary() {
         compose.setContent { OnboardingGate(OnboardingState(showing = false, ask = {})) { Text("The library") } }
 

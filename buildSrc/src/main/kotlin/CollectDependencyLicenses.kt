@@ -89,8 +89,9 @@ abstract class CollectDependencyLicenses : DefaultTask() {
 }
 
 /**
- * Writes "group:name:version" of every module of a runtime classpath, one per line: what the JVM check of the licence
- * list compares the list with (docs/library.md §14.4).
+ * Writes "group:name:version" of the modules whose files go into the APK, one per line, found from the packaged artifacts
+ * rather than the graph the list walks: what the JVM check of the licence list compares the list with (docs/library.md
+ * §14.4). BOMs and Kotlin Multiplatform root modules have no files, so the list holds more modules than this.
  */
 abstract class ListRuntimeComponents : DefaultTask() {
 
@@ -122,13 +123,32 @@ fun moduleComponents(runtime: Configuration): Provider<List<String>> =
             .distinct()
     }
 
+/**
+ * The modules that own the files of [runtime] that the build packages (classes jars, from AARs and jars alike), as
+ * "group:name:version".
+ */
+fun packagedComponents(runtime: Configuration): Provider<List<String>> =
+    runtime.incoming.artifactView {
+        lenient(true)
+        attributes { attribute(org.gradle.api.attributes.Attribute.of("artifactType", String::class.java), "android-classes-jar") }
+    }.artifacts.resolvedArtifacts.map { artifacts ->
+        artifacts.mapNotNull { it.id.componentIdentifier as? ModuleComponentIdentifier }
+            .map { "${it.group}:${it.module}:${it.version}" }
+            .distinct()
+    }
+
 /** Parent POMs are looked for this many levels up; Guava's licence, for one, is in its first parent. */
-private const val POM_LEVELS = 4
+private const val PARENT_LEVELS = 4
 
 /**
- * The POMs of [runtime]'s modules and of their parents up to [POM_LEVELS] levels, worked out only when the files are
- * asked for. A configuration keeps one version of a module, so two modules with different versions of one parent (Guava's
- * failureaccess and Guava itself) have their parents fetched by separate detached configurations.
+ * The POMs of [runtime]'s modules and of their parents up to [PARENT_LEVELS] levels. A configuration keeps one version of
+ * a module, so two modules with different versions of one parent (Guava's failureaccess and Guava itself) have their
+ * parents fetched by separate detached configurations.
+ *
+ * Gradle works the provider out while it plans the task graph, so a configuration cache miss (a changed build script, a
+ * new worktree, every CI run) resolves the runtime classpath and these POMs before any task runs, and the build log says
+ * that the classpath "was resolved during configuration time". The POMs come from Gradle's cache after the first time;
+ * the price is accepted for a list that a new parent level could not otherwise feed (docs/library.md §14.2).
  */
 fun Project.licensePoms(runtime: Configuration): FileCollection {
     val components = moduleComponents(runtime)
@@ -139,7 +159,8 @@ fun Project.licensePoms(runtime: Configuration): FileCollection {
             val found = mutableListOf<java.io.File>()
             val seen = HashSet<Coordinates>()
             var wanted = components.get().map(Coordinates::parse)
-            repeat(POM_LEVELS) {
+            // The modules' own POMs, then one round per parent level.
+            repeat(PARENT_LEVELS + 1) {
                 val batches = wanted.filter(seen::add).groupBy { "${it.group}:${it.name}" }.values
                     .flatMap { versions -> versions.withIndex() }
                     .groupBy({ it.index }, { it.value })
@@ -181,7 +202,7 @@ fun Project.registerDependencyLicenses(
         outputDir.set(layout.buildDirectory.dir("generated/licenses/$variantName"))
     }
     val list = tasks.register("list${capitalized}RuntimeComponents", ListRuntimeComponents::class.java) {
-        components.set(moduleComponents(runtime))
+        components.set(packagedComponents(runtime))
         output.set(layout.buildDirectory.file("generated/licenses/$variantName-components.txt"))
     }
     return collect to list

@@ -346,9 +346,9 @@ PiPlayer never adds an ID3v1 tag to a file that has none; §7.5 lists the TagLib
   the file instead of hanging; a decoder error after some audio came out (a file cut off in the middle of its last
   frame) ends the stream there and keeps that audio, but the decoded length then no longer counts as the file's
   length. A decoder in error gives none of the frames it decoded but not yet handed out, so the last FLAC frame, which
-  a cut file leaves broken, is queued only once every frame before it has come out (or after about half a second, for
-  a decoder that keeps frames back); without that, 1 to 6 of 30 frames were lost in about a quarter of the decodes on
-  the API 30 emulator, depending on timing (M2a step 14). PCM in the container that Android has no encoding for (big-endian, 64-bit float) is refused rather than
+  a cut file leaves broken, is queued only once the frame before it has come out (or after about two seconds without
+  output, for a decoder that keeps frames back); without that, 1 to 6 of 30 frames were lost in about a quarter of the
+  decodes on the API 30 emulator, depending on timing (M2a step 14). PCM in the container that Android has no encoding for (big-endian, 64-bit float) is refused rather than
   read as noise.
 - PCM conversion: accept every output encoding (8-, 16-, 24- and 32-bit integer, float), average all channels into
   mono, resample to 11 025 Hz with the resampler of speexdsp 1.2.1 (BSD-3-Clause; a Kaiser-windowed sinc filter that

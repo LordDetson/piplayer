@@ -19,7 +19,7 @@
     <string name="settings_version">Версия %1$s</string>
     <string name="settings_licenses">Лицензии открытого ПО</string>
     <string name="settings_licenses_summary">Библиотеки, из которых собран PiPlayer, и их лицензии</string>
-    <string name="licenses_native">Нативный код</string>
+    <string name="licenses_native">Нативный код и встроенные данные</string>
     <string name="licenses_unreadable">Не удалось прочитать список лицензий.</string>
     <string name="licenses_open">Показать лицензию</string>
     <string name="songs_tag_progress">Чтение тегов: %1$d из %2$d</string>

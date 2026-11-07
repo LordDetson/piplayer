@@ -81,17 +81,25 @@ object LicenseKinds {
 
     val all = listOf(APACHE_2, MIT, BSD_3)
 
-    /** The kind of [license], from its name or URL; null when the build does not know it. */
+    /**
+     * The kind of [license], from its name or URL; null when the build does not know it, or when the name and the URL
+     * say different things (a GPL name with an Apache URL is no Apache licence).
+     */
     fun of(license: PomLicense): LicenseKind? {
-        val name = license.name?.lowercase()?.replace(Regex("\\s+"), " ")?.trim().orEmpty()
-        val url = license.url?.let(::normalizedUrl).orEmpty()
+        val name = license.name?.lowercase()?.replace(Regex("\\s+"), " ")?.trim()?.takeIf { it.isNotEmpty() }
+        val url = license.url?.let(::normalizedUrl)?.takeIf { it.isNotEmpty() }
+        val byName = name?.let { text -> NAMES.firstOrNull { (_, patterns) -> patterns.any { it.matches(text) } }?.first }
+        val byUrl = url?.let { text -> URLS.firstOrNull { (_, urls) -> text in urls }?.first }
         return when {
-            url in APACHE_URLS || APACHE_NAMES.any { it.matches(name) } -> APACHE_2
-            url in MIT_URLS || MIT_NAMES.any { it.matches(name) } -> MIT
-            url in BSD_3_URLS || BSD_3_NAMES.any { it.matches(name) } -> BSD_3
-            else -> null
+            name != null && url != null -> byName?.takeIf { byUrl == null || byUrl == it } ?: byUrl?.takeIf { byName == null && !nameNamesAnother(name) }
+            else -> byName ?: byUrl
         }
     }
+
+    /** A name the build does not map that still names some licence: a URL alone must not outvote it. */
+    private fun nameNamesAnother(name: String) =
+        listOf("gpl", "gnu", "eclipse", "epl", "mozilla", "mpl", "cddl", "commons clause", "creative commons", "proprietary")
+            .any { it in name }
 
     /** "https://www.apache.org/licenses/LICENSE-2.0.txt" and its other spellings become "apache.org/licenses/license-2.0". */
     private fun normalizedUrl(url: String): String = url.trim().lowercase()
@@ -113,6 +121,9 @@ object LicenseKinds {
     private val MIT_NAMES = listOf(Regex("(the )?mit( license)?"))
     private val BSD_3_URLS = setOf("opensource.org/licenses/bsd-3-clause", "spdx.org/licenses/bsd-3-clause")
     private val BSD_3_NAMES = listOf(Regex("bsd-3-clause"), Regex("(the )?(new )?bsd 3-clause( license)?"))
+
+    private val NAMES = listOf(APACHE_2 to APACHE_NAMES, MIT to MIT_NAMES, BSD_3 to BSD_3_NAMES)
+    private val URLS = listOf(APACHE_2 to APACHE_URLS, MIT to MIT_URLS, BSD_3 to BSD_3_URLS)
 }
 
 /** A runtime dependency with its licence kinds and, where its kinds need one, its copyright notice. */
