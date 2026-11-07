@@ -119,6 +119,19 @@ class TreeBucketsTest {
     }
 
     @Test
+    fun noBucketHoldsBothNodesAndSongs() {
+        // An artist's albums of 2020 at the end, their songs in reverse year order starting with 2020.
+        val list = sections("2019" to 3, "2020" to 2, "2020" to 400, "2019" to 200)
+
+        val result = TreeBuckets.of(list.size, list::get, boundary = 5)
+
+        assertThat(result.map { it.from to it.to }).containsExactly(0 to 3, 3 to 5, 5 to 405, 405 to 605)
+        assertThat(result.map { it.title }).containsExactly("2019 (1)", "2020 (1)", "2020 (2)", "2019 (2)")
+        // Runs of rows too.
+        assertThat(TreeBuckets.of(600, { null }, boundary = 3).map { it.from to it.to }).containsExactly(0 to 3, 3 to 503, 503 to 600)
+    }
+
+    @Test
     fun anItemWeighsItsIdAndTextsAsAParcelWritesThem() {
         val bare = TreeBuckets.weight(0, null, null, null)
         assertThat(TreeBuckets.weight(10, null, null, null) - bare).isEqualTo(20)
@@ -126,6 +139,8 @@ class TreeBucketsTest {
         assertThat(TreeBuckets.weight(0, "abc", null, null) - bare).isEqualTo(12 + 3)
         assertThat(TreeBuckets.weight(0, "Ёж", "", "中文") - bare).isEqualTo(12 + 4 + 12 + 6)
         assertThat(TreeBuckets.weight(0, "🎵", null, null) - bare).isEqualTo(12 + 4)
+        // The artwork URI of step 13, in UTF-16 as a parcel writes a URI.
+        assertThat(TreeBuckets.weight(0, null, null, null, artworkUriLength = 40) - bare).isEqualTo(12 + 80)
     }
 
     @Test

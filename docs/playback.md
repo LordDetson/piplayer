@@ -1004,11 +1004,11 @@ through the media library service: a tree of nodes, each a folder or a song.
 | Folders | `folders` | the Folders tab's top level: with one volume, the subfolders of its root, then the songs right in it; with more, one node per volume |
 | An album | `album/<album key>` | its songs, in the album page's order |
 | An artist | `artist/<artist key>` | the artist's albums by year, then all their songs, in the artist page's order |
-| A folder | `folder/<volume>/<path>` | its subfolders by name, then its own songs, in the folder page's order |
+| A folder | `folder/<volume and path>` | its subfolders by name, then its own songs, in the folder page's order |
 
 - The keys are those of the app's pages (library.md §6.5), percent-encoded as in queue requests (library.md §6.4): an
-  album by its album key, an artist by their artist key, a folder by its volume and relative path. They survive a rebuild
-  of the library database and a new media index.
+  album by its album key, an artist by their artist key, a folder by its volume, `/` and relative path encoded as one
+  key (`folder/external_primary%2FMusic%2F`). They survive a rebuild of the library database and a new media index.
 - A song's media ID is the compact request (§2.3) of the list it is shown in, starting at it: the song's file ID
   (library.md §8.4), which survives a rebuild too, and its row as the fallback.
 - An item has its title and the media type of what it is (a folder of titles, albums, artists or mixed, an album, an
@@ -1028,9 +1028,11 @@ through the media library service: a tree of nodes, each a folder or a song.
   (library.md §11.2) in list order: the letter for orders by name, title or file name, the year, the minute or the number
   of songs for the others. A run of one section that is longer or heavier splits into parts, each as long as fits (at
   most 500), titled `A (1)`, `A (2)` and so on. The same section can start two runs (pinyin, or an artist's albums and
-  songs of one year); its parts count on. With texts of usual length a bucket of songs holds about 400 to 450 of them.
+  songs of one year); its parts count on. A bucket never holds both albums, artists or folders and songs, so that every
+  bucket of songs plays. With texts of usual length a bucket of songs holds about 400 to 450 of them.
 - A list whose entries have no section (disc and track order), or whose sections would make more than 500 buckets, splits
-  into runs of rows instead, cut the same way and titled by their rows (`1-420`).
+  into runs of rows instead, cut the same way and titled by their rows (`1-420`). The list of buckets itself is not
+  weighed: it would take more than about 250 buckets with very long folder paths to fill a legacy answer.
 - A bucket's media ID is its node's ID, `!` and the section (percent-encoded; empty for runs of rows), then `!` and the
   part from the second part on: `songs!A`, `songs!A!2`, `songs!!3`. It has the type of what it holds; a bucket of songs
   is playable. A bucket's place depends on the lengths of the names before it, so a change of the library may move the
@@ -1061,7 +1063,7 @@ through the media library service: a tree of nodes, each a folder or a song.
   "play X on PiPlayer" from the Assistant) plays the best match with its list. An artist whose name is the query (as
   normalized) plays the artist's songs; else an album whose title is the query plays the album; else the Songs list
   filtered by the query plays from its first song whose title is the query, or else from its first song; else the
-  first artist, then the first album, whose name holds the query. An empty query plays every song; when nothing is
+  first artist, then the first album, in the orders of their tabs, whose name holds the query. An empty query plays every song; when nothing is
   found the request fails. An add with a search query adds the songs that the play would queue, from the match on.
 
 ### 10.4 Who may browse

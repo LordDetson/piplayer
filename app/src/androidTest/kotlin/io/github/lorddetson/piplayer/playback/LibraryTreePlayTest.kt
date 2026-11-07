@@ -3,6 +3,7 @@ package io.github.lorddetson.piplayer.playback
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.os.Process
+import android.util.Log
 import androidx.annotation.OptIn
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.media3.common.C
@@ -138,6 +139,10 @@ class LibraryTreePlayTest {
 
     private fun MediaItemsWithStartPosition.current() = mediaItems[startIndex].mediaMetadata.title.toString()
 
+    /** The queue's state reaches the saver on the main thread, after the items: waits until it names [list]. */
+    private fun reported(list: SongQuery) =
+        PlaybackTesting.eventually("the queue of $list is reported") { queueRequests.lastOrNull()?.library?.list == list }
+
     private fun albumId(title: String) = items("albums").single { it.mediaMetadata.title.toString() == title }.mediaId
 
     @Test
@@ -169,7 +174,11 @@ class LibraryTreePlayTest {
 
     @Test
     fun anAppThatMayReadMusicItselfMayBrowseAndPlay() {
-        assertThat(context.checkPermission(AudioPermission.name, -1, Process.SHELL_UID)).isEqualTo(PackageManager.PERMISSION_GRANTED)
+        // As in PlaybackSessionCallbackTest: the shell holds the audio permission on API 30, not on API 36.
+        if (context.checkPermission(AudioPermission.name, -1, Process.SHELL_UID) != PackageManager.PERMISSION_GRANTED) {
+            Log.i("LibraryTreePlayTest", "Skipped: the shell may not read music on this device")
+            return
+        }
 
         assertThat((children("artist/ann", shell).value as List<*>)).hasSize(4)
         assertThat(play(MediaItem.Builder().setMediaId("artist/ann").build(), shell).titles()).containsExactly("Alpha", "Bravo", "Golf")
@@ -185,7 +194,7 @@ class LibraryTreePlayTest {
         assertThat(album.titles()).containsExactly("Alpha", "Bravo")
         assertThat(album.current()).isEqualTo("Bravo")
         assertThat(album.mediaItems).allSatisfy { assertThat(it.localConfiguration).isNotNull() }
-        assertThat(queueRequests.last()!!.library!!.list).isEqualTo(SongQuery(ListKind.ALBUM, first.removePrefix("album/").let { MediaIdText.decode(it)!! }))
+        reported(SongQuery(ListKind.ALBUM, first.removePrefix("album/").let { MediaIdText.decode(it)!! }))
 
         val golfOfArtist = items("artist/ann").last()
         assertThat(play(golfOfArtist).let { it.titles() to it.current() }).isEqualTo(listOf("Alpha", "Bravo", "Golf") to "Golf")
@@ -207,13 +216,13 @@ class LibraryTreePlayTest {
         // A folder plays with all its subfolders: its own songs first, then each subfolder by name.
         val music = TreeNode.Folder(FolderKey(FakeMediaIndex.PRIMARY, "Music/")).mediaId
         assertThat(play(music).titles()).containsExactly("Golf", "Second Hand", "Alpha", "Bravo", "Charlie", "Delta")
-        assertThat(queueRequests.last()!!.library!!.list.kind).isEqualTo(ListKind.TREE)
+        PlaybackTesting.eventually("the tree is reported") { queueRequests.lastOrNull()?.library?.list?.kind == ListKind.TREE }
 
         runBlocking { ListSorts(context).set(ListName.SONGS, ListOrder("title", reversed = true)) }
         val songs = play("songs")
         assertThat(songs.titles()).containsExactly("Second Hand", "Golf", "Delta", "Charlie", "Bravo", "Alpha")
         assertThat(songs.startIndex).isZero()
-        assertThat(queueRequests.last()!!.library!!.list).isEqualTo(SongQuery(ListKind.SONGS, sort = SongSort.TITLE, reversed = true))
+        reported(SongQuery(ListKind.SONGS, sort = SongSort.TITLE, reversed = true))
     }
 
     @Test
@@ -230,7 +239,7 @@ class LibraryTreePlayTest {
         assertThat(play(voice("second")).titles()).containsExactly("Charlie", "Delta")
         val found = play(voice("golf"))
         assertThat(found.titles()).containsExactly("Golf")
-        assertThat(queueRequests.last()!!.library!!.list).isEqualTo(SongQuery(ListKind.SONGS, sort = SongSort.TITLE, search = "golf"))
+        reported(SongQuery(ListKind.SONGS, sort = SongSort.TITLE, search = "golf"))
         assertThat(play(voice("hand")).current()).isEqualTo("Second Hand")
         assertThat(play(voice("")).titles()).hasSize(6)
         assertThatThrownBy { play(voice("zzzq")) }.isInstanceOf(ExecutionException::class.java)

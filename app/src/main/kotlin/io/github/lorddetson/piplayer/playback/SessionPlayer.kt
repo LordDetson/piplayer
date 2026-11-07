@@ -172,6 +172,22 @@ class SessionPlayer(private val player: ExoPlayer) : ForwardingPlayer(player) {
         super.addMediaItems(index, mediaItems)
     }
 
+    override fun replaceMediaItem(index: Int, mediaItem: MediaItem) = replaceMediaItems(index, index + 1, listOf(mediaItem))
+
+    /**
+     * New metadata for the same entries passes as it is (the refresh of docs/playback.md §2.6). Other entries in place of
+     * old ones, as a controller's replace brings them (§10.3), are added after them and the old ones removed, so that the
+     * edits see both.
+     */
+    override fun replaceMediaItems(fromIndex: Int, toIndex: Int, mediaItems: List<MediaItem>) {
+        val to = toIndex.coerceAtMost(player.mediaItemCount)
+        val same = to - fromIndex == mediaItems.size &&
+            mediaItems.indices.all { player.getMediaItemAt(fromIndex + it).mediaId == mediaItems[it].mediaId }
+        if (edits == null || same || fromIndex !in 0..to) return super.replaceMediaItems(fromIndex, toIndex, mediaItems)
+        if (mediaItems.isNotEmpty()) addMediaItems(to, mediaItems)
+        if (to > fromIndex) removeMediaItems(fromIndex, to)
+    }
+
     override fun removeMediaItem(index: Int) {
         if (index in 0 until player.mediaItemCount) edits?.removing(index, index + 1)
         super.removeMediaItem(index)

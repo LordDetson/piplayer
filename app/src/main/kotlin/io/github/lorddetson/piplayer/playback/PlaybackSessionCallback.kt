@@ -226,11 +226,32 @@ class PlaybackSessionCallback(
         query: String,
         params: LibraryParams?,
     ): ListenableFuture<LibraryResult<Void>> {
-        if (!mayReadLibrary(session, browser)) return Futures.immediateFuture(LibraryResult.ofError(SessionError.ERROR_PERMISSION_DENIED))
+        if (!mayReadLibrary(session, browser)) {
+            // A legacy browser waits for this before it asks for the results, which are then refused too.
+            notifySearch(session, browser, query, 0, params)
+            return Futures.immediateFuture(LibraryResult.ofError(SessionError.ERROR_PERMISSION_DENIED))
+        }
         return browsed {
-            val count = tree.search(query).size
-            mainHandler.post { if (!released) session.notifySearchResultChanged(browser, query, count, params) }
+            val count = try {
+                tree.search(query).size
+            } catch (e: Exception) {
+                notifySearch(session, browser, query, 0, params)
+                throw e
+            }
+            notifySearch(session, browser, query, count, params)
             LibraryResult.ofVoid(params)
+        }
+    }
+
+    /** Tells [browser] that the results of [query] are there (a legacy browser waits for it), on the main thread. */
+    private fun notifySearch(session: MediaLibrarySession, browser: MediaSession.ControllerInfo, query: String, count: Int, params: LibraryParams?) {
+        mainHandler.post {
+            if (released) return@post
+            try {
+                session.notifySearchResultChanged(browser, query, count, params)
+            } catch (e: IllegalStateException) {
+                Log.w(TAG, "Could not tell a browser about its search", e)
+            }
         }
     }
 
@@ -361,16 +382,17 @@ class PlaybackSessionCallback(
     }
 
     /** The songs that library items name, with their track references and the library ID they were read under. */
-    private class ResolvedSongs(val songs: List<Song>, val tracks: List<TrackRef>, val libraryId: String?)
+    private class ResolvedSongs(val songs: List<Song>, val tracks: List<TrackRef>, val libraryId: String?, val counts: List<Int>)
 
     /** Reads the songs of [mediaItems] (§10.3); blocks, so call it on the expansion thread. */
     private fun resolveSongs(mediaItems: List<MediaItem>): ResolvedSongs {
-        val songs = mediaItems.flatMap { item -> tree.songsToAdd(item).orEmpty() }
+        val perItem = mediaItems.map { item -> tree.songsToAdd(item).orEmpty() }
+        val songs = perItem.flatten()
         if (songs.isEmpty()) throw UnsupportedOperationException("The items name no song of the library")
         val refs = trackRefs()
         val libraryId = libraryIdNow(refs)
         val tracks = songs.map { song -> refs.lookup { it.refOf(song.id) } ?: TrackRef(song.id, null, null, null, null) }
-        return ResolvedSongs(songs, tracks, libraryId)
+        return ResolvedSongs(songs, tracks, libraryId, perItem.map { it.size })
     }
 
     /** A controller's add of library items: Media3 puts them in, and [inserting] journals them (§10.3). */
@@ -402,7 +424,7 @@ class PlaybackSessionCallback(
             if (token != restoreGeneration.get()) throw UnsupportedOperationException("The set was superseded")
             // The item to start at stands for its first song.
             val start = if (startIndex in mediaItems.indices) {
-                mediaItems.take(startIndex).sumOf { item -> tree.songsToAdd(item).orEmpty().size }.coerceAtMost(resolved.songs.lastIndex)
+                resolved.counts.take(startIndex).sum().coerceAtMost(resolved.songs.lastIndex)
             } else {
                 C.INDEX_UNSET
             }
@@ -435,8 +457,8 @@ class PlaybackSessionCallback(
         val keys = items.map { EntryKey.Added(QueueIds.addedNumber(it.mediaId)!!) }
         val tracks = adds.map { it.track }
         if (player.mediaItemCount == 0) {
-            // An empty player: the songs are the queue, as an add of PiPlayer's screen makes it (§9.1).
-            restoreGeneration.incrementAndGet()
+            // An empty player: the songs are the queue, as an add of PiPlayer's screen makes it (§9.1). A restore on its way
+            // finds the player no longer empty and gives way; a set asked for later still wins.
             val added = keys.zip(tracks) { key, track -> AddedEntry(key.number, track) }
             lastRemoval = null
             commit(QueueState(null, emptyList(), adds.first().libraryId, QueueEdits(added = added, nextNumber = keys.maxOf { it.number } + 1)))

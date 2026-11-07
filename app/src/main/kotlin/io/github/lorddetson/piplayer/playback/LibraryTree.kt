@@ -56,70 +56,86 @@ class LibraryTree(context: Context, private val artwork: TreeArtwork = TreeArtwo
 
     private val app = context.applicationContext
 
+    /**
+     * The service asks from its browsing thread and from the thread that expands queues; the lists and caches here are
+     * read by one of them at a time (their folder levels compute what they need lazily, for one thread).
+     */
+    private val lock = Any()
+
     /** The root, with exactly four browsable children. */
     fun root(): MediaItem = folder(TreeNode.Root, "", MediaMetadata.MEDIA_TYPE_FOLDER_MIXED, playable = false)
 
     /** Page [page] of [pageSize] of the children of [mediaId], or null when it names no node of the tree. */
     fun children(mediaId: String, page: Int, pageSize: Int): List<MediaItem>? {
-        val node = TreeNode.parse(mediaId) ?: return null
-        val listing = listing(node) ?: return null
-        return TreeBuckets.page(listing.size, page, pageSize).map(listing.item)
+        synchronized(lock) {
+            val node = TreeNode.parse(mediaId) ?: return null
+            val listing = listing(node) ?: return null
+            return TreeBuckets.page(listing.size, page, pageSize).map(listing.item)
+        }
     }
 
     /** The item [mediaId] names, or null when it names none. */
     fun item(mediaId: String): MediaItem? {
-        TreeNode.parse(mediaId)?.let { return nodeItem(it) }
-        val fileId = QueueRequest.parse(mediaId)?.startSongId ?: QueueIds.fileId(mediaId) ?: return null
-        val song = songById(fileId) ?: return null
-        return songItem(song, mediaId)
+        synchronized(lock) {
+            TreeNode.parse(mediaId)?.let { return nodeItem(it) }
+            val fileId = QueueRequest.parse(mediaId)?.startSongId ?: QueueIds.fileId(mediaId) ?: return null
+            val song = songById(fileId) ?: return null
+            return songItem(song, mediaId)
+        }
     }
 
     /** What the app's search finds for [query]: artists, albums, then songs (§10.3). */
     fun search(query: String): List<MediaItem> {
-        val text = query.trim()
-        if (SearchTerms.of(text).isEmpty()) return emptyList()
-        val songsQuery = songsQuery().copy(search = text)
-        val stamp = listOf(text, stamp(), order(ListName.ARTISTS), order(ListName.ALBUMS), songsQuery)
-        lastSearch?.takeIf { it.first == stamp }?.let { return it.second }
-        val all = read { lists ->
-            lists.artists(artistSort(), order(ListName.ARTISTS).reversed, text).take(SEARCH_ARTISTS).map(::artistItem) +
-                lists.albums(albumSort(), order(ListName.ALBUMS).reversed, text).take(SEARCH_ALBUMS).map(::albumItem) +
-                lists.songs(songsQuery, SEARCH_SONGS).mapIndexed { row, song -> songItem(song, QueueRequest(song.id, row, songsQuery).mediaId) }
-        }.orEmpty()
-        // What a legacy browser can take in one answer (§10.2).
-        var bytes = 0L
-        val found = all.takeWhile { item -> (bytes + weightOf(item) <= TreeBuckets.MAX_BYTES).also { if (it) bytes += weightOf(item) } }
-        lastSearch = stamp to found
-        return found
+        synchronized(lock) {
+            val text = query.trim()
+            if (SearchTerms.of(text).isEmpty()) return emptyList()
+            val songsQuery = songsQuery().copy(search = text)
+            val stamp = listOf(text, stamp(), order(ListName.ARTISTS), order(ListName.ALBUMS), songsQuery)
+            lastSearch?.takeIf { it.first == stamp }?.let { return it.second }
+            val all = read { lists ->
+                lists.artists(artistSort(), order(ListName.ARTISTS).reversed, text).take(SEARCH_ARTISTS).map(::artistItem) +
+                    lists.albums(albumSort(), order(ListName.ALBUMS).reversed, text).take(SEARCH_ALBUMS).map(::albumItem) +
+                    lists.songs(songsQuery, SEARCH_SONGS).mapIndexed { row, song -> songItem(song, QueueRequest(song.id, row, songsQuery).mediaId) }
+            }.orEmpty()
+            // What a legacy browser can take in one answer (§10.2).
+            var bytes = 0L
+            val found = all.takeWhile { item -> (bytes + weightOf(item) <= TreeBuckets.MAX_BYTES).also { if (it) bytes += weightOf(item) } }
+            lastSearch = stamp to found
+            return found
+        }
     }
 
     /** The request that plays [mediaId] (a playable node of the tree), or null when it names none that plays. */
     fun playRequest(mediaId: String): QueueRequest? {
-        val node = TreeNode.parse(mediaId) ?: return null
-        val query = queryOf(node)
-        if (query != null) return QueueRequest(startSongId = NO_SONG, startRow = 0, list = query)
-        val bucket = node as? TreeNode.Bucket ?: return null
-        val entries = entries(bucket.parent) ?: return null
-        val found = find(entries, bucket) ?: return null
-        val songsQuery = entries.query ?: return null
-        if (found.from < entries.nodes.size) return null
-        val row = found.from - entries.nodes.size
-        return QueueRequest(entries.songs[row].id, row, songsQuery)
+        synchronized(lock) {
+            val node = TreeNode.parse(mediaId) ?: return null
+            val query = queryOf(node)
+            if (query != null) return QueueRequest(startSongId = NO_SONG, startRow = 0, list = query)
+            val bucket = node as? TreeNode.Bucket ?: return null
+            val entries = entries(bucket.parent) ?: return null
+            val found = find(entries, bucket) ?: return null
+            val songsQuery = entries.query ?: return null
+            if (found.from < entries.nodes.size) return null
+            val row = found.from - entries.nodes.size
+            return QueueRequest(entries.songs[row].id, row, songsQuery)
+        }
     }
 
     /** The request a voice [query] plays (§10.3), or null when nothing matches. */
     fun voiceRequest(query: String): QueueRequest? {
-        val text = query.trim()
-        if (TextNormalizer.normalize(text).isEmpty()) return QueueRequest(NO_SONG, 0, songsQuery())
-        val songsQuery = songsQuery().copy(search = text)
-        return read { lists ->
-            val songs = lists.songs(songsQuery)
-            when (val match = VoiceMatch.choose(text, lists.artists(ArtistSort.NAME, search = text), lists.albums(AlbumSort.TITLE, search = text), songs)) {
-                VoiceMatch.AllSongs -> QueueRequest(NO_SONG, 0, songsQuery())
-                is VoiceMatch.Artist -> QueueRequest(NO_SONG, 0, artistQuery(match.key))
-                is VoiceMatch.Album -> QueueRequest(NO_SONG, 0, albumQuery(match.key))
-                is VoiceMatch.FoundSongs -> QueueRequest(match.fileId, songs.indexOfFirst { it.id == match.fileId }.coerceAtLeast(0), songsQuery)
-                null -> null
+        synchronized(lock) {
+            val text = query.trim()
+            if (TextNormalizer.normalize(text).isEmpty()) return QueueRequest(NO_SONG, 0, songsQuery())
+            val songsQuery = songsQuery().copy(search = text)
+            return read { lists ->
+                val songs = lists.songs(songsQuery)
+                when (val match = VoiceMatch.choose(text, lists.artists(artistSort(), order(ListName.ARTISTS).reversed, text), lists.albums(albumSort(), order(ListName.ALBUMS).reversed, text), songs)) {
+                    VoiceMatch.AllSongs -> QueueRequest(NO_SONG, 0, songsQuery())
+                    is VoiceMatch.Artist -> QueueRequest(NO_SONG, 0, artistQuery(match.key))
+                    is VoiceMatch.Album -> QueueRequest(NO_SONG, 0, albumQuery(match.key))
+                    is VoiceMatch.FoundSongs -> QueueRequest(match.fileId, songs.indexOfFirst { it.id == match.fileId }.coerceAtLeast(0), songsQuery)
+                    null -> null
+                }
             }
         }
     }
@@ -129,23 +145,25 @@ class LibraryTree(context: Context, private val artwork: TreeArtwork = TreeArtwo
      * bucket its songs, a search query what its play would queue. Null when the item names nothing of the library.
      */
     fun songsToAdd(item: MediaItem): List<Song>? {
-        val id = item.mediaId
-        if (id.isEmpty()) {
-            val query = item.requestMetadata.searchQuery ?: return null
-            val request = voiceRequest(query) ?: return null
-            val songs = songsOf(request.list)
-            return songs.drop(QueueRequest.startIndex(songs, request).coerceAtLeast(0))
+        synchronized(lock) {
+            val id = item.mediaId
+            if (id.isEmpty()) {
+                val query = item.requestMetadata.searchQuery ?: return null
+                val request = voiceRequest(query) ?: return null
+                val songs = songsOf(request.list)
+                return songs.drop(QueueRequest.startIndex(songs, request).coerceAtLeast(0))
+            }
+            val fileId = QueueRequest.parse(id)?.startSongId ?: QueueIds.fileId(id)
+            if (fileId != null) return listOfNotNull(songById(fileId))
+            val node = TreeNode.parse(id) ?: return null
+            if (node is TreeNode.Bucket) {
+                val entries = entries(node.parent) ?: return null
+                val found = find(entries, node) ?: return null
+                if (found.from < entries.nodes.size) return null
+                return entries.songs.subList(found.from - entries.nodes.size, found.to - entries.nodes.size)
+            }
+            return queryOf(node)?.let(::songsOf)
         }
-        val fileId = QueueRequest.parse(id)?.startSongId ?: QueueIds.fileId(id)
-        if (fileId != null) return listOfNotNull(songById(fileId))
-        val node = TreeNode.parse(id) ?: return null
-        if (node is TreeNode.Bucket) {
-            val entries = entries(node.parent) ?: return null
-            val found = find(entries, node) ?: return null
-            if (found.from < entries.nodes.size) return null
-            return entries.songs.subList(found.from - entries.nodes.size, found.to - entries.nodes.size)
-        }
-        return queryOf(node)?.let(::songsOf)
     }
 
     /** The children of [node] before paging: its entries, or the buckets they split into. */
@@ -188,7 +206,8 @@ class LibraryTree(context: Context, private val artwork: TreeArtwork = TreeArtwo
             if (index < nodes.size) return nodes[index].weight
             val row = index - nodes.size
             val song = songs[row]
-            return TreeBuckets.weight(idBase + digits(song.id) + digits(row.toLong()), song.title, song.artist, song.album)
+            val artworkUri = artwork.uriOf(ArtworkSubject.Song(song.id))
+            return TreeBuckets.weight(idBase + digits(song.id) + digits(row.toLong()), song.title, song.artist, song.album, artworkUri?.toString()?.length ?: 0)
         }
     }
 
@@ -235,7 +254,7 @@ class LibraryTree(context: Context, private val artwork: TreeArtwork = TreeArtwo
     private fun folderEntry(entry: FolderEntry) =
         NodeEntry(entry.section, MediaMetadata.MEDIA_TYPE_FOLDER_MIXED, folderItem(FolderKey(entry.volume, entry.relativePath)))
 
-    private fun buckets(entries: Entries): List<TreeBucket> = TreeBuckets.of(entries.size, entries::section, entries::weight)
+    private fun buckets(entries: Entries): List<TreeBucket> = TreeBuckets.of(entries.size, entries::section, entries::weight, boundary = entries.nodes.size)
 
     private fun find(entries: Entries, bucket: TreeNode.Bucket): TreeBucket? =
         buckets(entries).firstOrNull { it.section == bucket.section && it.part == bucket.part }
@@ -347,7 +366,11 @@ class LibraryTree(context: Context, private val artwork: TreeArtwork = TreeArtwo
     private fun artistSort() = if (order(ListName.ARTISTS).field == "songs") ArtistSort.SONGS else ArtistSort.NAME
 
     /** A songs list: the one the app or the tree read last, while it holds, else read now and kept (docs/library.md §6.4). */
-    private fun songsOf(query: SongQuery): List<Song> = SongList.current(query) ?: SongList.load(app, query = query)
+    private fun songsOf(query: SongQuery): List<Song> {
+        // Without access the shared list keeps an empty list that no revision makes stale; the tree does not take it.
+        if (!Library.mayRead(app)) return emptyList()
+        return SongList.current(query) ?: SongList.load(app, query = query)
+    }
 
     private fun songById(fileId: Long): Song? = SongList.songsById(app, listOf(fileId))[fileId]
 
@@ -403,7 +426,7 @@ class LibraryTree(context: Context, private val artwork: TreeArtwork = TreeArtwo
 
         /** What [item] weighs in a legacy browser's list: its media ID and the texts it shows (§10.2). */
         private fun weightOf(item: MediaItem): Int = item.mediaMetadata.let {
-            TreeBuckets.weight(item.mediaId.length, it.title, it.artist, it.albumTitle)
+            TreeBuckets.weight(item.mediaId.length, it.title, it.artist, it.albumTitle, it.artworkUri?.toString()?.length ?: 0)
         }
 
         /** The number of characters of [value] in decimal. */

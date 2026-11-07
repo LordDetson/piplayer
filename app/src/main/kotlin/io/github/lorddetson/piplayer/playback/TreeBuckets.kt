@@ -30,6 +30,8 @@ object TreeBuckets {
     /**
      * The buckets of a list of [size] entries whose sections [sectionAt] gives in list order, or none when the list fits in
      * one node: at most [max] entries that weigh at most [budget] bytes together, [weightAt] giving each entry's weight.
+     * No bucket spans [boundary], where a list's albums, artists or folders end and its songs begin, so that a bucket of
+     * songs plays.
      */
     fun of(
         size: Int,
@@ -37,6 +39,7 @@ object TreeBuckets {
         weightAt: (Int) -> Int = { 0 },
         max: Int = MAX_CHILDREN,
         budget: Int = MAX_BYTES,
+        boundary: Int = 0,
     ): List<TreeBucket> {
         val weights = IntArray(size) { weightAt(it) }
         if (size <= max && weights.sumOf { it.toLong() } <= budget) return emptyList()
@@ -46,15 +49,15 @@ object TreeBuckets {
             sections[i] = sectionAt(i)?.takeIf { it.isNotEmpty() }
             if (sections[i] != null) any = true
         }
-        if (!any) return rows(weights, max, budget)
+        if (!any) return rows(weights, max, budget, boundary)
         // Runs of one section, each cut where it reaches [max] entries or [budget] bytes.
         val pieces = ArrayList<Triple<String, Int, Int>>()
         var start = 0
         while (start < size) {
             val section = sections[start] ?: Sections.MISSING
-            val end = cut(weights, start, max, budget) { (sections[it] ?: Sections.MISSING) == section }
+            val end = cut(weights, start, max, budget) { it != boundary && (sections[it] ?: Sections.MISSING) == section }
             pieces += Triple(section, start, end)
-            if (pieces.size > max) return rows(weights, max, budget)
+            if (pieces.size > max) return rows(weights, max, budget, boundary)
             start = end
         }
         val totals = pieces.groupingBy { it.first }.eachCount()
@@ -66,11 +69,11 @@ object TreeBuckets {
     }
 
     /** Runs of rows, each cut where it reaches [max] entries or [budget] bytes. */
-    private fun rows(weights: IntArray, max: Int, budget: Int): List<TreeBucket> {
+    private fun rows(weights: IntArray, max: Int, budget: Int, boundary: Int): List<TreeBucket> {
         val runs = ArrayList<Pair<Int, Int>>()
         var start = 0
         while (start < weights.size) {
-            val end = cut(weights, start, max, budget) { true }
+            val end = cut(weights, start, max, budget) { it != boundary }
             runs += start to end
             start = end
         }
@@ -103,8 +106,14 @@ object TreeBuckets {
      * [description] (UTF-8 in the parcel since Android 11; an older Android, if the app ever runs on one, writes two bytes
      * a character), and what every item carries.
      */
-    fun weight(mediaIdLength: Int, title: CharSequence?, subtitle: CharSequence?, description: CharSequence?): Int =
-        ITEM_BYTES + 8 + 2 * mediaIdLength + text(title) + text(subtitle) + text(description)
+    fun weight(
+        mediaIdLength: Int,
+        title: CharSequence?,
+        subtitle: CharSequence?,
+        description: CharSequence?,
+        artworkUriLength: Int = 0,
+    ): Int = ITEM_BYTES + 8 + 2 * mediaIdLength + text(title) + text(subtitle) + text(description) +
+        if (artworkUriLength > 0) 12 + 2 * artworkUriLength else 0
 
     private fun text(text: CharSequence?): Int {
         if (text.isNullOrEmpty()) return 0

@@ -202,6 +202,14 @@ class LibraryTreeTest {
         assertThat(titles(entries)).containsExactly("First", "Alpha", "Bravo", "Golf")
         assertThat(entries[0].mediaMetadata.isBrowsable).isTrue()
         assertThat(QueueRequest.parse(entries[1].mediaId)!!.list).isEqualTo(SongQuery(ListKind.ARTIST, "ann", SongSort.YEAR))
+
+        // Longer's album and 600 songs share the year 2000: the album has a bucket of its own, the songs' buckets play.
+        val longer = children(children("artists").single { it.mediaMetadata.title.toString() == "Longer" }.mediaId)
+        assertThat(longer.first().mediaMetadata.title.toString()).isEqualTo("2000 (1)")
+        assertThat(titles(children(longer.first().mediaId))).containsExactly("Long")
+        assertThat(longer.first().mediaMetadata.isPlayable).isFalse()
+        assertThat(longer.drop(1)).allSatisfy { assertThat(it.mediaMetadata.isPlayable).isTrue() }
+        assertThat(longer.drop(1).sumOf { children(it.mediaId).size }).isEqualTo(LONG)
     }
 
     @Test
@@ -272,6 +280,25 @@ class LibraryTreeTest {
         eventually("the queue file journals the add") {
             val file = store.readQueueBlocking()
             file != null && file.added.size == 3 && file.journal.size == 1
+        }
+    }
+
+    @Test
+    fun aTreeItemThatReplacesAnEntryIsJournaledAsAnAddAndARemoval() {
+        val first = album("First")
+        onMain { browser.setMediaItem(first) }
+        browser.waitUntil("the album is the queue") { mediaItemCount == 2 }
+        val golf = children("folders").let { children(it.single().mediaId) }.last()
+
+        onMain { browser.replaceMediaItem(1, golf) }
+
+        // The controller shows its own item at once and the session's added entry when it arrives.
+        browser.waitUntil("Golf replaced Bravo as an added entry") {
+            mediaItemCount == 2 && getMediaItemAt(1).mediaMetadata.title.toString() == "Golf" && QueueIds.addedNumber(getMediaItemAt(1).mediaId) != null
+        }
+        eventually("the queue file journals the add and the removal") {
+            val file = store.readQueueBlocking()
+            file != null && file.added.size == 1 && file.journal.size == 2
         }
     }
 
