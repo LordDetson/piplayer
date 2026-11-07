@@ -27,7 +27,7 @@ started with `git push -f origin HEAD:ci/<name>` and `tools/instrumented/ci_wait
 
 | ID | What M2a promises | How | Result | Date |
 |---|---|---|---|---|
-| A1 | Everything specified so far still holds | T: the whole instrumented suite; J: `./gradlew testDebugUnitTest lintDebug` | pass on API 30 and API 36: CI on the final build, run FINAL_RUN; JVM FINAL_JVM tests, lint without errors. The S24 last ran the whole suite on the step 8 build (548 tests, 0 failed); a run on the final build is open: needs the phone | 08.11.2026 |
+| A1 | Everything specified so far still holds | T: the whole instrumented suite; J: `./gradlew testDebugUnitTest lintDebug` | pass on API 30 and API 36: CI on the final build, run 42416883212 on commit 2827b8f; JVM 1157 tests, lint without errors. The S24 last ran the whole suite on the step 8 build (548 tests, 0 failed); a run on the final build is open: needs the phone | 08.11.2026 |
 | L1 | The generated 20 000-file library is browsable within seconds of the first launch | M: `GeneratedLibraryTest` (first page after the grant at most 5 s on API 30 and 3 s on the phone; a later start at most 1 s) | pass. S24: 2.0 s first page, 0.59 s later start (step 1). API 30 quiet passes: 4.54, 4.19, 4.25 s and 0.81, 0.71, 0.77 s on the step 10 build; 4.51, 4.44, 4.85 s and 0.84, 0.80, 0.94 s after steps 6 and 8. The phone was not measured again after step 6 slowed the first sync by about 1.5 s on the emulator (since partly won back): open: needs the phone | 01.11 to 07.11.2026 |
 | L1b | The Albums, Artists and Folders tabs of 20 000 files open fast | M: the tab timings of the quiet pass | pass on API 30: albums 69 ms, artists 18 ms, folder levels 27 ms, the whole library tree 173 ms (step 6); 25 to 42 ms after steps 6 and 8 | 07.11.2026 |
 | L2 | The tag pass over 20 000 files while music plays keeps list positions and causes no underrun | T: `TagPassScreenOffTest` on the phone (FLAC album on repeat, screen off, no charger), `SongsInPlaceScreenTest` for positions | pass. S24: 21 368 files in 887 s (24 files/s), 0 read failures, 0 underruns, no stall, no new audio output, worst playback-thread lateness 89 ms against 82 ms in the control minute; again after the lower thread priority: 866 s, worst 116 ms. Positions: CI | 05.11.2026 |
@@ -46,7 +46,7 @@ started with `git push -f origin HEAD:ci/<name>` and `tools/instrumented/ci_wait
 ## Features of M2a
 
 Each feature of the M2a list in features.md, with the tests that cover it. Every class named here passed on API 30 and
-API 36 in the final CI run (FINAL_RUN) or among the JVM tests of the final build, unless the row says otherwise.
+API 36 in the final CI run (42416883212) or among the JVM tests of the final build, unless the row says otherwise.
 
 | Feature | Spec | Tests |
 |---|---|---|
