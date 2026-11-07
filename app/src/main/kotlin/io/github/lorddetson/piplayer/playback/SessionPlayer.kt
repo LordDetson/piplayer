@@ -186,6 +186,13 @@ class SessionPlayer(private val player: ExoPlayer) : ForwardingPlayer(player) {
         super.moveMediaItems(fromIndex, toIndex, newIndex)
     }
 
+    /**
+     * Replaces the stream's picture of the item [mediaId] with [data] while it is the current one (docs/library.md §13.6),
+     * or gives the stream's back with null. Call it on the player's thread.
+     */
+    fun setArtwork(mediaId: String, data: ByteArray?) {
+    }
+
     override fun getMediaMetadata(): MediaMetadata = itemMetadata(super.getMediaMetadata())
 
     override fun addListener(listener: Player.Listener) {

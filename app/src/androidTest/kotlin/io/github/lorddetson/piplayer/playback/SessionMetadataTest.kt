@@ -107,6 +107,48 @@ class SessionMetadataTest {
     }
 
     @Test
+    fun anOwnCoverReplacesTheStreamsAndListenersHearIt() {
+        val heard = mutableListOf<MediaMetadata>()
+        onMain {
+            session.addListener(object : Player.Listener {
+                override fun onMediaMetadataChanged(mediaMetadata: MediaMetadata) {
+                    heard += mediaMetadata
+                }
+            })
+        }
+        playFirst(item(1, "playback/cover-front.mp3"))
+        eventually("the stream's cover has arrived") { onMain { session.mediaMetadata.artworkData != null } }
+        val stream = onMain { session.mediaMetadata.artworkData }
+        val own = io.github.lorddetson.piplayer.ui.player.TestImages.png(32)
+
+        onMain { session.setArtwork("1", own) }
+
+        onMain {
+            assertThat(session.mediaMetadata.artworkData).isEqualTo(own)
+            assertThat(heard.last().artworkData).isEqualTo(own)
+            assertThat(session.mediaMetadata.title.toString()).isEqualTo("Item title")
+            // Another item's cover changes nothing now.
+            session.setArtwork("2", io.github.lorddetson.piplayer.ui.player.TestImages.png(16))
+            assertThat(session.mediaMetadata.artworkData).isEqualTo(own)
+            session.setArtwork("1", null)
+            assertThat(session.mediaMetadata.artworkData).isEqualTo(stream)
+            assertThat(heard.last().artworkData).isEqualTo(stream)
+        }
+    }
+
+    @Test
+    fun aCoverForAFileWithoutAPictureShowsToo() {
+        playFirst(item(1, LONG_FIXTURE))
+        eventually("playback has started") { onMain { exo.playbackState == Player.STATE_READY } }
+        onMain { assertThat(session.mediaMetadata.artworkData).isNull() }
+        val own = io.github.lorddetson.piplayer.ui.player.TestImages.png(32)
+
+        onMain { session.setArtwork("1", own) }
+
+        onMain { assertThat(session.mediaMetadata.artworkData).isEqualTo(own) }
+    }
+
+    @Test
     fun theListenerWrapperPassesOnEveryEvent() {
         val forwarded = ForwardingListener::class.java.declaredMethods.map { it.name to it.parameterTypes.toList() }.toSet()
 

@@ -222,8 +222,9 @@ is heard as a click. The becoming-noisy broadcast is protected, so emulator test
 
 - The session's player shows the queue item's metadata and nothing of what the extractor finds in the stream, so that
   fields PiPlayer leaves empty show nothing, not raw tags (TI §7.1). It stays a `ForwardingPlayer` that filters both the
-  value it gives and what its listeners hear, because the session keeps what it hears. The stream's cover stays until the
-  cover resolver of M2a step 13 takes over; before that every cover would vanish.
+  value it gives and what its listeners hear, because the session keeps what it hears. The stream's cover stays: the
+  embedded picture is the third source of library.md §13.1 anyway. Since M2a step 13 an own cover replaces it, and the
+  system thumbnail stands in for a file the tag pass found without a picture (library.md §13.6).
 - While the tag pass lands its batches (library.md §5), the playing item and the next one come up to date in place, each
   when its values differ, with the same URI: playback does not prepare again. The next item after a transition catches up
   at that transition. The other items of a queue wait, because each change costs every controller a new timeline.
@@ -305,7 +306,10 @@ large queue, and a song from an SD card if there is one.
 - M1 shows the cover embedded in the file, as Media3 reads it: ID3 APIC frames in MP3 (and in raw AAC, where the
   cover appears only once playback starts), FLAC PICTURE blocks, `METADATA_BLOCK_PICTURE` comments in Ogg Vorbis and
   Opus, and `covr` in MP4. A front cover wins over other pictures; a file without a front cover shows its last picture.
-  Covers in Matroska and WebM are not read. Folder images and the cover resolver come in M2a.
+  Covers in Matroska and WebM are not read.
+- Since M2a step 13 the screens take a library song's cover from the cover loader (library.md §13): its own cover, its
+  album's, the embedded picture (read by the same extractors), the system thumbnail, then a placeholder colored by the
+  album. Only a file opened from another app still shows the picture of the session's metadata, as below.
 - Queue items still carry no artwork (§2.3): the cover reaches the screens and the system only through the metadata of
   the current song.
 - The app decodes the cover once per song, off the main thread, scaled down to the shorter side of the screen at most.

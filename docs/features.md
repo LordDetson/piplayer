@@ -180,8 +180,9 @@ soon after 1.0, `later` is planned without a date. The items listed under Cut li
 
 ### Metadata and identification
 
-- Local covers: embedded art, folder images, generated placeholder; one resolver for lists, player and session;
-  list covers come from system thumbnails. `M2a`
+- Local covers: an own cover for a track or an album chosen from the device, embedded art, the system thumbnail
+  (which brings folder images), a generated placeholder; one loader for lists, player and session, with a thumbnail
+  cache (library.md §13). `M2a`
 - Single-file identification from the track menu, Now Playing and track details (TI §1 to §4). `M3`
 - Identify a file opened from another app; the result is kept in PiPlayer's database by content key until the file
   appears in the media index or in a granted folder (TI §1, §3.1). `M3`
