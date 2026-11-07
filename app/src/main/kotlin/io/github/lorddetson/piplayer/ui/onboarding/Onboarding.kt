@@ -63,6 +63,17 @@ object Onboarding {
     }
 }
 
+/**
+ * Tells a grant the app had not seen from one it held already (docs/library.md §14.1): starting the library asks for a tag
+ * pass and an attach pass, so it happens on a new grant, not on every resume.
+ */
+class NewGrants(grantedAtStart: Boolean) {
+    private var granted = grantedAtStart
+
+    /** Whether [granted], seen now, is a grant the last look did not see. */
+    fun newlyGranted(granted: Boolean): Boolean = (granted && !this.granted).also { this.granted = granted }
+}
+
 object OnboardingTags {
     const val SCREEN = "onboarding"
 }
@@ -85,13 +96,15 @@ class OnboardingState internal constructor(showing: Boolean, private val ask: ()
 /**
  * Onboarding for this launch. Without the permission the done flag is read before the first frame, as the theme is, so
  * the library never flashes before it. The dialog's answer, whatever it is, finishes onboarding; so does a grant made
- * elsewhere while the app was away (the system settings), checked whenever the activity resumes.
+ * elsewhere while the app was away (the system settings), checked whenever the activity resumes. Only a new grant, from
+ * the dialog or the settings, starts the library; a resume with the permission held all along starts nothing.
  */
 @Composable
 fun rememberOnboarding(): OnboardingState {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     lateinit var state: OnboardingState
+    val grants = remember { NewGrants(context.hasAudioPermission()) }
     val finish = {
         state.finish()
         scope.launch { Onboarding.markDone(context) }
@@ -99,7 +112,7 @@ fun rememberOnboarding(): OnboardingState {
     }
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         // Access granted: the library starts watching the index and syncs, with its progress on the screen.
-        if (granted) Library.start(context)
+        if (grants.newlyGranted(granted)) Library.start(context)
         finish()
     }
     state = remember {
@@ -108,9 +121,10 @@ fun rememberOnboarding(): OnboardingState {
         OnboardingState(Onboarding.shows(granted, done), ask = { launcher.launch(AudioPermission.name) })
     }
     LifecycleResumeEffect(Unit) {
-        if (context.hasAudioPermission()) {
-            // Granted in the system settings: the library starts here, whichever tab shows first.
-            Library.start(context)
+        val granted = context.hasAudioPermission()
+        // Granted in the system settings while the app was away: the library starts here, whichever tab shows first.
+        if (grants.newlyGranted(granted)) Library.start(context)
+        if (granted) {
             if (state.showing) finish()
             // A phone that already gave access never sees onboarding, now or later.
             scope.launch { if (!Onboarding.isDone(context)) Onboarding.markDone(context) }

@@ -14,6 +14,8 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.github.lorddetson.piplayer.MainActivity
 import io.github.lorddetson.piplayer.R
 import io.github.lorddetson.piplayer.TestFiles
+import androidx.lifecycle.Lifecycle
+import io.github.lorddetson.piplayer.library.Library
 import io.github.lorddetson.piplayer.library.songs.AudioPermission
 import io.github.lorddetson.piplayer.ui.GrantAudioPermission
 import io.github.lorddetson.piplayer.ui.library.LibraryTags
@@ -118,6 +120,25 @@ class OnboardingWithThePermissionTest {
         compose.onNodeWithTag(OnboardingTags.SCREEN).assertDoesNotExist()
 
         compose.waitUntil(timeoutMillis = 5_000) { runBlocking { Onboarding.isDone(context) } }
+    }
+
+    /**
+     * A resume (the notification shade, a system dialog, a return to the app) with the permission held all along starts
+     * nothing: each start of the library asks for a tag pass and an attach pass again.
+     */
+    @Test
+    fun resumingAgainDoesNotStartTheLibraryAgain() {
+        compose.waitUntilExactlyOneExists(hasTestTag(LibraryTags.TABS), timeoutMillis = 10_000)
+        compose.waitForIdle()
+        val before = Library.starts.get()
+
+        repeat(3) {
+            compose.activityRule.scenario.moveToState(Lifecycle.State.STARTED)
+            compose.activityRule.scenario.moveToState(Lifecycle.State.RESUMED)
+            compose.waitForIdle()
+        }
+
+        assertThat(Library.starts.get()).describedAs("starts of the library after 3 resumes").isEqualTo(before)
     }
 }
 
