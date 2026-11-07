@@ -808,8 +808,10 @@ the cover provider that serves the library tree's `artworkUri` to controllers ou
   5. the placeholder (§13.4).
 - An album's cover is its own cover, otherwise the embedded picture or system thumbnail of one of its songs: the first by
   disc, track and file name among the songs whose picture the tag pass found, then among the unread ones, then among the
-  rest. A song's own cover stands for that song only, never for its album.
-- An artist's cover is the cover of one of their albums, taken in the artist page's order (year, then title): the first
+  rest. A song's own cover stands for that song only, never for its album. Hidden files (§3.5) may stand for an album too:
+  their pictures are the album's all the same.
+- An artist's cover is the cover of one of their albums, taken in the artist page's order (the album's year, then its
+  title, over all its songs, so that a compilation sorts by its own year): the first
   with an own cover, otherwise the first with an embedded picture, otherwise the first. An artist without albums shows
   the embedded picture or system thumbnail of their first song.
 - Media3 reads the picture rather than `MediaMetadataRetriever`, because the platform's retriever takes the first picture
@@ -857,7 +859,10 @@ the cover provider that serves the library tree's `artworkUri` to controllers ou
   decode, so that the shorter side is at least the step (views crop to a square); a row never holds a full-size picture.
   Now Playing asks for the shorter side of the screen.
 - A memory cache keeps decoded pictures, an eighth of the heap and at most 32 MB, the least recently used going first.
-  It also remembers that a source had no picture. A change of own covers empties it, and the covers on screen load again.
+  It also remembers that a source had no picture. A change of own covers empties it, and the covers on screen load again,
+  each keeping its picture until the new one is there. A sync that changed the library and the end of a run of the tag
+  pass empty it too (not every batch, so that scrolling back during a pass finds its covers); views on screen then keep
+  what they show until they are drawn anew.
 - A disk cache keeps the pictures of steps up to 768 px as JPEG at quality 90, and an empty file for an embedded picture
   or a thumbnail that a file does not have, in `cache/covers/` (a missing own copy is only looked for again): at most 100 MB, the least recently used file going first. Keys name the source and its
   state: an own cover by its copy's name; a picture of a file by the file ID, size and modification time, so that a
