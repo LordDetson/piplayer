@@ -16,6 +16,7 @@ import io.github.lorddetson.piplayer.library.lists.FolderEntry
 import io.github.lorddetson.piplayer.library.lists.FolderLevels
 import io.github.lorddetson.piplayer.library.lists.LibraryLists
 import io.github.lorddetson.piplayer.library.lists.ListKind
+import io.github.lorddetson.piplayer.library.lists.SongOutline
 import io.github.lorddetson.piplayer.library.lists.SongQuery
 import io.github.lorddetson.piplayer.library.lists.SongSort
 import io.github.lorddetson.piplayer.library.search.SearchTerms
@@ -76,7 +77,7 @@ class LibraryTree(context: Context, private val artwork: TreeArtwork = TreeArtwo
         synchronized(lock) {
             val node = TreeNode.parse(mediaId) ?: return null
             val listing = listing(node) ?: return null
-            return TreeBuckets.page(listing.size, page, pageSize).map(listing.item)
+            return listing.items(TreeBuckets.page(listing.size, page, pageSize))
         }
     }
 
@@ -124,7 +125,7 @@ class LibraryTree(context: Context, private val artwork: TreeArtwork = TreeArtwo
             val songsQuery = entries.query ?: return null
             if (found.from < entries.nodes.size) return null
             val row = found.from - entries.nodes.size
-            return QueueRequest(entries.songs[row].id, row, songsQuery)
+            return QueueRequest(entries.outline.ids[row], row, songsQuery)
         }
     }
 
@@ -167,7 +168,7 @@ class LibraryTree(context: Context, private val artwork: TreeArtwork = TreeArtwo
                 val entries = entries(node.parent) ?: return null
                 val found = find(entries, node) ?: return null
                 if (found.from < entries.nodes.size) return null
-                return entries.songs.subList(found.from - entries.nodes.size, found.to - entries.nodes.size)
+                return entries.songs(found.from - entries.nodes.size, found.to - entries.nodes.size)
             }
             return queryOf(node)?.let(::songsOf)
         }
@@ -177,74 +178,94 @@ class LibraryTree(context: Context, private val artwork: TreeArtwork = TreeArtwo
     private fun listing(node: TreeNode): Listing? {
         if (node == TreeNode.Root) {
             val tabs = listOf(TreeNode.Songs, TreeNode.Albums, TreeNode.Artists, TreeNode.Folders).map(::fixedItem)
-            return Listing(tabs.size) { tabs[it] }
+            return Listing(tabs.size) { rows -> rows.map(tabs::get) }
         }
         if (node is TreeNode.Bucket) {
             val entries = entries(node.parent) ?: return null
             val found = find(entries, node) ?: return null
-            return Listing(found.to - found.from) { entries.item(found.from + it) }
+            return Listing(found.to - found.from) { rows -> entries.items(rows.first + found.from..rows.last + found.from) }
         }
         val entries = entries(node) ?: return null
         val buckets = buckets(entries)
-        if (buckets.isEmpty()) return Listing(entries.size, entries::item)
-        return Listing(buckets.size) { bucketItem(node, entries, buckets[it]) }
+        if (buckets.isEmpty()) return Listing(entries.size, entries::items)
+        return Listing(buckets.size) { rows -> rows.map { bucketItem(node, entries, buckets[it]) } }
     }
 
     /**
-     * The entries of a list node in its order: [nodes] first (albums, artists, folders), then [songs] of [query]. Null for
-     * a node that is gone or no list.
+     * The entries of a list node in its order: [nodes] first (albums, artists, folders), then the songs of [query] as its
+     * [outline] gives them: only the songs of the rows shown are read (§10.5). Null for a node that is gone or no list.
      */
-    private inner class Entries(val nodes: List<NodeEntry>, val songs: List<Song>, val query: SongQuery?) {
-        val size: Int get() = nodes.size + songs.size
+    private inner class Entries(val nodes: List<NodeEntry>, val outline: SongOutline, val query: SongQuery?) {
+        val size: Int get() = nodes.size + outline.size
 
         /** The length of a song's media ID without its file ID and row, which differ by song. */
         private val idBase = query?.let { QueueRequest(0, 0, it).mediaId.length - 2 } ?: 0
 
-        fun section(index: Int): String? = if (index < nodes.size) nodes[index].section else songs[index - nodes.size].section
+        fun section(index: Int): String? = if (index < nodes.size) nodes[index].section else outline.sections[index - nodes.size]
 
-        fun item(index: Int): MediaItem {
-            if (index < nodes.size) return nodes[index].item
-            val row = index - nodes.size
-            return songItem(songs[row], QueueRequest(songs[row].id, row, query!!).mediaId)
+        /** The items of [indices], the songs among them read in one go; a song gone since the outline is left out. */
+        fun items(indices: IntRange): List<MediaItem> {
+            if (indices.isEmpty()) return emptyList()
+            val firstRow = maxOf(indices.first, nodes.size) - nodes.size
+            val songs = if (indices.last >= nodes.size) songsById(outline.ids, firstRow, indices.last - nodes.size + 1) else emptyMap()
+            return indices.mapNotNull { index ->
+                if (index < nodes.size) return@mapNotNull nodes[index].item
+                val row = index - nodes.size
+                songs[outline.ids[row]]?.let { songItem(it, QueueRequest(it.id, row, query!!).mediaId) }
+            }
         }
 
-        /** What the entry's item weighs in a legacy browser's list (§10.2), without building it. */
+        /** The songs of rows [from] until [to] of the outline, in order. */
+        fun songs(from: Int, to: Int): List<Song> {
+            val songs = songsById(outline.ids, from, to)
+            return (from until to).mapNotNull { songs[outline.ids[it]] }
+        }
+
+        /** What the entry's item weighs in a legacy browser's list (§10.2), without building it or reading its song. */
         fun weight(index: Int): Int {
             if (index < nodes.size) return nodes[index].weight
             val row = index - nodes.size
-            val song = songs[row]
-            val uriLength = artwork.uriLength(ArtworkSubject.Song(song.id))
-            return TreeBuckets.weight(idBase + digits(song.id) + digits(row.toLong()), song.title, song.artist, song.album, uriLength)
+            val id = outline.ids[row]
+            val uriLength = artwork.uriLength(ArtworkSubject.Song(id))
+            return TreeBuckets.weightOfBytes(
+                idBase + digits(id) + digits(row.toLong()), outline.titleBytes[row], outline.artistBytes[row], outline.albumBytes[row], uriLength,
+            )
         }
+
+        /** What the buckets of these entries depend on; their layout is kept by it (§10.5). */
+        val bucketKey: BucketKey get() = BucketKey(outline, nodes.map { it.weight }, nodes.map { it.section }, artwork.version)
     }
 
     private class NodeEntry(val section: String?, val type: Int, val item: MediaItem) {
         val weight = weightOf(item)
     }
 
-    private class Listing(val size: Int, val item: (Int) -> MediaItem)
+    /** The outline itself counts by identity: a new read is a new layout. */
+    private data class BucketKey(val outline: SongOutline, val weights: List<Int>, val sections: List<String?>, val artwork: Long)
+
+    private class Listing(val size: Int, val items: (IntRange) -> List<MediaItem>)
 
     private fun entries(node: TreeNode): Entries? = when (node) {
-        TreeNode.Songs -> songsQuery().let { Entries(emptyList(), songsOf(it), it) }
-        TreeNode.Albums -> Entries(albums().map { NodeEntry(it.section, MediaMetadata.MEDIA_TYPE_ALBUM, albumItem(it)) }, emptyList(), null)
-        TreeNode.Artists -> Entries(artists().map { NodeEntry(it.section, MediaMetadata.MEDIA_TYPE_ARTIST, artistItem(it)) }, emptyList(), null)
+        TreeNode.Songs -> songsQuery().let { Entries(emptyList(), outlineOf(it), it) }
+        TreeNode.Albums -> Entries(albums().map { NodeEntry(it.section, MediaMetadata.MEDIA_TYPE_ALBUM, albumItem(it)) }, SongOutline.EMPTY, null)
+        TreeNode.Artists -> Entries(artists().map { NodeEntry(it.section, MediaMetadata.MEDIA_TYPE_ARTIST, artistItem(it)) }, SongOutline.EMPTY, null)
         TreeNode.Folders -> {
             val levels = levels()
             val top = levels.top()
             val folder = top.folder
             if (folder == null) {
                 val volumes = top.entries.let { if (order(ListName.FOLDERS).reversed) it.reversed() else it }
-                Entries(volumes.map(::folderEntry), emptyList(), null)
+                Entries(volumes.map(::folderEntry), SongOutline.EMPTY, null)
             } else {
                 folderEntries(levels, FolderKey(folder.first, folder.second))
             }
         }
-        is TreeNode.Album -> if (read { it.album(node.key) } == null) null else albumQuery(node.key).let { Entries(emptyList(), songsOf(it), it) }
+        is TreeNode.Album -> if (read { it.album(node.key) } == null) null else albumQuery(node.key).let { Entries(emptyList(), outlineOf(it), it) }
         is TreeNode.Artist -> read { lists ->
             lists.artist(node.key)?.let { lists.artistAlbums(node.key) }
         }?.let { albums ->
             val query = artistQuery(node.key)
-            Entries(albums.map { NodeEntry(Sections.year(it.year), MediaMetadata.MEDIA_TYPE_ALBUM, albumItem(it)) }, songsOf(query), query)
+            Entries(albums.map { NodeEntry(Sections.year(it.year), MediaMetadata.MEDIA_TYPE_ALBUM, albumItem(it)) }, outlineOf(query), query)
         }
         is TreeNode.Folder -> levels().let { levels -> if (levels.contains(node.folder.volume, node.folder.relativePath)) folderEntries(levels, node.folder) else null }
         TreeNode.Root, is TreeNode.Bucket -> null
@@ -255,13 +276,17 @@ class LibraryTree(context: Context, private val artwork: TreeArtwork = TreeArtwo
         val order = order(ListName.FOLDERS)
         val subfolders = levels.children(folder.volume, folder.relativePath, order.reversed)
         val query = SongQuery.folder(folder.volume, folder.relativePath).copy(sort = SongSort.of(order.field) ?: SongSort.FILE_NAME, reversed = order.reversed)
-        return Entries(subfolders.map(::folderEntry), songsOf(query), query)
+        return Entries(subfolders.map(::folderEntry), outlineOf(query), query)
     }
 
     private fun folderEntry(entry: FolderEntry) =
         NodeEntry(entry.section, MediaMetadata.MEDIA_TYPE_FOLDER_MIXED, folderItem(FolderKey(entry.volume, entry.relativePath)))
 
-    private fun buckets(entries: Entries): List<TreeBucket> = TreeBuckets.of(entries.size, entries::section, entries::weight, boundary = entries.nodes.size)
+    private fun buckets(entries: Entries): List<TreeBucket> {
+        val key = entries.bucketKey
+        bucketLayouts[key]?.let { return it }
+        return TreeBuckets.of(entries.size, entries::section, entries::weight, boundary = entries.nodes.size).also { bucketLayouts[key] = it }
+    }
 
     private fun find(entries: Entries, bucket: TreeNode.Bucket): TreeBucket? =
         buckets(entries).firstOrNull { it.section == bucket.section && it.part == bucket.part }
@@ -381,6 +406,31 @@ class LibraryTree(context: Context, private val artwork: TreeArtwork = TreeArtwo
 
     private fun songById(fileId: Long): Song? = SongList.songsById(app, listOf(fileId))[fileId]
 
+    /** The songs of [ids] from [from] until [to], by file ID. */
+    private fun songsById(ids: LongArray, from: Int, to: Int): Map<Long, Song> =
+        if (from >= to) emptyMap() else SongList.songsById(app, (from until to).map { ids[it] })
+
+    /**
+     * The outline of [query] (§10.5): kept for the last few lists while the library's revision, the hidden files, the
+     * collation, the tag pass and its batches stay; without access to music it is empty.
+     */
+    private fun outlineOf(query: SongQuery): SongOutline {
+        if (!Library.mayRead(app)) return SongOutline.EMPTY
+        val stamp = stamp() + SongList.batches.value
+        outlines[query]?.takeIf { it.first == stamp }?.let { return it.second }
+        val outline = read { it.outline(query) } ?: SongOutline.EMPTY
+        outlines[query] = stamp to outline
+        return outline
+    }
+
+    private val outlines = object : LinkedHashMap<SongQuery, Pair<List<Any?>, SongOutline>>(8, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<SongQuery, Pair<List<Any?>, SongOutline>>) = size > KEPT_LISTS
+    }
+
+    private val bucketLayouts = object : LinkedHashMap<BucketKey, List<TreeBucket>>(8, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<BucketKey, List<TreeBucket>>) = size > KEPT_LISTS
+    }
+
     private fun albums(): List<AlbumGroup> {
         val order = order(ListName.ALBUMS)
         return cached("albums", order, emptyList()) { lists -> lists.albums(albumSort(), order.reversed) }
@@ -437,7 +487,19 @@ class LibraryTree(context: Context, private val artwork: TreeArtwork = TreeArtwo
         }
 
         /** The number of characters of [value] in decimal. */
-        private fun digits(value: Long): Int = value.toString().length
+        private fun digits(value: Long): Int {
+            if (value < 0) return digits(-value) + 1
+            var count = 1
+            var rest = value
+            while (rest >= 10) {
+                rest /= 10
+                count++
+            }
+            return count
+        }
+
+        /** How many lists' outlines and bucket layouts are kept: the Songs list and the nodes browsed last. */
+        private const val KEPT_LISTS = 4
 
         /** A node plays from its first song: no song of this ID exists, so the request starts at row 0. */
         private const val NO_SONG = -1L

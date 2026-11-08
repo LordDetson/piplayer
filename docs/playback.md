@@ -1093,13 +1093,21 @@ through the media library service: a tree of nodes, each a folder or a song.
 ### 10.5 When the tree is read
 
 - Nothing of the tree is read at start or in the first sync. A node is read when a controller asks for it, on a thread of
-  its own, from the library as the app reads it: the songs lists through the shared lists of library.md §6.4 (a list the
-  app shows serves the tree at once, and a list the tree reads serves the tap that follows), the albums, artists and
-  folders once for each revision of the library, hidden files, collation and order. The results of the last search are
-  kept the same way.
-- The Songs root and one of its buckets on the generated library of 20 000 songs answer within 300 ms on the API 30
-  emulator (the median of 5 after a warm-up, `@TimingTest`). A browse in the car should feel immediate, and step 6 read
-  the whole tree of the generated library in about 170 ms on that emulator, which leaves room for a busy host.
+  its own, from the library as the app reads it.
+- A list of songs is read as its outline: each row's file ID, section and the UTF-8 bytes of its title, artist and album,
+  in the list's order, which is all that its buckets and their weights need (SQLite gives the bytes). Only the songs of
+  the rows a controller is shown are read, by their file IDs. On the owner's phone reading the 20 000 songs of the
+  generated library whole took about 145 ms of a cold bucket's 230 ms, building them 37 ms and weighing them 29 ms; the
+  outline takes about 115 ms.
+- The tree keeps the outlines and bucket layouts of its last four lists while the library's revision, the hidden files,
+  the collation and the tag pass (each of its batches) stay, and the albums, artists and folders once for each revision,
+  hidden files, collation and order. The results of the last search are kept the same way. The tap on a song reads its
+  list for the queue as the app's tap does (§2.3).
+- The Songs root and one of its buckets on the generated library answer within 200 ms on the owner's phone, each read by
+  a new tree with no list kept, as a controller's first browse after a start (the median of 5 after a warm-up,
+  `@TimingTest`); the API 30 emulator keeps the earlier 300 ms. A browse in the car should feel immediate. On the phone
+  the root takes about 125 ms, a bucket about 145 ms, and a bucket right after its root about 15 ms; on the emulator
+  about 145 to 160 ms and 150 to 180 ms.
 
 ### 10.6 Not yet
 
@@ -1111,8 +1119,8 @@ through the media library service: a tree of nodes, each a folder or a song.
 
 JVM tests: node IDs for every kind with keys of every kind of character, malformed IDs refused; buckets by section, runs
 of one section split, sections that repeat, entries without a section, too many sections; pages of children, also with
-the largest page size; the weight of an item and buckets cut by weight; the best match of a voice query; an add at a
-row in the journal.
+the largest page size; the weight of an item and buckets cut by weight, the weight from an outline's bytes equal to the
+weight from the texts; the best match of a voice query; an add at a row in the journal.
 
 Instrumented tests on the API 30 emulator, on a library database filled from a test index: the root and its four nodes;
 the children of every node in the app's order, with every ID they give resolving to the same item; buckets on a list
@@ -1122,5 +1130,7 @@ no artwork data anywhere; a song of an album, an
 artist, a folder and the Songs list plays that list from it, a node plays its list from the start; search results and
 their songs playing the filtered list; a voice query playing an artist, an album and a song with its list; adds of tree
 items and queue items journaled as added entries; an app without access to music gets the root and nothing more, and
-cannot play or add library items. On the generated library, the timing check of §10.5. The cover URIs of the tree's
+cannot play or add library items. On a library database, the outline of every kind of list equal to its songs (rows,
+sections, the bytes of Cyrillic, Chinese and emoji texts). On the generated library, the timing check of §10.5, on the
+phone too. The cover URIs of the tree's
 items have the checks of library.md §13.8.8.

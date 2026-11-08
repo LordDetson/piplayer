@@ -199,15 +199,18 @@ class GeneratedLibraryTest {
     }
 
     /**
-     * The controller tree's Songs root and one of its buckets (docs/playback.md §10.5), each read with no list kept, as a
-     * controller's first browse after a start finds it; a bucket read right after its root is logged too.
+     * The controller tree's Songs root and one of its buckets (docs/playback.md §10.5), each read by a new tree with no
+     * list kept, as a controller's first browse after a start finds them; a bucket read right after its root is logged too.
      */
     @Test
     @TimingTest
-    fun theControllerTreeAnswersTheSongsRootAndABucketWithin300Milliseconds() {
+    fun theControllerTreeAnswersTheSongsRootAndABucketWithin200MillisecondsOnThePhone() {
         runBlocking { Library.sync(context).awaitIdle() }
         // As the service builds it, with a cover URI for every song (docs/library.md §13.8).
-        val tree = LibraryTree(context, io.github.lorddetson.piplayer.playback.ProviderArtwork(context))
+        fun newTree(): LibraryTree {
+            SongList.forget()
+            return LibraryTree(context, io.github.lorddetson.piplayer.playback.ProviderArtwork(context))
+        }
         fun median(name: String, read: () -> Unit): Duration {
             repeat(WARM_UP) { read() }
             val times = List(5) { measureTime { read() } }.sorted()
@@ -215,21 +218,23 @@ class GeneratedLibraryTest {
             return times[2]
         }
 
-        val buckets = tree.children("songs", 0, Int.MAX_VALUE)!!
+        val buckets = newTree().children("songs", 0, Int.MAX_VALUE)!!
         val bucket = buckets[buckets.size / 2].mediaId
         val root = median("Tree: Songs root") {
-            SongList.forget()
-            assertThat(tree.children("songs", 0, Int.MAX_VALUE)!!.size).isBetween(2, LibraryTree.MAX_CHILDREN)
+            assertThat(newTree().children("songs", 0, Int.MAX_VALUE)!!.size).isBetween(2, LibraryTree.MAX_CHILDREN)
         }
         val coldBucket = median("Tree: a bucket of Songs") {
-            SongList.forget()
-            assertThat(tree.children(bucket, 0, Int.MAX_VALUE)!!.size).isBetween(1, LibraryTree.MAX_CHILDREN)
+            assertThat(newTree().children(bucket, 0, Int.MAX_VALUE)!!.size).isBetween(1, LibraryTree.MAX_CHILDREN)
         }
+        val tree = newTree()
+        tree.children("songs", 0, Int.MAX_VALUE)
         median("Tree: a bucket of Songs after its root") { tree.children(bucket, 0, Int.MAX_VALUE) }
         assumeTimeLimitsApply()
 
-        assertThat(root.inWholeMilliseconds).describedAs("Songs root").isLessThanOrEqualTo(300L)
-        assertThat(coldBucket.inWholeMilliseconds).describedAs("a bucket").isLessThanOrEqualTo(300L)
+        // The phone is the reference; the emulator's sort of 20 000 rows alone takes most of its margin (§10.5).
+        val limit = if (emulator) 300L else 200L
+        assertThat(root.inWholeMilliseconds).describedAs("Songs root").isLessThanOrEqualTo(limit)
+        assertThat(coldBucket.inWholeMilliseconds).describedAs("a bucket").isLessThanOrEqualTo(limit)
     }
 
     private companion object {

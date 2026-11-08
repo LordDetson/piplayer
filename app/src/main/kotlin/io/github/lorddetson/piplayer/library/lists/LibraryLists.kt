@@ -18,6 +18,48 @@ import io.github.lorddetson.piplayer.identification.text.TextNormalizer
 import io.github.lorddetson.piplayer.settings.HiddenFiles
 import kotlinx.coroutines.runBlocking
 
+/**
+ * A song list without its songs (docs/playback.md §10.5): row i is the file [ids] i in the list's order, with its
+ * [sections] i and the UTF-8 bytes of its title, artist and album (0 for none), what the controller tree weighs it by.
+ */
+class SongOutline(
+    val ids: LongArray,
+    val sections: Array<String?>,
+    val titleBytes: IntArray,
+    val artistBytes: IntArray,
+    val albumBytes: IntArray,
+) {
+    val size: Int get() = ids.size
+
+    companion object {
+        val EMPTY = SongOutline(LongArray(0), emptyArray(), IntArray(0), IntArray(0), IntArray(0))
+
+        /** The outline of [songs], read whole. */
+        fun of(songs: List<Song>) = SongOutline(
+            ids = LongArray(songs.size) { songs[it].id },
+            sections = Array(songs.size) { songs[it].section },
+            titleBytes = IntArray(songs.size) { utf8Bytes(songs[it].title) },
+            artistBytes = IntArray(songs.size) { utf8Bytes(songs[it].artist) },
+            albumBytes = IntArray(songs.size) { utf8Bytes(songs[it].album) },
+        )
+
+        /** What [text] takes in UTF-8, as SQLite's `length(CAST(text AS BLOB))` counts it. */
+        fun utf8Bytes(text: CharSequence?): Int {
+            if (text == null) return 0
+            var bytes = 0
+            for (char in text) {
+                bytes += when {
+                    char.code < 0x80 -> 1
+                    // A surrogate pair is four bytes.
+                    char.code < 0x800 || char.isSurrogate() -> 2
+                    else -> 3
+                }
+            }
+            return bytes
+        }
+    }
+}
+
 /** The orders of the Albums tab (docs/library.md §6.3). */
 enum class AlbumSort { TITLE, ARTIST, YEAR }
 
@@ -87,7 +129,28 @@ class LibraryLists(private val database: LibraryDatabase, private val hidden: Hi
     /** The songs of [query] in its order, the first [limit] when given, each with its section (docs/library.md §11.2). */
     fun songs(query: SongQuery, limit: Int? = null): List<Song> {
         val section = sectionOf(query.sort)
-        return rows(query, limit).map { row -> song(row, section(row)) }
+        return rows(query, limit).map { row -> song(row, section(row.sectionKey, row.sectionNumber)) }
+    }
+
+    /**
+     * The rows of [query] in its order with only what the controller tree splits it by (docs/playback.md §10.2, §10.5):
+     * each row's file ID, section and the UTF-8 bytes of its title, artist and album. Reading whole songs costs a third
+     * more; the tree reads them for the rows it shows.
+     */
+    fun outline(query: SongQuery): SongOutline {
+        if (query.kind == ListKind.TREE) return SongOutline.of(songs(query))
+        val sql = Sql(hidden)
+        sql.where(filterOf(query) ?: return SongOutline.EMPTY)
+        sql.search("d.search_text", query.search)
+        val rows = runBlocking { dao.outlineRows(sql.outline(query.sort, orderOf(query.sort, query.reversed))) }
+        val section = sectionOf(query.sort)
+        return SongOutline(
+            ids = LongArray(rows.size) { rows[it].fileId },
+            sections = Array(rows.size) { section(rows[it].sectionKey, rows[it].sectionNumber) },
+            titleBytes = IntArray(rows.size) { rows[it].titleBytes ?: 0 },
+            artistBytes = IntArray(rows.size) { rows[it].artistBytes ?: 0 },
+            albumBytes = IntArray(rows.size) { rows[it].albumBytes ?: 0 },
+        )
     }
 
     private fun song(row: ListSongRow, section: String?) =
@@ -107,14 +170,14 @@ class LibraryLists(private val database: LibraryDatabase, private val hidden: Hi
     private fun songOf(row: ListSongRow) = song(row, section = null)
 
     /** How a row of [sort] finds its section from what the query selected for it. */
-    private fun sectionOf(sort: SongSort): (ListSongRow) -> String? = when (sort) {
+    private fun sectionOf(sort: SongSort): (key: ByteArray?, number: Long?) -> String? = when (sort) {
         SongSort.TITLE, SongSort.ARTIST, SongSort.ALBUM, SongSort.FILE_NAME -> {
             val buckets = SortKeys.current().buckets
-            { row -> Sections.letter(SortKey.of(row.sectionKey), buckets) }
+            { key, _ -> Sections.letter(SortKey.of(key), buckets) }
         }
-        SongSort.LENGTH -> { row -> Sections.minutes(row.sectionNumber) }
-        SongSort.YEAR -> { row -> Sections.year(row.sectionNumber?.toInt()) }
-        SongSort.TRACK -> { _ -> null }
+        SongSort.LENGTH -> { _, number -> Sections.minutes(number) }
+        SongSort.YEAR -> { _, number -> Sections.year(number?.toInt()) }
+        SongSort.TRACK -> { _, _ -> null }
     }
 
     private fun rows(query: SongQuery, limit: Int?): List<ListSongRow> {
@@ -329,6 +392,13 @@ class LibraryLists(private val database: LibraryDatabase, private val hidden: Hi
                 "d.disc_number AS discNumber, f.relative_path AS relativePath, ${SECTIONS.getValue(sort)} " +
                 "FROM track_display d JOIN audio_file f ON f.id = d.file_id WHERE ${conditions()} " +
                 "ORDER BY $order" + (limit?.let { " LIMIT $it" } ?: ""),
+        )
+
+        /** The outline of [SongOutline]: the file ID, the section's key or number, the UTF-8 bytes of three texts. */
+        fun outline(sort: SongSort, order: String): RoomRawQuery = raw(
+            "SELECT f.id AS fileId, ${SECTIONS.getValue(sort)}, length(CAST(d.title AS BLOB)) AS titleBytes, " +
+                "length(CAST(d.artist AS BLOB)) AS artistBytes, length(CAST(d.album AS BLOB)) AS albumBytes " +
+                "FROM track_display d JOIN audio_file f ON f.id = d.file_id WHERE ${conditions()} ORDER BY $order",
         )
 
         fun raw(sql: String): RoomRawQuery {

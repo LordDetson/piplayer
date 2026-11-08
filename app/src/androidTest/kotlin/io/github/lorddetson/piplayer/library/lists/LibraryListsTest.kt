@@ -327,4 +327,32 @@ class LibraryListsTest {
         assertThat(found.getValue(ring).title).isEqualTo("Ring")
         assertThat(lists.songsById(emptyList())).isEmpty()
     }
+
+    /** The outline of a list is its songs without them: the same rows, sections and texts' bytes (docs/playback.md §10.5). */
+    @Test
+    fun theOutlineOfAListHoldsItsSongsRowsSectionsAndTextBytes() {
+        index.volume().rows = index.volume().rows + listOf(
+            row(20, "Ёжик в тумане", path = "Music/Ёж/", artist = "Ёлкин Бор", album = "Ночной ёж", generation = 100),
+            row(21, "夜に駆ける 🎵", path = "Music/Ёж/", artist = null, album = "", generation = 101),
+        )
+        runBlocking { sync.sync() }
+        val queries = SongSort.entries.flatMap { sort -> listOf(false, true).map { SongQuery.SONGS.copy(sort = sort, reversed = it) } } +
+            listOf(
+                SongQuery.album(second.key), SongQuery.artist(lists.artists().first().key), SongQuery.folder(PRIMARY, "Music/Mix/"),
+                SongQuery.tree(PRIMARY, "Music/"), SongQuery.SONGS.copy(search = "ёж"), SongQuery.album("nothing"),
+            )
+
+        for (query in queries) {
+            val songs = lists.songs(query)
+            val outline = lists.outline(query)
+
+            assertThat(outline.ids.toList()).describedAs("$query").isEqualTo(songs.map { it.id })
+            assertThat(outline.sections.toList()).describedAs("$query").isEqualTo(songs.map { it.section })
+            fun bytes(text: String?) = text?.toByteArray(Charsets.UTF_8)?.size ?: 0
+            assertThat(outline.titleBytes.toList()).describedAs("$query").isEqualTo(songs.map { bytes(it.title) })
+            assertThat(outline.artistBytes.toList()).describedAs("$query").isEqualTo(songs.map { bytes(it.artist) })
+            assertThat(outline.albumBytes.toList()).describedAs("$query").isEqualTo(songs.map { bytes(it.album) })
+        }
+        assertThat(lists.outline(SongQuery.SONGS).size).isGreaterThan(7)
+    }
 }

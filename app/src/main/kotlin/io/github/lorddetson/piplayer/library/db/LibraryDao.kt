@@ -234,6 +234,10 @@ interface LibraryDao {
     @RawQuery
     suspend fun albumGroups(query: RoomRawQuery): List<AlbumGroupRow>
 
+    /** The outline of a song list for the controller tree (docs/playback.md §10.5). */
+    @RawQuery
+    suspend fun outlineRows(query: RoomRawQuery): List<OutlineRow>
+
     @RawQuery
     suspend fun artistGroups(query: RoomRawQuery): List<ArtistGroupRow>
 
@@ -444,6 +448,16 @@ data class CoverFileRow(
     val albumKey: String?,
 )
 
+
+/** A row of a song list's outline: what the controller tree splits the list by (docs/playback.md §10.5). */
+data class OutlineRow(
+    val fileId: Long,
+    val sectionKey: ByteArray? = null,
+    val sectionNumber: Long? = null,
+    val titleBytes: Int? = null,
+    val artistBytes: Int? = null,
+    val albumBytes: Int? = null,
+)
 
 /** A song of a list, with what the list groups it by. */
 data class ListSongRow(

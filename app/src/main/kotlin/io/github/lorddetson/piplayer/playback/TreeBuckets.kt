@@ -1,5 +1,6 @@
 package io.github.lorddetson.piplayer.playback
 
+import io.github.lorddetson.piplayer.library.lists.SongOutline.Companion.utf8Bytes
 import io.github.lorddetson.piplayer.library.sort.Sections
 
 /**
@@ -112,22 +113,14 @@ object TreeBuckets {
         subtitle: CharSequence?,
         description: CharSequence?,
         artworkUriLength: Int = 0,
-    ): Int = ITEM_BYTES + 8 + 2 * mediaIdLength + text(title) + text(subtitle) + text(description) +
-        if (artworkUriLength > 0) 12 + 2 * artworkUriLength else 0
+    ): Int = weightOfBytes(mediaIdLength, utf8Bytes(title), utf8Bytes(subtitle), utf8Bytes(description), artworkUriLength)
 
-    private fun text(text: CharSequence?): Int {
-        if (text.isNullOrEmpty()) return 0
-        var bytes = 12
-        for (char in text) {
-            bytes += when {
-                char.code < 0x80 -> 1
-                // A surrogate pair is four bytes.
-                char.code < 0x800 || char.isSurrogate() -> 2
-                else -> 3
-            }
-        }
-        return bytes
-    }
+    /** [weight] from the UTF-8 bytes of the texts, as a list's outline gives them (§10.5); 0 bytes for none. */
+    fun weightOfBytes(mediaIdLength: Int, titleBytes: Int, subtitleBytes: Int, descriptionBytes: Int, artworkUriLength: Int = 0): Int =
+        ITEM_BYTES + 8 + 2 * mediaIdLength + text(titleBytes) + text(subtitleBytes) + text(descriptionBytes) +
+            if (artworkUriLength > 0) 12 + 2 * artworkUriLength else 0
+
+    private fun text(bytes: Int): Int = if (bytes == 0) 0 else 12 + bytes
 
     /**
      * What every item takes besides its texts, with room to spare: the class name a parcel writes for each item, the

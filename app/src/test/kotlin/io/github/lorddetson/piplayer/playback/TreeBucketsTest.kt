@@ -1,5 +1,6 @@
 package io.github.lorddetson.piplayer.playback
 
+import io.github.lorddetson.piplayer.library.lists.SongOutline
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 
@@ -141,6 +142,21 @@ class TreeBucketsTest {
         assertThat(TreeBuckets.weight(0, "🎵", null, null) - bare).isEqualTo(12 + 4)
         // The artwork URI of step 13, in UTF-16 as a parcel writes a URI.
         assertThat(TreeBuckets.weight(0, null, null, null, artworkUriLength = 40) - bare).isEqualTo(12 + 80)
+    }
+
+    @Test
+    fun theWeightFromAnOutlinesBytesIsTheWeightFromTheTexts() {
+        val texts = listOf(null, "", "Alpha", "Ёжик в тумане", "夜に駆ける", "🎵 tunes", "x".repeat(300))
+        for (title in texts) {
+            for (subtitle in texts) {
+                val description = texts[(title?.length ?: 0) % texts.size]
+                fun bytes(text: String?) = text?.toByteArray(Charsets.UTF_8)?.size ?: 0
+                assertThat(SongOutline.utf8Bytes(title)).isEqualTo(bytes(title))
+                assertThat(TreeBuckets.weightOfBytes(57, bytes(title), bytes(subtitle), bytes(description), 40))
+                    .describedAs("$title / $subtitle / $description")
+                    .isEqualTo(TreeBuckets.weight(57, title, subtitle, description, 40))
+            }
+        }
     }
 
     @Test
