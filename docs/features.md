@@ -295,6 +295,8 @@ Size: L (about 8 weeks).
 
 ### M2a Browse and play
 
+Closed on 08.11.2026 (`m2a-acceptance.md`).
+
 Size: L (about 10 weeks).
 
 - Data model with two database files (rebuildable library data and user data), tracks separate from files, stable
@@ -318,6 +320,9 @@ Size: M (about 5 weeks).
 - Starts with what M2a handed over: a week in which the owner uses PiPlayer as the daily player with real music on
   the phone, with no open blocker, and M1's check C2 with a real phone call (`m1-acceptance.md`); what the week finds is
   fixed first.
+- Also handed over by M2a: the first sync of 20 000 files has no headroom (2.7 to 3.0 s on the phone against 3 s, about
+  4.6 s on the API 30 emulator against 5 s; `m2a-acceptance.md`, L1), so it is made faster before M2b adds work to it,
+  and the opened-file tests that time out on slow CI runners wait for events instead of a fixed 10 s.
 - Playlists with resolution hints, smart lists, favorite tracks and albums, statistics, the manual choice of legacy
   encodings, track details, multi-select, the Genres and Playlists categories.
 - Done when the daily-use week has passed with no open blocker, C2 passes with a real call, favorites, playlists and
