@@ -148,18 +148,30 @@ class IdentityAttacher(
         }
     }
 
-    /** Steps 4 and 5: a missing identity that holds data takes over the file of a new identity, which goes. */
+    /**
+     * Steps 4 and 5: a missing identity takes over the file of a new identity without user data, which goes. What
+     * [find] found is checked again in the write transaction against the identities and holders of that moment, since
+     * user data may have been written for the new identity meanwhile (the attach pass never deletes an identity that
+     * holds data). The replaced identity's album members become the missing one's (docs/library.md §15.3).
+     */
     private suspend fun takeOver(find: suspend (List<Identity>) -> List<Takeover>) {
         val dao = user.identities()
-        val stored = dao.identities()
-        val takeovers = find(stored.map(::identity))
-        if (takeovers.isEmpty()) return
-        val byId = stored.associateBy { it.id }
-        user.withWriteTransaction {
+        val found = find(dao.identities().map(::identity))
+        if (found.isEmpty()) return
+        val wrote = user.withWriteTransaction {
+            val stored = dao.identities()
+            val takeovers = Takeover.stillValid(found, stored.map(::identity), holders())
+            if (takeovers.isEmpty()) return@withWriteTransaction false
+            val byId = stored.associateBy { it.id }
+            takeovers.forEach { takeover ->
+                user.favorites().copyMembers(from = takeover.replacedId, to = takeover.missingId)
+                user.favorites().removeMembersOf(takeover.replacedId)
+            }
             dao.delete(takeovers.map { it.replacedId })
             dao.updateAll(takeovers.map { identity(byId.getValue(it.missingId)).following(it.file).entity(byId.getValue(it.missingId)) })
+            true
         }
-        changes.value++
+        if (wrote) changes.value++
     }
 
     private suspend fun dropStaleFingerprints(now: Long) {

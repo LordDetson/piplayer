@@ -101,7 +101,9 @@ object PlaylistHints {
      * [hints] takes over the one settled file of [files] that one of its hints names by place, by display name ignoring
      * case or by recording MBID, with a length within 1 s of the hint's (else the identity's), when no other missing
      * identity could take that file. As in step 4, a file may be taken only from an identity outside [holdingData] made
-     * since the missing one went missing, which is then deleted; byte-identical copies count once, by the lowest file ID.
+     * since the missing one went missing, which is then deleted. Byte-identical copies are one file: a hint may name any
+     * copy of a key, an identity whose hints name copies of one key alone takes that key, and the copy it takes over is
+     * the one at a hinted place, else the lowest file ID among the copies its hints name.
      */
     fun takeovers(
         files: List<KeyedFile>,
@@ -114,19 +116,24 @@ object PlaylistHints {
         val missing = identities.filter { it.id in hints && it.contentKey !in held && it.missingSince != null }
         if (missing.isEmpty()) return emptyList()
         val owners = identities.associateBy { it.contentKey }
-        val copies = files.filter { it.settled }.groupBy { it.contentKey }.map { (_, same) -> same.minBy { it.fileId } }
+        val copiesByKey = files.filter { it.settled }.groupBy { it.contentKey }
+        // For each missing identity, the copies its hints name, by key.
         val candidates = missing.map { identity ->
             val since = identity.missingSince!!
             val own = hints.getValue(identity.id)
-            identity to copies.filter { file ->
-                val owner = owners[file.contentKey]
-                owner != null && owner.id !in holdingData && owner.createdAt >= since && own.any { hint -> names(hint, identity, file) }
+            identity to copiesByKey.mapNotNull { (key, copies) ->
+                val owner = owners[key]
+                if (owner == null || owner.id in holdingData || owner.createdAt < since) return@mapNotNull null
+                val named = copies.filter { file -> own.any { hint -> names(hint, identity, file) } }
+                if (named.isEmpty()) null else key to named
             }
         }
-        val claims = candidates.flatMap { (_, matched) -> matched.map { it.contentKey } }.groupingBy { it }.eachCount()
+        val claims = candidates.flatMap { (_, matched) -> matched.map { (key, _) -> key } }.groupingBy { it }.eachCount()
         return candidates.mapNotNull { (identity, matched) ->
-            matched.singleOrNull()?.takeIf { claims[it.contentKey] == 1 }
-                ?.let { Takeover(identity.id, it, owners.getValue(it.contentKey).id) }
+            val (key, named) = matched.singleOrNull()?.takeIf { (key, _) -> claims[key] == 1 } ?: return@mapNotNull null
+            val places = hints.getValue(identity.id).mapNotNullTo(HashSet()) { it.place }
+            val file = named.filter { it.place in places }.minByOrNull { it.fileId } ?: named.minBy { it.fileId }
+            Takeover(identity.id, file, owners.getValue(key).id)
         }
     }
 

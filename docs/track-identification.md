@@ -235,10 +235,11 @@ apps do not change it.
      without user data, which then goes. These candidates are fingerprinted on demand at background priority, as a
      one-off for identities that hold user data and stayed unmatched; this is not part of the library scan (§8);
   5. for playlist entries also their hints (path, name, duration, recording MBID): a missing identity that entries
-     refer to takes the key of the one unattached file that matches a hint by place and duration, by name and duration
-     or by recording MBID and duration, when no other missing identity could take it. Like step 4 it runs after the
-     new identities are made and takes over a file whose new identity holds no user data. An entry never points at a file;
-     an entry without an identity is linked to the identity of the file its hints name (library.md §16.2).
+     refer to takes over the one file that matches a hint by place and duration, by name and duration or by recording
+     MBID and duration, when no other missing identity could take it. Like step 4 it runs after the new identities are
+     made, so the file already has a new identity; it takes the file only from a new identity that holds no user data,
+     which then goes. Byte-identical copies count as one file. An entry never points at a file; an entry without an
+     identity is linked to the identity of the file its hints name (library.md §16.2).
 
   A file is unattached when no identity holds its key; a file whose length still waits for a walk is not matched yet.
   Every file left unattached gets a new identity. Re-attachment runs after media index rebuilds, SD card changes,
@@ -1118,7 +1119,7 @@ tests, and a high-band error rate within the threshold of §11.4.
 | M2a | Duration source: reliable headers are used; MP3 without a frame-count header and raw ADTS are walked; a Xing/VBRI byte count off by more than 2 %, a CBR header off by more than 2 s, and WAV, MP4 and FLAC headers that the payload cannot support trigger a walk |
 | M2a | Content key: golden values (each fixture has its expected key in hex, checked on every TagLib or parser change); on synthetic payload offsets the key stays the same when only tag regions change and changes when payload bytes change |
 | M2a | Re-attachment order (§3.1): content key, location with duration, unique recording MBID, cached fingerprint, playlist hints; another song at the same path with a duration 3 s off is not attached; two unattached files with the same recording MBID attach neither |
-| M2b | Playlist hints (§3.1 step 5, library.md §16.2): a missing identity that entries refer to takes the one unattached file their place, name or MBID names with a duration within 1 s, never one that two identities could take; an entry without an identity is linked by key, place, name and MBID in that order; M3U8 lines are parsed, written and matched to library files (library.md §16.6) |
+| M2b | Playlist hints (§3.1 step 5, library.md §16.2): a missing identity that entries refer to takes over the one file their place, name or MBID names with a duration within 1 s from a new identity without user data, never one that two identities could take; an entry without an identity is linked by key, place, name and MBID in that order; M3U8 lines are parsed, written and matched to library files (library.md §16.6) |
 | M2b | Start-up mirror: when the user database's change counter differs from the mirrored one, favorites, statistics and the badge state are mirrored again; M3 adds the merged values of decided fields and the Keep as-is/Skip state |
 | M2a | IPC from `:tagger` for the tag pass: each result stays under 128 KB; a larger result or a value over 16 KB travels through a file; no cover bytes cross the process boundary |
 | M2b | Legacy encodings, per file: "Кино", "Ёжик" and "Би-2" stored as Windows-1251 are decoded as such in automatic mode; "Beyoncé", "Motörhead", "Sigur Rós" and "ÉTÉ" stay ISO-8859-1; ID3v1, encoding-0 ID3v2 frames and RIFF INFO |

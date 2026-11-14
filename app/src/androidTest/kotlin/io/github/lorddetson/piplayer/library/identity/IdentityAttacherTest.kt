@@ -12,6 +12,8 @@ import io.github.lorddetson.piplayer.library.playlists.PlaylistLinks
 import io.github.lorddetson.piplayer.library.sync.IndexRow
 import io.github.lorddetson.piplayer.library.sync.LibrarySync
 import io.github.lorddetson.piplayer.library.tagpass.DurationSource
+import io.github.lorddetson.piplayer.userdata.PlaylistEntity
+import io.github.lorddetson.piplayer.userdata.PlaylistEntryEntity
 import io.github.lorddetson.piplayer.userdata.UserDatabase
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
@@ -255,6 +257,108 @@ class IdentityAttacherTest {
             assertThat(byId.keys).containsExactlyInAnyOrder(a, b)
         } finally {
             ordered.close()
+        }
+    }
+
+    /**
+     * Identity A held data and went missing; a new file b.mp3 (key 3) arrived, and the pass gave it a new identity N.
+     * Runs [pass] with an attacher whose step 4 matches every file (while A's old key is [fingerprinted]) and calls
+     * [onCached] and [onCompute] as hooks, so that a test writes user data at a set point between the plan and a
+     * takeover; the real user data is the holders.
+     */
+    private suspend fun afterTakeoverRace(
+        hints: PlaylistLinks? = null,
+        fingerprinted: Boolean = true,
+        onCached: suspend (String) -> Unit = {},
+        onCompute: suspend (KeyedFile) -> Unit = {},
+        pass: suspend (a: Long) -> Unit,
+    ) {
+        index.volume().rows = listOf(row(1, path = "Music/A/", name = "a.mp3"))
+        sync.sync()
+        keyed(1, key(1))
+        attacher.attach()
+        val a = identities().single().id
+        user.favorites().add(a, now)
+        val format = library.library().keyedFiles().single().format
+        val sounds = object : FingerprintSource {
+            override suspend fun cached(contentKey: String): CachedPrint? {
+                onCached(contentKey)
+                return if (fingerprinted && contentKey == key(1)) CachedPrint(intArrayOf(1), format) else null
+            }
+
+            override suspend fun compute(file: KeyedFile): IntArray {
+                onCompute(file)
+                return intArrayOf(1)
+            }
+        }
+        val racing = IdentityAttacher(
+            library, user, sync, holders = { user.user().identitiesHoldingData().toSet() },
+            fingerprints = FingerprintStep(sounds, similar = { _, _ -> true }), clock = { now }, playlists = hints,
+        )
+        try {
+            index.volume().rows = listOf(row(3, path = "Music/New/", name = "b.mp3", generation = 10))
+            sync.sync()
+            keyed(3, key(3))
+            now += 1
+            racing.attach()
+            pass(a)
+        } finally {
+            racing.close()
+        }
+    }
+
+    private suspend fun idOfKey(key: String) = user.identities().idOfKey(Hex.bytes(key))
+
+    @Test
+    fun step4LeavesANewIdentityThatGainedAFavoriteWhileItFingerprinted() = runBlocking<Unit> {
+        // The user favorites the new file while step 4 fingerprints it: N holds data now and must stay.
+        afterTakeoverRace(onCompute = { file -> user.favorites().add(idOfKey(file.contentKey)!!, now) }) { a ->
+            val n = idOfKey(key(3))
+            assertThat(n).isNotNull().isNotEqualTo(a)
+            assertThat(user.favorites().favorites().map { it.identityId }).containsExactlyInAnyOrder(a, n)
+            assertThat(identities().single { it.id == a }.missingSince).isNotNull()
+        }
+    }
+
+    @Test
+    fun step5LeavesANewIdentityThatGainedAPlaylistEntryMeanwhile() = runBlocking<Unit> {
+        // A's entry names b.mp3 by name and length; while step 4 runs, the user adds b.mp3 to a playlist under N.
+        var entry = 0L
+        val hints = object : PlaylistLinks {
+            override suspend fun identityHints() =
+                mapOf(identities().minOf { it.id } to listOf(EntryHint(PRIMARY, "Music/A/", "b.mp3", 200_000)))
+            override suspend fun link(files: List<KeyedFile>) = Unit
+        }
+        afterTakeoverRace(
+            hints = hints,
+            // No fingerprint for A: step 4 takes nothing, so the takeover is step 5's.
+            fingerprinted = false,
+            onCached = { contentKey ->
+                if (contentKey == key(1) && entry == 0L) {
+                    val playlist = user.playlists().addPlaylist(PlaylistEntity(name = "P", createdAt = now, updatedAt = now))
+                    user.playlists().addEntries(listOf(PlaylistEntryEntity(
+                        playlistId = playlist, position = 0, identityId = idOfKey(key(3))!!, hintVolumeName = null,
+                        hintRelativePath = null, hintDisplayName = null, hintDurationMs = null, hintContentKey = null,
+                        hintRecordingMbid = null, hintTitle = null, hintArtist = null,
+                    )))
+                    entry = user.playlists().entries(playlist).single().id
+                }
+            },
+        ) { a ->
+            val n = user.playlists().entry(entry)!!.identityId
+            assertThat(identities().map { it.id }).contains(n)
+            assertThat(identities().single { it.id == n }.contentKey).isEqualTo(Hex.bytes(key(3)))
+            assertThat(identities().single { it.id == a }.missingSince).isNotNull()
+        }
+    }
+
+    @Test
+    fun aTakeoverMovesTheAlbumMembersOfTheIdentityItReplaces() = runBlocking<Unit> {
+        // A mirror run during step 4 records N on a referenced album; A takes over b.mp3 and so takes N's place there.
+        afterTakeoverRace(onCompute = { file -> user.favorites().addMember("album", idOfKey(file.contentKey)!!) }) { a ->
+            assertThat(idOfKey(key(3))).isEqualTo(a)
+            assertThat(user.favorites().members().filter { m -> identities().any { it.id == m.identityId } }.map { it.albumKey to it.identityId })
+                .containsExactly("album" to a)
         }
     }
 

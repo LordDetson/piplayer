@@ -142,6 +142,44 @@ class PlaylistHintsTest {
         assertThat(copies.map { it.file.fileId }).containsExactly(1L)
     }
 
+    // Byte-identical copies: one key, one identity, several files (docs/library.md §16.2).
+
+    @Test
+    fun step5MatchesAHintAgainstEveryCopyOfAKey() {
+        // The entry names the copy at the higher file ID; the lower copy has another name in another folder.
+        val identity = missing(7, "aa", hint = null)
+        val elsewhere = file(1, "bb", Place("external_primary", "Backup/", "track01.mp3"))
+        val named = file(9, "bb", moved)
+
+        val found = takeovers(listOf(identity), mapOf(7L to listOf(hint(moved))), listOf(elsewhere, named), owners = listOf(owner(100, elsewhere)))
+
+        assertThat(found).containsExactly(Takeover(missingId = 7, file = named, replacedId = 100))
+    }
+
+    @Test
+    fun step5TakesNothingWhenTwoMissingIdentitiesHintDifferentCopiesOfOneKey() {
+        val first = file(1, "bb", Place("external_primary", "Backup/", "track01.mp3"))
+        val second = file(9, "bb", moved)
+        val identities = listOf(missing(7, "aa", hint = null), missing(8, "dd", hint = null))
+        val hints = mapOf(7L to listOf(hint(first.place)), 8L to listOf(hint(moved)))
+
+        val found = takeovers(identities, hints, listOf(first, second), owners = listOf(owner(100, first)))
+
+        assertThat(found).isEmpty()
+    }
+
+    @Test
+    fun step5TakesOverTheCopyAtTheHintedPlace() {
+        // Both copies carry the hinted name; the one at the hinted place becomes the identity's file and hint.
+        val identity = missing(7, "aa", hint = null)
+        val other = file(1, "bb", Place("external_primary", "Backup/", "01 Song.mp3"))
+        val atHint = file(9, "bb", moved)
+
+        val found = takeovers(listOf(identity), mapOf(7L to listOf(hint(moved))), listOf(other, atHint), owners = listOf(owner(100, other)))
+
+        assertThat(found.map { it.file.fileId }).containsExactly(9L)
+    }
+
     // Entries without an identity.
 
     @Test

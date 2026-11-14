@@ -104,6 +104,15 @@ interface FavoriteDao {
     @Query("DELETE FROM album_member WHERE album_key = :albumKey")
     suspend fun removeMembers(albumKey: String)
 
+    /** The albums [from] is a member of now count [to] instead, as when a takeover deletes [from] (docs/library.md §8.2). */
+    @Query(
+        "INSERT OR IGNORE INTO album_member (album_key, identity_id) SELECT album_key, :to FROM album_member WHERE identity_id = :from",
+    )
+    suspend fun copyMembers(from: Long, to: Long)
+
+    @Query("DELETE FROM album_member WHERE identity_id = :identityId")
+    suspend fun removeMembersOf(identityId: Long)
+
     /** Members whose identity is gone (docs/library.md §15.3). */
     @Query("DELETE FROM album_member WHERE identity_id NOT IN (SELECT id FROM track_identity)")
     suspend fun removeLostMembers()

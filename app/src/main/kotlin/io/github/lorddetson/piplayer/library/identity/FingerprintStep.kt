@@ -15,7 +15,26 @@ interface FingerprintSource {
 class CachedPrint(val raw: IntArray, val format: String?)
 
 /** A missing identity that takes over the file of a newer identity, which is deleted (docs/library.md §8.3). */
-data class Takeover(val missingId: Long, val file: KeyedFile, val replacedId: Long)
+data class Takeover(val missingId: Long, val file: KeyedFile, val replacedId: Long) {
+
+    companion object {
+        /**
+         * The [takeovers], found on what was read before step 4 or 5 ran, that still hold on [identities] and
+         * [holdingData] as the step's write transaction reads them (docs/library.md §8.2): the missing identity is still
+         * there and missing, and the replaced one is still there with the file's key and holds no user data. Step 4 can
+         * fingerprint for minutes, and meanwhile the user may favorite, play or add to a playlist the new identity.
+         */
+        fun stillValid(takeovers: List<Takeover>, identities: List<Identity>, holdingData: Set<Long>): List<Takeover> {
+            val byId = identities.associateBy { it.id }
+            return takeovers.filter { takeover ->
+                val missing = byId[takeover.missingId]
+                val replaced = byId[takeover.replacedId]
+                missing != null && missing.missingSince != null && replaced != null && replaced.id !in holdingData &&
+                    replaced.contentKey == takeover.file.contentKey
+            }
+        }
+    }
+}
 
 /**
  * Step 4 of re-attachment (TI §3.1, docs/library.md §8.3): a missing identity that holds user data takes over a file

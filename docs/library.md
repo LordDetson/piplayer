@@ -693,7 +693,9 @@ saved queue that refers to identities is in playback.md §4.
   holds no user data and has been missing for 30 days is deleted: a deleted file, an SD card left out of the phone. An
   identity that holds user data is never deleted. User data that refers to identities: a song's own cover (§13.2), a
   favorite, play events and play statistics (§15), playlist entries (§16.2); decisions (M3) will add theirs. Album members
-  (§15.3) are not user data: they never keep an identity.
+  (§15.3) are not user data: they never keep an identity. Decision (PIM-31): when steps 4 and 5 of §8.2 delete the new
+  identity whose file a missing identity takes over, its album members become the missing identity's, in the same
+  transaction, so that an album seen with that file keeps counting it.
 - Attaching changes no user data, so it does not raise the user database's change counter (§3.1). Nothing is written
   into the library database: lists do not need the identity, and the two files keep no row IDs of each other (TI §10).
   Each pass asks the mirror of §15.4 for a run afterwards, because favorites and play counts follow the keys.
@@ -720,6 +722,11 @@ saved queue that refers to identities is in playback.md §4.
   this order, each in a transaction of its own, and take over files that hold a new identity without user data, which is
   deleted. Decision (PIM-31): step 5 comes after step 4, as TI §3.1 orders them, so that a fingerprint, the stronger
   evidence, wins over a name and a length.
+- Decision (PIM-31): steps 4 and 5 find their takeovers on what was read before they ran, and step 4 can fingerprint
+  for minutes, while the user may favorite, play or add to a playlist the file's new identity. So each takeover is
+  checked again inside its write transaction, against the identities and the user data of that moment: it is written
+  only while the missing identity is still missing and the new identity still holds the file's key and holds no user
+  data. Otherwise the new identity stays with its data and the missing one stays missing; a later pass may try again.
 - Taking a key moves the identity: `content_key`, `duration_ms` and the hints become the file's, and `missing_since` is
   cleared. When two missing identities could take one file, the newest one takes it.
 - The identity's recording MBID follows the file's tags while it is attached. A decided MBID of M3 will win over tags.
@@ -769,6 +776,10 @@ user data, never with it; step 4 with fake fingerprints (one match, two matches,
 an older identity, once per process).
 
 Instrumented tests on the API 30 emulator:
+
+- Steps 4 and 5 with a hook that writes user data between the plan and the takeover: a favorite written while step 4
+  fingerprints, or a playlist entry added before step 5, keeps the new identity and leaves the missing one missing; a
+  takeover moves the album members of the identity it replaces.
 
 - `user.db` from version 1 to 2 with a row of version 1 (`MigrationTestHelper`), and the exported schema.
 - Through the real library, the sync and the tag pass on generated files: a file moved to another folder, a renamed
@@ -1409,7 +1420,10 @@ Decision: an entry never points at a file. It refers to a track identity (§8.1)
       and length, when exactly one such file exists and no other missing identity could take it. It runs in the attach
       pass after step 4 (§8.2), so it takes over the file from the identity the pass gave it, as step 4 does: only a file
       whose identity holds no user data and was made since the missing identity went missing, which is then deleted.
-      Byte-identical copies count as one file;
+      Byte-identical copies count as one file. Decision (PIM-31): a hint is matched against every copy of a key, so
+      two missing identities whose hints name different copies of one key compete for it and neither takes it, and the
+      copy taken over (whose place the identity's hints then name) is the one at a hinted place, else the lowest file
+      ID among the copies the hints name;
     - an entry without an identity is linked by every attach pass to the identity of the file its hints name, in this
       order: the content key, the place, the place ignoring case, the display name ignoring case with the length (any
       length when the hint has none), the recording MBID with the length. A name that several files carry goes to the one whose
@@ -1492,7 +1506,9 @@ Decision: an entry never points at a file. It refers to a track identity (§8.1)
 ### 16.7 Checks
 
 JVM tests: step 5 of re-attachment and the linking of entries without an identity (each hint, a hint that two files or
-two identities match, the order of the tiers, the path-suffix choice); the resolution of entries to files (the identity's
+two identities match, a hint naming any copy of a key, two identities hinting different copies of one key, the copy at
+the hinted place taken over, the order of the tiers, the path-suffix choice); a takeover checked again against the
+identities and user data of its write transaction; the resolution of entries to files (the identity's
 hinted copy first, no place guess for an entry with an identity, the hint key and then the place for one without); M3U8
 parsing (byte order mark, CRLF, comments, `#EXTINF` with and without an artist or length, `#PLAYLIST`, `file://`,
 Windows and relative paths, streams) and writing, the legacy decoding of a Windows-1251 `.m3u`, the paths of volumes; the
