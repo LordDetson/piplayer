@@ -260,4 +260,47 @@
     <string name="favorites_filter">Favorites</string>
     <string name="favorite_albums_none">No favorite albums</string>
     <string name="favorite_failed">The favorite could not be changed</string>
+    <!-- Playlists (docs/library.md §16). -->
+    <string name="tab_playlists">Playlists</string>
+    <string name="playlist_new">New playlist</string>
+    <string name="playlist_import">Import</string>
+    <string name="playlists_none">No playlists yet</string>
+    <string name="playlist_name">Name</string>
+    <string name="playlist_create">Create</string>
+    <string name="playlist_rename">Rename</string>
+    <string name="playlist_save">Save</string>
+    <string name="playlist_export">Export</string>
+    <string name="playlist_delete">Delete</string>
+    <string name="playlist_delete_title">Delete %1$s?</string>
+    <string name="playlist_delete_text">The playlist goes. Its songs stay in the library.</string>
+    <string name="dialog_cancel">Cancel</string>
+    <string name="playlist_play">Play</string>
+    <string name="open_playlist">Open playlist</string>
+    <string name="add_to_playlist">Add to playlist</string>
+    <string name="playlist_added">Added to %1$s</string>
+    <plurals name="playlist_added_count">
+        <item quantity="one">%1$d song added to %2$s</item>
+        <item quantity="other">%1$d songs added to %2$s</item>
+    </plurals>
+    <string name="playlist_unavailable">Not in the library</string>
+    <plurals name="playlist_unavailable_count">
+        <item quantity="one">%1$d not in the library</item>
+        <item quantity="other">%1$d not in the library</item>
+    </plurals>
+    <string name="playlist_entry_unavailable">This song is not in the library now</string>
+    <string name="playlist_remove">Remove from playlist</string>
+    <string name="playlist_removed">Removed from playlist: %1$s</string>
+    <plurals name="playlist_imported">
+        <item quantity="one">Imported %1$s: %2$d of %3$d song found</item>
+        <item quantity="other">Imported %1$s: %2$d of %3$d songs found</item>
+    </plurals>
+    <string name="playlist_import_failed">The playlist could not be read</string>
+    <plurals name="playlist_exported">
+        <item quantity="one">%1$d song exported</item>
+        <item quantity="other">%1$d songs exported</item>
+    </plurals>
+    <string name="playlist_export_failed">The playlist could not be written</string>
+    <string name="playlist_failed">The playlist could not be changed</string>
+    <string name="playlist_not_found">This playlist is gone</string>
+    <string name="playlist_unknown_title">Unknown song</string>
 </resources>

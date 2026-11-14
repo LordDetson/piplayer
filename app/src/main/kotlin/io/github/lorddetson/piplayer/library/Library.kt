@@ -22,6 +22,7 @@ import io.github.lorddetson.piplayer.library.identity.IdentityAttacher
 import io.github.lorddetson.piplayer.library.identity.LibraryFingerprints
 import io.github.lorddetson.piplayer.library.identity.LibraryTrackRefs
 import io.github.lorddetson.piplayer.library.mirror.UserMirror
+import io.github.lorddetson.piplayer.library.playlists.PlaylistLibrary
 import io.github.lorddetson.piplayer.library.rules.FolderRule
 import io.github.lorddetson.piplayer.library.rules.RulesSource
 import io.github.lorddetson.piplayer.library.songs.AudioPermission
@@ -126,6 +127,20 @@ object Library {
      * never closes the database under them.
      */
     fun trackRefs(context: Context): LibraryTrackRefs = opened(context).trackRefs
+
+    /**
+     * Playlists on both databases (docs/library.md §16). They read the library through [read], so a rebuild never closes
+     * the database under them.
+     */
+    fun playlists(context: Context): PlaylistLibrary {
+        val app = context.applicationContext
+        return PlaylistLibrary(
+            object : LibraryTrackRefs.Access {
+                override fun <T> read(block: (LibraryDatabase) -> T): T = read(app, block)
+            },
+            UserData.database(app),
+        )
+    }
 
     private fun newTrackRefs(context: Context, user: UserDatabase = UserData.database(context)) = LibraryTrackRefs(
         object : LibraryTrackRefs.Access {
@@ -379,6 +394,13 @@ object Library {
             ready = { sync.status.value.known },
             // Favorites and plays follow the keys the pass attaches (docs/library.md §8.1, §15.4).
             afterPass = mirror::request,
+            // Playlist hints (docs/library.md §16.2); the pass reads the library database itself while no sync writes.
+            playlists = PlaylistLibrary(
+                object : LibraryTrackRefs.Access {
+                    override fun <T> read(block: (LibraryDatabase) -> T): T = block(database)
+                },
+                user,
+            ),
         )
         identities.follow(sync.status)
         return Opened(database, sync, identities, newTrackRefs(context), mirror)

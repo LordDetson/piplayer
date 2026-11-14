@@ -104,6 +104,31 @@ class QueueRequestTest {
         assertThat(QueueRequest.startIndex(emptyList(), QueueRequest(startSongId = 20, startRow = 0))).isEqualTo(-1)
     }
 
+    @Test
+    fun `a song that stands twice starts at the tapped copy`() {
+        // A playlist may hold one song twice (docs/library.md §16.4).
+        val twice = listOf(song(10), song(20), song(10))
+
+        assertThat(QueueRequest.startIndex(twice, QueueRequest(startSongId = 10, startRow = 2))).isEqualTo(2)
+        assertThat(QueueRequest.startIndex(twice, QueueRequest(startSongId = 10, startRow = 0))).isEqualTo(0)
+        // The row no longer holds it: its first place.
+        assertThat(QueueRequest.startIndex(twice, QueueRequest(startSongId = 10, startRow = 1))).isEqualTo(0)
+    }
+
+    @Test
+    fun `a playlist is named by its ID and plays in its own order`() {
+        val list = SongQuery.playlist(42)
+        val request = QueueRequest(startSongId = 7, startRow = 3, list = list)
+
+        assertThat(list.sort).isEqualTo(SongSort.POSITION)
+        assertThat(request.mediaId).isEqualTo("q2/playlist?key=42&sort=position&rev=0&q=&start=7&index=3")
+        assertThat(QueueRequest.parse(request.mediaId)).isEqualTo(request)
+        assertThat(QueueRequest.parse(request.mediaId)?.list?.playlistId).isEqualTo(42L)
+        // Only a number names a playlist.
+        assertThat(QueueRequest.parse("q2/playlist?key=abc&sort=position&rev=0&q=&start=7&index=3")).isNull()
+        assertThat(QueueRequest.parse("q2/playlist?key=&sort=position&rev=0&q=&start=7&index=3")).isNull()
+    }
+
     private val links = SongLinks(
         albumKey = "new album key",
         artists = listOf(ArtistLink("new artist", "New Artist")),

@@ -180,7 +180,7 @@ class LibraryLists(private val database: LibraryDatabase, private val hidden: Hi
         }
         SongSort.LENGTH -> { _, number -> Sections.minutes(number) }
         SongSort.YEAR -> { _, number -> Sections.year(number?.toInt()) }
-        SongSort.TRACK -> { _, _ -> null }
+        SongSort.TRACK, SongSort.POSITION -> { _, _ -> null }
     }
 
     private fun rows(query: SongQuery, limit: Int?): List<ListSongRow> {
@@ -334,7 +334,8 @@ class LibraryLists(private val database: LibraryDatabase, private val hidden: Hi
         ListKind.ALBUM -> "d.album_key = ?" to listOf(query.key)
         ListKind.ARTIST -> "d.file_id IN (SELECT file_id FROM display_artist WHERE artist_key = ?)" to listOf(query.key)
         ListKind.FOLDER -> query.folder?.let { "f.volume_name = ? AND f.relative_path = ?" to listOf(it.volume, it.relativePath) }
-        ListKind.TREE -> null
+        // A playlist's songs come from the user database too (docs/library.md §16.4): `PlaylistSongs`, not these lists.
+        ListKind.TREE, ListKind.PLAYLIST -> null
     }
 
     private fun run(query: RoomRawQuery): List<ListSongRow> = runBlocking { dao.listSongs(query) }

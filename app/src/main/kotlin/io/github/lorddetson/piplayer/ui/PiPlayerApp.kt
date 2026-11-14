@@ -16,6 +16,8 @@ import io.github.lorddetson.piplayer.ui.library.ArtistPage
 import io.github.lorddetson.piplayer.ui.library.FolderPage
 import io.github.lorddetson.piplayer.ui.library.LibraryHost
 import io.github.lorddetson.piplayer.ui.library.LibraryScreen
+import io.github.lorddetson.piplayer.ui.playlists.PlaylistPage
+import io.github.lorddetson.piplayer.ui.playlists.rememberPlaylistActions
 import io.github.lorddetson.piplayer.ui.onboarding.OnboardingGate
 import io.github.lorddetson.piplayer.ui.onboarding.rememberOnboarding
 import io.github.lorddetson.piplayer.ui.settings.LicenseTextScreen
@@ -116,6 +118,10 @@ data class ArtistRoute(val key: String) : NavKey
 @Serializable
 data class LibraryFolderRoute(val volume: String, val relativePath: String) : NavKey
 
+/** A playlist's page, found by its ID (docs/library.md §16.3). */
+@Serializable
+data class PlaylistRoute(val id: Long) : NavKey
+
 @Serializable
 data object NowPlayingRoute : NavKey
 
@@ -187,6 +193,7 @@ fun PiPlayerApp(viewModel: PlayerViewModel = viewModel()) {
     val covers = rememberCoverActions(snackbar)
     val favorites = remember(context) { FavoriteChoices(context) }
     val favoriteActions = rememberFavoriteActions(favorites, snackbar)
+    val playlists = rememberPlaylistActions(snackbar, open = { id -> open(PlaylistRoute(id)) })
     val menu = remember {
         SongMenu(
             links = { song -> linksOf(context, song.id) },
@@ -197,6 +204,7 @@ fun PiPlayerApp(viewModel: PlayerViewModel = viewModel()) {
             addToQueue = { viewModel.addToQueue(QueueTarget.Songs(listOf(it.id)), next = false) },
             covers = covers,
             favorites = favoriteActions.actions,
+            addToPlaylist = { playlists.addToPlaylist(QueueTarget.Songs(listOf(it.id))) },
         )
     }
     val host = LibraryHost(
@@ -213,6 +221,7 @@ fun PiPlayerApp(viewModel: PlayerViewModel = viewModel()) {
         openArtist = menu.openArtist,
         openFolder = menu.openFolder,
         covers = covers,
+        playlists = playlists,
     )
     // What the artist and the album on Now Playing open (docs/library.md §6.1).
     var playingLinks by remember { mutableStateOf<SongLinks?>(null) }
@@ -242,6 +251,7 @@ fun PiPlayerApp(viewModel: PlayerViewModel = viewModel()) {
             entry<LibraryFolderRoute>(metadata = FROM_THE_SIDE) { route ->
                 FolderPage(route.volume, route.relativePath, host, onBack = { close() })
             }
+            entry<PlaylistRoute>(metadata = FROM_THE_SIDE) { route -> PlaylistPage(route.id, host, playlists, onBack = { close() }) }
             entry<QueueRoute>(metadata = FROM_THE_SIDE) {
                 QueueScreen(
                     player = player,

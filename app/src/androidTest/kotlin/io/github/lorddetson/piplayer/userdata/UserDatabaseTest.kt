@@ -136,6 +136,37 @@ class UserDatabaseTest {
     }
 
     @Test
+    fun versionFourMigratesToFiveKeepingItsDataAndAddingPlaylists() = runBlocking<Unit> {
+        migrations.createDatabase(4).use { connection ->
+            connection.prepare(
+                "INSERT INTO track_identity (id, content_key, start_ms, duration_ms, created_at) VALUES (7, x'0102', 0, 1000, 1)",
+            ).use { it.step() }
+            connection.prepare("INSERT INTO favorite (identity_id, added_at) VALUES (7, 2)").use { it.step() }
+            connection.prepare("INSERT INTO user_meta (id, change_counter, rules_counter) VALUES (1, 9, 4)").use { it.step() }
+        }
+
+        // Checks the migrated schema against the committed app/schemas/.../5.json.
+        migrations.runMigrationsAndValidate(5).close()
+
+        val opened = UserDatabase.open(context, file.name)
+        try {
+            assertThat(opened.identities().identities().map { it.id }).containsExactly(7L)
+            assertThat(opened.favorites().favorites()).containsExactly(FavoriteEntity(7, 2))
+            assertThat(opened.user().changeCounter()).isEqualTo(9)
+            assertThat(opened.user().rulesCounter()).isEqualTo(4)
+            val playlists = Playlists(opened) { 50 }
+            assertThat(playlists.playlists()).isEmpty()
+            val id = playlists.create("Road trip")
+            playlists.add(id, listOf(NewEntry(8, "external_primary", "Music/", "a.mp3", 1_000)))
+            assertThat(playlists.entries(id).map { it.identityId }).containsExactly(8L)
+            // An identity a playlist refers to holds user data (docs/library.md §16.2).
+            assertThat(opened.user().identitiesHoldingData()).containsExactlyInAnyOrder(7L, 8L)
+        } finally {
+            opened.close()
+        }
+    }
+
+    @Test
     fun favoritesAndPlaysRaiseTheChangeCounterButNotTheRulesCounter() = runBlocking<Unit> {
         val dao = database.user()
         val favorites = Favorites(database)

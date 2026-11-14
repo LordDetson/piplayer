@@ -234,7 +234,10 @@ apps do not change it.
      is similar to the one cached for the identity's old key (§10.1), and that is unattached or holds a newer identity
      without user data, which then goes. These candidates are fingerprinted on demand at background priority, as a
      one-off for identities that hold user data and stayed unmatched; this is not part of the library scan (§8);
-  5. for playlist entries also their hints (path, name, duration, recording MBID).
+  5. for playlist entries also their hints (path, name, duration, recording MBID): a missing identity that entries
+     refer to takes the key of the one unattached file that matches a hint by place and duration, by name and duration
+     or by recording MBID and duration, when no other missing identity could take it. An entry never points at a file;
+     an entry without an identity is linked to the identity of the file its hints name (library.md §16.2).
 
   A file is unattached when no identity holds its key; a file whose length still waits for a walk is not matched yet.
   Every file left unattached gets a new identity. Re-attachment runs after media index rebuilds, SD card changes,
@@ -1042,9 +1045,11 @@ used, never through a stored content URI, which goes stale after a media index r
   own cover follow its tracks to a new key, library.md §15.3), `play_event(identity_id, started_at, listened_ms)` for
   the last 90 days, and `play_stats(identity_id, play_count, listened_ms, last_played_at)`, into which older events are
   folded (M2b, version 4, library.md §15).
-- `playlist(id, name, created_at, updated_at)` and `playlist_entry(playlist_id, position, identity_id,
-  hint_volume_name, hint_relative_path, hint_display_name, hint_duration_ms, hint_content_key, hint_recording_mbid)`;
-  an entry plays the first available location of its identity.
+- `playlist(id, name, created_at, updated_at)` and `playlist_entry(id, playlist_id, position, identity_id,
+  hint_volume_name, hint_relative_path, hint_display_name, hint_duration_ms, hint_content_key, hint_recording_mbid,
+  hint_title, hint_artist)` (M2b, version 5, library.md §16); an entry plays the first available location of its
+  identity. `identity_id` is empty while the entry's song has no identity (its tags not read yet, or an imported line
+  that found no file); such an entry is linked by its hints.
 - `library_folder_rule(volume_name, relative_path, mode)`: include or exclude (M2a).
 - `batch(uuid, created_at, source, status, write_to_file)`.
 - `tag_backup(id, identity_id, volume_name, relative_path, display_name, created_at, tags_path, tags_hash,
@@ -1078,7 +1083,8 @@ used, never through a stored content URI, which goes stale after a media index r
   library.md §3.1) that the sync follows, so that a favorite or a play does not make the sync apply the rules again.
   The mirror of favorites and plays (M2b) compares no counters: its full run is cheap, and the first attach pass of each
   process asks for one (library.md §15.4). Writes that change nothing mirrored (the listened time of a counted play, own covers, album
-  members, folding old play events) do not raise the counter.
+  members, folding old play events, playlists) do not raise the counter. Playlists are not mirrored at all: the playlist
+  page and the queue resolve their entries against the library database by content key and place (library.md §16.5).
 - A change that touches both files commits the user database first and the library database in its own transaction
   afterwards. If the process dies in between, the start-up mirror and the tag pass bring the library database up to
   date (§7.2 step 7).
@@ -1111,6 +1117,7 @@ tests, and a high-band error rate within the threshold of §11.4.
 | M2a | Duration source: reliable headers are used; MP3 without a frame-count header and raw ADTS are walked; a Xing/VBRI byte count off by more than 2 %, a CBR header off by more than 2 s, and WAV, MP4 and FLAC headers that the payload cannot support trigger a walk |
 | M2a | Content key: golden values (each fixture has its expected key in hex, checked on every TagLib or parser change); on synthetic payload offsets the key stays the same when only tag regions change and changes when payload bytes change |
 | M2a | Re-attachment order (§3.1): content key, location with duration, unique recording MBID, cached fingerprint, playlist hints; another song at the same path with a duration 3 s off is not attached; two unattached files with the same recording MBID attach neither |
+| M2b | Playlist hints (§3.1 step 5, library.md §16.2): a missing identity that entries refer to takes the one unattached file their place, name or MBID names with a duration within 1 s, never one that two identities could take; an entry without an identity is linked by key, place, name and MBID in that order; M3U8 lines are parsed, written and matched to library files (library.md §16.6) |
 | M2b | Start-up mirror: when the user database's change counter differs from the mirrored one, favorites, statistics and the badge state are mirrored again; M3 adds the merged values of decided fields and the Keep as-is/Skip state |
 | M2a | IPC from `:tagger` for the tag pass: each result stays under 128 KB; a larger result or a value over 16 KB travels through a file; no cover bytes cross the process boundary |
 | M2b | Legacy encodings, per file: "Кино", "Ёжик" and "Би-2" stored as Windows-1251 are decoded as such in automatic mode; "Beyoncé", "Motörhead", "Sigur Rós" and "ÉTÉ" stay ISO-8859-1; ID3v1, encoding-0 ID3v2 frames and RIFF INFO |
@@ -1154,6 +1161,7 @@ tests, and a high-band error rate within the threshold of §11.4.
 | M2a | `:tagger` isolation: a fixture that crashes the native reader and a call that hangs for more than 30 s are counted; the second time the file is marked unsafe; playback continues |
 | M2b | Legacy-encoding fixtures through the real reader: the Windows-1251 ID3v1, ID3v2 and RIFF INFO fixtures read in automatic mode and with the Windows-1251 choice, the KOI8-R and Shift_JIS fixtures with their own choice; a wrong choice shows other text, and Automatic brings the right text back without reading the file again; every code page of the list is supported by the device |
 | M2b | Deleting `library.db` keeps favorites, playlists, statistics and (from M3) decisions, which re-attach after the rebuild |
+| M2b | Playlist entries resolve after a move, a rename and a media index rebuild; an entry of a deleted file stays, unavailable, and comes back with the file; an M3U8 export imported again on the same device gives the same songs (library.md §16.7) |
 | M3 | Decoding table: every format the player plays is read with `MediaExtractorCompat`, decoded and fingerprinted |
 | M3 | Snippet: a playing main player pauses for the snippet and resumes at the same position; a main player paused before the snippet stays paused; queue, position and statistics do not change; a focus loss during the snippet stops it without resuming the main player |
 | M3 | Session metadata: for a fixture whose embedded cover and tags differ from the saved values, and for an MP3 without a frame-count header, the MediaController's metadata, artwork and duration equal PiPlayer's values after Apply and after Undo, without preparing the file again |

@@ -257,4 +257,55 @@
     <string name="favorites_filter">Избранные</string>
     <string name="favorite_albums_none">Нет избранных альбомов</string>
     <string name="favorite_failed">Не удалось изменить избранное</string>
+    <!-- Плейлисты (docs/library.md §16). -->
+    <string name="tab_playlists">Плейлисты</string>
+    <string name="playlist_new">Новый плейлист</string>
+    <string name="playlist_import">Импорт</string>
+    <string name="playlists_none">Плейлистов пока нет</string>
+    <string name="playlist_name">Название</string>
+    <string name="playlist_create">Создать</string>
+    <string name="playlist_rename">Переименовать</string>
+    <string name="playlist_save">Сохранить</string>
+    <string name="playlist_export">Экспорт</string>
+    <string name="playlist_delete">Удалить</string>
+    <string name="playlist_delete_title">Удалить «%1$s»?</string>
+    <string name="playlist_delete_text">Плейлист будет удалён. Песни останутся в библиотеке.</string>
+    <string name="dialog_cancel">Отмена</string>
+    <string name="playlist_play">Слушать</string>
+    <string name="open_playlist">Открыть плейлист</string>
+    <string name="add_to_playlist">Добавить в плейлист</string>
+    <string name="playlist_added">Добавлено в «%1$s»</string>
+    <plurals name="playlist_added_count">
+        <item quantity="one">%1$d песня добавлена в «%2$s»</item>
+        <item quantity="few">%1$d песни добавлены в «%2$s»</item>
+        <item quantity="many">%1$d песен добавлено в «%2$s»</item>
+        <item quantity="other">%1$d песни добавлено в «%2$s»</item>
+    </plurals>
+    <string name="playlist_unavailable">Нет в библиотеке</string>
+    <plurals name="playlist_unavailable_count">
+        <item quantity="one">%1$d нет в библиотеке</item>
+        <item quantity="few">%1$d нет в библиотеке</item>
+        <item quantity="many">%1$d нет в библиотеке</item>
+        <item quantity="other">%1$d нет в библиотеке</item>
+    </plurals>
+    <string name="playlist_entry_unavailable">Этой песни сейчас нет в библиотеке</string>
+    <string name="playlist_remove">Убрать из плейлиста</string>
+    <string name="playlist_removed">Убрано из плейлиста: %1$s</string>
+    <plurals name="playlist_imported">
+        <item quantity="one">Импортирован «%1$s»: найдено %2$d из %3$d песни</item>
+        <item quantity="few">Импортирован «%1$s»: найдено %2$d из %3$d песен</item>
+        <item quantity="many">Импортирован «%1$s»: найдено %2$d из %3$d песен</item>
+        <item quantity="other">Импортирован «%1$s»: найдено %2$d из %3$d песни</item>
+    </plurals>
+    <string name="playlist_import_failed">Не удалось прочитать плейлист</string>
+    <plurals name="playlist_exported">
+        <item quantity="one">Экспортирована %1$d песня</item>
+        <item quantity="few">Экспортированы %1$d песни</item>
+        <item quantity="many">Экспортировано %1$d песен</item>
+        <item quantity="other">Экспортировано %1$d песни</item>
+    </plurals>
+    <string name="playlist_export_failed">Не удалось записать плейлист</string>
+    <string name="playlist_failed">Не удалось изменить плейлист</string>
+    <string name="playlist_not_found">Этого плейлиста больше нет</string>
+    <string name="playlist_unknown_title">Неизвестная песня</string>
 </resources>

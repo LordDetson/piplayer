@@ -11,6 +11,9 @@ enum class ListKind(val token: String, val defaultSort: SongSort) {
 
     /** A folder with all its subfolders. */
     TREE("tree", SongSort.FILE_NAME),
+
+    /** A playlist by its ID, in its own order (docs/library.md §16.4). */
+    PLAYLIST("playlist", SongSort.POSITION),
     ;
 
     companion object {
@@ -31,6 +34,9 @@ enum class SongSort(val token: String) {
     /** Album by year, then disc and track. */
     YEAR("year"),
     FILE_NAME("file"),
+
+    /** A playlist's own order. */
+    POSITION("position"),
     ;
 
     companion object {
@@ -52,6 +58,9 @@ data class SongQuery(
     /** The folder of a folder or tree list. */
     val folder: FolderKey? get() = if (kind == ListKind.FOLDER || kind == ListKind.TREE) FolderKey.parse(key) else null
 
+    /** The playlist of a playlist list. */
+    val playlistId: Long? get() = if (kind == ListKind.PLAYLIST) key.toLongOrNull() else null
+
     companion object {
         /** The Songs tab by title, also what a request of version 1 names. */
         val SONGS = SongQuery(ListKind.SONGS)
@@ -63,5 +72,7 @@ data class SongQuery(
         fun folder(volume: String, relativePath: String) = SongQuery(ListKind.FOLDER, FolderKey(volume, relativePath).key)
 
         fun tree(volume: String, relativePath: String) = SongQuery(ListKind.TREE, FolderKey(volume, relativePath).key)
+
+        fun playlist(id: Long) = SongQuery(ListKind.PLAYLIST, id.toString())
     }
 }

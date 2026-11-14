@@ -185,8 +185,9 @@ is heard as a click. The becoming-noisy broadcast is protected, so emulator test
 - The playback service expands the request in `onSetMediaItems`, on a background thread: it takes the shared list of
   the request's list (or reads it, if the service runs without the screen or no longer keeps it), builds one media item per song (media ID, content URI, title,
   artist, album, length, music type; no artwork and no request metadata, which would be published to other apps) and
-  starts at the tapped song. If the song is gone, it starts at the same row, or the last one. A request whose list is
-  empty, or that cannot be read, is refused.
+  starts at the tapped song: at the request's row when the song stands there, which picks the tapped copy of a song
+  that a playlist holds twice (M2b, library.md §16.4), else at the song's first row. If the song is gone, it starts at
+  the same row, or the last one. A request whose list is empty, or that cannot be read, is refused.
 - Only controllers that may read the library (§1.4) may send such a request; others are refused, because the queue
   it builds would show them the library. Every other set request follows §1.4 (files only from PiPlayer's own
   process).
@@ -922,7 +923,8 @@ By hand on the phone: one of the owner's albums (MP3 with a LAME tag) with the s
   Album, artist and folder rows of the tabs and pages have a menu with the same two entries, and so has the top bar of
   an album, artist and folder page. An album adds its songs by disc and track, an artist and a folder (with all its
   subfolders, as "Play all, with subfolders") in the sort kept for that kind of list (library.md §6.3), without the
-  page's search.
+  page's search. Since M2b these menus also have "Add to playlist" right after "Add to queue", and playlist rows and
+  pages have "Play next" and "Add to queue" for the playlist's available entries in order (library.md §16.3).
 - "Play next" puts the songs right after the current one. "Add to queue" puts them after the current song and after
   the songs already added that come right after it: the songs added by "Play next" and "Add to queue" that have not
   played yet form an up-next run behind the current song, and "Add to queue" extends it. A song played, or passed by a
