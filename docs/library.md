@@ -1654,7 +1654,10 @@ Every smart list is a list of the library: it holds visible songs only (§3.5), 
   The other tables are joined by their primary keys, so a list of 100 songs reads about its own rows, also in a library
   of 20 000 songs.
 - The first sync reads and writes one more column (`date_added`) and builds the two new indexes of its tables after the
-  rows (§1.3).
+  rows (§1.3). Measured on the API 30 emulator with 20 000 files, whose first sync from a test index takes about 3.1 s:
+  about 15 ms for each index, so about 30 ms in all, 1% of it. The index on the reasons holds only NULLs at that point;
+  it is kept because Songs missing information and its count, read after every run of the mirror, would otherwise scan
+  `track_display`.
 
 ### 17.5 Checks
 
