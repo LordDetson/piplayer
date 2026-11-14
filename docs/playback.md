@@ -459,7 +459,8 @@ too often while it plays?), and a large cover (3000x3000) in the profiler.
 - A song that played to its end, so that the queue ended, is saved at position zero and without listen progress. This
   holds also after a stop that follows the end: the stop leaves the player idle with its position at the end, and
   that position must not reach the file (PIM-68). The system's recent media controls then show the song from its
-  start, and a restore replays it as a new playback, as §4.3.1 does for the last song. A position just before the end,
+  start, and a restore replays it as a new playback, as §4.3.1 does for the last song. Its listened time is not lost
+  with the progress: a play that counted had it written when the queue ended (§11.2). A position just before the end,
   as the five-second save writes it, is kept as it is: whether it counts as the end, and which song follows, is decided
   at the restore (§4.3.1), when the length, the repeat mode and the order are known together.
 
@@ -507,8 +508,9 @@ too often while it plays?), and a large cover (3000x3000) in the profiler.
   song with repeat off it starts that song again. So no restore stays buffering or ends at the end of a song. The check
   is dropped when a seek, another song or another queue comes first.
 - A restore that moves off the end is a new playback (§11.1): of the next song, or a replay of the same one, which may
-  count as a play again. The saved listen progress is not resumed. When the check against the player's length moves
-  within the same item, the restored playback ends there and a new one starts.
+  count as a play again. The saved listen progress is not resumed: the saved playback ends at the restore, so a play
+  that counted gets its saved listened time written (§11.3, M2b PIM-68). When the check against the player's length
+  moves within the same item, the restored playback ends there and a new one starts.
 
 ### 4.4 Opening the app and resuming from the system
 
@@ -1237,7 +1239,10 @@ whichever comes first; seeking adds nothing; songs shorter than 30 s never count
   reached while playing, and at every change of state. Only songs of the library count, by their track identity; an
   opened file or a song whose tags are not read yet is not recorded (library.md §15.5).
 - When the playback ends (another item, the queue replaced, the service destroyed), its listened time is written to
-  the event of a play that counted. Writes go in order on one background writer; when the service is destroyed, the
+  the event of a play that counted. So it is when the queue ends (the last song played to its end with repeat off,
+  M2b PIM-68): nothing else may end the playback before Android ends the process, which then calls nothing of the
+  service. The playback stays current there; should it go on (a play pressed after the end replays the song from its
+  start), its later end writes the larger time over the first. Writing the time again never adds a play. Writes go in order on one background writer; when the service is destroyed, the
   writer finishes the writes asked for and ends.
 
 ### 11.3 Process death
@@ -1246,8 +1251,13 @@ whichever comes first; seeking adds nothing; songs shorter than 30 s never count
   queue is restored and resumes the saved item (§4.3: found by its file or URI, at its saved position), the playback
   goes on from there: the listened time keeps growing toward the threshold, and a play that already counted does not
   count again. When the saved item is gone, a new playback starts, and so it does when the saved position was at the
-  end of the song and the restore moved on to the next song or to the start of the same one (§4.3.1). A song that
-  played to its end is saved without progress (§4.2).
+  end of the song and the restore moved on to the next song or to the start of the same one (§4.3.1). The saved
+  playback then ends at the restore, before the new one starts: a play that counted gets its saved listened time
+  written, as at any other end (§11.2), under the song's file now, so that a process killed in the last seconds of a
+  song (in the zone of §4.3.1) or with its song gone from the queue keeps that time. A saved playback that did not count
+  ends without a trace, and the time written never adds a play. When the saved song's file is not known any more, or the
+  saved item is an opened file, nothing is written: a file ID of another library would name another file. A song that
+  played to its end is saved without progress (§4.2); its time was written when the queue ended (§11.2).
 - Snapshots are written every five seconds while playing and at every pause, so a process killed while playing loses at
   most five seconds of listened time; a process killed while paused loses nothing.
 
@@ -1255,9 +1265,11 @@ whichever comes first; seeking adds nothing; songs shorter than 30 s never count
 
 JVM tests: the counter on a test clock: half of a 3-minute song, 4 minutes of a 20-minute one, never under 30 s, an
 unknown length at 4 minutes, pauses and seeks adding nothing, once per playback, a new playback counting again, a resumed
-playback going on and not counting twice; the snapshot keys.
+playback going on and not counting twice; the snapshot keys; which saved playback a restore ends (a counted one of a song
+whose file is known, not a resumed, an uncounted, a gone or an opened one).
 
 Instrumented tests: the tracker on a real player with a test clock: counting while playing, pauses, a seek, a repeat-one
 replay, a transition to the next song, a new queue that starts with the same song and a restore that moves from the end of
-the song back to its start (§4.3.1) as new playbacks; a change of the
+the song back to its start (§4.3.1) as new playbacks; a counted playback that ends the queue getting its listened time
+there; a saved playback that a restore does not resume ending only when it counted; a change of the
 queue that keeps the item and new values for the current entry in place keeping its playback.

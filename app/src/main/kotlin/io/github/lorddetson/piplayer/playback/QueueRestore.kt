@@ -93,6 +93,16 @@ object QueueRestore {
         }
     }
 
+    /**
+     * The media ID under which the saved playback of [snapshot] ends at a restore that does not resume it (§11.3), or
+     * null: only a playback that counted, of a library song whose file [currentFileId] is known now, has an event whose
+     * listened time is still to be written. One not counted ends without a trace, as any playback that does not count.
+     */
+    fun endedSavedPlayback(snapshot: PlaybackSnapshot, resumes: Boolean, currentFileId: Long?): String? {
+        if (resumes || snapshot.listen?.counted != true || snapshot.songId < 0) return null
+        return currentFileId?.toString()
+    }
+
     /** The longest end of a song in which a saved position counts as its end (docs/playback.md §4.3.1). */
     const val MAX_END_ZONE_MS = 5_000L
 

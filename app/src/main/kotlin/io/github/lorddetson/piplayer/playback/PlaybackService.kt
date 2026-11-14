@@ -98,6 +98,7 @@ class PlaybackService : MediaLibraryService() {
             store,
             controls,
             onRestore = tracker::resume,
+            onRestoreEnded = tracker::endSaved,
             onReplay = tracker::restart,
             onQueueRequest = saver::setQueue,
         ).also { callback = it }

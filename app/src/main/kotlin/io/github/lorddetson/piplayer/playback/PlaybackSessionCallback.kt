@@ -67,6 +67,8 @@ class PlaybackSessionCallback(
     private val tree: LibraryTree = LibraryTree(context, ProviderArtwork(context)),
     /** The restored current item and its saved progress toward a play, which goes on (docs/playback.md §11.3). */
     private val onRestore: (mediaId: String, progress: ListenProgress) -> Unit = { _, _ -> },
+    /** The saved playback that the restore does not resume, under its song's media ID: it has ended (docs/playback.md §11.3). */
+    private val onRestoreEnded: (mediaId: String, progress: ListenProgress) -> Unit = { _, _ -> },
     /** The restored item moved from its end back to its own start: a new playback of it (docs/playback.md §4.3.1). */
     onReplay: () -> Unit = {},
     private val onQueueRequest: (QueueState?) -> Unit,
@@ -791,7 +793,8 @@ class PlaybackSessionCallback(
         if (libraryRequest == null && openItems.isEmpty() && edits.added.isEmpty()) return null
         // A start moved off the end is a new playback (§4.3.1, §11.3).
         val resumes = start == chosen && QueueRestore.resumesSavedItem(order, start, snapshot, currentFileId)
-        return RestoredQueue(items, start, QueueState(libraryRequest, openItems, libraryId, edits), shuffled, resumes)
+        val ended = QueueRestore.endedSavedPlayback(snapshot, resumes, currentFileId)
+        return RestoredQueue(items, start, QueueState(libraryRequest, openItems, libraryId, edits), shuffled, resumes, ended)
     }
 
     /**
@@ -805,10 +808,16 @@ class PlaybackSessionCallback(
         }
     }
 
-    /** Hands the saved progress toward a play to the counter when the restored queue resumes the saved item (§11.3). */
+    /**
+     * Hands the saved progress toward a play to the counter when the restored queue resumes the saved item (§11.3), or
+     * ends the saved playback when it does not, before the new one starts, so that a counted one gets its listened time.
+     */
     private fun resumeListening(snapshot: PlaybackSnapshot, restored: RestoredQueue) {
         val listen = snapshot.listen ?: return
-        if (!restored.resumes) return
+        if (!restored.resumes) {
+            restored.endedMediaId?.let { onRestoreEnded(it, listen) }
+            return
+        }
         restored.items.getOrNull(restored.start.index)?.let { onRestore(it.mediaId, listen) }
     }
 
@@ -931,6 +940,8 @@ class PlaybackSessionCallback(
         val order: IntArray?,
         /** Whether the start is the saved item itself, whose playback goes on (docs/playback.md §11.3). */
         val resumes: Boolean = false,
+        /** The media ID under which the saved playback ends, when the restore does not resume it (§11.3). */
+        val endedMediaId: String? = null,
     )
 
     /**

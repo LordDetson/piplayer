@@ -164,6 +164,37 @@ class PlayTrackerTest {
     }
 
     @Test
+    fun aCountedPlaybackThatEndsTheQueueGetsItsListenedTimeAtTheEnd() {
+        start(item("a"))
+        listen(4_000)
+        assertThat(counted()).containsExactly("a")
+
+        // Repeat is off and nothing follows: the queue ends, and nothing else ends this playback before the process may go.
+        onMain { player.seekTo(11_000) }
+        awaitPlayer("the queue ends") { playbackState == Player.STATE_ENDED }
+
+        assertThat(recorded.map { it.kind to it.mediaId }).containsExactly("counted" to "a", "ended" to "a")
+        assertThat(recorded.last().listenedMs).isEqualTo(4_000)
+        assertThat(recorded.last().startedAt).isEqualTo(wall)
+    }
+
+    @Test
+    fun aSavedPlaybackThatTheRestoreDoesNotResumeEndsOnlyIfItCounted() {
+        start(item("b"))
+
+        onMain {
+            tracker.endSaved("a", ListenProgress(listenedMs = 295_000, counted = true, startedAt = 42))
+            tracker.endSaved("c", ListenProgress(listenedMs = 100_000, counted = false, startedAt = 43))
+        }
+
+        assertThat(recorded.map { it.kind to it.mediaId }).containsExactly("ended" to "a")
+        assertThat(recorded.single().listenedMs).isEqualTo(295_000)
+        assertThat(recorded.single().startedAt).isEqualTo(42)
+        // The current playback is untouched.
+        assertThat(onMain { tracker.progress() }?.listenedMs).isEqualTo(0)
+    }
+
+    @Test
     fun aRepeatOneReplayCountsAgain() {
         // The 2 s song ends and plays again; the first playback counts long before it ends.
         val replayed = CountDownLatch(1)

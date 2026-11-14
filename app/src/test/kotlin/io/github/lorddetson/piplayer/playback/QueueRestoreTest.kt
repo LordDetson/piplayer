@@ -358,4 +358,34 @@ class QueueRestoreTest {
         assertThat(QueueRestore.resumesSavedItem(three, moved, snapshot, currentFileId = 20)).isFalse()
         assertThat(QueueRestore.resumesSavedItem(three.take(2), replay, snapshot, currentFileId = 20)).isFalse()
     }
+
+    private val counted = ListenProgress(listenedMs = 295_000, counted = true, startedAt = 1_700_000_000_000)
+
+    @Test
+    fun `a counted playback that the restore does not resume ends with its saved listened time`() {
+        // Saved in the end zone of song 20, which is file 21 now; the restore moved on to the next song.
+        val snapshot = librarySnapshot(songId = 20, row = 1, positionMs = 298_000).copy(listen = counted)
+
+        assertThat(QueueRestore.endedSavedPlayback(snapshot, resumes = false, currentFileId = 21)).isEqualTo("21")
+    }
+
+    @Test
+    fun `a resumed, an uncounted, a gone or an opened playback ends nothing at the restore`() {
+        val snapshot = librarySnapshot(songId = 20, row = 1).copy(listen = counted)
+        val uncounted = snapshot.copy(listen = counted.copy(counted = false))
+        val open = opened(0, "a")
+        val openSnapshot = PlaybackSnapshot(
+            queue = null, openItems = listOf(open), songId = -1, row = 0, positionMs = 0, shuffle = false,
+            repeatMode = PlaybackSnapshot.REPEAT_OFF, title = null, artist = null, album = null, durationMs = 0,
+            uri = open.uri, listen = counted,
+        )
+
+        // The resumed playback goes on and ends later; an uncounted one never becomes a play.
+        assertThat(QueueRestore.endedSavedPlayback(snapshot, resumes = true, currentFileId = 20)).isNull()
+        assertThat(QueueRestore.endedSavedPlayback(uncounted, resumes = false, currentFileId = 20)).isNull()
+        // Without the file now its identity is not known, and a file ID of another library would name another file.
+        assertThat(QueueRestore.endedSavedPlayback(snapshot, resumes = false, currentFileId = null)).isNull()
+        assertThat(QueueRestore.endedSavedPlayback(snapshot.copy(listen = null), resumes = false, currentFileId = 20)).isNull()
+        assertThat(QueueRestore.endedSavedPlayback(openSnapshot, resumes = false, currentFileId = null)).isNull()
+    }
 }

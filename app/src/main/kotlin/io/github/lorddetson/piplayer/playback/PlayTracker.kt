@@ -71,6 +71,12 @@ class PlayTracker(
         pending = mediaId to progress
     }
 
+    /** The saved playback [progress] of [mediaId], which a restore does not resume, has ended (§11.3). */
+    fun endSaved(mediaId: String, progress: ListenProgress) {
+        // Only a counted playback has an event to finish; one not counted never becomes a play.
+        if (progress.counted) recorder.ended(mediaId, progress.startedAt, progress.listenedMs)
+    }
+
     /** Ends the current playback and starts a new one of the same item (§4.3.1). */
     fun restart() {
         if (!started) return
@@ -103,6 +109,14 @@ class PlayTracker(
     override fun onIsPlayingChanged(isPlaying: Boolean) {
         counter.setPlaying(isPlaying)
         checkNow()
+    }
+
+    override fun onPlaybackStateChanged(playbackState: Int) {
+        // The queue ended (§11.2): nothing may end this playback before the process goes, so a counted one gets its
+        // listened time now. It stays the current playback; should it go on, its end writes the time again.
+        if (playbackState != Player.STATE_ENDED) return
+        val mediaId = counter.mediaId ?: return
+        counter.progress(mediaId)?.takeIf { it.counted }?.let { recorder.ended(mediaId, it.startedAt, it.listenedMs) }
     }
 
     override fun onTimelineChanged(timeline: Timeline, reason: Int) {
