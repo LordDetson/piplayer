@@ -331,6 +331,7 @@
     <!-- Track details (docs/library.md §18). -->
     <string name="details">Сведения</string>
     <string name="details_not_found">Этой песни больше нет в библиотеке</string>
+    <string name="details_failed">Не удалось прочитать сведения</string>
     <string name="details_copy">Копировать</string>
     <string name="details_copied">Скопировано</string>
     <string name="details_open_musicbrainz">Открыть в MusicBrainz</string>

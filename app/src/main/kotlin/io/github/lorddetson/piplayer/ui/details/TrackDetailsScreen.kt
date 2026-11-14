@@ -8,6 +8,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.text.format.Formatter
+import android.util.Log
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -78,41 +79,29 @@ import java.text.NumberFormat
 import java.util.Date
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flow
-import kotlinx.coroutines.flow.mapLatest
-import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-
-/** What the details screen shows: still reading, the song gone, or its details. */
-sealed interface DetailsState {
-    data object Loading : DetailsState
-
-    data object Gone : DetailsState
-
-    data class Found(val details: TrackDetails) : DetailsState
-}
 
 /**
  * The details of the song [fileId] of the library, or of the file opened from another app at [uri] (docs/library.md §18),
  * read off the main thread. A song of the library is read again whenever the library, a batch of the tag pass, the
- * identities, the mirrored favorites and plays or the own covers change, so that the screen follows it.
+ * identities, the mirrored favorites and plays or the own covers change, so that the screen follows it; an opened file is
+ * read once for the life of the screen, since each read costs a `:tagger` call (docs/library.md §18.5).
  */
-@OptIn(ExperimentalCoroutinesApi::class)
 class TrackDetailsViewModel(application: Application, private val fileId: Long?, private val uri: String?) : AndroidViewModel(application) {
 
     private val app = application
 
-    val state: StateFlow<DetailsState> = changes()
-        .mapLatest { withContext(Dispatchers.IO) { read() } }
-        .catch { emit(DetailsState.Gone) }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), DetailsState.Loading)
+    val state: StateFlow<DetailsState> = DetailsStates.of(
+        viewModelScope,
+        changes(),
+        once = fileId == null,
+        onError = { Log.w(TAG, "The details could not be read", it) },
+    ) { withContext(Dispatchers.IO) { read() } }
 
     private fun changes(): Flow<Unit> {
         if (fileId == null || !Library.mayRead(app)) return flow { emit(Unit) }
@@ -125,17 +114,17 @@ class TrackDetailsViewModel(application: Application, private val fileId: Long?,
         ) { _, _, _, _, _ -> }
     }
 
-    private suspend fun read(): DetailsState {
+    private suspend fun read(): DetailsState.Found? {
         val details = when {
             fileId != null -> if (Library.mayRead(app)) TrackDetailsSources.library(app).read(fileId) else null
             uri != null -> TrackDetailsSources.opened(app).read(uri)
             else -> null
         }
-        return details?.let(DetailsState::Found) ?: DetailsState.Gone
+        return details?.let { DetailsState.Found(it) }
     }
 
     private companion object {
-        const val STOP_TIMEOUT_MS = 5_000L
+        const val TAG = "TrackDetails"
     }
 }
 
@@ -165,6 +154,11 @@ fun TrackDetailsScreen(fileId: Long?, uri: String?, snackbar: SnackbarHostState,
             DetailsState.Loading -> Box(modifier, contentAlignment = Alignment.Center) { CircularProgressIndicator() }
             DetailsState.Gone -> Text(
                 stringResource(R.string.details_not_found),
+                style = MaterialTheme.typography.bodyLarge,
+                modifier = modifier.padding(16.dp),
+            )
+            DetailsState.Failed -> Text(
+                stringResource(R.string.details_failed),
                 style = MaterialTheme.typography.bodyLarge,
                 modifier = modifier.padding(16.dp),
             )

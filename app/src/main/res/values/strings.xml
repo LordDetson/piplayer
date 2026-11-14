@@ -326,6 +326,7 @@
     <!-- Track details (docs/library.md §18). -->
     <string name="details">Details</string>
     <string name="details_not_found">This song is no longer in the library</string>
+    <string name="details_failed">The details could not be read</string>
     <string name="details_copy">Copy</string>
     <string name="details_copied">Copied</string>
     <string name="details_open_musicbrainz">Open in MusicBrainz</string>

@@ -1718,6 +1718,10 @@ are in playback.md §9.1. The owner left the open choices to the recommendations
   reads again after a sync that changed the library, a batch of the tag pass, an attach pass, a change that the mirror
   brings over (a favorite, a play, §15.4) and a change of the own covers, so that it follows the song while it is open. A
   song that left the library while its screen is open says so, with the way back.
+- Decision: a read that fails (a database busy or failing for a moment) never says that the song left the library. The
+  screen keeps the values it shows, or says "The details could not be read" when it shows none yet, and the next change
+  reads again. The reads of a song of the library stop five seconds after the screen is no longer shown and start again
+  when it comes back, so that it does not follow the library in the background; an opened file is read once (§18.5).
 - M3 adds the source of each value and a per-field revert (TI §7.1): each row is a field with a value, kept apart from
   its label and its format, so that a source can be added to it later. Nothing of that is built in M2b.
 
@@ -1775,7 +1779,8 @@ are in playback.md §9.1. The owner left the open choices to the recommendations
   are left out; the length is TagLib's.
 - When the read fails (`:tagger` crashed, timed out, the file is unsafe or can no longer be opened) the screen shows what
   the provider gives and says that the file could not be read. A read costs at most one `:tagger` call per opening of the
-  screen; nothing is stored, and the file is never added to the library.
+  screen: the screen keeps what it read for as long as it is open, also when the app goes to the background and comes
+  back, and never reads the file again. Nothing is stored, and the file is never added to the library.
 
 ### 18.6 Checks
 
