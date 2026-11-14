@@ -1436,6 +1436,8 @@ Decision: an entry never points at a file. It refers to a track identity (§8.1)
 - A playlist plays through a compact request of the list `playlist` (`q2/playlist?key=<playlist ID>&sort=position...`,
   playback.md §2.3) whose songs are its available entries in order. The request's start row picks the tapped copy of a
   song that stands more than once.
+- The sort `position` belongs to playlists; a list of the library asked for it takes the order its files came into the
+  library (their file IDs), so that every sort keeps an exact reverse (§6.3).
 - The list of a playlist is not kept between reads (§6.4): every request reads the playlist as it is, since an edit does
   not change the library's revision.
 - A saved queue of a playlist restores the playlist as it is then, like every list (playback.md §4); one deleted since

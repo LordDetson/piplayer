@@ -490,6 +490,8 @@ class LibraryLists(private val database: LibraryDatabase, private val hidden: Hi
                 "d.year", "d.title_sort",
             ),
             SongSort.FILE_NAME to listOf("d.file_sort", "d.title_sort"),
+            // A playlist's own order means nothing for a list of the library: there it is the order files came in.
+            SongSort.POSITION to listOf("f.id"),
         )
 
         /** What each order's section is found from (docs/library.md §11.2): the key it sorts by first, or a number. */
@@ -501,6 +503,7 @@ class LibraryLists(private val database: LibraryDatabase, private val hidden: Hi
             SongSort.LENGTH to "NULL AS sectionKey, d.duration_ms AS sectionNumber",
             SongSort.YEAR to "NULL AS sectionKey, CASE WHEN d.album_key IS NULL THEN d.year ELSE $ALBUM_YEAR END AS sectionNumber",
             SongSort.TRACK to "NULL AS sectionKey, NULL AS sectionNumber",
+            SongSort.POSITION to "NULL AS sectionKey, NULL AS sectionNumber",
         )
 
         /** [sort]'s terms, all reversed for [reversed], which reverses the whole list since the ID makes it total. */
