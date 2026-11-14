@@ -1,5 +1,6 @@
 package io.github.lorddetson.piplayer.library.tagpass
 
+import androidx.room3.withWriteTransaction
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.github.lorddetson.piplayer.TestFiles
 import io.github.lorddetson.piplayer.library.FakeMediaIndex
@@ -768,6 +769,90 @@ class TagPassTest {
         assertThat(decoded.read()).describedAs("not marked as decoded").isNull()
         pass().run()
         for (id in 1L..2L) assertThat(display(id).title).isEqualTo(misread("Кино", "windows-1251", "KOI8-R"))
+        assertThat(decoded.read()).isEqualTo("koi8-r")
+    }
+
+    @Test
+    fun decodingAgainAsksTheGateBeforeEachBatch() = runBlocking<Unit> {
+        library(1, 2, 3)
+        for (id in 1L..3L) reader.answers[id] = tagged("TITLE" to markedCp1251("Кино"))
+        pass().run()
+        manual = encoding("koi8-r")
+        val decodedWhenAsked = mutableListOf<Int>()
+        val gated = TagPass(
+            database, sync, reader, cyrillicLanguage = { cyrillic }, legacyEncoding = { manual }, decodedEncoding = decoded,
+            readerVersion = 1, batchSize = 1,
+            gate = { decodedWhenAsked += dao.files().count { it.tagEncoding == "koi8-r" } },
+        )
+
+        redecode(gated)
+
+        // A held gate (a hot device, an underrun, the app hidden while nothing plays) holds a decoding again as it holds reads.
+        assertThat(decodedWhenAsked).describedAs("files decoded again each time the gate was asked").containsExactly(0, 1, 2)
+        for (id in 1L..3L) assertThat(files().getValue(id).tagEncoding).describedAs("file $id").isEqualTo("koi8-r")
+    }
+
+    /** Overwrites the stored raw tags of [mediaStoreId] with text that is not JSON. */
+    private suspend fun spoilRawTags(mediaStoreId: Long) {
+        val fileId = files().getValue(mediaStoreId).id
+        database.withWriteTransaction {
+            usePrepared("UPDATE track SET raw_tags_json = '{not json' WHERE file_id = ?") {
+                it.bindLong(1, fileId)
+                it.step()
+            }
+        }
+    }
+
+    @Test
+    fun aFileWhoseRawTagsCannotBeDecodedKeepsWhatItShowsAndTheOthersAreDecodedAgain() = runBlocking<Unit> {
+        library(1, 2, 3)
+        for (id in 1L..3L) reader.answers[id] = tagged("TITLE" to markedCp1251("Кино"))
+        pass().run()
+        spoilRawTags(2)
+        manual = encoding("koi8-r")
+
+        redecode()
+
+        assertThat(display(2).title).describedAs("the spoilt file").isEqualTo("Кино")
+        assertThat(files().getValue(2).tagEncoding).describedAs("the spoilt file").isEqualTo(LegacyText.WINDOWS_1251)
+        for (id in listOf(1L, 3L)) {
+            assertThat(display(id).title).describedAs("file $id").isEqualTo(misread("Кино", "windows-1251", "KOI8-R"))
+            assertThat(files().getValue(id).tagEncoding).describedAs("file $id").isEqualTo("koi8-r")
+        }
+        // Nothing would ever decode that file differently, so it does not hold the change open.
+        assertThat(decoded.read()).isEqualTo("koi8-r")
+    }
+
+    @Test
+    fun aDecodingAgainThatFailsLeavesTheReadsOfTheRunGoingAndIsTriedByTheNextRun() = runBlocking<Unit> {
+        library(1)
+        reader.answers[1] = tagged("TITLE" to markedCp1251("Кино"))
+        pass().run()
+        manual = encoding("koi8-r")
+        library(1, 2)
+        reader.answers[2] = tagged("TITLE" to "Second")
+        var failed = false
+        val failing = TagPass(
+            database, sync, reader, cyrillicLanguage = { cyrillic }, legacyEncoding = { manual }, decodedEncoding = decoded,
+            readerVersion = 1,
+            onBatch = {
+                if (!failed) {
+                    failed = true
+                    throw IllegalStateException("The database gave up")
+                }
+            },
+        )
+
+        val result = failing.run()
+
+        assertThat(failed).describedAs("the decoding again failed").isTrue()
+        assertThat(result.read).describedAs("files read after it").isEqualTo(1)
+        assertThat(display(2).title).isEqualTo("Second")
+        assertThat(decoded.read()).describedAs("not marked as decoded").isNull()
+
+        pass().run()
+
+        assertThat(display(1).title).isEqualTo(misread("Кино", "windows-1251", "KOI8-R"))
         assertThat(decoded.read()).isEqualTo("koi8-r")
     }
 

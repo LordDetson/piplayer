@@ -31,6 +31,7 @@ import io.github.lorddetson.piplayer.library.sync.LibrarySync
 import io.github.lorddetson.piplayer.library.sync.MediaIndex
 import io.github.lorddetson.piplayer.library.sync.MediaStoreIndex
 import io.github.lorddetson.piplayer.library.tagpass.PassGate
+import io.github.lorddetson.piplayer.library.tagpass.PassReader
 import io.github.lorddetson.piplayer.library.tagpass.DurationWalks
 import io.github.lorddetson.piplayer.library.tagpass.TagPass
 import io.github.lorddetson.piplayer.library.tagpass.TagPassRunner
@@ -82,6 +83,11 @@ object Library {
     /** Tests turn the tag pass off, because it would read the device's real library under them. */
     @Volatile
     var tagPassEnabled = true
+
+    /** What the tag pass reads with in a test over a fake media index, whose files `:tagger` could not open. */
+    @VisibleForTesting
+    @Volatile
+    var passReaderForTests: PassReader? = null
 
     private val opened = MutableStateFlow<Opened?>(null)
     private val lock = Any()
@@ -204,7 +210,7 @@ object Library {
         val pass = TagPass(
             library.database,
             library.sync,
-            reader,
+            passReaderForTests ?: reader,
             cyrillicLanguage = {
                 val locales = listOf(Resources.getSystem().configuration.locales, app.resources.configuration.locales)
                 LegacyText.isCyrillicLanguage(locales.flatMap { list -> List(list.size()) { list[it].language } })

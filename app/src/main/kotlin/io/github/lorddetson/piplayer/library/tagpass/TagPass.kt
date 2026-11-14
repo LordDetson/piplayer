@@ -1,5 +1,6 @@
 package io.github.lorddetson.piplayer.library.tagpass
 
+import android.util.Log
 import androidx.room3.withWriteTransaction
 import io.github.lorddetson.piplayer.identification.text.TextNormalizer
 import io.github.lorddetson.piplayer.library.db.FileState
@@ -21,6 +22,7 @@ import io.github.lorddetson.piplayer.tagging.TagReadGuard
 import io.github.lorddetson.piplayer.tagging.TagReport
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.coroutines.cancellation.CancellationException
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 import kotlin.time.TimeSource
@@ -108,7 +110,7 @@ class TagPass(
         choice = legacyEncoding()
         // Also when no change asked: one may have come too late for a run before the process ended.
         if (choice?.name != decodedEncoding.read()) redecodeAsked.set(true)
-        redecodeIfAsked()
+        redecodeOrGoOn()
         val files = sync.exclusive { dao.unreadFiles(readerVersion, TagReadGuard.UNSAFE_COUNT) }.filter { it.key() !in failedHere }
         mutableProgress.value = PassProgress(running = true, done = 0, total = files.size)
         var read = 0
@@ -126,9 +128,8 @@ class TagPass(
             for (file in files) {
                 if (redecodeAsked.get()) {
                     // What this run stored so far was decoded with the old choice.
-                    gate()
                     flush()
-                    redecodeIfAsked()
+                    redecodeOrGoOn()
                 }
                 var answer: PassRead
                 while (true) {
@@ -151,7 +152,7 @@ class TagPass(
             }
             flush()
             // A change during the last read.
-            redecodeIfAsked()
+            redecodeOrGoOn()
             // Also when there was nothing to read: a sync may have removed the last tracks of an album.
             removeOrphans()
         } finally {
@@ -164,8 +165,23 @@ class TagPass(
     fun askRedecode() = redecodeAsked.set(true)
 
     /**
+     * [redecodeIfAsked], but a failure leaves the reads going: the change stays unmarked, so the next run tries it again
+     * (docs/library.md §5.7). Only the end of the process stops the run.
+     */
+    private suspend fun redecodeOrGoOn() {
+        try {
+            redecodeIfAsked()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.w(TAG, "Decoding the library again failed", e)
+        }
+    }
+
+    /**
      * Decodes the stored files with legacy text again from their raw tags, reading no file, when a change of the setting
-     * asked for it: only those whose code page changes, in batches, while no sync runs (docs/library.md §5.7).
+     * asked for it: only those whose code page changes, in batches, while no sync runs, asking [gate] before each batch
+     * as a read asks it before each file (docs/library.md §5.7).
      */
     private suspend fun redecodeIfAsked() {
         if (!redecodeAsked.getAndSet(false)) return
@@ -174,14 +190,22 @@ class TagPass(
         val cyrillic = cyrillicLanguage()
         val ids = sync.exclusive { dao.legacyFileIds() }
         for (chunk in ids.chunked(batchSize)) {
+            gate()
             val rows = sync.exclusive {
                 val changed = ArrayList<Long>()
                 database.withWriteTransaction {
                     for (row in dao.legacyTracksOf(chunk)) {
-                        val raw = row.rawTagsJson?.let { Json.decodeFromString<Map<String, List<String>>>(it) } ?: continue
-                        val decoded = LegacyText.decode(raw, cyrillic, manual)
+                        val rawJson = row.rawTagsJson ?: continue
+                        val (decoded, tags) = try {
+                            val decoded = LegacyText.decode(Json.decodeFromString<Map<String, List<String>>>(rawJson), cyrillic, manual)
+                            decoded to TrackTags.from(decoded.properties)
+                        } catch (e: Exception) {
+                            // Stored raw tags that do not decode would fail every time: the file keeps what it shows.
+                            Log.w(TAG, "The raw tags of file ${row.fileId} could not be decoded again", e)
+                            continue
+                        }
                         if (decoded.encoding == row.tagEncoding) continue
-                        storeTrack(row.fileId, TrackTags.from(decoded.properties), row.rawTagsJson, row.trackKey, row.volume, row.relativePath)
+                        storeTrack(row.fileId, tags, rawJson, row.trackKey, row.volume, row.relativePath)
                         dao.setTagEncoding(row.fileId, decoded.encoding)
                         changed += row.fileId
                     }
@@ -377,5 +401,7 @@ class TagPass(
         const val ROLE_ARTIST = 0
         const val ROLE_ALBUM_ARTIST = 1
         const val ROLE_COMPOSER = 2
+
+        private const val TAG = "TagPass"
     }
 }

@@ -317,8 +317,11 @@ before text search, scoring and the diff, so the "old" column shows readable tex
   - A stored name that is unknown or that the device does not support (a backup restored onto another phone) counts
     as Automatic.
   - A change of the setting decodes the affected files again from their stored raw tags, without reading any file,
-    and the lists and system surfaces follow (library.md §5.7). Choosing Automatic again brings back exactly what the
-    automatic mode gave, so a wrong choice is undone by the same setting.
+    and the lists and system surfaces follow (library.md §5.7). Choosing Automatic again brings back what the
+    automatic mode gives from the stored raw tags and the current languages, so a wrong choice is undone by the same
+    setting. That is what the first read gave unless the device's or the app's languages changed since, or the file
+    holds a legacy value over 16 KiB above ASCII, which the raw tags leave out but the first read's detection saw
+    (library.md §5.7); "Read all tags again" gives the first read's result in both cases.
   - A per-file choice is not part of M2b: one setting serves the case that matters, a library written by one old
     tagger in one code page. A choice for a single file comes with the manual tag editor (M4b), where the user sees
     that file's fields; it will be stored as user data by identity, not in `library.db`.

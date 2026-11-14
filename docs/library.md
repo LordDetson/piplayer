@@ -470,16 +470,24 @@ keeps playing meanwhile, and the crash leaves a native crash report of `:tagger`
   fields hold bytes above ASCII, decodes their stored raw tags with the new setting, and leaves a file as it is when its
   code page stays the same (files whose legacy fields are valid UTF-8, for example, or every file when the choice
   equals what the automatic mode found). Files without legacy text are never touched. Values over 16 KiB, which the raw
-  tags leave out, are not decoded again; none of them is a value the lists use.
+  tags leave out, are not decoded again; none of them is a value the lists use. They also take no part in the automatic
+  mode's detection when decoding again, while a read's detection sees them, so Automatic after a manual choice may give
+  a file whose long legacy value (Latin-1 lyrics, say) swayed the first read another code page; "Read all tags again"
+  reads such files as the first read did. Keeping a per-file mark for this case is not worth it in M2b.
+- Stored raw tags that do not decode (a damaged row) leave that file as it is, logged, and the rest goes on; nothing
+  would decode them differently later, so they do not keep the change open. Any other failure of a decoding again
+  leaves the run's reads going: the change stays unmarked, and the next run tries it again from where it stopped.
 - `device_state` keeps the choice the stored files were last decoded with (`legacy_encoding_decoded`, no value for
   Automatic), written when a decoding again has finished. Every run compares it with the setting before it reads, so
   a change that no run could finish before the process ended is still applied, and a decoding stopped half-way goes on
   where it stopped, because the files it finished already carry the new code page. It describes the library database,
   so it is not backed up either; every library of M2a was decoded automatically, so an update to M2b starts with no
   work.
-- It stores in batches like the pass (§5.2): up to 200 files a transaction, while no sync runs, each with its track,
-  artists, genres and album built again as a read builds them, and the new `tag_encoding`. A file whose album title or
-  album artist changes moves to another album key, as after a tag edit by another app.
+- It stores in batches like the pass (§5.2): up to 200 files a transaction, while no sync runs, asking the pass's gate
+  (§5.5) before each batch as a read asks it before each file, so a hot device, an underrun or an app hidden while
+  nothing plays holds it too. Each file gets its track, artists, genres and album built again as a read builds them,
+  and the new `tag_encoding`. A file whose album title or album artist changes moves to another album key, as after a
+  tag edit by another app.
 - Lists and system surfaces get the new values as after a batch of the pass (§5.4): rows change in place, the session's
   items and the controller tree follow, albums, artists and genres group again after the run, and the list is sorted
   anew at the next point §5.4 names.
@@ -487,7 +495,9 @@ keeps playing meanwhile, and the crash leaves a native crash report of `:tagger`
   alone does not decode the library again in M2b ("Read all tags again" does).
 - Checks: the decoding again of only the affected files without a read, a wrong choice and its undoing, albums,
   artists and genres that follow the new text, a choice made while a run reads, a change no run applied before the
-  process ended and a decoding stopped half-way, the lists' batches through the runner; the fixtures of TI §11.2
+  process ended and a decoding stopped half-way, the gate asked before each batch, a damaged row and a failed decoding
+  that leaves the reads going, the lists' batches through the runner, a choice in the settings that reaches the open
+  library's pass at once; the fixtures of TI §11.2
   through the real reader; the setting and the remembered choice in their files; the setting's dialog with its labels
   and actions.
 
