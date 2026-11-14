@@ -236,7 +236,8 @@ apps do not change it.
      one-off for identities that hold user data and stayed unmatched; this is not part of the library scan (§8);
   5. for playlist entries also their hints (path, name, duration, recording MBID): a missing identity that entries
      refer to takes the key of the one unattached file that matches a hint by place and duration, by name and duration
-     or by recording MBID and duration, when no other missing identity could take it. An entry never points at a file;
+     or by recording MBID and duration, when no other missing identity could take it. Like step 4 it runs after the
+     new identities are made and takes over a file whose new identity holds no user data. An entry never points at a file;
      an entry without an identity is linked to the identity of the file its hints name (library.md §16.2).
 
   A file is unattached when no identity holds its key; a file whose length still waits for a walk is not matched yet.

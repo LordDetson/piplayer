@@ -4,6 +4,7 @@ import io.github.lorddetson.piplayer.library.identity.Identity
 import io.github.lorddetson.piplayer.library.identity.IdentityMatcher
 import io.github.lorddetson.piplayer.library.identity.KeyedFile
 import io.github.lorddetson.piplayer.library.identity.Place
+import io.github.lorddetson.piplayer.library.identity.Takeover
 import java.util.Locale
 
 /**
@@ -96,20 +97,37 @@ class FileMatcher(files: List<HintFile>) {
 object PlaylistHints {
 
     /**
-     * Step 5: each missing identity of [missing] that entries refer to with [hints] takes the one file of [unattached]
-     * that one of its hints names by place, by display name ignoring case or by recording MBID, with a length within 1 s
-     * of the hint's (else the identity's), when no other missing identity could take that file.
+     * Step 5, after step 4 (docs/library.md §8.2): each missing identity of [identities] that entries refer to with
+     * [hints] takes over the one settled file of [files] that one of its hints names by place, by display name ignoring
+     * case or by recording MBID, with a length within 1 s of the hint's (else the identity's), when no other missing
+     * identity could take that file. As in step 4, a file may be taken only from an identity outside [holdingData] made
+     * since the missing one went missing, which is then deleted; byte-identical copies count once, by the lowest file ID.
      */
-    fun reattach(missing: List<Identity>, hints: Map<Long, List<EntryHint>>, unattached: List<KeyedFile>): Map<Long, KeyedFile> {
-        if (hints.isEmpty() || unattached.isEmpty()) return emptyMap()
-        val candidates = missing.mapNotNull { identity ->
-            val own = hints[identity.id] ?: return@mapNotNull null
-            identity.id to unattached.filter { file -> own.any { hint -> names(hint, identity, file) } }
+    fun takeovers(
+        files: List<KeyedFile>,
+        identities: List<Identity>,
+        holdingData: Set<Long>,
+        hints: Map<Long, List<EntryHint>>,
+    ): List<Takeover> {
+        if (hints.isEmpty()) return emptyList()
+        val held = files.mapTo(HashSet()) { it.contentKey }
+        val missing = identities.filter { it.id in hints && it.contentKey !in held && it.missingSince != null }
+        if (missing.isEmpty()) return emptyList()
+        val owners = identities.associateBy { it.contentKey }
+        val copies = files.filter { it.settled }.groupBy { it.contentKey }.map { (_, same) -> same.minBy { it.fileId } }
+        val candidates = missing.map { identity ->
+            val since = identity.missingSince!!
+            val own = hints.getValue(identity.id)
+            identity to copies.filter { file ->
+                val owner = owners[file.contentKey]
+                owner != null && owner.id !in holdingData && owner.createdAt >= since && own.any { hint -> names(hint, identity, file) }
+            }
         }
-        val claims = candidates.flatMap { (_, files) -> files.map { it.fileId } }.groupingBy { it }.eachCount()
-        return candidates.mapNotNull { (id, files) ->
-            files.singleOrNull()?.takeIf { claims[it.fileId] == 1 }?.let { id to it }
-        }.toMap()
+        val claims = candidates.flatMap { (_, matched) -> matched.map { it.contentKey } }.groupingBy { it }.eachCount()
+        return candidates.mapNotNull { (identity, matched) ->
+            matched.singleOrNull()?.takeIf { claims[it.contentKey] == 1 }
+                ?.let { Takeover(identity.id, it, owners.getValue(it.contentKey).id) }
+        }
     }
 
     private fun names(hint: EntryHint, identity: Identity, file: KeyedFile): Boolean {

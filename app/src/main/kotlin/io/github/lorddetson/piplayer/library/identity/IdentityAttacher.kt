@@ -4,6 +4,7 @@ import android.util.Log
 import androidx.room3.withWriteTransaction
 import io.github.lorddetson.piplayer.library.db.KeyedFileRow
 import io.github.lorddetson.piplayer.library.db.LibraryDatabase
+import io.github.lorddetson.piplayer.library.playlists.PlaylistHints
 import io.github.lorddetson.piplayer.library.sync.LibrarySync
 import io.github.lorddetson.piplayer.library.tagpass.DurationSource
 import io.github.lorddetson.piplayer.userdata.TrackIdentityEntity
@@ -116,12 +117,14 @@ class IdentityAttacher(
         val stored = dao.identities()
         val holding = holders()
         val hints = playlists?.identityHints().orEmpty()
-        val plan = IdentityMatcher.plan(files, stored.map(::identity), holding, now, hints)
+        val plan = IdentityMatcher.plan(files, stored.map(::identity), holding, now)
         if (!plan.isEmpty) {
             write(plan, stored.associateBy { it.id }, now)
             changes.value++
         }
-        fingerprints?.let { step -> takeOver(step, files, holding) }
+        // Step 4, the stronger evidence, before step 5 (TI §3.1): both take over files the plan gave new identities.
+        if (holding.isNotEmpty()) fingerprints?.let { step -> takeOver { identities -> step.takeovers(files, identities, holding) } }
+        if (hints.isNotEmpty()) takeOver { identities -> PlaylistHints.takeovers(files, identities, holding, hints) }
         // Entries without an identity take the one of the file their hints name, now that every settled file has one.
         playlists?.link(files)
         dropStaleFingerprints(now)
@@ -145,12 +148,11 @@ class IdentityAttacher(
         }
     }
 
-    /** Step 4: a missing identity that holds data takes over the file of a new identity, which goes. */
-    private suspend fun takeOver(step: FingerprintStep, files: List<KeyedFile>, holding: Set<Long>) {
-        if (holding.isEmpty()) return
+    /** Steps 4 and 5: a missing identity that holds data takes over the file of a new identity, which goes. */
+    private suspend fun takeOver(find: suspend (List<Identity>) -> List<Takeover>) {
         val dao = user.identities()
         val stored = dao.identities()
-        val takeovers = step.takeovers(files, stored.map(::identity), holding)
+        val takeovers = find(stored.map(::identity))
         if (takeovers.isEmpty()) return
         val byId = stored.associateBy { it.id }
         user.withWriteTransaction {

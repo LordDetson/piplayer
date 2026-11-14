@@ -58,7 +58,10 @@ data class AttachPlan(
     val isEmpty: Boolean get() = created.isEmpty() && updated.isEmpty() && deleted.isEmpty()
 }
 
-/** Steps 1, 2, 3 and 5 of re-attachment (TI §3.1, docs/library.md §8.2); step 4 is [FingerprintStep]. */
+/**
+ * Steps 1, 2 and 3 of re-attachment and the new identities (TI §3.1, docs/library.md §8.2); step 4 is [FingerprintStep]
+ * and step 5, the hints of playlist entries, is [io.github.lorddetson.piplayer.library.playlists.PlaylistHints.takeovers].
+ */
 object IdentityMatcher {
 
     /** How far two lengths may lie apart for steps 2 to 4. */
@@ -76,8 +79,6 @@ object IdentityMatcher {
         identities: List<Identity>,
         holdingData: Set<Long>,
         now: Long,
-        /** The hints of the playlist entries of each identity, for step 5 (docs/library.md §16.2). */
-        playlistHints: Map<Long, List<io.github.lorddetson.piplayer.library.playlists.EntryHint>> = emptyMap(),
     ): AttachPlan {
         val filesByKey = files.groupBy { it.contentKey }
         val heldKeys = identities.mapTo(HashSet()) { it.contentKey }
@@ -124,15 +125,6 @@ object IdentityMatcher {
             result[identity.id] = identity.following(file)
         }
 
-        // Step 5 of TI §3.1: the hints of playlist entries (docs/library.md §16.2).
-        if (playlistHints.isNotEmpty()) {
-            val left = missing.filter { it.id !in result }
-            for ((id, file) in io.github.lorddetson.piplayer.library.playlists.PlaylistHints.reattach(left, playlistHints, unattached)) {
-                unattached -= file
-                result[id] = left.first { it.id == id }.following(file)
-            }
-        }
-
         // What stays missing is marked, and goes after a while unless user data refers to it.
         val deleted = mutableListOf<Long>()
         for (identity in missing) {
@@ -146,7 +138,7 @@ object IdentityMatcher {
 
         val before = identities.associateBy { it.id }
         val updated = result.values.filter { it != before[it.id] }
-        // Step 5: a new identity for every file left.
+        // A new identity for every file left; steps 4 and 5 may take some of them over after this plan is written.
         return AttachPlan(created = unattached.sortedBy { it.fileId }, updated = updated, deleted = deleted)
     }
 

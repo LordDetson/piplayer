@@ -713,7 +713,13 @@ saved queue that refers to identities is in playback.md §4.
   3. A missing identity with a recording MBID takes the key of the one unattached file that carries that MBID in its
      tags, when the length is within 1 s and no other unattached file and no other missing identity has that MBID.
   4. Missing identities that hold user data try the fingerprint cache (§8.3).
-  5. Every unattached file left gets a new identity.
+  5. Missing identities that playlist entries refer to try the entries' hints (§16.2).
+  6. Every unattached file left gets a new identity.
+
+  The plan of steps 1 to 3 is written with the new identities of step 6 in one transaction; steps 4 and 5 then run in
+  this order, each in a transaction of its own, and take over files that hold a new identity without user data, which is
+  deleted. Decision (PIM-31): step 5 comes after step 4, as TI §3.1 orders them, so that a fingerprint, the stronger
+  evidence, wins over a name and a length.
 - Taking a key moves the identity: `content_key`, `duration_ms` and the hints become the file's, and `missing_since` is
   cleared. When two missing identities could take one file, the newest one takes it.
 - The identity's recording MBID follows the file's tags while it is attached. A decided MBID of M3 will win over tags.
@@ -724,7 +730,7 @@ saved queue that refers to identities is in playback.md §4.
   identification (M3). A row whose key no file and no identity holds is dropped after 30 days.
 - Step 4 runs only for missing identities that hold user data and whose old key has a cached fingerprint. Candidates are
   attached files of the same format, with a length within 1 s, whose identity holds no user data and is newer than the
-  missing one: the file came after the identity went missing, so the pass of step 5 may already have given it a new
+  missing one: the file came after the identity went missing, so step 6 of the pass may already have given it a new
   identity. Candidates without a cached fingerprint are fingerprinted at background priority (the decoders of TI §3.2,
   at most 120 s of audio) and cached by their key.
 - A match is a bit error rate of at most 10 % at the best offset (`FingerprintComparison`, as in M0). With exactly one
@@ -1398,10 +1404,12 @@ Decision: an entry never points at a file. It refers to a track identity (§8.1)
 - An unavailable entry stays in its playlist in its place, shown as "Not in the library", and is skipped when the
   playlist plays. It comes back when a matching file appears:
     - by the identity's own re-attachment (key, place with length, MBID, fingerprint), which favorites share;
-    - by step 5 of TI §3.1: a missing identity that entries refer to takes the key of the one unattached file that
+    - by step 5 of TI §3.1: a missing identity that entries refer to takes the key of the one new file that
       matches one of their hints by place and length, by display name (ignoring case) and length, or by recording MBID
       and length, when exactly one such file exists and no other missing identity could take it. It runs in the attach
-      pass after step 3 (§8.2), before new identities are made;
+      pass after step 4 (§8.2), so it takes over the file from the identity the pass gave it, as step 4 does: only a file
+      whose identity holds no user data and was made since the missing identity went missing, which is then deleted.
+      Byte-identical copies count as one file;
     - an entry without an identity is linked by every attach pass to the identity of the file its hints name, in this
       order: the content key, the place, the place ignoring case, the display name ignoring case with the length (any
       length when the hint has none), the recording MBID with the length. A name that several files carry goes to the one whose

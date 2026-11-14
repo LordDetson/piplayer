@@ -1,9 +1,9 @@
 package io.github.lorddetson.piplayer.library.playlists
 
 import io.github.lorddetson.piplayer.library.identity.Identity
-import io.github.lorddetson.piplayer.library.identity.IdentityMatcher
 import io.github.lorddetson.piplayer.library.identity.KeyedFile
 import io.github.lorddetson.piplayer.library.identity.Place
+import io.github.lorddetson.piplayer.library.identity.Takeover
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 
@@ -32,32 +32,38 @@ class PlaylistHintsTest {
     private fun hintFile(id: Long, place: Place, durationMs: Long? = 200_000, key: String? = null, mbid: String? = null) =
         HintFile(id, place, durationMs, key, mbid)
 
-    // Step 5 of re-attachment (TI §3.1).
+    // Step 5 of re-attachment (TI §3.1): after step 4, over the files of identities that hold no user data.
+
+    /** The new identity the pass gave [file], made at [createdAt]. */
+    private fun owner(id: Long, file: KeyedFile, createdAt: Long = now) =
+        Identity(id, file.contentKey, file.durationMs, file.recordingMbid, file.place, file.size, createdAt, missingSince = null)
+
+    private fun takeovers(
+        missing: List<Identity>,
+        hints: Map<Long, List<EntryHint>>,
+        files: List<KeyedFile>,
+        owners: List<Identity> = files.mapIndexed { i, file -> owner(100L + i, file) },
+        holding: Set<Long> = missing.map { it.id }.toSet(),
+    ) = PlaylistHints.takeovers(files, missing + owners, holding, hints)
 
     @Test
     fun step5AMissingIdentityTakesTheOneFileItsEntryNamesByNameAndLength() {
-        // The file was re-encoded (another key) and moved: steps 1 to 3 find nothing.
+        // The file was re-encoded (another key) and moved: steps 1 to 4 find nothing, and the pass gave it a new identity.
         val identity = missing(7, "aa", hint = Place("external_primary", "Music/Gone/", "x.mp3"))
         val target = file(1, "bb", moved)
 
-        val plan = IdentityMatcher.plan(
-            listOf(target), listOf(identity), holdingData = setOf(7), now = now,
-            playlistHints = mapOf(7L to listOf(hint(old))),
-        )
+        val found = takeovers(listOf(identity), mapOf(7L to listOf(hint(old))), listOf(target))
 
-        assertThat(plan.created).isEmpty()
-        assertThat(plan.updated.single().id).isEqualTo(7)
-        assertThat(plan.updated.single().contentKey).isEqualTo("bb")
-        assertThat(plan.updated.single().hint).isEqualTo(moved)
+        assertThat(found).containsExactly(Takeover(missingId = 7, file = target, replacedId = 100))
     }
 
     @Test
     fun step5ByThePlaceOfTheEntryWithTheLength() {
         val identity = missing(7, "aa", hint = null)
 
-        val found = PlaylistHints.reattach(listOf(identity), mapOf(7L to listOf(hint(renamed))), listOf(file(1, "bb", renamed)))
+        val found = takeovers(listOf(identity), mapOf(7L to listOf(hint(renamed))), listOf(file(1, "bb", renamed)))
 
-        assertThat(found.mapValues { it.value.fileId }).containsExactly(java.util.Map.entry(7L, 1L))
+        assertThat(found.map { it.missingId to it.file.fileId }).containsExactly(7L to 1L)
     }
 
     @Test
@@ -66,24 +72,24 @@ class PlaylistHintsTest {
         val mbid = "0b8a3a2e-1111-4222-8333-444455556666"
         val target = file(1, "bb", Place("external_primary", "Other/", "track.ogg"), mbid = mbid)
 
-        val found = PlaylistHints.reattach(listOf(identity), mapOf(7L to listOf(hint(null, mbid = mbid, name = null))), listOf(target))
+        val found = takeovers(listOf(identity), mapOf(7L to listOf(hint(null, mbid = mbid, name = null))), listOf(target))
 
-        assertThat(found.keys).containsExactly(7L)
+        assertThat(found.map { it.missingId }).containsExactly(7L)
     }
 
     @Test
     fun step5NeedsTheLengthWithin1s() {
         val identity = missing(7, "aa", hint = null)
 
-        val far = PlaylistHints.reattach(listOf(identity), mapOf(7L to listOf(hint(old))), listOf(file(1, "bb", moved, durationMs = 202_000)))
+        val far = takeovers(listOf(identity), mapOf(7L to listOf(hint(old))), listOf(file(1, "bb", moved, durationMs = 202_000)))
         // A hint without a length takes the identity's; with neither there is nothing to compare.
-        val identityLength = PlaylistHints.reattach(listOf(identity), mapOf(7L to listOf(hint(old, durationMs = null))), listOf(file(1, "bb", moved)))
-        val unknown = PlaylistHints.reattach(
+        val identityLength = takeovers(listOf(identity), mapOf(7L to listOf(hint(old, durationMs = null))), listOf(file(1, "bb", moved)))
+        val unknown = takeovers(
             listOf(missing(7, "aa", hint = null, durationMs = null)), mapOf(7L to listOf(hint(old, durationMs = null))), listOf(file(1, "bb", moved)),
         )
 
         assertThat(far).isEmpty()
-        assertThat(identityLength.keys).containsExactly(7L)
+        assertThat(identityLength.map { it.missingId }).containsExactly(7L)
         assertThat(unknown).isEmpty()
     }
 
@@ -92,7 +98,7 @@ class PlaylistHintsTest {
         val identity = missing(7, "aa", hint = null)
         val files = listOf(file(1, "bb", moved), file(2, "cc", Place("external_primary", "Music/Third/", "01 Song.mp3")))
 
-        assertThat(PlaylistHints.reattach(listOf(identity), mapOf(7L to listOf(hint(old))), files)).isEmpty()
+        assertThat(takeovers(listOf(identity), mapOf(7L to listOf(hint(old))), files)).isEmpty()
     }
 
     @Test
@@ -100,23 +106,40 @@ class PlaylistHintsTest {
         val identities = listOf(missing(7, "aa", hint = null), missing(8, "dd", hint = null))
         val hints = mapOf(7L to listOf(hint(old)), 8L to listOf(hint(moved)))
 
-        assertThat(PlaylistHints.reattach(identities, hints, listOf(file(1, "bb", moved)))).isEmpty()
+        assertThat(takeovers(identities, hints, listOf(file(1, "bb", moved)))).isEmpty()
     }
 
     @Test
-    fun step5ComesAfterTheIdentitysOwnSteps() {
-        // Step 2 already takes the file at the identity's own place; the entry's hint does not move it elsewhere.
-        val identity = missing(7, "aa", hint = old)
-        val atOld = file(1, "bb", old)
+    fun step5IsOnlyForIdentitiesThatNoFileHolds() {
+        // Steps 1 to 4 attached the identity already; the entry's hint does not move it elsewhere.
+        val atOld = file(1, "aa", old)
         val byName = file(2, "cc", moved)
+        val attached = missing(7, "aa").copy(missingSince = null)
 
-        val plan = IdentityMatcher.plan(
-            listOf(atOld, byName), listOf(identity), holdingData = setOf(7), now = now,
-            playlistHints = mapOf(7L to listOf(hint(moved))),
-        )
+        val found = takeovers(listOf(attached), mapOf(7L to listOf(hint(moved))), listOf(atOld, byName))
 
-        assertThat(plan.updated.single().contentKey).isEqualTo("bb")
-        assertThat(plan.created.map { it.fileId }).containsExactly(2L)
+        assertThat(found).isEmpty()
+    }
+
+    @Test
+    fun step5TakesOnlyTheSettledFileOfANewerIdentityWithoutUserData() {
+        val identity = missing(7, "aa", hint = null)
+        val target = file(1, "bb", moved)
+        val hints = mapOf(7L to listOf(hint(old)))
+
+        // The file's identity holds user data of its own (a favorite, an entry): it is never taken.
+        val holding = takeovers(listOf(identity), hints, listOf(target), holding = setOf(7L, 100L))
+        // The file's identity is older than the missing one's absence: the file was there before, so it is another song.
+        val older = takeovers(listOf(identity), hints, listOf(target), owners = listOf(owner(100, target, createdAt = now - 5_000)))
+        // A length still waiting for a walk could fall outside the window.
+        val pending = takeovers(listOf(identity), hints, listOf(target.copy(settled = false)))
+        // The file of the same key at the lower file ID stands for byte-identical copies.
+        val copies = takeovers(listOf(identity), hints, listOf(target.copy(fileId = 9), target), owners = listOf(owner(100, target)))
+
+        assertThat(holding).isEmpty()
+        assertThat(older).isEmpty()
+        assertThat(pending).isEmpty()
+        assertThat(copies.map { it.file.fileId }).containsExactly(1L)
     }
 
     // Entries without an identity.

@@ -7,6 +7,8 @@ import io.github.lorddetson.piplayer.library.FakeMediaIndex.Companion.PRIMARY
 import io.github.lorddetson.piplayer.library.FakeMediaIndex.Companion.row
 import io.github.lorddetson.piplayer.library.FakeRules
 import io.github.lorddetson.piplayer.library.db.LibraryDatabase
+import io.github.lorddetson.piplayer.library.playlists.EntryHint
+import io.github.lorddetson.piplayer.library.playlists.PlaylistLinks
 import io.github.lorddetson.piplayer.library.sync.IndexRow
 import io.github.lorddetson.piplayer.library.sync.LibrarySync
 import io.github.lorddetson.piplayer.library.tagpass.DurationSource
@@ -212,6 +214,47 @@ class IdentityAttacherTest {
             assertThat(identities().map { it.id }).containsExactly(id)
         } finally {
             holding.close()
+        }
+    }
+
+    @Test
+    fun theFingerprintStepComesBeforeThePlaylistHints() = runBlocking<Unit> {
+        index.volume().rows = listOf(row(1, path = "Music/A/", name = "a.mp3"), row(2, path = "Music/B/", name = "b.mp3"))
+        sync.sync()
+        keyed(1, key(1))
+        keyed(2, key(2))
+        attacher.attach()
+        val (a, b) = identities().sortedBy { it.id }.map { it.id }
+        // A sounds like the new file (only A's old key has a cached fingerprint, and it matches); B's playlist entry
+        // names the new file by name and length.
+        val sounds = object : FingerprintSource {
+            override suspend fun cached(contentKey: String) =
+                if (contentKey == key(1)) CachedPrint(intArrayOf(1), library.library().keyedFiles().firstOrNull()?.format) else null
+            override suspend fun compute(file: KeyedFile) = intArrayOf(1)
+        }
+        val hints = object : PlaylistLinks {
+            override suspend fun identityHints() = mapOf(b to listOf(EntryHint(PRIMARY, "Music/B/", "b.mp3", 200_000)))
+            override suspend fun link(files: List<KeyedFile>) = Unit
+        }
+        val ordered = IdentityAttacher(
+            library, user, sync, holders = { setOf(a, b) }, fingerprints = FingerprintStep(sounds, similar = { _, _ -> true }),
+            clock = { now }, playlists = hints,
+        )
+
+        try {
+            index.volume().rows = listOf(row(3, path = "Music/New/", name = "b.mp3", generation = 10))
+            sync.sync()
+            keyed(3, key(3))
+            now += 1
+            ordered.attach()
+
+            val byId = identities().associateBy { it.id }
+            assertThat(byId.getValue(a).contentKey).isEqualTo(Hex.bytes(key(3)))
+            assertThat(byId.getValue(b).contentKey).isEqualTo(Hex.bytes(key(2)))
+            assertThat(byId.getValue(b).missingSince).isNotNull()
+            assertThat(byId.keys).containsExactlyInAnyOrder(a, b)
+        } finally {
+            ordered.close()
         }
     }
 
