@@ -488,16 +488,24 @@ too often while it plays?), and a large cover (3000x3000) in the profiler.
   its end, with a long fade-out still to come, resumes there.
 - Instead the restore moves on as the player would have moved on when the song ended: with repeat one, the same song
   from its start; otherwise the next song of the play order (the shuffle order when it is restored exactly, §4.8; the
-  list order otherwise, also when the shuffle order is generated again, which then starts with that song), the first
+  list order otherwise, also when the shuffle order is generated again, which then starts with that song; the check
+  against the player's length below follows the player's order instead), the first
   one after the last with repeat all. After the last song with repeat off there is none, and the restore starts that
   last song from its start. The moved start is paused or plays exactly as the restore would have (§4.4).
 - The length used is the one the queue item has before the player reads the file: the library's length of the song,
   or the length read when the file was opened (§5.2). When it is not known, the saved position is applied as it is.
+  A position more than 1 s past that length is applied as it is too: the player wrote it, so the file was longer than
+  the library says (a file replaced by a longer one, or a variable-bitrate MP3 whose length was misjudged), and the
+  position may be in the middle of the song. Up to 1 s past counts as the end, since the player's length of the same
+  file differs from the library's by rounding and its estimate. The check below decides with the real length.
 - Once the player knows the length of the restored item itself, the same rule is checked again against that length,
   once, also when the restore already applied it: it catches an unknown or a wrong length in the library (a file
-  replaced by a shorter one). If the position is at the end, the player moves on as above right away, so no restore
-  stays buffering or ends at the end of a song. The check is dropped when a seek, another song or another queue comes
-  first.
+  replaced by a shorter one, or a position left to it above). If the position is at the end, the player moves on right
+  away to the song it would play next in its current order: the same song with repeat one, otherwise the next one of
+  its play order with the current repeat mode. With a shuffle order generated again that is the song after it in the
+  new order, which starts with the ended song, so the move stays random instead of following the list. After the last
+  song with repeat off it starts that song again. So no restore stays buffering or ends at the end of a song. The check
+  is dropped when a seek, another song or another queue comes first.
 - A restore that moves off the end is a new playback (§11.1): of the next song, or a replay of the same one, which may
   count as a play again. The saved listen progress is not resumed. When the check against the player's length moves
   within the same item, the restored playback ends there and a new one starts.
@@ -579,9 +587,12 @@ Instrumented tests on the API 30, 36 and 37 emulators:
   and stopped is saved at zero without listen progress; a saved position at the end of the only opened file, and one
   past the end of a library song whose length is unknown (the check against the player's length), each play that song
   from its start on a system play request instead of ending (API 36) or buffering (API 30); a position at the end of a
-  song with a next one opens the app paused at the start of the next song. JVM tests: the zone's size, the moves for
-  repeat off, all and one, the restored shuffle order and an unknown length, and that a moved start resumes no
-  playback.
+  song with a next one opens the app paused at the start of the next song, also when that song's length is unknown
+  (the check moves to the next song); a position of 5 s in the 12-second file whose library length is 2 s opens the
+  app paused there. The check on a player of its own: at the end it moves to the start of the next song and stays
+  paused, or replays the only song; a seek or another queue before the length is known drops it. JVM tests: the
+  zone's size, the moves for repeat off, all and one, the restored shuffle order and an unknown length, a position up
+  to 1 s past the length moving and one further past staying, and that a moved start resumes no playback.
 - Headset next and previous move through the queue and a double tap of play/pause skips forward and keeps playing; the
   exported receiver is declared for the system's media button.
 - A foreign action, a malformed media button and a play start with no saved queue stop before the system's deadline

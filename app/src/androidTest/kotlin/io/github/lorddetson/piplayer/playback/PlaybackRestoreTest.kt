@@ -466,6 +466,46 @@ class PlaybackRestoreTest {
         }
     }
 
+    @Test
+    fun aPositionAtTheEndOfASongOfUnknownLengthOpensTheAppPausedAtTheStartOfTheNextSong() {
+        songs.songs = listOf(
+            SongSourceRule.song(1, "Alpha", LONG_FIXTURE, durationMs = null),
+            SongSourceRule.song(2, "Bravo", LONG_FIXTURE),
+        )
+        runBlocking { store.write(snapshot(songId = 1, row = 0, positionMs = SongSourceRule.LONG_FIXTURE_MS)) }
+
+        ActivityScenario.launch(MainActivity::class.java).use {
+            // Only the player's length shows that the position is at the end of Alpha.
+            controller.awaitState("the app shows Bravo, the song after Alpha, paused") {
+                mediaItemCount == 2 && currentMediaItem?.mediaId == "2" && playbackState == Player.STATE_READY &&
+                    !playWhenReady
+            }
+            assertThat(onMain { controller.currentPosition }).isLessThan(500L)
+            throughout("the moved start stays paused", 1.seconds) { onMain { !controller.playWhenReady } }
+        }
+    }
+
+    @Test
+    fun aPositionPastAnUnderstatedLibraryLengthOpensTheAppPausedThere() {
+        // The library says 2 s for the 12-second file: the saved 5 s is the middle of the song, not past its end.
+        songs.songs = listOf(
+            SongSourceRule.song(1, "Alpha", LONG_FIXTURE, durationMs = 2_000),
+            SongSourceRule.song(2, "Bravo", LONG_FIXTURE),
+        )
+        runBlocking { store.write(snapshot(songId = 1, row = 0, positionMs = 5_000)) }
+
+        ActivityScenario.launch(MainActivity::class.java).use {
+            controller.awaitState("the app shows Alpha paused") {
+                mediaItemCount == 2 && currentMediaItem?.mediaId == "1" && playbackState == Player.STATE_READY &&
+                    !playWhenReady
+            }
+            assertThat(onMain { controller.currentPosition }).isBetween(4_800L, 5_300L)
+            throughout("Alpha stays where it was saved", 1.seconds) {
+                onMain { controller.currentMediaItem?.mediaId == "1" && !controller.playWhenReady }
+            }
+        }
+    }
+
     private fun openInApp(uri: Uri): ActivityScenario<MainActivity> {
         val intent = Intent(context, MainActivity::class.java)
             .setAction(Intent.ACTION_VIEW)

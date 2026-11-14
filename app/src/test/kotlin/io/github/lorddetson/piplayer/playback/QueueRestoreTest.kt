@@ -308,6 +308,28 @@ class QueueRestoreTest {
     }
 
     @Test
+    fun `a position far past the library length is left to the player's length`() {
+        // The library says 2 s, the file is longer: the saved 5 s is the middle of the song, not past its end.
+        val slots = listOf(QueueSlot.Library(timed(10, 2_000)), QueueSlot.Library(timed(20, 60_000)))
+
+        assertThat(QueueRestore.offTheEnd(slots, QueueStart(0, 5_000), PlaybackSnapshot.REPEAT_OFF, playOrder = null))
+            .isEqualTo(QueueStart(0, 5_000))
+        assertThat(QueueRestore.offTheEnd(slots, QueueStart(0, 3_001), PlaybackSnapshot.REPEAT_OFF, playOrder = null))
+            .isEqualTo(QueueStart(0, 3_001))
+    }
+
+    @Test
+    fun `a position up to a second past the library length is at the end`() {
+        // The player's length of the same file differs from the library's by rounding and its estimate.
+        val slots = listOf(QueueSlot.Library(timed(10, 2_000)), QueueSlot.Library(timed(20, 60_000)))
+
+        assertThat(QueueRestore.offTheEnd(slots, QueueStart(0, 3_000), PlaybackSnapshot.REPEAT_OFF, playOrder = null))
+            .isEqualTo(QueueStart(1, 0))
+        assertThat(QueueRestore.offTheEnd(slots, QueueStart(0, 2_000), PlaybackSnapshot.REPEAT_OFF, playOrder = null))
+            .isEqualTo(QueueStart(1, 0))
+    }
+
+    @Test
     fun `an opened file at its end starts again when it is the whole queue`() {
         val file = opened(0, "alone")
 

@@ -126,12 +126,22 @@ object QueueRestore {
     }
 
     /**
+     * How far past the queue item's length a saved position may be and still count as its end (§4.3.1): the player's
+     * length of the same file differs from the library's by rounding and its estimate. Further past, the item's length
+     * is too short for the file, and only the player's own length decides.
+     */
+    const val PAST_END_TOLERANCE_MS = 1_000L
+
+    /**
      * [start], moved off the end of its song when its position is there (§4.3.1): to the start of the row that plays
-     * next, or to the start of the same row when none does. The length is the queue item's; an unknown one moves nothing.
+     * next, or to the start of the same row when none does. The length is the queue item's; an unknown one, or one the
+     * position is more than [PAST_END_TOLERANCE_MS] past, moves nothing and leaves the decision to the player's length.
      */
     fun offTheEnd(order: List<QueueSlot>, start: QueueStart, repeatMode: Int, playOrder: IntArray?): QueueStart {
         val slot = order.getOrNull(start.index) ?: return start
-        if (!isAtEnd(start.positionMs, slot.durationMs)) return start
+        val durationMs = slot.durationMs ?: return start
+        if (start.positionMs > durationMs + PAST_END_TOLERANCE_MS) return start
+        if (!isAtEnd(start.positionMs, durationMs)) return start
         return QueueStart(nextAfterEnd(start.index, order.size, repeatMode, playOrder) ?: start.index, 0)
     }
 
