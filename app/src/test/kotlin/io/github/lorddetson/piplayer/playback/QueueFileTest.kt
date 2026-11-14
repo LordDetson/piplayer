@@ -7,7 +7,7 @@ import java.io.ByteArrayOutputStream
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 
-/** The queue file, format 1 (docs/playback.md §4.8). */
+/** The queue file, format 3 (docs/playback.md §4.8). */
 class QueueFileTest {
 
     private val track = TrackRef(
@@ -27,7 +27,7 @@ class QueueFileTest {
             QueueEdit.Insert(after = null, entries = listOf(EntryKey.Added(3)), row = 0),
             QueueEdit.Remove(entry = EntryKey.Opened(0), row = 7),
             QueueEdit.Move(entry = EntryKey.Added(1), after = null, row = 0),
-            QueueEdit.Move(entry = EntryKey.Song(6), after = EntryKey.Added(2), row = 9),
+            QueueEdit.Move(entry = EntryKey.Song(6), after = EntryKey.Added(2), row = 9, from = 2),
         ),
         order = listOf(EntryKey.Song(7), EntryKey.Added(1), EntryKey.Opened(0), EntryKey.Song(Long.MAX_VALUE)),
         nextNumber = 4,
@@ -92,11 +92,40 @@ class QueueFileTest {
     }
 
     @Test
-    fun theUpNextRunRoundTripsInFormat2() {
+    fun theUpNextRunRoundTrips() {
         val withRun = full.copy(upNext = listOf(EntryKey.Added(1), EntryKey.Added(3)))
 
-        assertThat(QueueFileCodec.FORMAT).isEqualTo(2)
         assertThat(roundTrip(withRun)).isEqualTo(withRun)
+    }
+
+    @Test
+    fun theRowAMoveCameFromRoundTripsInFormat3() {
+        val moves = QueueFile(
+            revision = 3,
+            libraryId = "lib",
+            journal = listOf(
+                QueueEdit.Move(entry = EntryKey.Song(1), after = null, row = 0, from = 2),
+                QueueEdit.Move(entry = EntryKey.Song(1), after = EntryKey.Song(2), row = 2, from = 0),
+            ),
+        )
+
+        assertThat(QueueFileCodec.FORMAT).isEqualTo(3)
+        assertThat(roundTrip(moves)).isEqualTo(moves)
+    }
+
+    @Test
+    fun aFormat2FileIsStillReadWithMovesFromNoKnownRow() {
+        // Written by the format 2 codec of M2a step 9: one move of song 6 after song 5 at row 2.
+        val format2 = "504951460000000200000000000000080100036c6962010001020006000502000062e42396"
+        val bytes = format2.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+
+        assertThat(QueueFileCodec.read(ByteArrayInputStream(bytes))).isEqualTo(
+            QueueFile(
+                revision = 8,
+                libraryId = "lib",
+                journal = listOf(QueueEdit.Move(entry = EntryKey.Song(6), after = EntryKey.Song(5), row = 2, from = null)),
+            ),
+        )
     }
 
     @Test

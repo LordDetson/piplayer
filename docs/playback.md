@@ -615,7 +615,7 @@ Schema 3 replaces what §4.1 to §4.3 say about media index IDs, the saved shuff
   §4.2. The structure of the queue lives in `queue.bin` under the app's no-backup files and is written only when the
   structure changes: a new queue, an open from another app, shuffle turned on or off, an edit (step 9). It is written
   to a new file that then replaces the old one, so a reader never sees half of it.
-- **The queue file** (format 2 since step 9; format 1 is still read) holds its revision, the library ID (library.md §8.4),
+- **The queue file** (format 3 since M2b, PIM-31; formats 1 and 2 are still read) holds its revision, the library ID (library.md §8.4),
   the entries added by edits, the edit journal, the up-next run (§9.4) and, while shuffle is on, the play order. The compact request and the opened files at their rows stay in
   `playback_state`, as in schema 2, because they are small.
   An entry of the queue is named by a key: a library song by its file ID, an opened file by its place in the opened
@@ -637,7 +637,13 @@ Schema 3 replaces what §4.1 to §4.3 say about media index IDs, the saved shuff
 - **The edit journal** (filled since step 9, §9) lists the edits in the order they were made: insert entries after an entry,
   remove an entry, move an entry after another. Each edit names entries by their keys, not by rows, and keeps the row
   it was made at as a fallback, so it still applies when the compact request reads a changed list: an insert whose
-  entry is gone goes to its row, a removal or a move of an entry that is gone does nothing. Added entries carry their
+  entry is gone goes to its row, a removal or a move of an entry that is gone does nothing. A song that a playlist
+  holds twice (library.md §16.4) stands in the queue under one key more than once; then the rows tell its copies apart
+  (M2b, PIM-31): a removal takes the copy nearest its row, a move the copy nearest the row it came from, which format 3
+  records with each move, and an insert or a move after such a song goes after the copy nearest the row right before
+  its own (the earlier of two as near). On an unchanged list each of these rows is exactly that copy's, so the restored
+  queue is the edited one; on a changed list the nearest copy is the best guess. A move read from format 1 or 2, which
+  lacks the row it came from, takes the first copy, as those versions did. Added entries carry their
   track references, so they survive a library rebuild like the current item. A journal of more than 200 edits
   is folded at the next restore (§9.4):
   the queue file then holds every library entry as an added entry, the opened files stay at their rows in
@@ -1020,7 +1026,9 @@ By hand on the phone: one of the owner's albums (MP3 with a LAME tag) with the s
 - The journal names entries of the library and added ones. Its rows count only those entries: files opened from other
   apps are not in it and keep their rows in `playback_state` as the queue has them now, so they are put back at the end.
   Removing or moving an opened file changes only its row.
-- The queue file (format 2) also holds the up-next run's entries. Format 1 files are still read, without a run.
+- The queue file (format 2 on) also holds the up-next run's entries, and since format 3 (M2b, PIM-31) each move also
+  keeps the row it came from among the entries the journal counts, so that a move of a song that stands twice replays
+  on the right copy (§4.8). Format 1 files are still read without a run, format 1 and 2 files without those rows.
 - Every edit writes the queue file and then `playback_state`; a queue of added songs only has no compact request.
 - An edited queue restored under another library ID keeps its added entries, found by their track references, leaves
   out the edits that name library songs by file ID, which would now name other files, and is folded at once (below),
@@ -1037,7 +1045,8 @@ in the list and in the play order, with and without the run; shuffle turned on k
 the restored order puts new songs after the run; media IDs of added entries; the journal rows without opened files and
 opened rows after inserts, removals and moves; the rebuilt queue from the request, the journal, the added entries and
 the opened files equals the edited one, also on a changed list and with another library ID; folding over 200 edits;
-the queue file format 2 and format 1; a snapshot of added songs only; removing the only entry, and ranges across opened
+the queue file formats 3, 2 and 1; removals, moves and inserts next to a song that stands twice, on an unchanged and a
+changed list; a snapshot of added songs only; removing the only entry, and ranges across opened
 files; when a restore folds.
 
 Instrumented tests on the API 30 emulator: through the service, "Play next" and "Add to queue" with shuffle off and on,

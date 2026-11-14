@@ -175,15 +175,24 @@ class QueueEditingTest {
     }
 
     @Test
+    fun movingTheLaterCopyOfASongRecordsTheRowItCameFrom() {
+        val result = QueueEditing.move(state(), QueueView(songs(1, 2, 1), current = 0), from = 2, to = 0)
+
+        assertThat(result.edits.journal).containsExactly(QueueEdit.Move(Song(1), after = null, row = 0, from = 2))
+        assertThat(QueueJournal.replay(songs(1, 2, 1), result.edits.journal)).containsExactly(Song(1), Song(1), Song(2))
+    }
+
+    @Test
     fun movingAnEntryRecordsItsNewNeighbour() {
         val view = QueueView(songs(1, 2, 3, 4), current = 0)
 
         val result = QueueEditing.move(state(), view, from = 0, to = 2)
 
-        assertThat(result.edits.journal).containsExactly(QueueEdit.Move(Song(1), after = Song(3), row = 2))
+        assertThat(result.edits.journal).containsExactly(QueueEdit.Move(Song(1), after = Song(3), row = 2, from = 0))
 
         val first = QueueEditing.move(state(listOf(opened(1))), QueueView(listOf(Song(1), Opened(0), Song(2), Song(3)), 0), from = 3, to = 0)
-        assertThat(first.edits.journal).containsExactly(QueueEdit.Move(Song(3), after = null, row = 0))
+        // The row it came from counts no opened file either.
+        assertThat(first.edits.journal).containsExactly(QueueEdit.Move(Song(3), after = null, row = 0, from = 2))
         assertThat(first.openItems.map { it.index }).containsExactly(2)
     }
 
@@ -330,12 +339,12 @@ class QueueEditingTest {
         val result = QueueEditing.moveRange(state(listOf(opened(1, "a"), opened(3, "b"))), view, from = 0, to = 2, newIndex = 3)
 
         assertThat(result.openItems).containsExactly(opened(1, "b"), opened(4, "a"))
-        assertThat(result.edits.journal).containsExactly(QueueEdit.Move(Song(1), after = Song(3), row = 2))
+        assertThat(result.edits.journal).containsExactly(QueueEdit.Move(Song(1), after = Song(3), row = 2, from = 0))
 
         // Back the other way: file b and song 3 move to the front.
         val back = QueueEditing.moveRange(state(listOf(opened(1, "a"), opened(3, "b"))), view, from = 3, to = 5, newIndex = 0)
         assertThat(back.openItems).containsExactly(opened(0, "b"), opened(3, "a"))
-        assertThat(back.edits.journal).containsExactly(QueueEdit.Move(Song(3), after = null, row = 0))
+        assertThat(back.edits.journal).containsExactly(QueueEdit.Move(Song(3), after = null, row = 0, from = 2))
     }
 
     @Test

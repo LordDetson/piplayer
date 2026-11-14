@@ -11,6 +11,7 @@ import java.io.InputStream
 import java.io.OutputStream
 import java.nio.ByteBuffer
 import java.util.zip.CRC32
+import kotlin.math.abs
 
 /** An entry of the queue by what it is, not by its row (docs/playback.md §4.8). */
 sealed interface EntryKey {
@@ -39,8 +40,11 @@ sealed interface QueueEdit {
 
     data class Remove(val entry: EntryKey, override val row: Int) : QueueEdit
 
-    /** [entry] goes right after [after], or first when it is null. */
-    data class Move(val entry: EntryKey, val after: EntryKey?, override val row: Int) : QueueEdit
+    /**
+     * [entry] goes right after [after], or first when it is null. [from] is the row it was moved from, which tells copies
+     * of a song in the queue twice apart (format 3); null in a file of an older format.
+     */
+    data class Move(val entry: EntryKey, val after: EntryKey?, override val row: Int, val from: Int? = null) : QueueEdit
 }
 
 /**
@@ -59,16 +63,19 @@ data class QueueFile(
 )
 
 /**
- * Reads and writes [QueueFile], format 2: four magic bytes and the format, the values in a fixed order with numbers as
- * variable-length integers, and a CRC-32 of everything before it at the end. Format 2 adds the up-next run after the
- * order; format 1 files are still read, without a run.
+ * Reads and writes [QueueFile], format 3: four magic bytes and the format, the values in a fixed order with numbers as
+ * variable-length integers, and a CRC-32 of everything before it at the end. Format 2 added the up-next run after the
+ * order, format 3 the row each move came from; format 1 and 2 files are still read, without a run or those rows.
  */
 object QueueFileCodec {
 
-    const val FORMAT = 2
+    const val FORMAT = 3
 
     /** The format of M2a step 8, without the up-next run. */
     private const val FORMAT_1 = 1
+
+    /** The format of M2a step 9, without the row a move came from. */
+    private const val FORMAT_2 = 2
 
     private val MAGIC = "PIQF".toByteArray(Charsets.US_ASCII)
 
@@ -111,6 +118,8 @@ object QueueFileCodec {
                         writeByte(MOVE)
                         key(edit.entry)
                         key(edit.after)
+                        // 0 for a row not known, as in a move read from an older format.
+                        number((edit.from ?: -1) + 1L)
                     }
                 }
                 number(edit.row.toLong())
@@ -151,19 +160,19 @@ object QueueFileCodec {
         val magic = ByteArray(MAGIC.size).also { readFully(it) }
         if (!magic.contentEquals(MAGIC)) return null
         val format = readInt()
-        if (format != FORMAT && format != FORMAT_1) return null
+        if (format != FORMAT && format != FORMAT_2 && format != FORMAT_1) return null
         val revision = readLong()
         val libraryId = text()
         val nextNumber = number()
         val added = List(count()) { AddedEntry(number(), track()) }
-        val journal = List(count()) { edit() }
+        val journal = List(count()) { edit(format) }
         val order = if (readBoolean()) List(count()) { key() ?: throw IOException("An order without an entry") } else null
         val upNext = if (format == FORMAT_1) emptyList() else List(count()) { key() ?: throw IOException("A run without an entry") }
         if (available() != 0) return null
         return QueueFile(revision, libraryId, added, journal, order, nextNumber, upNext)
     }
 
-    private fun DataInputStream.edit(): QueueEdit = when (readByte().toInt()) {
+    private fun DataInputStream.edit(format: Int): QueueEdit = when (readByte().toInt()) {
         INSERT -> {
             val after = key()
             val entries = List(count()) { key() as? EntryKey.Added ?: throw IOException("An insert of an entry not added") }
@@ -172,7 +181,9 @@ object QueueFileCodec {
         REMOVE -> QueueEdit.Remove(key() ?: throw IOException("A removal without an entry"), row())
         MOVE -> {
             val entry = key() ?: throw IOException("A move without an entry")
-            QueueEdit.Move(entry, key(), row())
+            val after = key()
+            val from = if (format >= FORMAT) Math.toIntExact(number() - 1).takeIf { it >= 0 } else null
+            QueueEdit.Move(entry, after, row(), from)
         }
         else -> throw IOException("An unknown edit")
     }
@@ -285,11 +296,18 @@ object QueueJournal {
                     val at = if (after == null && edit.after != null) edit.row.coerceIn(0, list.size) else placeAfter(list, after, edit.row)
                     list.addAll(at, edit.entries)
                 }
-                is QueueEdit.Remove -> if (songKeys || edit.entry !is EntryKey.Song) list.remove(edit.entry)
-                is QueueEdit.Move -> if ((songKeys || edit.entry !is EntryKey.Song) && list.remove(edit.entry)) {
-                    val after = edit.after.takeUnless { !songKeys && it is EntryKey.Song }
-                    val at = if (after == null && edit.after != null) edit.row.coerceIn(0, list.size) else placeAfter(list, after, edit.row)
-                    list.add(at, edit.entry)
+                is QueueEdit.Remove -> if (songKeys || edit.entry !is EntryKey.Song) {
+                    nearest(list, edit.entry, edit.row).takeIf { it >= 0 }?.let(list::removeAt)
+                }
+                is QueueEdit.Move -> if (songKeys || edit.entry !is EntryKey.Song) {
+                    // A move from a row not known (an older format) takes the first copy, as before format 3.
+                    val index = nearest(list, edit.entry, edit.from ?: -1)
+                    if (index >= 0) {
+                        list.removeAt(index)
+                        val after = edit.after.takeUnless { !songKeys && it is EntryKey.Song }
+                        val at = if (after == null && edit.after != null) edit.row.coerceIn(0, list.size) else placeAfter(list, after, edit.row)
+                        list.add(at, edit.entry)
+                    }
                 }
             }
         }
@@ -299,7 +317,22 @@ object QueueJournal {
     /** The index right after [after], 0 for none, or [row] when [after] is gone. */
     private fun placeAfter(list: List<EntryKey>, after: EntryKey?, row: Int): Int {
         if (after == null) return 0
-        val index = list.indexOf(after)
+        // The anchor stood right before the row the entries went to.
+        val index = nearest(list, after, row - 1)
         return if (index >= 0) index + 1 else row.coerceIn(0, list.size)
+    }
+
+    /**
+     * The index of [key] in [list], or -1: of the copy nearest [row] when a song stands more than once (a playlist may
+     * hold it twice), the earlier one of two as near. On an unchanged list the row is exactly that copy's.
+     */
+    private fun nearest(list: List<EntryKey>, key: EntryKey, row: Int): Int {
+        var best = -1
+        for (i in list.indices) {
+            if (list[i] != key) continue
+            if (best < 0 || abs(i - row) < abs(best - row)) best = i
+            if (i >= row) break
+        }
+        return best
     }
 }

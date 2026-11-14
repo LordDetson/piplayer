@@ -119,7 +119,7 @@ object QueueEditing {
         val openItems = openRows(state.openItems, newKeys)
         if (key is EntryKey.Opened) return state.copy(openItems = openItems)
         val edits = state.edits
-        val move = QueueEdit.Move(key, anchorBefore(newKeys, to), laneRow(newKeys, to))
+        val move = QueueEdit.Move(key, anchorBefore(newKeys, to), laneRow(newKeys, to), from = laneRow(view.keys, from))
         return state.copy(openItems = openItems, edits = edits.copy(journal = edits.journal + move))
     }
 

@@ -100,4 +100,45 @@ class QueueJournalTest {
 
         assertThat(QueueJournal.replay(base, edits, songKeys = false)).containsExactly(Added(2), Song(1), Song(2), Song(3), Song(4))
     }
+
+    // A playlist may hold a song twice (docs/library.md): the edits tell its copies apart by their rows.
+    private val twice = listOf(Song(1), Song(2), Song(1))
+
+    @Test
+    fun aRemovalOfTheLaterCopyOfASongRemovesThatCopy() {
+        assertThat(QueueJournal.replay(twice, listOf(QueueEdit.Remove(Song(1), row = 2)))).containsExactly(Song(1), Song(2))
+        assertThat(QueueJournal.replay(twice, listOf(QueueEdit.Remove(Song(1), row = 0)))).containsExactly(Song(2), Song(1))
+    }
+
+    @Test
+    fun anInsertAfterTheLaterCopyOfASongGoesAfterThatCopy() {
+        val edits = listOf(QueueEdit.Insert(after = Song(1), entries = listOf(Added(1)), row = 3))
+
+        assertThat(QueueJournal.replay(twice, edits)).containsExactly(Song(1), Song(2), Song(1), Added(1))
+    }
+
+    @Test
+    fun aMoveOfTheLaterCopyOfASongMovesThatCopy() {
+        val edits = listOf(QueueEdit.Move(entry = Song(1), after = null, row = 0, from = 2))
+
+        assertThat(QueueJournal.replay(twice, edits)).containsExactly(Song(1), Song(1), Song(2))
+    }
+
+    @Test
+    fun aMoveAfterTheLaterCopyOfASongGoesAfterThatCopy() {
+        // Song 2 moves from row 1 to right after the second copy of song 1: 1, 3, 1, 2.
+        val edits = listOf(QueueEdit.Move(entry = Song(2), after = Song(1), row = 3, from = 1))
+
+        assertThat(QueueJournal.replay(listOf(Song(1), Song(2), Song(3), Song(1)), edits))
+            .containsExactly(Song(1), Song(3), Song(1), Song(2))
+    }
+
+    @Test
+    fun onAChangedListTheNearestCopyToTheRowIsTheOneEdited() {
+        // The second copy of song 1 was removed at row 3 of 1, 2, 3, 1; a song came in at the front since.
+        val changed = listOf(Song(9), Song(1), Song(2), Song(3), Song(1))
+
+        assertThat(QueueJournal.replay(changed, listOf(QueueEdit.Remove(Song(1), row = 3))))
+            .containsExactly(Song(9), Song(1), Song(2), Song(3))
+    }
 }
