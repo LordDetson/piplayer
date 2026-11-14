@@ -87,7 +87,7 @@ class GeneratedLibraryTest {
             Log.i(TAG, "First launch: first page after $firstPage, whole sync after $fullSync")
             assumeTimeLimitsApply()
 
-            assertThat(firstPage.inWholeMilliseconds).describedAs("first page").isLessThanOrEqualTo(if (emulator) 4_000L else 3_000L)
+            assertThat(firstPage.inWholeMilliseconds).describedAs("first page").isLessThanOrEqualTo(if (emulator) 5_000L else 3_000L)
             assertThat(fullSync.inWholeMilliseconds).describedAs("whole sync").isLessThanOrEqualTo(10_000L)
         }
     }

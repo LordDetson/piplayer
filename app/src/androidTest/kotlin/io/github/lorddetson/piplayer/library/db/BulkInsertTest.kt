@@ -90,7 +90,7 @@ class BulkInsertTest {
         writeAll(texts.mapIndexed { i, text -> Values(i + 1L, text = text) })
 
         assertThat(stored().map { it[1] }).containsExactlyElementsOf(
-            listOf("cut�", "�alone", "a�'q�", "pair 😀").map { hexOf(it.encodeToByteArray()) },
+            listOf("cut\uFFFD", "\uFFFDalone", "a\uFFFD'q\uFFFD", "pair 😀").map { hexOf(it.encodeToByteArray()) },
         )
     }
 
@@ -160,10 +160,7 @@ class BulkInsertTest {
         }
     }
 
-    @Test
-    fun noBulkStatementStaysPreparedAfterItsWrite() {
-        // Room keeps prepared statements by their text; a bulk statement's text is its rows and never comes again.
-        val driver = CountingDriver(BundledSQLiteDriver()) { it.startsWith("INSERT OR REPLACE INTO t ") }
+    private fun withCountingDatabase(driver: CountingDriver, block: suspend PooledConnection.() -> Unit) {
         val counted = Room.inMemoryDatabaseBuilder<LibraryDatabase>(TestFiles.targetContext)
             .setDriver(driver)
             .setQueryCoroutineContext(Dispatchers.IO)
@@ -172,14 +169,39 @@ class BulkInsertTest {
             runBlocking {
                 counted.withWriteTransaction {
                     usePrepared("CREATE TABLE t (id INTEGER PRIMARY KEY, s TEXT, n INTEGER, f INTEGER, b BLOB, kept TEXT)") { it.step() }
-                    write(List(4_321) { i -> Values(i + 1L, text = "row $i") })
-                    assertThat(driver.live.get()).describedAs("bulk statements still prepared").isZero()
+                    block()
                 }
             }
-            assertThat(driver.prepared.get()).describedAs("bulk statements").isEqualTo(3)
         } finally {
             counted.close()
         }
+    }
+
+    @Test
+    fun noLargeBulkStatementStaysPreparedAfterItsWrite() {
+        // Room keeps prepared statements by their text; a bulk statement's text is its rows and never comes again.
+        val driver = CountingDriver(BundledSQLiteDriver()) { it.startsWith("INSERT OR REPLACE INTO t ") }
+        // Long enough that the last statement, of 321 rows, is a large one too.
+        val padding = "x".repeat(200)
+        assertThat(321 * padding.length).isGreaterThan(LARGE_STATEMENT)
+
+        withCountingDatabase(driver) {
+            write(List(4_321) { i -> Values(i + 1L, text = "row $i $padding") })
+            assertThat(driver.live.get()).describedAs("bulk statements still prepared").isZero()
+        }
+        assertThat(driver.prepared.get()).describedAs("bulk statements").isEqualTo(3)
+    }
+
+    @Test
+    fun aSmallBulkWriteKeepsTheConnectionsOtherStatementsPrepared() {
+        // As a batch of the tag pass between the statements of its transaction.
+        val driver = CountingDriver(BundledSQLiteDriver()) { it == COUNT }
+        withCountingDatabase(driver) {
+            usePrepared(COUNT) { it.step() }
+            write(List(3) { i -> Values(i + 1L, text = "row $i") })
+            usePrepared(COUNT) { it.step() }
+        }
+        assertThat(driver.prepared.get()).describedAs("times the statement before the write was prepared").isEqualTo(1)
     }
 
     @Test
@@ -256,5 +278,6 @@ class BulkInsertTest {
     private companion object {
         const val ROWS = "SELECT id, hex(s), typeof(s), n, typeof(n), f, typeof(f), hex(b), typeof(b), kept FROM t ORDER BY id"
         const val SCHEMA = "SELECT type, name, tbl_name, sql FROM sqlite_master ORDER BY type, name"
+        const val COUNT = "SELECT count(*) FROM t"
     }
 }

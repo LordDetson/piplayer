@@ -66,7 +66,7 @@ class SqlRowsTest {
         )
 
         assertThat(sql).isEqualTo(
-            "('cut�'),('�alone'),('a�''q�'),('pair 😀'),(CAST(X'6e756c00efbfbd' AS TEXT))",
+            "('cut\uFFFD'),('\uFFFDalone'),('a\uFFFD''q\uFFFD'),('pair 😀'),(CAST(X'6e756c00efbfbd' AS TEXT))",
         )
     }
 
@@ -88,8 +88,8 @@ class SqlRowsTest {
         for ((i, c) in value.withIndex()) {
             when {
                 c == '\'' -> append("''")
-                c.isHighSurrogate() && value.getOrNull(i + 1)?.isLowSurrogate() != true -> append('�')
-                c.isLowSurrogate() && value.getOrNull(i - 1)?.isHighSurrogate() != true -> append('�')
+                c.isHighSurrogate() && value.getOrNull(i + 1)?.isLowSurrogate() != true -> append('\uFFFD')
+                c.isLowSurrogate() && value.getOrNull(i - 1)?.isHighSurrogate() != true -> append('\uFFFD')
                 else -> append(c)
             }
         }

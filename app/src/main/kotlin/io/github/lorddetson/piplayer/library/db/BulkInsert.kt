@@ -123,7 +123,7 @@ internal class SqlRows(private val sql: StringBuilder = StringBuilder()) {
 
     private companion object {
         const val NULL = "NULL"
-        const val REPLACEMENT = '�'
+        const val REPLACEMENT = '\uFFFD'
         const val HEX = "0123456789abcdef"
     }
 }
@@ -191,7 +191,8 @@ internal suspend fun <T> PooledConnection.replaceInChunks(
             buildAhead()
             if (sql != null) {
                 usePrepared(sql) { it.step() }
-                forgetLastStatement()
+                // A small one may stay: pushing it out would also push out the statements of the transaction around it.
+                if (sql.length >= LARGE_STATEMENT) forgetLastStatement()
             }
         }
     }
@@ -205,6 +206,12 @@ internal suspend fun <T> PooledConnection.replaceInChunks(
 private suspend fun PooledConnection.forgetLastStatement() {
     for (sql in EVICTING) usePrepared(sql) { }
 }
+
+/**
+ * The length of a statement's text from which it is pushed out of Room's cache after it runs: a write of a few dozen
+ * files stays under it, and the [ROOM_STATEMENT_CACHE] such statements the cache keeps at most hold under a megabyte.
+ */
+internal const val LARGE_STATEMENT = 32 * 1024
 
 /** Room's default size of the cache of prepared statements of a connection (BulkInsertTest checks it). */
 internal const val ROOM_STATEMENT_CACHE = 25

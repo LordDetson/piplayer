@@ -1,6 +1,9 @@
 package io.github.lorddetson.piplayer.library.sync
 
+import io.github.lorddetson.piplayer.library.sort.Collation
+import io.github.lorddetson.piplayer.library.sort.SortKey
 import io.github.lorddetson.piplayer.library.sort.SortKeys
+import java.util.Locale
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.github.lorddetson.piplayer.TestFiles
 import io.github.lorddetson.piplayer.library.FakeMediaIndex
@@ -655,6 +658,63 @@ class LibrarySyncTest {
         assertThat(dao.volumes()).isEmpty()
         assertThat(sync.status.value.ready).isTrue()
         assertThat(sync.status.value.known).describedAs("the library knows its folders").isFalse()
+    }
+
+    /** A first sync of 5 000 files, whose file 4 500 fails in the last chunk, after the files and entries are written. */
+    private fun assertAFailedFirstSyncWritesNothing() = runBlocking<Unit> {
+        index.volume().rows = List(5_000) { i -> row(i + 1L, title = if (i + 1 == 4_500) "Poison" else "Song ${i + 1}") }
+        val schema = schemaOf(database)
+
+        assertThat(sync.sync()).isFalse()
+
+        assertThat(dao.files()).isEmpty()
+        assertThat(dao.entries()).isEmpty()
+        assertThat(dao.displays()).isEmpty()
+        assertThat(dao.volumes()).isEmpty()
+        assertThat(schemaOf(database)).describedAs("indexes").isEqualTo(schema)
+        assertThat(sync.status.value.ready).isTrue()
+        assertThat(sync.status.value.known).isFalse()
+    }
+
+    @Test
+    fun aFirstSyncWhoseResolvingFailsWritesNothing() {
+        val factory = SortKeys.factory
+        val appLanguages = context.resources.configuration.locales.let { list -> (0 until list.size()).map { list[it] } }
+        // Keys of the poisoned title fail, as a resolver chunk that throws.
+        SortKeys.factory = { locales ->
+            val collation = factory(locales)
+            object : Collation by collation {
+                override fun newKeys(): (String) -> SortKey {
+                    val keys = collation.newKeys()
+                    return { text -> check(!text.contains("poison", ignoreCase = true)) { "Resolving failed" }; keys(text) }
+                }
+            }
+        }
+        try {
+            SortKeys.use(listOf(Locale.forLanguageTag("is")))
+            assertAFailedFirstSyncWritesNothing()
+        } finally {
+            SortKeys.factory = factory
+            SortKeys.use(appLanguages)
+        }
+
+        // Nothing of the failed sync is left in the way of the next one.
+        runBlocking { assertThat(sync.sync()).isTrue() }
+        assertThat(files()).hasSize(5_000)
+    }
+
+    @Test
+    fun aFirstSyncWhoseWriteFailsWritesNothing() {
+        runBlocking {
+            database.withWriteTransaction {
+                usePrepared(
+                    "CREATE TRIGGER poisoned BEFORE INSERT ON display_artist WHEN NEW.name = 'Artist 4500' " +
+                        "BEGIN SELECT RAISE(ABORT, 'Writing failed'); END",
+                ) { it.step() }
+            }
+        }
+
+        assertAFailedFirstSyncWritesNothing()
     }
 
     @Test
