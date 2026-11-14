@@ -6,6 +6,7 @@ import android.net.Uri
 import android.os.storage.StorageManager
 import android.provider.DocumentsContract
 import android.provider.OpenableColumns
+import io.github.lorddetson.piplayer.R
 import io.github.lorddetson.piplayer.library.Library
 import io.github.lorddetson.piplayer.library.values.LegacyText
 import io.github.lorddetson.piplayer.settings.LibrarySettings
@@ -28,7 +29,8 @@ class PlaylistFiles(context: Context) {
             if (read.size > MAX_BYTES) throw IOException("The playlist is larger than $MAX_BYTES bytes")
             read
         } ?: throw IOException("The playlist could not be opened")
-        val name = displayName(uri)?.let { it.substringBeforeLast('.').ifBlank { it } }.orEmpty()
+        val name = displayName(uri)?.let { it.substringBeforeLast('.').ifBlank { it } }?.takeIf { it.isNotBlank() }
+            ?: app.getString(R.string.playlist_default_name)
         val folder = if (DocumentsContract.isDocumentUri(app, uri)) M3uPaths.folderOf(uri.authority, DocumentsContract.getDocumentId(uri)) else null
         val text = M3u.decode(bytes, cyrillicLanguage(), LibrarySettings(app).readLegacyEncoding())
         if (Library.mayRead(app)) Library.awaitReady(app, READY_TIMEOUT_MS)

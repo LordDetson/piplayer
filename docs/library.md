@@ -1421,7 +1421,8 @@ Decision: an entry never points at a file. It refers to a track identity (§8.1)
   the song is not in the library now. Each row has a drag handle, and a menu with "Play next", "Add to queue", "Move up",
   "Move down" and "Remove from playlist"; "Move up" and "Move down" are also the row's accessibility actions, so TalkBack
   and switch access reorder without dragging. Removing says so with "Undo", which puts the entry back in its place. The
-  page has no sort and no search: the playlist's order is the user's.
+  page has no sort and no search: the playlist's order is the user's. A playlist deleted while its page is open closes
+  the page; a page opened for a playlist that is gone says so.
 - "Add to playlist" is in the song menu after "Add to queue", and in the menus of album, artist and folder rows and page
   top bars. It opens a chooser with "New playlist" first and the playlists by name; the songs go to the end of the chosen
   playlist, an album's by disc and track, an artist's and a folder's (with its subfolders) in the sort kept for their kind,
@@ -1494,4 +1495,5 @@ Instrumented tests on the API 30 emulator:
   device gives the same songs; a legacy `.m3u` reads.
 - On the screen: create, rename and delete with the confirmation; "Add to playlist" from the song menu with "New
   playlist" and from an album's menu; the page plays from an entry, moves entries with the accessibility actions, removes
-  one and puts it back with "Undo"; a playlist of 5 000 entries scrolls to its end and moves its last entry.
+  one and puts it back with "Undo", and closes when its playlist is deleted from its menu; a playlist of 5 000 entries
+  scrolls to its end and moves its last entry.

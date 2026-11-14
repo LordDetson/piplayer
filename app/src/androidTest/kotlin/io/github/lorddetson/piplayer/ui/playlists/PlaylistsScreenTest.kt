@@ -205,6 +205,22 @@ class PlaylistsScreenTest {
     }
 
     @Test
+    fun deletingAPlaylistFromItsPageClosesThePage() {
+        songsPlaylist(1)
+        tab(R.string.tab_playlists)
+        tap(hasText("Mix") and hasAnyAncestor(hasTestTag(PlaylistTags.LIST)))
+        compose.waitUntilAtLeastOneExists(hasTestTag(PlaylistTags.PAGE_LIST), timeoutMillis = 10_000)
+
+        tap(hasContentDescription(text(R.string.page_menu)))
+        tap(hasText(text(R.string.playlist_delete)))
+        tap(inDialog(hasText(text(R.string.playlist_delete))))
+
+        compose.waitUntil(10_000) { named("Mix").isEmpty() }
+        compose.waitUntilAtLeastOneExists(hasText(text(R.string.playlists_none)), timeoutMillis = 10_000)
+        compose.waitUntilDoesNotExist(hasTestTag(PlaylistTags.PAGE_LIST), timeoutMillis = 10_000)
+    }
+
+    @Test
     fun aLargePlaylistScrollsToItsEndAndMovesItsLastEntry() {
         // 5 000 entries, the size of TI's budget (§10.2), each by its place.
         val id = runBlocking {
