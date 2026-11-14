@@ -93,6 +93,8 @@ class SongMenu(
     val covers: CoverActions? = null,
     /** "Add to favorites" or "Remove from favorites" (docs/library.md §15.2). */
     val favorites: FavoriteActions? = null,
+    /** "Add to playlist" (docs/library.md §16.3). */
+    val addToPlaylist: ((Song) -> Unit)? = null,
 )
 
 /** What the song menu does with favorites (docs/library.md §15.2): whether a song is one, and making it one or not. */
@@ -359,6 +361,12 @@ private fun SongMenuButton(song: Song, menu: SongMenu) {
                 open = false
                 menu.addToQueue(song)
             })
+            menu.addToPlaylist?.let { add ->
+                DropdownMenuItem(text = { Text(stringResource(R.string.add_to_playlist)) }, onClick = {
+                    open = false
+                    add(song)
+                })
+            }
             val found = links
             found?.albumKey?.let { key ->
                 DropdownMenuItem(text = { Text(stringResource(R.string.go_to_album)) }, onClick = {

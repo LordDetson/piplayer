@@ -80,10 +80,10 @@ interface UserDao {
     )
     suspend fun countRulesChange()
 
-    /** The identities that user data refers to, which the attach pass never deletes (docs/library.md §8.1, §15). */
+    /** The identities that user data refers to, which the attach pass never deletes (docs/library.md §8.1, §15, §16.2). */
     @Query(
         "SELECT identity_id FROM track_cover UNION SELECT identity_id FROM favorite UNION SELECT identity_id FROM play_event " +
-            "UNION SELECT identity_id FROM play_stats",
+            "UNION SELECT identity_id FROM play_stats UNION SELECT identity_id FROM playlist_entry WHERE identity_id IS NOT NULL",
     )
     suspend fun identitiesHoldingData(): List<Long>
 }
@@ -103,16 +103,17 @@ class RulesCounterMigration : AutoMigrationSpec {
     entities = [
         FolderRuleEntity::class, UserMetaEntity::class, TrackIdentityEntity::class, TrackCoverEntity::class,
         AlbumCoverEntity::class, FavoriteEntity::class, FavoriteAlbumEntity::class, AlbumMemberEntity::class,
-        PlayEventEntity::class, PlayStatsEntity::class,
+        PlayEventEntity::class, PlayStatsEntity::class, PlaylistEntity::class, PlaylistEntryEntity::class,
     ],
-    version = 4,
+    version = 5,
     exportSchema = true,
     // Version 2 adds the track identities (docs/library.md §8.1), version 3 the own covers (§13.2), version 4 favorites,
-    // album members, plays and the rules counter (§15.1).
+    // album members, plays and the rules counter (§15.1), version 5 playlists (§16.1).
     autoMigrations = [
         AutoMigration(from = 1, to = 2),
         AutoMigration(from = 2, to = 3),
         AutoMigration(from = 3, to = 4, spec = RulesCounterMigration::class),
+        AutoMigration(from = 4, to = 5),
     ],
 )
 abstract class UserDatabase : RoomDatabase() {
@@ -126,6 +127,8 @@ abstract class UserDatabase : RoomDatabase() {
     abstract fun favorites(): FavoriteDao
 
     abstract fun plays(): PlayDao
+
+    abstract fun playlists(): PlaylistDao
 
     companion object {
         const val NAME = "user.db"

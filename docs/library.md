@@ -202,8 +202,8 @@ The data model it implements is sketched in track-identification.md §10 (TI bel
     - `user_meta(id, change_counter)`: one row whose counter goes up in the same transaction as every write of user
       data, so that the library database can tell whether it still mirrors it (TI §10.3).
 - Version 2 adds the track identities (§8.1), version 3 the references of own covers (§13.2), version 4 favorites,
-  favorite albums, their album members and play statistics (§15.1). Later tables (playlists, decisions) arrive with
-  their milestones.
+  favorite albums, their album members and play statistics (§15.1), version 5 playlists (§16.1). Later tables
+  (decisions) arrive with their milestones.
 - Since version 4 `user_meta` also has `rules_counter`, which goes up only with the folder rules: the sync applies the
   rules again when it changes (§3.4), so that a favorite or a play does not make the sync walk the rules and read the
   lists again. `change_counter` goes up with every write the library database mirrors (folder rules, favorites,
@@ -584,7 +584,8 @@ keeps playing meanwhile, and the crash leaves a native crash report of `:tagger`
 - A tap sends a compact request of version 2 (playback.md §2.3) that names the list, its key, the sort, the reverse
   and the search: `q2/<list>?key=<key>&sort=<field>&rev=<0|1>&q=<query>&start=<ID>&index=<row>`, the key and the query
   percent-encoded, the start the song's file ID (§8.4). The lists are `songs` (no key), `album` (its album key), `artist` (its artist key), `folder` (the
-  volume, `/` and the relative path) and `tree` (a folder with all its subfolders).
+  volume, `/` and the relative path), `tree` (a folder with all its subfolders) and, since M2b, `playlist` (its
+  playlist ID, with the sort `position`, §16.4).
 - `tree` plays the folder's own songs first, in the folder page's sort, then each subfolder in name order, in turn with
   its own songs first. "Reverse order" reverses the whole list.
 - The service expands a request from the list the screen shows when it holds the start song, otherwise by reading the
@@ -691,7 +692,7 @@ saved queue that refers to identities is in playback.md §4.
 - `missing_since` is empty while a file holds the identity's key and is set when none does any more. An identity that
   holds no user data and has been missing for 30 days is deleted: a deleted file, an SD card left out of the phone. An
   identity that holds user data is never deleted. User data that refers to identities: a song's own cover (§13.2), a
-  favorite, play events and play statistics (§15); playlists (M2b) and decisions (M3) will add theirs. Album members
+  favorite, play events and play statistics (§15), playlist entries (§16.2); decisions (M3) will add theirs. Album members
   (§15.3) are not user data: they never keep an identity.
 - Attaching changes no user data, so it does not raise the user database's change counter (§3.1). Nothing is written
   into the library database: lists do not need the identity, and the two files keep no row IDs of each other (TI §10).
@@ -1355,3 +1356,142 @@ Instrumented tests on the API 30 emulator:
   song's play by its identity (opened files and songs without one not at all) and ending its writer when closed.
 - On the screen: the toggle on Now Playing and in the song menu, on the album page, and the Favorites chip of the
   Albums tab.
+
+## 16. Playlists (M2b: PIM-31)
+
+The tables are in TI §10.2, the re-attachment step of playlist hints in TI §3.1 and the queue request in playback.md
+§2.3. The owner left the open choices to the recommendations (14.11.2026); they are marked "decision".
+
+### 16.1 What `user.db` version 5 adds
+
+- `playlist(id, name, created_at, updated_at)`: a playlist. Its name is trimmed and must not be blank; two playlists may
+  have the same name (decision). `updated_at` changes with every change of its name or entries.
+- `playlist_entry(id, playlist_id, position, identity_id, hint_volume_name, hint_relative_path, hint_display_name,
+  hint_duration_ms, hint_content_key, hint_recording_mbid, hint_title, hint_artist)`: an entry. Positions run from 0
+  without gaps; every change keeps them so in one transaction. The row ID keeps an entry apart from another of the same
+  song: the same song may stand in one playlist more than once (decision). `hint_title` and `hint_artist` (beyond TI's
+  first sketch) give an entry without a file something to show and to export.
+- No foreign keys: deleting a playlist deletes its entries in the same transaction.
+- Version 4 migrates by an automatic migration with the exported schema `5.json`; a test runs it on a database of
+  version 4 with rows.
+- Playlist writes do not raise the change counter of §3.1: nothing of a playlist is mirrored (§16.5).
+
+### 16.2 How an entry finds its file
+
+Decision: an entry never points at a file. It refers to a track identity (§8.1), or, while it has none, only to its hints.
+
+- An entry made from a song of the library takes the song's identity when it has one, and in any case the file's place,
+  length and content key as hints, and the identity's recording MBID. A song whose tags are not read yet has no identity;
+  its entry is made with the hints alone and gets the identity later (below), so adding never waits for the tag pass.
+  Such an entry keeps no length hint (decision): the index's length before the tag pass can be far off for a VBR MP3
+  without a header (§3.5), so its place alone names it until it is linked.
+- An entry with an identity plays the first available location of that identity (TI §3.1): the file at the identity's
+  hinted place, else the one at the entry's hinted place, else the copy with the lowest file ID. Nothing weaker: while no
+  file holds the identity's key, the entry is unavailable, even when another file lies at its old place.
+- An entry without an identity plays the file that holds its hinted content key, else the file at its hinted place whose
+  length is within 1 s of the hinted one (any length when either is unknown).
+- Available means a file of the library database: the hidden kinds and short files of §3.5 play from a playlist, since
+  the user put them there; files of excluded folders (§3.4) do not.
+- An unavailable entry stays in its playlist in its place, shown as "Not in the library", and is skipped when the
+  playlist plays. It comes back when a matching file appears:
+    - by the identity's own re-attachment (key, place with length, MBID, fingerprint), which favorites share;
+    - by step 5 of TI §3.1: a missing identity that entries refer to takes the key of the one unattached file that
+      matches one of their hints by place and length, by display name (ignoring case) and length, or by recording MBID
+      and length, when exactly one such file exists and no other missing identity could take it. It runs in the attach
+      pass after step 3 (§8.2), before new identities are made;
+    - an entry without an identity is linked by every attach pass to the identity of the file its hints name, in this
+      order: the content key, the place with the length, the display name ignoring case with the length (any length when
+      the hint has none), the recording MBID with the length. A name that several files carry goes to the one whose
+      folder path ends most like the hinted one, then to the lowest file ID, the rule of the import (§16.6). Linking
+      writes only `identity_id`.
+- Identities that entries refer to hold user data: they are never deleted (§8.1).
+
+### 16.3 Screens
+
+- Decision: the Playlists list is a tab after Folders. Its content is one composable that PIM-64 can move among the
+  browse categories. It starts with "New playlist" and "Import" and lists the playlists by name (the collator of the
+  locale), each with its number of songs; the top bar's search filters them by name, and the tab has no sort. With none
+  it says "No playlists yet".
+- "New playlist" and "Rename" open a dialog with a name field; its confirm button stays off while the name is blank.
+- A playlist row's menu has "Play", "Play next", "Add to queue", "Rename", "Export" and "Delete". Decision: "Delete" asks
+  for a confirmation that names the playlist and says that its songs stay in the library; there is no undo.
+- A tap opens the playlist page: the top bar with back, the name and a menu with "Play next", "Add to queue", "Rename",
+  "Export" and "Delete"; under it the number of songs (and of those not in the library), "Play", and the entries in their
+  order. A tap on an available entry plays the playlist's available entries from it; a tap on an unavailable one says that
+  the song is not in the library now. Each row has a drag handle, and a menu with "Play next", "Add to queue", "Move up",
+  "Move down" and "Remove from playlist"; "Move up" and "Move down" are also the row's accessibility actions, so TalkBack
+  and switch access reorder without dragging. Removing says so with "Undo", which puts the entry back in its place. The
+  page has no sort and no search: the playlist's order is the user's.
+- "Add to playlist" is in the song menu after "Add to queue", and in the menus of album, artist and folder rows and page
+  top bars. It opens a chooser with "New playlist" first and the playlists by name; the songs go to the end of the chosen
+  playlist, an album's by disc and track, an artist's and a folder's (with its subfolders) in the sort kept for their kind,
+  as "Add to queue" takes them (playback.md §9.1). A message says "Added to <name>", with the number for more than one song.
+- A playlist of 5 000 entries scrolls and reorders without reading on the main thread: the page reads and resolves
+  entries on a background thread, a drag moves the row in memory, and the move is written when it is dropped, in one
+  transaction off the main thread.
+
+### 16.4 Playing
+
+- A playlist plays through a compact request of the list `playlist` (`q2/playlist?key=<playlist ID>&sort=position...`,
+  playback.md §2.3) whose songs are its available entries in order. The request's start row picks the tapped copy of a
+  song that stands more than once.
+- The list of a playlist is not kept between reads (§6.4): every request reads the playlist as it is, since an edit does
+  not change the library's revision.
+- A saved queue of a playlist restores the playlist as it is then, like every list (playback.md §4); one deleted since
+  keeps only its added and opened entries, like a list whose songs are all gone.
+
+### 16.5 The library database
+
+- Decision: nothing of playlists is mirrored into the library database. The playlist page and the queue resolve entries
+  by content key and place against `audio_file` and `track_display`, with one query of each kind for a whole playlist (a
+  JSON parameter, as the mirror of §15.4 uses), and no list of the library tabs needs playlist membership. The library
+  database's version stays 10.
+- So playlists survive a media index rebuild, moves and renames, a rebuild of the library and a deletion of the library
+  database: their entries refer to identities and hints of the user database, which come back with the keys.
+
+### 16.6 M3U8 import and export
+
+- In 1.0 both go through the system file picker (TI §7.3): export with `ACTION_CREATE_DOCUMENT` (suggested name
+  `<name>.m3u8`, type `audio/x-mpegurl`), import with `ACTION_OPEN_DOCUMENT` for the playlist types and the generic types
+  that providers give `.m3u8` and `.m3u` files.
+- Export writes UTF-8 without a byte order mark: `#EXTM3U`, then per entry `#EXTINF:<seconds>,<artist> - <title>` (the
+  length rounded to the nearest second, `-1` when unknown, the title alone without an artist) and the file's path.
+  Decision: paths are absolute (`/storage/emulated/0/Music/...`: the volume's directory from the system's storage
+  volumes, `/storage/<volume>/` for a volume that is not attached). A document from the picker does not reliably have a
+  path to be relative to, and absolute paths round-trip on the same device; relative paths are read on import. An
+  unavailable entry is written from its hints: the identity's last place, else the entry's.
+- Import reads UTF-8, with or without a byte order mark. A file that is not valid UTF-8 (an old `.m3u`) is decoded as
+  the tags are (§5.7): in the manual legacy encoding when one is chosen, otherwise Windows-1251 for Cyrillic text under a
+  Cyrillic language and Latin-1 else. The name is the `#PLAYLIST:` line, else the document's name without its extension.
+- Each line that is not a comment names a file: an absolute path, a `file://` URI, a path relative to the playlist's
+  folder (when the picker's document names one, as documents of the system's storage provider do), or a Windows path, of
+  which only the name counts. Lines with another scheme (`http://`, streams) are dropped and counted as not found.
+- A line goes to a file of the library: the same place, then the same place ignoring case, then the same display name
+  ignoring case with a length within 1 s of `#EXTINF` (any length when it gives none); a name that several files carry
+  goes to the one whose folder path ends most like the line's, then to the lowest file ID. A found file makes an entry as
+  a song added from the library does (§16.2). Decision: a line that finds nothing is kept as an unavailable entry with
+  its hints (place, name, length, title and artist from `#EXTINF`), so that the song comes back when its file appears.
+- A message says how many songs were found: "Imported <name>: 12 of 15 songs found".
+
+### 16.7 Checks
+
+JVM tests: step 5 of re-attachment and the linking of entries without an identity (each hint, a hint that two files or
+two identities match, the order of the tiers, the path-suffix choice); the resolution of entries to files (the identity's
+hinted copy first, no place guess for an entry with an identity, the hint key and then the place for one without); M3U8
+parsing (byte order mark, CRLF, comments, `#EXTINF` with and without an artist or length, `#PLAYLIST`, `file://`,
+Windows and relative paths, streams) and writing, the legacy decoding of a Windows-1251 `.m3u`, the paths of volumes; the
+matching of lines; the queue request of the list `playlist` and the start row of a song that stands twice.
+
+Instrumented tests on the API 30 emulator:
+
+- `user.db` from version 4 to 5 with rows of version 4 (`MigrationTestHelper`).
+- The playlists on the real user database: create, rename, delete with the entries, add with duplicates, remove and put
+  back, moves with positions kept without gaps, blank names refused, no change counter raised.
+- Through the real library: entries resolve after a file moves, is renamed, after an index rebuild with new IDs, after a
+  rebuild of the library and after a deletion of the library database; an entry of a deleted file is unavailable and
+  comes back with the file; an entry added before the tag pass read its song plays and is linked once the song has an
+  identity; an imported line that found nothing comes back when its file appears; an export imported again on the same
+  device gives the same songs; a legacy `.m3u` reads.
+- On the screen: create, rename and delete with the confirmation; "Add to playlist" from the song menu with "New
+  playlist" and from an album's menu; the page plays from an entry, moves entries with the accessibility actions, removes
+  one and puts it back with "Undo"; a playlist of 5 000 entries scrolls to its end and moves its last entry.

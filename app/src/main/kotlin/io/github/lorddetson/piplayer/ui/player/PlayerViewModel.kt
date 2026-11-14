@@ -234,16 +234,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
      * The list of [target] without a search: an album by disc and track, an artist and a folder in the order kept for
      * their kind (docs/playback.md §9.1, docs/library.md §6.3).
      */
-    private suspend fun queryOf(target: QueueTarget): SongQuery {
-        val (query, list) = when (target) {
-            is QueueTarget.Album -> return SongQuery.album(target.key)
-            is QueueTarget.Artist -> SongQuery.artist(target.key) to ListName.ARTIST_PAGE
-            is QueueTarget.Folder -> SongQuery.tree(target.volume, target.relativePath) to ListName.FOLDERS
-            is QueueTarget.Songs -> return SongQuery.SONGS
-        }
-        val order = ListSorts(getApplication()).order(list).first()
-        return query.copy(sort = SongSort.of(order.field) ?: query.sort, reversed = order.reversed)
-    }
+    private suspend fun queryOf(target: QueueTarget): SongQuery = QueueTarget.queryOf(getApplication(), target)
 
     /** Removes the queue entry at [row] that shows [mediaId], with "Undo" in the message (docs/playback.md §9.2). */
     fun removeFromQueue(row: Int, mediaId: String, title: String) {
@@ -355,4 +346,25 @@ sealed interface QueueTarget {
 
     /** A folder with all its subfolders. */
     data class Folder(val volume: String, val relativePath: String) : QueueTarget
+
+    /** A playlist's available entries in order (docs/library.md §16.3). */
+    data class Playlist(val id: Long) : QueueTarget
+
+    companion object {
+        /**
+         * The list of [target] without a search: an album by disc and track, an artist and a folder in the order kept for
+         * their kind, a playlist in its own order (docs/playback.md §9.1, docs/library.md §6.3, §16.3).
+         */
+        suspend fun queryOf(context: android.content.Context, target: QueueTarget): SongQuery {
+            val (query, list) = when (target) {
+                is Album -> return SongQuery.album(target.key)
+                is Artist -> SongQuery.artist(target.key) to ListName.ARTIST_PAGE
+                is Folder -> SongQuery.tree(target.volume, target.relativePath) to ListName.FOLDERS
+                is Playlist -> return SongQuery.playlist(target.id)
+                is Songs -> return SongQuery.SONGS
+            }
+            val order = ListSorts(context).order(list).first()
+            return query.copy(sort = SongSort.of(order.field) ?: query.sort, reversed = order.reversed)
+        }
+    }
 }

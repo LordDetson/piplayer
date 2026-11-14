@@ -45,6 +45,8 @@ class IdentityAttacher(
     private val ready: () -> Boolean = { true },
     /** Called after every pass, whatever it wrote: the mirror follows the keys (docs/library.md §15.4). */
     private val afterPass: () -> Unit = {},
+    /** The hints of playlist entries for step 5, and the linking of entries without an identity (docs/library.md §16.2). */
+    private val playlists: io.github.lorddetson.piplayer.library.playlists.PlaylistLinks? = null,
 ) {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -113,12 +115,15 @@ class IdentityAttacher(
         val dao = user.identities()
         val stored = dao.identities()
         val holding = holders()
-        val plan = IdentityMatcher.plan(files, stored.map(::identity), holding, now)
+        val hints = playlists?.identityHints().orEmpty()
+        val plan = IdentityMatcher.plan(files, stored.map(::identity), holding, now, hints)
         if (!plan.isEmpty) {
             write(plan, stored.associateBy { it.id }, now)
             changes.value++
         }
         fingerprints?.let { step -> takeOver(step, files, holding) }
+        // Entries without an identity take the one of the file their hints name, now that every settled file has one.
+        playlists?.link(files)
         dropStaleFingerprints(now)
         afterPass()
         plan

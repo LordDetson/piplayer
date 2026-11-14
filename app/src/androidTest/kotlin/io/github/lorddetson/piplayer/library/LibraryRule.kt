@@ -56,6 +56,8 @@ class LibraryRule(private val index: () -> MediaIndex? = { null }) : ExternalRes
             // Favorites and plays refer to identities too (docs/library.md §15).
             UserData.favorites(context).clear()
             UserData.plays(context).clear()
+            // Playlist entries refer to identities and places of the test before (docs/library.md §16).
+            UserData.playlists(context).clear()
             UserData.database(context).identities().deleteAll()
             val settings = LibrarySettings(context)
             settings.setShowSystemSounds(false)

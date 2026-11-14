@@ -263,6 +263,10 @@ interface LibraryDao {
     @RawQuery
     suspend fun folderCounts(query: RoomRawQuery): List<FolderCountRow>
 
+    /** Files with their display values, as playlists resolve and add them (docs/library.md §16), built by `PlaylistLibrary`. */
+    @RawQuery
+    suspend fun playlistFiles(query: RoomRawQuery): List<PlaylistFileRow>
+
     @Query(
         "SELECT d.file_id AS fileId, d.album_key AS albumKey, f.volume_name AS volume, f.relative_path AS relativePath " +
             "FROM track_display d JOIN audio_file f ON f.id = d.file_id WHERE d.file_id = :fileId",
@@ -516,6 +520,22 @@ data class SongPlaceRow(val fileId: Long, val albumKey: String?, val volume: Str
 
 /** A file with its ID and place, as a rebuild keeps it (docs/library.md §8.5). */
 data class StoredPlace(val fileId: Long, val volume: String, val relativePath: String, val displayName: String)
+
+/** A file with its place, key, stored length and display values, as a playlist entry finds it (docs/library.md §16.2). */
+data class PlaylistFileRow(
+    val fileId: Long,
+    val mediaStoreId: Long,
+    val volume: String,
+    val relativePath: String,
+    val displayName: String,
+    val contentKey: String?,
+    val fileDurationMs: Long?,
+    val title: String,
+    val artist: String?,
+    val album: String?,
+    val durationMs: Long?,
+    val discNumber: Int?,
+)
 
 /** A file with its content key, as the attach pass reads it. */
 data class KeyedFileRow(

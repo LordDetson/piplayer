@@ -5,6 +5,7 @@ import androidx.annotation.VisibleForTesting
 import io.github.lorddetson.piplayer.library.Library
 import io.github.lorddetson.piplayer.library.db.SongRow
 import io.github.lorddetson.piplayer.library.lists.LibraryLists
+import io.github.lorddetson.piplayer.library.lists.ListKind
 import io.github.lorddetson.piplayer.library.lists.SongQuery
 import io.github.lorddetson.piplayer.settings.HiddenFiles
 import io.github.lorddetson.piplayer.settings.LibrarySettings
@@ -68,6 +69,7 @@ object SongList {
      * call it off the main thread.
      */
     fun load(context: Context, fresh: Boolean = false, query: SongQuery = SongQuery.SONGS): List<Song> {
+        if (query.kind == ListKind.PLAYLIST) return playlistSongs(context, query)
         sourceOverride?.let { return load(it, fresh = fresh, query = query) }
         val app = context.applicationContext
         // Without access the library is not listed, as the media index would list nothing (docs/playback.md §2.2).
@@ -78,6 +80,18 @@ object SongList {
         return Library.read(app) { database ->
             load(LibrarySongSource(database, hidden, query), Library.revision() to hidden, fresh, query, Library.collation())
         }
+    }
+
+    /**
+     * A playlist's available songs in order, read anew every time and never kept: an edit of the playlist does not change
+     * the library's revision, by which kept lists go stale (docs/library.md §16.4).
+     */
+    private fun playlistSongs(context: Context, query: SongQuery): List<Song> {
+        val id = query.playlistId ?: return emptyList()
+        val app = context.applicationContext
+        if (sourceOverride != null || !Library.mayRead(app)) return emptyList()
+        Library.awaitReady(app, READY_TIMEOUT_MS)
+        return Library.playlists(app).songs(id)
     }
 
     /**

@@ -43,6 +43,7 @@ data class QueueRequest(val startSongId: Long, val startRow: Int, val list: Song
             if ((kind == ListKind.SONGS) != key.isEmpty()) return null
             val list = SongQuery(kind, key, sort, reversed == "1", search)
             if ((kind == ListKind.FOLDER || kind == ListKind.TREE) && list.folder == null) return null
+            if (kind == ListKind.PLAYLIST && list.playlistId == null) return null
             val id = start.toLongOrNull() ?: return null
             return QueueRequest(id, index.toInt(), list)
         }
@@ -59,9 +60,14 @@ data class QueueRequest(val startSongId: Long, val startRow: Int, val list: Song
             return request.copy(list = request.list.copy(key = key))
         }
 
-        /** Where the queue of [songs] starts for [request]: the start song, else its row, else -1 for an empty list. */
+        /**
+         * Where the queue of [songs] starts for [request]: its row when the start song stands there (the tapped copy of a
+         * song a playlist holds twice, docs/library.md §16.4), else the song's first row, else the row, else -1 for an
+         * empty list.
+         */
         fun startIndex(songs: List<Song>, request: QueueRequest): Int {
             if (songs.isEmpty()) return -1
+            if (songs.getOrNull(request.startRow)?.id == request.startSongId) return request.startRow
             val index = songs.indexOfFirst { it.id == request.startSongId }
             return if (index >= 0) index else request.startRow.coerceAtMost(songs.lastIndex)
         }

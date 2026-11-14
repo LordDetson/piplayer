@@ -106,6 +106,8 @@ import io.github.lorddetson.piplayer.ui.songs.rememberAudioAccess
 import io.github.lorddetson.piplayer.covers.CoverRequest
 import io.github.lorddetson.piplayer.ui.covers.CoverActions
 import io.github.lorddetson.piplayer.ui.covers.LibraryCover
+import io.github.lorddetson.piplayer.ui.playlists.PlaylistActions
+import io.github.lorddetson.piplayer.ui.playlists.PlaylistsContent
 
 object LibraryTags {
     const val TABS = "library_tabs"
@@ -134,9 +136,19 @@ class LibraryHost(
     val openFolder: (volume: String, relativePath: String) -> Unit,
     /** Own covers of songs and albums (docs/library.md §13.2). */
     val covers: CoverActions? = null,
+    /** Playlists: their tab, their pages and "Add to playlist" (docs/library.md §16.3). */
+    val playlists: PlaylistActions? = null,
 )
 
-private enum class LibraryTab(val label: Int) { SONGS(R.string.tab_songs), ALBUMS(R.string.tab_albums), ARTISTS(R.string.tab_artists), FOLDERS(R.string.tab_folders) }
+private enum class LibraryTab(val label: Int) {
+    SONGS(R.string.tab_songs),
+    ALBUMS(R.string.tab_albums),
+    ARTISTS(R.string.tab_artists),
+    FOLDERS(R.string.tab_folders),
+
+    /** After Folders (docs/library.md §16.3); PIM-64 may move it among the browse categories. */
+    PLAYLISTS(R.string.tab_playlists),
+}
 
 /**
  * The library screen (docs/library.md §6.1): the top bar with search, sort and the settings, the tabs Songs, Albums,
@@ -175,6 +187,8 @@ fun LibraryScreen(host: LibraryHost, onOpenSettings: () -> Unit) {
                 grid = artists.grid.collectAsStateWithLifecycle().value, onGrid = artists::setGrid,
             )
             LibraryTab.FOLDERS -> SortButton(ListName.FOLDERS, folders.order.collectAsStateWithLifecycle().value, folders::setOrder)
+            // Playlists sort by name only (docs/library.md §16.3).
+            LibraryTab.PLAYLISTS -> Unit
         }
     }
     Scaffold(
@@ -238,6 +252,7 @@ fun LibraryScreen(host: LibraryHost, onOpenSettings: () -> Unit) {
                 tiles = { list -> artistTiles(list, host) },
             ) { list -> artistItems(list, host) }
             LibraryTab.FOLDERS -> FolderContent(access, folders, folder = null, host, modifier, search, empty)
+            LibraryTab.PLAYLISTS -> host.playlists?.let { PlaylistsContent(host, it, search, modifier) }
         }
     }
 }
@@ -451,13 +466,22 @@ internal fun AlbumRow(album: AlbumGroup, host: LibraryHost) {
  * What a row's or a page's menu adds to the queue (docs/playback.md §9.1); an album's menu also chooses or removes its
  * own cover (docs/library.md §13.2).
  */
-internal class QueueMenu(val playNext: () -> Unit, val addToQueue: () -> Unit, val cover: CoverMenu? = null)
+internal class QueueMenu(
+    val playNext: () -> Unit,
+    val addToQueue: () -> Unit,
+    val cover: CoverMenu? = null,
+    /** "Add to playlist" (docs/library.md §16.3). */
+    val addToPlaylist: (() -> Unit)? = null,
+)
 
 /** "Choose cover", and "Remove own cover" while [hasOwn]. */
 internal class CoverMenu(val choose: () -> Unit, val remove: () -> Unit, val hasOwn: suspend () -> Boolean)
 
-internal fun queue(host: LibraryHost, target: QueueTarget) =
-    QueueMenu(playNext = { host.addToQueue(target, true) }, addToQueue = { host.addToQueue(target, false) })
+internal fun queue(host: LibraryHost, target: QueueTarget) = QueueMenu(
+    playNext = { host.addToQueue(target, true) },
+    addToQueue = { host.addToQueue(target, false) },
+    addToPlaylist = host.playlists?.let { playlists -> { playlists.addToPlaylist(target) } },
+)
 
 /** The menu of the album [key]: the queue, and its own cover. */
 internal fun albumMenu(host: LibraryHost, key: String) = QueueMenu(
@@ -466,6 +490,7 @@ internal fun albumMenu(host: LibraryHost, key: String) = QueueMenu(
     cover = host.covers?.let { covers ->
         CoverMenu(choose = { covers.chooseForAlbum(key) }, remove = { covers.removeForAlbum(key) }, hasOwn = { covers.albumHasOwn(key) })
     },
+    addToPlaylist = host.playlists?.let { playlists -> { playlists.addToPlaylist(QueueTarget.Album(key)) } },
 )
 
 /** The menu button of a row or a page with "Play next" and "Add to queue". */
@@ -487,6 +512,12 @@ internal fun QueueMenuButton(description: String, menu: QueueMenu) {
                 open = false
                 menu.addToQueue()
             })
+            menu.addToPlaylist?.let { add ->
+                DropdownMenuItem(text = { Text(stringResource(R.string.add_to_playlist)) }, onClick = {
+                    open = false
+                    add()
+                })
+            }
             menu.cover?.let { cover ->
                 DropdownMenuItem(text = { Text(stringResource(R.string.cover_choose)) }, onClick = {
                     open = false

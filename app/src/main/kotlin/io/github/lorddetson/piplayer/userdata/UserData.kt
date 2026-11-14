@@ -21,4 +21,6 @@ object UserData {
     fun favorites(context: Context) = Favorites(database(context))
 
     fun plays(context: Context) = PlayStats(database(context))
+
+    fun playlists(context: Context) = Playlists(database(context))
 }

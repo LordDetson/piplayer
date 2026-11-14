@@ -71,7 +71,14 @@ object IdentityMatcher {
      * The changes that attach [identities] to [files]: [holdingData] are the identities that user data refers to, which
      * are never deleted; [now] is the time of the pass.
      */
-    fun plan(files: List<KeyedFile>, identities: List<Identity>, holdingData: Set<Long>, now: Long): AttachPlan {
+    fun plan(
+        files: List<KeyedFile>,
+        identities: List<Identity>,
+        holdingData: Set<Long>,
+        now: Long,
+        /** The hints of the playlist entries of each identity, for step 5 (docs/library.md §16.2). */
+        playlistHints: Map<Long, List<io.github.lorddetson.piplayer.library.playlists.EntryHint>> = emptyMap(),
+    ): AttachPlan {
         val filesByKey = files.groupBy { it.contentKey }
         val heldKeys = identities.mapTo(HashSet()) { it.contentKey }
         val result = LinkedHashMap<Long, Identity>()
@@ -115,6 +122,15 @@ object IdentityMatcher {
             if (!withinWindow(file.durationMs, identity.durationMs)) continue
             unattached -= file
             result[identity.id] = identity.following(file)
+        }
+
+        // Step 5 of TI §3.1: the hints of playlist entries (docs/library.md §16.2).
+        if (playlistHints.isNotEmpty()) {
+            val left = missing.filter { it.id !in result }
+            for ((id, file) in io.github.lorddetson.piplayer.library.playlists.PlaylistHints.reattach(left, playlistHints, unattached)) {
+                unattached -= file
+                result[id] = left.first { it.id == id }.following(file)
+            }
         }
 
         // What stays missing is marked, and goes after a while unless user data refers to it.

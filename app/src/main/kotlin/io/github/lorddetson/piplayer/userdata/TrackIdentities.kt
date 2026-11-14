@@ -50,6 +50,10 @@ interface TrackIdentityDao {
     @Query("SELECT id FROM track_identity WHERE content_key = :contentKey AND start_ms = 0")
     suspend fun idOfKey(contentKey: ByteArray): Long?
 
+    /** The identities of [keys] (at most 500 at once), for new playlist entries (docs/library.md §16.2). */
+    @Query("SELECT * FROM track_identity WHERE start_ms = 0 AND content_key IN (:keys)")
+    suspend fun withKeys(keys: List<ByteArray>): List<TrackIdentityEntity>
+
     @Insert
     suspend fun add(identity: TrackIdentityEntity): Long
 
