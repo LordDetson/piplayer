@@ -21,7 +21,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
@@ -132,6 +134,14 @@ class PlaybackStateStore internal constructor(
     }
 
     fun readBlocking(): PlaybackSnapshot? = runBlocking { read() }
+
+    /**
+     * The saved state each time a write changes it, starting with the one on disk. A test collects it to see a state
+     * that a later write replaces soon, such as the queue while a short song plays.
+     */
+    @VisibleForTesting
+    val saved: Flow<PlaybackSnapshot?>
+        get() = dataStore.data.map { it.toSnapshot() }
 
     /** Forgets the saved state in the background, after every write enqueued so far and before any enqueued after it. */
     fun enqueueClear() {

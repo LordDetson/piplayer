@@ -15,11 +15,12 @@ import io.github.lorddetson.piplayer.MainActivity
 import io.github.lorddetson.piplayer.R
 import io.github.lorddetson.piplayer.TestFiles
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.LONG_FIXTURE
-import io.github.lorddetson.piplayer.playback.PlaybackTesting.SHORT_FIXTURE
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.connectController
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.eventually
+import io.github.lorddetson.piplayer.playback.PlaybackTesting.expect
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.fileItem
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.onMain
+import io.github.lorddetson.piplayer.playback.PlaybackTesting.slowRunnerPause
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.stopAndRelease
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.tap
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.throughout
@@ -155,6 +156,9 @@ class PlaybackRestoreTest {
         }
     }
 
+    /** The media IDs of the queue in list order. */
+    private fun mediaIds(): List<String> = (0 until controller.mediaItemCount).map { controller.getMediaItemAt(it).mediaId }
+
     /** The media IDs of the queue in its shuffled play order. */
     private fun shuffledIds(): List<String> {
         val timeline = controller.currentTimeline
@@ -285,19 +289,18 @@ class PlaybackRestoreTest {
                 isPlaying && currentMediaItem?.mediaId == "2" && mediaItemCount == 3
             }
 
-            openInApp(opened).use {
-                controller.waitUntil("the opened file plays right after Bravo") {
+            SavedStates(store).use { saves ->
+                val plays = controller.expect("the opened file plays right after Bravo", capture = { mediaIds() }) {
                     isPlaying && mediaItemCount == 4 && currentMediaItem?.mediaId == opened.toString()
                 }
-                assertThat(onMain { controller.mediaItemCount }).isEqualTo(4)
-                assertThat(onMain { (0 until controller.mediaItemCount).map { controller.getMediaItemAt(it).mediaId } })
-                    .containsExactly("1", "2", opened.toString(), "3")
-            }
+                openInApp(opened).use {
+                    assertThat(plays.await()).containsExactly("1", "2", opened.toString(), "3")
+                }
 
-            eventually("the mixed queue is saved") {
-                val saved = store.readBlocking()
-                saved != null && saved.songId == -1L && saved.row == 2 && saved.queue == request &&
-                    saved.openItems.map { it.index to it.uri } == listOf(2 to opened.toString())
+                saves.await("the mixed queue is saved") { saved ->
+                    saved != null && saved.songId == -1L && saved.row == 2 && saved.queue == request &&
+                        saved.openItems.map { it.index to it.uri } == listOf(2 to opened.toString())
+                }
             }
         } finally {
             onMain {
@@ -320,10 +323,12 @@ class PlaybackRestoreTest {
             controller.waitUntil("shuffle is on") { shuffleModeEnabled }
             val before = onMain { shuffledIds() }
 
+            val plays = controller.expect("the opened file plays", capture = { shuffledIds() }) {
+                mediaItemCount == 21 && currentMediaItem?.mediaId == opened.toString()
+            }
             openInApp(opened).use {
-                controller.waitUntil("the opened file plays") { mediaItemCount == 21 && currentMediaItem?.mediaId == opened.toString() }
                 // Nothing of the order is skipped: the opened file stands between the old current song and the rest.
-                assertThat(onMain { shuffledIds() }).containsExactlyElementsOf(listOf(before[0], opened.toString()) + before.drop(1))
+                assertThat(plays.await()).containsExactlyElementsOf(listOf(before[0], opened.toString()) + before.drop(1))
             }
         } finally {
             onMain {
@@ -340,16 +345,16 @@ class PlaybackRestoreTest {
     fun aFileOpenedFromAnotherAppStartsAQueueAndIsRestoredByASystemPlayRequest() {
         val opened = insertAudio("open-with-alone.mp3")
         try {
-            openInApp(opened).use {
-                controller.waitUntil("the opened file plays") {
+            SavedStates(store).use { saves ->
+                val plays = controller.expect("the opened file plays") {
                     isPlaying && mediaItemCount == 1 && currentMediaItem?.mediaId == opened.toString()
                 }
-            }
+                openInApp(opened).use { plays.await() }
 
-            eventually("the opened queue is saved") {
-                val saved = store.readBlocking()
-                saved != null && saved.queue == null && saved.songId == -1L && saved.row == 0 &&
-                    saved.openItems.single().uri == opened.toString()
+                saves.await("the opened queue is saved") { saved ->
+                    saved != null && saved.queue == null && saved.songId == -1L && saved.row == 0 &&
+                        saved.openItems.singleOrNull()?.uri == opened.toString()
+                }
             }
 
             onMain {
@@ -358,11 +363,11 @@ class PlaybackRestoreTest {
                 controller.clearMediaItems()
             }
             controller.waitUntil("the player is empty") { mediaItemCount == 0 }
-            onMain { controller.play() }
-
-            controller.waitUntil("the saved opened file is rebuilt and plays") {
+            val rebuilt = controller.expect("the saved opened file is rebuilt and plays") {
                 isPlaying && mediaItemCount == 1 && currentMediaItem?.mediaId == opened.toString()
             }
+            onMain { controller.play() }
+            rebuilt.await()
         } finally {
             onMain {
                 controller.pause()
@@ -378,10 +383,14 @@ class PlaybackRestoreTest {
             .setAction(Intent.ACTION_VIEW)
             .setDataAndType(uri, "audio/mpeg")
             .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        return ActivityScenario.launch(intent)
+        // On a slow runner the test gets back from starting the activity late, while the opened file already plays.
+        return ActivityScenario.launch<MainActivity>(intent).also { slowRunnerPause() }
     }
 
-    /** A file of the app's own in the media index, the way a file manager would offer it. */
+    /**
+     * A file of the app's own in the media index, the way a file manager would offer it. A long one: a 2 s file could
+     * be over before a slow runner's main thread passes on that it plays.
+     */
     private fun insertAudio(name: String): Uri {
         val resolver = context.contentResolver
         val values = ContentValues().apply {
@@ -394,7 +403,7 @@ class PlaybackRestoreTest {
         val uri = requireNotNull(resolver.insert(collection, values))
         try {
             resolver.openOutputStream(uri)!!.use { output ->
-                TestFiles.assets.open(SHORT_FIXTURE).use { input -> input.copyTo(output) }
+                TestFiles.assets.open(LONG_FIXTURE).use { input -> input.copyTo(output) }
             }
             values.clear()
             values.put(MediaStore.Audio.Media.IS_PENDING, 0)

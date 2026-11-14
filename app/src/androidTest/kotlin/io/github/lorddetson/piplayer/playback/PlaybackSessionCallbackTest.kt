@@ -29,6 +29,7 @@ import io.github.lorddetson.piplayer.library.songs.SongList
 import io.github.lorddetson.piplayer.library.songs.SongSource
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.LONG_FIXTURE
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.SHORT_FIXTURE
+import io.github.lorddetson.piplayer.playback.PlaybackTesting.awaitState
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.eventually
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.fileItem
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.onMain
@@ -108,7 +109,8 @@ class PlaybackSessionCallbackTest {
         )
         callback = PlaybackSessionCallback(context, store) { queueRequests += it }
         session = onMain {
-            MediaLibrarySession.Builder(context, ExoPlayer.Builder(context).build(), callback).setId("callback-test").build()
+            val player = ExoPlayer.Builder(context).setMediaSourceFactory(PlaybackTesting.slowRunnerSources(context)).build()
+            MediaLibrarySession.Builder(context, player, callback).setId("callback-test").build()
         }
     }
 
@@ -373,7 +375,7 @@ class PlaybackSessionCallbackTest {
         assertThat(onMain { session.player.mediaItemCount }).isEqualTo(3)
         assertThat(onMain { session.player.currentMediaItemIndex }).isEqualTo(1)
         assertThat(onMain { session.player.playWhenReady }).isFalse()
-        eventually("the restored song is ready") { onMain { session.player.playbackState == Player.STATE_READY } }
+        player().awaitState("the restored song is ready") { playbackState == Player.STATE_READY }
         assertThat(onMain { session.player.currentPosition }).isBetween(400L, 700L)
         assertThat(queueRequests.last()).isEqualTo(QueueState(requireNotNull(saved.queue), emptyList(), libraryId()))
     }
@@ -388,7 +390,7 @@ class PlaybackSessionCallbackTest {
         }.get(10, TimeUnit.SECONDS)
 
         assertThat(onMain { session.player.currentMediaItemIndex }).isEqualTo(1)
-        eventually("the fallback song is ready") { onMain { session.player.playbackState == Player.STATE_READY } }
+        player().awaitState("the fallback song is ready") { playbackState == Player.STATE_READY }
         assertThat(onMain { session.player.currentPosition }).isLessThan(100L)
     }
 
@@ -587,6 +589,10 @@ class PlaybackSessionCallbackTest {
 
     @Test
     fun openedFilesGoRightAfterTheCurrentSongAndTheFirstOnePlays() {
+        // Copied before the player reads anything: the songs play the same short file, and copying it again would
+        // rewrite it under the player that loads B.
+        val first = Uri.fromFile(TestFiles.copy(LONG_FIXTURE))
+        val second = Uri.fromFile(TestFiles.copy(SHORT_FIXTURE))
         songs.songs = listOf(SongSourceRule.song(1, "A"), SongSourceRule.song(2, "B"), SongSourceRule.song(3, "C"))
         val request = QueueRequest(startSongId = 2, startRow = 1)
         val library = setItems(piPlayer, request)
@@ -594,8 +600,6 @@ class PlaybackSessionCallbackTest {
             session.player.setMediaItems(library.mediaItems, library.startIndex, 0)
             session.player.prepare()
         }
-        val first = Uri.fromFile(TestFiles.copy(LONG_FIXTURE))
-        val second = Uri.fromFile(TestFiles.copy(SHORT_FIXTURE))
 
         val result = onMain {
             callback.onCustomCommand(
@@ -612,7 +616,7 @@ class PlaybackSessionCallbackTest {
         assertThat(onMain { session.player.mediaItemCount }).isEqualTo(5)
         assertThat(onMain { session.player.currentMediaItemIndex }).isEqualTo(2)
         assertThat(onMain { session.player.playWhenReady }).isTrue()
-        eventually("the opened file is ready") { onMain { session.player.playbackState == Player.STATE_READY } }
+        player().awaitState("the opened file is ready") { currentMediaItemIndex == 2 && playbackState == Player.STATE_READY }
         assertThat(onMain { session.player.currentMediaItem?.mediaId }).isEqualTo(first.toString())
         assertThat(mediaIds())
             .containsExactly("1", "2", first.toString(), second.toString(), "3")
@@ -642,8 +646,8 @@ class PlaybackSessionCallbackTest {
         assertThat(onMain { session.player.mediaItemCount }).isEqualTo(2)
         assertThat(onMain { session.player.currentMediaItemIndex }).isZero()
         assertThat(onMain { session.player.playWhenReady }).isTrue()
-        eventually("the first opened file is ready") {
-            onMain { session.player.playbackState == Player.STATE_READY }
+        player().awaitState("the first opened file is ready") {
+            currentMediaItemIndex == 0 && playbackState == Player.STATE_READY
         }
         val state = requireNotNull(queueRequests.last())
         assertThat(state.library).isNull()
@@ -744,9 +748,7 @@ class PlaybackSessionCallbackTest {
             .containsExactly("1", first.toString(), "2", second.toString(), "3")
         assertThat(onMain { session.player.currentMediaItemIndex }).isEqualTo(3)
         assertThat(onMain { session.player.playWhenReady }).isFalse()
-        eventually("the current opened file is ready") {
-            onMain { session.player.playbackState == Player.STATE_READY }
-        }
+        player().awaitState("the current opened file is ready") { playbackState == Player.STATE_READY }
         assertThat(onMain { session.player.currentPosition }).isBetween(400L, 700L)
         val state = requireNotNull(queueRequests.last())
         assertThat(state.library).isEqualTo(saved.queue)
@@ -883,6 +885,9 @@ class PlaybackSessionCallbackTest {
     private fun openArgs(vararg uris: Uri) = Bundle().apply {
         putStringArrayList(PlaybackSessionCallback.EXTRA_URIS, ArrayList(uris.map(Uri::toString)))
     }
+
+    /** The session's player; the session hands it out on the main thread only. */
+    private fun player(): Player = onMain { session.player }
 
     private fun mediaIds(): List<String> = onMain {
         (0 until session.player.mediaItemCount).map { row -> session.player.getMediaItemAt(row).mediaId }

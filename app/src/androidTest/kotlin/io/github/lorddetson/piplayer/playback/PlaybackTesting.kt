@@ -1,6 +1,7 @@
 package io.github.lorddetson.piplayer.playback
 
 import android.content.ComponentName
+import android.content.Context
 import android.net.Uri
 import android.os.Bundle
 import android.os.ParcelFileDescriptor
@@ -8,11 +9,18 @@ import android.os.Process
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DataSource
+import androidx.media3.datasource.DataSpec
+import androidx.media3.datasource.DefaultDataSource
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.exoplayer.source.MediaSource
 import androidx.media3.session.MediaBrowser
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import androidx.test.platform.app.InstrumentationRegistry
 import io.github.lorddetson.piplayer.TestFiles
+import java.io.InterruptedIOException
 import java.util.concurrent.TimeUnit
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
@@ -29,6 +37,44 @@ object PlaybackTesting {
 
     /** A 2 s tone. */
     const val SHORT_FIXTURE = "decoding/mp3-44100-stereo.mp3"
+
+    /**
+     * How long a test that opts in stands still where a slow runner loses time: the instrumentation argument
+     * `slowRunnerMs`, 0 by default. It reproduces on a fast device what an overloaded CI emulator does to a test.
+     */
+    val slowRunnerMs: Long = InstrumentationRegistry.getArguments().getString("slowRunnerMs")?.toLongOrNull() ?: 0
+
+    /** Stands still for [slowRunnerMs], as the test thread of a slow runner does after a slow step. */
+    fun slowRunnerPause() {
+        if (slowRunnerMs > 0) Thread.sleep(slowRunnerMs)
+    }
+
+    /**
+     * Media sources for a test's own player that open every file [slowRunnerMs] late, as a slow runner's player does;
+     * the usual sources when no delay is asked for.
+     */
+    @androidx.annotation.OptIn(UnstableApi::class)
+    fun slowRunnerSources(context: Context): MediaSource.Factory {
+        val upstream = DefaultDataSource.Factory(context)
+        if (slowRunnerMs <= 0) return DefaultMediaSourceFactory(upstream)
+        return DefaultMediaSourceFactory(
+            DataSource.Factory {
+                val source = upstream.createDataSource()
+                object : DataSource by source {
+                    override fun open(dataSpec: DataSpec): Long {
+                        try {
+                            Thread.sleep(slowRunnerMs)
+                        } catch (e: InterruptedException) {
+                            // The player cancels a load by interrupting its thread.
+                            Thread.currentThread().interrupt()
+                            throw InterruptedIOException("Cancelled while standing still")
+                        }
+                        return source.open(dataSpec)
+                    }
+                }
+            },
+        )
+    }
 
     /** Runs [block] on the main thread and returns what it returns, or rethrows what it throws. */
     fun <T> onMain(block: () -> T): T {
@@ -62,6 +108,27 @@ object PlaybackTesting {
     /** Like [throughout], with [condition] evaluated on the main thread. */
     fun <P> P.holdsThroughout(what: String, duration: Duration, condition: P.() -> Boolean) =
         throughout(what, duration) { onMain { condition() } }
+
+    /**
+     * How long a wait for a reported event lasts before the test gives up. Only a last resort against a hang: the wait
+     * ends as soon as the player reports the state or an error, so a slow runner passes and a broken player fails at once.
+     */
+    val SAFETY_TIMEOUT = 60.seconds
+
+    /**
+     * Starts listening for a state of this player in which [condition] holds, before the action that leads to it; the
+     * returned [Expectation] gives what [capture] read at that moment. The state may be gone by the time the test thread
+     * looks (a short song on a slow runner), and the wait has no deadline of its own but [SAFETY_TIMEOUT].
+     */
+    fun <P : Player, T> P.expect(what: String, capture: P.() -> T, condition: P.() -> Boolean): Expectation<P, T> =
+        Expectation(this, what, capture, condition)
+
+    /** Like the other [expect], when only reaching the state matters. */
+    fun <P : Player> P.expect(what: String, condition: P.() -> Boolean): Expectation<P, Unit> =
+        Expectation(this, what, {}, condition)
+
+    /** Waits until this player reports a state in which [condition] holds, or fails at once on a playback error. */
+    fun <P : Player> P.awaitState(what: String, condition: P.() -> Boolean) = expect(what, condition).await()
 
     private fun token(): SessionToken {
         val context = TestFiles.targetContext

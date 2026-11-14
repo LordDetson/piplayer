@@ -10,9 +10,13 @@ import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.After
 import org.junit.Before
@@ -123,6 +127,27 @@ class PlaybackStateStoreTest {
             store.enqueue(second)
 
             assertThat(store.read()?.positionMs).isEqualTo(2_000)
+        }
+    }
+
+    @Test
+    fun `every write reaches the collectors of the saved state`() {
+        runBlocking {
+            val seen = Channel<Long?>(Channel.UNLIMITED)
+            val collecting = launch(Dispatchers.IO) { store.saved.collect { seen.send(it?.positionMs) } }
+            suspend fun next() = withTimeout(10.seconds) { seen.receive() }
+            try {
+                assertThat(next()).describedAs("the empty file").isNull()
+
+                store.write(snapshot(positionMs = 1_000))
+                assertThat(next()).isEqualTo(1_000)
+                store.write(snapshot(positionMs = 2_000))
+                assertThat(next()).isEqualTo(2_000)
+                store.clear()
+                assertThat(next()).describedAs("after clear").isNull()
+            } finally {
+                collecting.cancel()
+            }
         }
     }
 
