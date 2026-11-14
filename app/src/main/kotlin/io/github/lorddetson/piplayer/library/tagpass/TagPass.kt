@@ -246,7 +246,7 @@ class TagPass(
                 states[item.file.fileId]?.let { it.size == item.file.size && it.mtime == item.file.mtime } == true
             }
             val read = current.filter { it.parsed != null }.map { it.file.fileId }
-            // A failure gives the file the reasons of its index values (docs/library.md §17.1).
+            // Every failure, also one tried again in a later process, gives the file the reasons of its index values (§17.1).
             val failed = current.filter { it.parsed == null && it.answer !is PassRead.Unavailable }.map { it.file.fileId }
             database.withWriteTransaction {
                 for (item in current) {

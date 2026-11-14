@@ -1578,8 +1578,12 @@ Every smart list is a list of the library: it holds visible songs only (§3.5), 
     - The tag pass's read decides the reasons. A file the pass has not tried yet has none and is not listed: the pass
       reads it soon, and until then the index fills an album without a tag with its folder's name.
     - Decision: a file the pass tried and could not read (`tag_failure` set and `tag_pass_at` not: TagLib does not know
-      the format, the read failed or crashed, the file is marked unsafe) keeps the index's values for good, so its reasons
-      come from them: "Title from the file name" when the index has no title or its title equals the display name without
+      the format, the read failed or crashed, the file is marked unsafe, or it could not be opened or the device failed
+      to read it) shows the index's values, so its reasons come from them until a read replaces them. For an unknown
+      format, a failed read and an unsafe file that is for good, while the file and the reader stay the same; a crash, a
+      file that could not be opened and a read the device failed (§5.3) are tried again in a later process, and the
+      reasons count meanwhile, since the values shown lack what they say and the next try may fail the same way. The
+      reasons are: "Title from the file name" when the index has no title or its title equals the display name without
       the extension (the level 4 case of TI §1), "No artist" when neither the index nor the file name gives one, "No album"
       when the index has none or gives the name of the file's folder, which is what it fills in for a file without an
       album tag, and always "No cover" and "No MusicBrainz ID", since no tag was read. The tag pass writes these reasons

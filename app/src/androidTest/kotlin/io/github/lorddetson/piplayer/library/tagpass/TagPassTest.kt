@@ -247,6 +247,34 @@ class TagPassTest {
             MissingReasons.COVER or MissingReasons.RECORDING_ID)
     }
 
+    /**
+     * A failure the pass tries again in a later process (the file could not be opened, the device failed to read it) gets
+     * the reasons of its index values too, and keeps them until a later read replaces them (docs/library.md §17.1).
+     */
+    @Test
+    fun aFileThatCouldNotBeOpenedHasTheReasonsOfItsIndexValuesUntilALaterReadReplacesThem() = runBlocking<Unit> {
+        index.volume().rows = listOf(
+            row(1, title = "track07", name = "track07.mp3", artist = null, album = "Music"),
+            row(2, title = "Song", name = "02.mp3", artist = "Ann", album = "First"),
+        )
+        sync.sync()
+        reader.answers[1] = PassRead.OpenFailed
+        reader.answers[2] = PassRead.Replied(TagReport(error = TagReadError.IO_ERROR))
+
+        pass().run()
+
+        assertThat(files().getValue(1).tagFailure).isEqualTo("open")
+        assertThat(files().getValue(2).tagFailure).isEqualTo("open")
+        assertThat(display(1).missingInfoReasons).isEqualTo(MissingReasons.ALL)
+        assertThat(display(2).missingInfoReasons).isEqualTo(MissingReasons.COVER or MissingReasons.RECORDING_ID)
+
+        // A later process reads the file: the reasons of the read replace those of the index.
+        reader.answers[1] = tagged("TITLE" to "Seven", "ARTIST" to "Ann", "ALBUM" to "Best")
+        pass().run()
+        assertThat(files().getValue(1).tagFailure).isNull()
+        assertThat(display(1).missingInfoReasons).isEqualTo(MissingReasons.COVER or MissingReasons.RECORDING_ID)
+    }
+
     @Test
     fun aReadErrorIsAFailureOfItsOwnAndNotTriedAgainUntilItChanges() = runBlocking<Unit> {
         library(1)
