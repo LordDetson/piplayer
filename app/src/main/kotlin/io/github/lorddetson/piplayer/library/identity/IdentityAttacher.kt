@@ -135,8 +135,12 @@ class IdentityAttacher(
     private suspend fun write(plan: AttachPlan, stored: Map<Long, TrackIdentityEntity>, now: Long) {
         val dao = user.identities()
         user.withWriteTransaction {
-            // Deleted first: a key an identity gives up may be taken by another in the same pass.
-            if (plan.deleted.isNotEmpty()) plan.deleted.chunked(CHUNK).forEach { dao.delete(it) }
+            // Deleted first: a key an identity gives up may be taken by another in the same pass. The holders are read
+            // again here, since user data may have come for one since the plan read them (docs/library.md §8.1).
+            if (plan.deleted.isNotEmpty()) {
+                val holding = holders()
+                plan.deleted.filter { it !in holding }.chunked(CHUNK).forEach { dao.delete(it) }
+            }
             if (plan.updated.isNotEmpty()) {
                 // In two steps, so that two identities that swap keys never hold one key at once.
                 val moved = plan.updated.map { it.entity(stored.getValue(it.id)) }

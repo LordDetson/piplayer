@@ -21,6 +21,8 @@ data class CoverFile(
     val embedded: Boolean?,
     val identityId: Long? = null,
     val albumKey: String? = null,
+    /** The file's content key in hex, by which [identityId] was read. */
+    val contentKey: String? = null,
 )
 
 /** An album of an artist, in the artist page's order, and whether one of its songs has an embedded picture. */

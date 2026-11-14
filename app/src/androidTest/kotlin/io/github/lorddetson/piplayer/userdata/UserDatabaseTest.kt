@@ -36,6 +36,12 @@ class UserDatabaseTest {
         context.deleteDatabase(file.name)
     }
 
+    /** An identity [id] for user data to refer to: a write for an identity that does not exist goes nowhere. */
+    private fun identity(id: Long) = TrackIdentityEntity(
+        id = id, contentKey = ByteArray(32) { id.toByte() }, durationMs = 1_000, recordingMbid = null, hintVolumeName = null,
+        hintRelativePath = null, hintDisplayName = null, hintSize = null, createdAt = 1, missingSince = null,
+    )
+
     @Test
     fun versionOneIsCreatedAsItsExportedSchemaSays() = runBlocking<Unit> {
         // Fails when the entities and the committed app/schemas/.../1.json disagree.
@@ -157,6 +163,7 @@ class UserDatabaseTest {
             val playlists = Playlists(opened) { 50 }
             assertThat(playlists.playlists()).isEmpty()
             val id = playlists.create("Road trip")
+            opened.identities().add(identity(8))
             playlists.add(id, listOf(NewEntry(8, "external_primary", "Music/", "a.mp3", 1_000)))
             assertThat(playlists.entries(id).map { it.identityId }).containsExactly(8L)
             // An identity a playlist refers to holds user data (docs/library.md §16.2).
@@ -170,6 +177,7 @@ class UserDatabaseTest {
     fun favoritesAndPlaysRaiseTheChangeCounterButNotTheRulesCounter() = runBlocking<Unit> {
         val dao = database.user()
         val favorites = Favorites(database)
+        database.identities().add(identity(1))
 
         favorites.set(1, favorite = true)
         favorites.setAlbum("album", favorite = true)

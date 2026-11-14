@@ -3,6 +3,7 @@ package io.github.lorddetson.piplayer.covers
 import androidx.room3.withWriteTransaction
 import io.github.lorddetson.piplayer.library.mirror.AlbumCoverMoves
 import io.github.lorddetson.piplayer.userdata.UserDatabase
+import io.github.lorddetson.piplayer.userdata.current
 import java.io.File
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -63,11 +64,30 @@ class OwnCovers(private val database: UserDatabase, val dir: File, private val c
 
     override fun album(albumKey: String): String? = snapshot?.albums?.get(albumKey)
 
-    suspend fun setTrack(identityId: Long, copy: CoverCopy) = change(keep = copy.fileName) { current ->
-        val old = dao.trackCover(identityId)?.fileName
-        dao.putTrackCover(identityId, copy.fileName, copy.width, copy.height, clock())
-        delete(old, keep = copy.fileName)
-        Snapshot(current.tracks + (identityId to copy.fileName), current.albums)
+    /**
+     * Gives the song of [identityId], read with the file's [contentKey], the cover [copy]. The identity is checked in the
+     * write transaction ([current], docs/library.md §8.2); when the song has none now, the copy goes and this is false.
+     */
+    suspend fun setTrack(identityId: Long, copy: CoverCopy, contentKey: ByteArray? = null): Boolean {
+        var set = false
+        change(keep = copy.fileName) { current ->
+            val written = database.withWriteTransaction {
+                val identity = database.identities().current(identityId, contentKey) ?: return@withWriteTransaction null
+                val old = dao.trackCover(identity)?.fileName
+                dao.putTrackCover(identity, copy.fileName, copy.width, copy.height, clock())
+                identity to old
+            }
+            if (written == null) {
+                // Nothing would name the copy.
+                if (copy.fileName !in current.tracks.values && copy.fileName !in current.albums.values) delete(copy.fileName)
+                return@change current
+            }
+            val (identity, old) = written
+            delete(old, keep = copy.fileName)
+            set = true
+            Snapshot(current.tracks + (identity to copy.fileName), current.albums)
+        }
+        return set
     }
 
     suspend fun setAlbum(albumKey: String, copy: CoverCopy) = change(keep = copy.fileName) { current ->
@@ -77,11 +97,17 @@ class OwnCovers(private val database: UserDatabase, val dir: File, private val c
         Snapshot(current.tracks, current.albums + (albumKey to copy.fileName))
     }
 
-    suspend fun removeTrack(identityId: Long) = change { current ->
-        val old = dao.trackCover(identityId)?.fileName ?: return@change current
-        dao.removeTrackCover(identityId)
+    /** Takes the own cover from the song of [identityId], read with the file's [contentKey], checked as by [setTrack]. */
+    suspend fun removeTrack(identityId: Long, contentKey: ByteArray? = null) = change { current ->
+        val removed: Pair<Long, String>? = database.withWriteTransaction {
+            val identity = database.identities().current(identityId, contentKey) ?: return@withWriteTransaction null
+            val old = dao.trackCover(identity)?.fileName ?: return@withWriteTransaction null
+            dao.removeTrackCover(identity)
+            identity to old
+        }
+        val (identity, old) = removed ?: return@change current
         delete(old)
-        Snapshot(current.tracks - identityId, current.albums)
+        Snapshot(current.tracks - identity, current.albums)
     }
 
     suspend fun removeAlbum(albumKey: String) = change { current ->

@@ -696,6 +696,18 @@ saved queue that refers to identities is in playback.md §4.
   (§15.3) are not user data: they never keep an identity. Decision (PIM-31): when steps 4 and 5 of §8.2 delete the new
   identity whose file a missing identity takes over, its album members become the missing identity's, in the same
   transaction, so that an album seen with that file keeps counting it.
+- Decision (PIM-31): the 30-day deletion is planned on the holders read before the pass's write transaction, and an
+  undo may put back the last playlist entry of such an identity meanwhile. The transaction reads the holders again and
+  deletes only identities that still hold no user data.
+- Decision (PIM-31): user data is written only for an identity that exists. `user.db` declares no foreign keys, so the
+  writers check it themselves: each one reads the song's identity with the file's content key before its write
+  transaction (a cover's copy takes seconds, a play counts minutes after the song started), and inside that transaction
+  it writes for that identity while it exists, else for the identity that holds the read key now (a takeover of §8.2
+  deleted the identity read and gave the file to the missing identity), else for none. With none, a favorite, a play or
+  an own cover is not written and the screen says the song is not read yet, as before the tag pass reads it, and the
+  copy of the cover goes; a playlist entry, added or put back by an undo with its key hint, keeps its hints without an
+  identity, and the linking of a later pass (§16.2) gives it one. A removal (favorite off, own cover removed) finds its
+  identity the same way.
 - Attaching changes no user data, so it does not raise the user database's change counter (§3.1). Nothing is written
   into the library database: lists do not need the identity, and the two files keep no row IDs of each other (TI §10).
   Each pass asks the mirror of §15.4 for a run afterwards, because favorites and play counts follow the keys.
@@ -727,6 +739,8 @@ saved queue that refers to identities is in playback.md §4.
   checked again inside its write transaction, against the identities and the user data of that moment: it is written
   only while the missing identity is still missing and the new identity still holds the file's key and holds no user
   data. Otherwise the new identity stays with its data and the missing one stays missing; a later pass may try again.
+  The writers of user data close the other side (§8.1): one that read the new identity before the takeover's
+  transaction and writes after it writes for the missing identity, which holds the file's key now.
 - Taking a key moves the identity: `content_key`, `duration_ms` and the hints become the file's, and `missing_since` is
   cleared. When two missing identities could take one file, the newest one takes it.
 - The identity's recording MBID follows the file's tags while it is attached. A decided MBID of M3 will win over tags.
@@ -780,6 +794,10 @@ Instrumented tests on the API 30 emulator:
 - Steps 4 and 5 with a hook that writes user data between the plan and the takeover: a favorite written while step 4
   fingerprints, or a playlist entry added before step 5, keeps the new identity and leaves the missing one missing; a
   takeover moves the album members of the identity it replaces.
+- Writers that read the new identity while step 4 fingerprints and write after the takeover (a favorite, a play, an own
+  cover, a playlist entry added and one put back by an undo) write for the missing identity that took the file; writers
+  for a deleted identity whose key no identity holds write nothing, the entry keeps only its hints and the cover's copy
+  goes; an identity due for the 30-day deletion that gains an entry while the pass plans is kept.
 
 - `user.db` from version 1 to 2 with a row of version 1 (`MigrationTestHelper`), and the exported schema.
 - Through the real library, the sync and the tag pass on generated files: a file moved to another folder, a renamed

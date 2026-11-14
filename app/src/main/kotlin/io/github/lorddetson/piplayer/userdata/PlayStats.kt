@@ -7,11 +7,17 @@ class PlayStats(private val database: UserDatabase) {
 
     private val dao get() = database.plays()
 
-    /** A play of [identityId] that counted; raises the change counter, since the play count is mirrored. */
-    suspend fun record(identityId: Long, startedAt: Long, listenedMs: Long) = database.withWriteTransaction {
-        dao.addEvent(identityId, startedAt, listenedMs)
-        database.user().countChange()
-    }
+    /**
+     * A play of [identityId], read with the file's [contentKey], that counted; raises the change counter, since the play
+     * count is mirrored. The identity is checked in the write transaction ([current]); the one recorded, or null for none.
+     */
+    suspend fun record(identityId: Long, startedAt: Long, listenedMs: Long, contentKey: ByteArray? = null): Long? =
+        database.withWriteTransaction {
+            val identity = database.identities().current(identityId, contentKey) ?: return@withWriteTransaction null
+            dao.addEvent(identity, startedAt, listenedMs)
+            database.user().countChange()
+            identity
+        }
 
     /** The final listened time of a play that counted; nothing of it is mirrored, so the counter stays. */
     suspend fun setListened(identityId: Long, startedAt: Long, listenedMs: Long) =

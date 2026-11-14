@@ -69,3 +69,11 @@ interface TrackIdentityDao {
     @Query("DELETE FROM track_identity")
     suspend fun deleteAll()
 }
+
+/**
+ * The identity that user data for [id] goes to, read inside the writer's transaction (docs/library.md §8.2): [id] while it
+ * exists, else the identity that holds [contentKey] now, as after a takeover deleted [id] and gave its file to another
+ * identity between the writer's read and its write; null when neither exists, and then nothing is written for it.
+ */
+suspend fun TrackIdentityDao.current(id: Long, contentKey: ByteArray?): Long? =
+    if (identity(id) != null) id else contentKey?.let { idOfKey(it) }

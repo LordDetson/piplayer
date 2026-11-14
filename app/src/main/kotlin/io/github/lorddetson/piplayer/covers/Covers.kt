@@ -63,6 +63,7 @@ class LibraryCoverFacts(
         embedded = row.embedded,
         identityId = row.contentKey?.let { user.identities().idOfKey(Hex.bytes(it)) },
         albumKey = row.albumKey,
+        contentKey = row.contentKey,
     )
 
     private companion object {
@@ -181,16 +182,20 @@ class CoverChoices(context: Context) {
     private val app = context.applicationContext
     private val own = Covers.own(app)
 
-    /** The identity of the song [fileId]; it has one once the tag pass has read it. */
-    private suspend fun identityOf(fileId: Long): Long? = Covers.facts(app).file(fileId)?.identityId
+    /** The identity of the song [fileId] with the key it was read by; it has one once the tag pass has read it. */
+    private suspend fun songOf(fileId: Long): Pair<Long, ByteArray?>? =
+        Covers.facts(app).file(fileId)?.let { file -> file.identityId?.let { it to file.contentKey?.let(Hex::bytes) } }
+
+    private suspend fun identityOf(fileId: Long): Long? = songOf(fileId)?.first
 
     /** Whether the song [fileId] can have an own cover now. */
     suspend fun canChooseForSong(fileId: Long): Boolean = safely(false) { identityOf(fileId) != null }
 
     suspend fun chooseForSong(fileId: Long, image: Uri): Result = safely(Result.FAILED) {
-        val identity = identityOf(fileId) ?: return@safely Result.NOT_READ
+        val (identity, key) = songOf(fileId) ?: return@safely Result.NOT_READ
         val copy = copy(image) ?: return@safely Result.NO_IMAGE
-        own.setTrack(identity, copy)
+        // The copy can take seconds; the identity is checked again where the cover is written (docs/library.md §8.2).
+        if (!own.setTrack(identity, copy, key)) return@safely Result.NOT_READ
         Result.SAVED
     }
 
@@ -217,7 +222,7 @@ class CoverChoices(context: Context) {
     }
 
     suspend fun removeForSong(fileId: Long): Result = safely(Result.FAILED) {
-        identityOf(fileId)?.let { own.removeTrack(it) }
+        songOf(fileId)?.let { (identity, key) -> own.removeTrack(identity, key) }
         Result.REMOVED
     }
 

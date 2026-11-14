@@ -57,18 +57,22 @@ class Playlists(private val database: UserDatabase, private val clock: () -> Lon
         dao.deletePlaylist(id) > 0
     }
 
-    /** Puts [entries] at the end of the playlist [playlistId], in order; how many. */
+    /**
+     * Puts [entries] at the end of the playlist [playlistId], in order; how many. Each identity is checked in the write
+     * transaction ([current]): an entry whose identity is gone takes the one of its key, else none, for linking (§16.2).
+     */
     suspend fun add(playlistId: Long, entries: List<NewEntry>): Int {
         if (entries.isEmpty()) return 0
         return database.withWriteTransaction {
             requireNotNull(dao.playlist(playlistId)) { "No playlist $playlistId" }
             val first = dao.count(playlistId)
+            val identities = database.identities()
             dao.addEntries(
                 entries.mapIndexed { i, entry ->
                     PlaylistEntryEntity(
                         playlistId = playlistId,
                         position = first + i,
-                        identityId = entry.identityId,
+                        identityId = entry.identityId?.let { identities.current(it, entry.contentKey) },
                         hintVolumeName = entry.volume,
                         hintRelativePath = entry.relativePath,
                         hintDisplayName = entry.displayName,
@@ -94,13 +98,17 @@ class Playlists(private val database: UserDatabase, private val clock: () -> Lon
         entry
     }
 
-    /** Puts a removed [entry] back at its position, or at the end when the playlist is shorter now. */
+    /**
+     * Puts a removed [entry] back at its position, or at the end when the playlist is shorter now. Its identity may have
+     * gone meanwhile, and is checked as by [add] with the entry's key hint.
+     */
     suspend fun restore(entry: PlaylistEntryEntity) {
         database.withWriteTransaction {
             if (dao.playlist(entry.playlistId) == null || dao.entry(entry.id) != null) return@withWriteTransaction
             val position = entry.position.coerceIn(0, dao.count(entry.playlistId))
+            val identity = entry.identityId?.let { database.identities().current(it, entry.hintContentKey) }
             dao.shift(entry.playlistId, position, Int.MAX_VALUE, 1)
-            dao.addEntries(listOf(entry.copy(position = position)))
+            dao.addEntries(listOf(entry.copy(position = position, identityId = identity)))
             dao.touch(entry.playlistId, clock())
         }
     }

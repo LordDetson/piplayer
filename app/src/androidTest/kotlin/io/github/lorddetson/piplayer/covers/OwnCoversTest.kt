@@ -6,11 +6,13 @@ import android.net.Uri
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.github.lorddetson.piplayer.TestFiles
 import io.github.lorddetson.piplayer.ui.player.TestImages
+import io.github.lorddetson.piplayer.userdata.TrackIdentityEntity
 import io.github.lorddetson.piplayer.userdata.UserDatabase
 import java.io.File
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.After
+import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 
@@ -22,6 +24,17 @@ class OwnCoversTest {
     private val dir = File(context.cacheDir, "own-covers-test").apply { deleteRecursively(); mkdirs() }
     private val database = UserDatabase.open(context, name = null)
     private val covers = OwnCovers(database, dir)
+
+    /** The identity the track covers belong to: a cover for an identity that does not exist goes nowhere (§8.2). */
+    @Before
+    fun identity() = runBlocking<Unit> {
+        database.identities().add(
+            TrackIdentityEntity(
+                id = 7, contentKey = ByteArray(32) { 7 }, durationMs = 1_000, recordingMbid = null, hintVolumeName = null,
+                hintRelativePath = null, hintDisplayName = null, hintSize = null, createdAt = 1, missingSince = null,
+            ),
+        )
+    }
 
     @After
     fun close() {

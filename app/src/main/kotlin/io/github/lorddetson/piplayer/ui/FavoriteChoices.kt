@@ -3,7 +3,9 @@ package io.github.lorddetson.piplayer.ui
 import android.content.Context
 import android.util.Log
 import io.github.lorddetson.piplayer.library.Library
+import io.github.lorddetson.piplayer.library.identity.Hex
 import io.github.lorddetson.piplayer.library.identity.IdentityAttacher
+import io.github.lorddetson.piplayer.library.identity.TrackRef
 import io.github.lorddetson.piplayer.userdata.UserData
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -28,10 +30,12 @@ class FavoriteChoices(context: Context) {
     private val app = context.applicationContext
     private val favorites get() = UserData.favorites(app)
 
-    /** The identity of the song [fileId], or null before its tags are read. */
-    private suspend fun identityOf(fileId: Long): Long? = withContext(Dispatchers.IO) {
-        if (Library.mayRead(app)) Library.trackRefs(app).refOf(fileId)?.identityId else null
+    /** The reference of the song [fileId]: its identity, null before its tags are read, and the key it was read by. */
+    private suspend fun refOf(fileId: Long): TrackRef? = withContext(Dispatchers.IO) {
+        if (Library.mayRead(app)) Library.trackRefs(app).refOf(fileId) else null
     }
+
+    private suspend fun identityOf(fileId: Long): Long? = refOf(fileId)?.identityId
 
     suspend fun isFavorite(fileId: Long): Boolean = safely(false) { identityOf(fileId)?.let { favorites.isFavorite(it) } == true }
 
@@ -46,8 +50,10 @@ class FavoriteChoices(context: Context) {
         }
 
     suspend fun setSong(fileId: Long, favorite: Boolean): Result = safely(Result.FAILED) {
-        val identity = identityOf(fileId) ?: return@safely Result.NOT_READ
-        favorites.set(identity, favorite)
+        val ref = refOf(fileId)
+        val identity = ref?.identityId ?: return@safely Result.NOT_READ
+        // Checked again in the write transaction: a takeover may have deleted it since (docs/library.md §8.2).
+        if (!favorites.set(identity, favorite, ref.contentKey?.let(Hex::bytes))) return@safely Result.NOT_READ
         Result.DONE
     }
 

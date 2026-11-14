@@ -16,10 +16,15 @@ class Favorites(private val database: UserDatabase, private val clock: () -> Lon
 
     fun isFavoriteFlow(identityId: Long): Flow<Boolean> = dao.isFavoriteFlow(identityId)
 
-    /** Makes the song of [identityId] a favorite, or not; a favorite keeps the time it first became one. */
-    suspend fun set(identityId: Long, favorite: Boolean) = database.withWriteTransaction {
-        if (favorite) dao.add(identityId, clock()) else dao.remove(identityId)
+    /**
+     * Makes the song of [identityId], read with the file's [contentKey], a favorite, or not; a favorite keeps the time it
+     * first became one. The identity is checked in the write transaction ([current]); false when the song has none now.
+     */
+    suspend fun set(identityId: Long, favorite: Boolean, contentKey: ByteArray? = null): Boolean = database.withWriteTransaction {
+        val identity = database.identities().current(identityId, contentKey) ?: return@withWriteTransaction false
+        if (favorite) dao.add(identity, clock()) else dao.remove(identity)
         database.user().countChange()
+        true
     }
 
     suspend fun isFavoriteAlbum(albumKey: String): Boolean = dao.isFavoriteAlbum(albumKey)

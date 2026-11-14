@@ -6,6 +6,7 @@ import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.After
+import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 
@@ -16,6 +17,20 @@ class PlaylistsTest {
     private val database = UserDatabase.open(TestFiles.targetContext, name = null)
     private var now = 100L
     private val playlists = Playlists(database) { now }
+
+    /** The identities the entries refer to: a write for an identity that does not exist goes nowhere (§8.2). */
+    @Before
+    fun identities() = runBlocking {
+        database.identities().addAll(
+            (1..9).map { n ->
+                TrackIdentityEntity(
+                    id = n.toLong(), contentKey = ByteArray(32) { n.toByte() }, durationMs = 1_000L * n, recordingMbid = null,
+                    hintVolumeName = null, hintRelativePath = null, hintDisplayName = null, hintSize = null, createdAt = 1,
+                    missingSince = null,
+                )
+            },
+        )
+    }
 
     @After
     fun close() = database.close()

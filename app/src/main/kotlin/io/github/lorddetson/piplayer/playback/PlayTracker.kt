@@ -10,6 +10,8 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.Timeline
 import io.github.lorddetson.piplayer.library.Library
+import io.github.lorddetson.piplayer.library.identity.Hex
+import io.github.lorddetson.piplayer.library.identity.TrackRef
 import io.github.lorddetson.piplayer.userdata.UserData
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.coroutines.cancellation.CancellationException
@@ -162,9 +164,11 @@ class LibraryPlayRecorder(context: Context) : PlayRecorder {
     override fun counted(mediaId: String, startedAt: Long, listenedMs: Long) {
         val fileId = QueueIds.fileId(mediaId) ?: return
         write {
-            val identity = identityOf(fileId) ?: return@write
-            recorded[mediaId to startedAt] = identity
-            UserData.plays(app).record(identity, startedAt, listenedMs)
+            val ref = refOf(fileId) ?: return@write
+            val identity = ref.identityId ?: return@write
+            // Checked again in the write transaction: a takeover may have deleted it since (docs/library.md §8.2).
+            recorded[mediaId to startedAt] =
+                UserData.plays(app).record(identity, startedAt, listenedMs, ref.contentKey?.let(Hex::bytes)) ?: return@write
         }
     }
 
@@ -193,8 +197,9 @@ class LibraryPlayRecorder(context: Context) : PlayRecorder {
         done.await()
     }
 
-    private fun identityOf(fileId: Long): Long? =
-        if (Library.mayRead(app)) Library.trackRefs(app).refOf(fileId)?.identityId else null
+    private fun refOf(fileId: Long): TrackRef? = if (Library.mayRead(app)) Library.trackRefs(app).refOf(fileId) else null
+
+    private fun identityOf(fileId: Long): Long? = refOf(fileId)?.identityId
 
     /** A failed write is logged; playback must not go down for it. */
     private fun write(block: suspend () -> Unit) {

@@ -2,6 +2,8 @@ package io.github.lorddetson.piplayer.library.identity
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.github.lorddetson.piplayer.TestFiles
+import io.github.lorddetson.piplayer.covers.CoverCopy
+import io.github.lorddetson.piplayer.covers.OwnCovers
 import io.github.lorddetson.piplayer.library.FakeMediaIndex
 import io.github.lorddetson.piplayer.library.FakeMediaIndex.Companion.PRIMARY
 import io.github.lorddetson.piplayer.library.FakeMediaIndex.Companion.row
@@ -12,9 +14,14 @@ import io.github.lorddetson.piplayer.library.playlists.PlaylistLinks
 import io.github.lorddetson.piplayer.library.sync.IndexRow
 import io.github.lorddetson.piplayer.library.sync.LibrarySync
 import io.github.lorddetson.piplayer.library.tagpass.DurationSource
+import io.github.lorddetson.piplayer.userdata.Favorites
+import io.github.lorddetson.piplayer.userdata.NewEntry
+import io.github.lorddetson.piplayer.userdata.PlayStats
 import io.github.lorddetson.piplayer.userdata.PlaylistEntity
 import io.github.lorddetson.piplayer.userdata.PlaylistEntryEntity
+import io.github.lorddetson.piplayer.userdata.Playlists
 import io.github.lorddetson.piplayer.userdata.UserDatabase
+import java.io.File
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.After
@@ -359,6 +366,125 @@ class IdentityAttacherTest {
             assertThat(idOfKey(key(3))).isEqualTo(a)
             assertThat(user.favorites().members().filter { m -> identities().any { it.id == m.identityId } }.map { it.albumKey to it.identityId })
                 .containsExactly("album" to a)
+        }
+    }
+
+    @Test
+    fun userDataForANewIdentityATakeoverDeletedGoesToTheIdentityThatTookItsFile() = runBlocking<Unit> {
+        // Each writer read N for b.mp3 while step 4 fingerprinted, and writes after the takeover deleted N: what it
+        // writes must go to A, which holds b.mp3's key now (docs/library.md §8.2), not to N, which nothing shows.
+        val playlists = Playlists(user) { now }
+        val dir = File(context.cacheDir, "attacher-covers").apply { deleteRecursively(); mkdirs() }
+        var stale = 0L
+        var playlist = 0L
+        var removed: PlaylistEntryEntity? = null
+        try {
+            afterTakeoverRace(
+                onCompute = { file ->
+                    if (stale == 0L) {
+                        stale = idOfKey(file.contentKey)!!
+                        // An entry of N removed now, before the takeover's transaction, is put back by an undo later.
+                        playlist = playlists.create("P")
+                        playlists.add(playlist, listOf(NewEntry(stale, PRIMARY, "Music/New/", "b.mp3", 200_000, contentKey = Hex.bytes(file.contentKey))))
+                        removed = playlists.remove(playlists.entries(playlist).single().id)
+                    }
+                },
+            ) { a ->
+                assertThat(idOfKey(key(3))).isEqualTo(a)
+                assertThat(identities().map { it.id }).doesNotContain(stale)
+                val heldKey = Hex.bytes(key(3))
+
+                val favorited = Favorites(user) { now }.set(stale, favorite = true, contentKey = heldKey)
+                val played = PlayStats(user).record(stale, startedAt = 5, listenedMs = 6, contentKey = heldKey)
+                playlists.add(playlist, listOf(NewEntry(stale, PRIMARY, "Music/New/", "b.mp3", 200_000, contentKey = heldKey)))
+                playlists.restore(removed!!)
+                File(dir, "c.jpg").writeBytes(byteArrayOf(1))
+                val covered = OwnCovers(user, dir).setTrack(stale, CoverCopy("c.jpg", 1, 1), contentKey = heldKey)
+
+                assertThat(user.favorites().favorites().map { it.identityId }).containsOnly(a)
+                assertThat(user.plays().events().map { it.identityId }).containsExactly(a)
+                assertThat(playlists.entries(playlist).map { it.identityId }).containsExactly(a, a)
+                assertThat(user.covers().trackCovers().map { it.identityId }).containsExactly(a)
+                assertThat(user.user().identitiesHoldingData()).containsExactly(a)
+                assertThat(favorited).isTrue()
+                assertThat(played).isEqualTo(a)
+                assertThat(covered).isTrue()
+            }
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun userDataForADeletedIdentityWhoseKeyNoIdentityHoldsIsNotWritten() = runBlocking<Unit> {
+        // N went and no identity holds the key the writer read: a song's data has nowhere to go, an entry keeps its
+        // hints without an identity for the linking of a later pass, and the cover's copy goes.
+        index.volume().rows = listOf(row(1))
+        sync.sync()
+        keyed(1, key(1))
+        attacher.attach()
+        val gone = identities().single().id
+        user.identities().delete(listOf(gone))
+        val nobodys = Hex.bytes(key(9))
+        val playlists = Playlists(user) { now }
+        val playlist = playlists.create("P")
+        val dir = File(context.cacheDir, "attacher-covers").apply { deleteRecursively(); mkdirs() }
+        try {
+            val favorited = Favorites(user) { now }.set(gone, favorite = true, contentKey = nobodys)
+            val played = PlayStats(user).record(gone, startedAt = 5, listenedMs = 6, contentKey = nobodys)
+            playlists.add(playlist, listOf(NewEntry(gone, PRIMARY, "Music/", "a.mp3", 200_000, contentKey = nobodys)))
+            File(dir, "c.jpg").writeBytes(byteArrayOf(1))
+            val covered = OwnCovers(user, dir).setTrack(gone, CoverCopy("c.jpg", 1, 1), contentKey = nobodys)
+
+            assertThat(user.favorites().favorites()).isEmpty()
+            assertThat(user.plays().events()).isEmpty()
+            assertThat(playlists.entries(playlist).single().identityId).isNull()
+            assertThat(playlists.entries(playlist).single().hintDisplayName).isEqualTo("a.mp3")
+            assertThat(user.covers().trackCovers()).isEmpty()
+            assertThat(File(dir, "c.jpg")).doesNotExist()
+            assertThat(user.user().identitiesHoldingData()).isEmpty()
+            assertThat(favorited).isFalse()
+            assertThat(played).isNull()
+            assertThat(covered).isFalse()
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun aMissingIdentityThatGainsAnEntryWhileThePassPlansIsNotDeleted() = runBlocking<Unit> {
+        // An identity missing for 30 days without data: while the pass plans its deletion, an undo puts its entry back.
+        // The deletion is checked again in the pass's write transaction (docs/library.md §8.1), so the entry keeps it.
+        index.volume().rows = listOf(row(1))
+        sync.sync()
+        keyed(1, key(1))
+        attacher.attach()
+        val id = identities().single().id
+        index.volume().rows = emptyList()
+        sync.sync()
+        attacher.attach()
+        now += IdentityMatcher.KEEP_MISSING_MS
+        val playlists = Playlists(user) { now }
+        val playlist = playlists.create("P")
+        var reads = 0
+        val racing = IdentityAttacher(
+            library, user, sync,
+            holders = {
+                val holding = user.user().identitiesHoldingData().toSet()
+                if (reads++ == 0) {
+                    playlists.add(playlist, listOf(NewEntry(id, PRIMARY, "Music/", "a.mp3", 200_000, contentKey = Hex.bytes(key(1)))))
+                }
+                holding
+            },
+            clock = { now },
+        )
+        try {
+            racing.attach()
+
+            assertThat(identities().map { it.id }).containsExactly(id)
+            assertThat(playlists.entries(playlist).single().identityId).isEqualTo(id)
+        } finally {
+            racing.close()
         }
     }
 
