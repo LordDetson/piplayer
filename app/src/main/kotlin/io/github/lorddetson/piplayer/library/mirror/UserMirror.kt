@@ -3,7 +3,6 @@ package io.github.lorddetson.piplayer.library.mirror
 import android.util.Log
 import androidx.room3.PooledConnection
 import androidx.room3.withWriteTransaction
-import io.github.lorddetson.piplayer.library.db.JsonRows
 import io.github.lorddetson.piplayer.library.db.LibraryDatabase
 import io.github.lorddetson.piplayer.library.db.MirrorDao
 import io.github.lorddetson.piplayer.library.identity.Hex
@@ -26,6 +25,9 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.serialization.json.add
+import kotlinx.serialization.json.addJsonArray
+import kotlinx.serialization.json.buildJsonArray
 
 /** The own album covers as the mirror moves them (docs/library.md §15.3); `OwnCovers` in the app. */
 interface AlbumCoverMoves {
@@ -162,8 +164,8 @@ class UserMirror(
                 execute("DELETE FROM album_mirror")
                 insertTracks(current.entries.toList(), fileIds = null)
                 for (chunk in albums.chunked(ROWS_PER_STATEMENT)) {
-                    val json = JsonRows().apply { chunk.forEach { key -> row { text(key) } } }.toString()
-                    execute("INSERT OR IGNORE INTO album_mirror (album_key) SELECT value->>0 FROM json_each(?)", json)
+                    val json = buildJsonArray { chunk.forEach { key -> add(key) } }.toString()
+                    execute("INSERT OR IGNORE INTO album_mirror (album_key) SELECT value FROM json_each(?)", json)
                 }
             }
             values = current
@@ -195,13 +197,14 @@ class UserMirror(
             "SELECT f.id, j.value->>1, j.value->>2, j.value->>3 FROM json_each(?) j " +
             "JOIN audio_file f ON f.content_key = j.value->>0$only"
         for (chunk in entries.chunked(ROWS_PER_STATEMENT)) {
-            val json = JsonRows().apply {
+            // A parameter, not literals: the statement's text stays the same, so Room keeps one prepared statement.
+            val json = buildJsonArray {
                 for ((key, value) in chunk) {
-                    row {
-                        text(key)
-                        flag(value.favorite)
-                        long(value.playCount)
-                        long(value.lastPlayedAt)
+                    addJsonArray {
+                        add(key)
+                        add(if (value.favorite) 1 else 0)
+                        add(value.playCount)
+                        add(value.lastPlayedAt)
                     }
                 }
             }.toString()
