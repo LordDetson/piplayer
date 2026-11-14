@@ -1911,7 +1911,11 @@ smart lists (§17) in the controller tree (playback.md §10). The owner left the
   `genre_key` after the rows, with the indexes of `audio_file`, `track_display` and `display_artist` (§1.3). The limits of
   §1.7 do not change. Decision: the generated library (§1.6) keeps its one genre per file in PIM-64, so that the release
   check's timings stay comparable with the earlier ones; a file of several genres costs one row more per genre, which the
-  first sync writes in the chunks of `display_artist`.
+  first sync writes in the chunks of `display_artist`. Measured on the API 30 emulator with the generated library
+  (15.11.2026, not a quiet `--timing` pass): the first page of Songs after a median of 3.87 s over eight passes (3.75 to
+  4.20 s), against 3.70 s over five passes (3.53 to 4.24 s) on the code before PIM-64; the sync's writing took about
+  0.3 to 0.5 s more. Should the release check's median pass 4 s, `display_genre` can drop its search text and sort key,
+  which belong to the genre rather than the file, and the Genres list derive them for its few rows when it reads.
 - The Genres list is one grouping query over `display_genre` joined to `track_display` and `audio_file` by their keys;
   the number of "Unknown genre" one count of the visible display rows without a `display_genre` row. A genre's songs are
   the visible display rows whose file has a row of its key (by the index on `genre_key`).
