@@ -303,4 +303,5 @@
     <string name="playlist_failed">The playlist could not be changed</string>
     <string name="playlist_not_found">This playlist is gone</string>
     <string name="playlist_unknown_title">Unknown song</string>
+    <string name="playlist_default_name">Playlist</string>
 </resources>

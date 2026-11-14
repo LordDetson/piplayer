@@ -132,6 +132,12 @@ fun PlaylistPage(id: Long, host: LibraryHost, actions: PlaylistActions, onBack: 
     val header by model.header.collectAsStateWithLifecycle()
     val items by model.items.collectAsStateWithLifecycle()
     val found = (header as? PlaylistHeader.Found)?.playlist
+    // A playlist deleted while its page is open, from its menu or elsewhere, takes the page with it.
+    var wasFound by remember { mutableStateOf(false) }
+    LaunchedEffect(header) {
+        if (header is PlaylistHeader.Found) wasFound = true
+        if (header == PlaylistHeader.Gone && wasFound) onBack()
+    }
     Scaffold(
         topBar = {
             TopAppBar(
