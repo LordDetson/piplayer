@@ -1621,9 +1621,10 @@ Every smart list is a list of the library: it holds visible songs only (§3.5), 
 ### 17.3 Playing and the queue
 
 - Each smart list is a list kind of its own in queue requests (§6.4): `favorites`, `added`, `recent`, `most` and `missing`,
-  so that a queue of a smart list is saved and restored after the process dies as one request, like every list
-  (playback.md §4). The first four have no key; `missing` has the chosen reasons as its key, a number from 1 to 31 (title
-  1, artist 2, album 4, cover 8, MusicBrainz ID 16), so that a restored queue lists the same reasons.
+  so that a tap names the list it plays. The first four have no key; `missing` has the chosen reasons as its key, a number
+  from 1 to 31 (title 1, artist 2, album 4, cover 8, MusicBrainz ID 16), so that a restored queue lists the same reasons.
+  A queue of Favorites, Recently added or Songs missing information is saved and restored after the process dies as that
+  request, like every list (playback.md §4); a queue of Recently played or Most played becomes added entries (next item).
 - Decision: Recently played and Most played change as their own queue plays: each counted play moves its song up. So
   their queue keeps the songs and order of the tap: the service makes it a queue of added entries with their track
   references (playback.md §9.4), saved in the queue file, rather than a request read again at a restore. A restore after
