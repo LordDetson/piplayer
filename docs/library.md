@@ -1233,18 +1233,24 @@ The owner's decision of 14.11.2026: the album's references follow its tracks.
   Members of a key that nothing refers to any more go, and so do members whose identity is deleted (§8.1). Files the
   tag pass has not read yet have no identity and are no members; a reference made before the album's tags are read can
   follow only once they are.
-- A move: a referenced key that names no album any more moves its references to the new key that holds more than half
-  of its present members. A member is present when a file of the library holds its identity's key; the album key of
-  that file counts for it (an identity with copies in several albums counts for each). Members that are gone count for
-  nothing.
-- No move: while the old key still names an album (a split that leaves some tracks behind), on a tie, or when no new key
-  holds more than half (a split into three), the references stay where they are, applying to nothing, and every later
-  run looks again. A key that comes back has its references back with it.
+- A move: the references of a referenced key move to the key that holds more than half of its present members, when
+  that is another key. A member is present when a file of the library holds its identity's key; the album key of that
+  file counts for it (an identity with copies in several albums counts for each), and a member still on the old key
+  counts for the old key. Members that are gone count for nothing. So a retag that reaches most of an album's files (a
+  release ID written into 11 of its 12 files) or a move of most of them to another folder takes the references along,
+  also while the rest still names the old key.
+- No move: while more than half of the present members are still on the old key, on a tie (half of them left behind,
+  or a split into two halves), or when no key holds more than half (a split into three), the references stay where
+  they are, and every later run looks again. While the old key names no album its references apply to nothing; a key
+  that comes back has its references back with it.
 - A merge: when several old keys move to one new key, or the new key already has references, a favorite stays one, with
   the earliest `added_at`; of the own covers the one set last (`set_at`) wins and the others are deleted with their
   copies. The members of the old keys join the new key's.
 - It runs in the full mirror run of §15.4, after a sync, an attach pass or a run of the tag pass, never when a list is
   read. Moving a favorite raises the change counter; moving a cover does not, as setting one does not (§13.2).
+- The covers move first, then the favorites and the members of the old keys in one transaction of the user database.
+  If the cover move fails or the process dies in between, the old key keeps its members, so the next run finds the
+  same move again and finishes it; a cover already moved is not moved twice.
 
 ### 15.4 The mirror
 
@@ -1252,13 +1258,15 @@ The owner's decision of 14.11.2026: the album's references follow its tracks.
   `track_mirror(file_id, favorite, play_count, last_played_at)`, a row only for a file whose identity is a favorite or
   has plays, and `album_mirror(album_key)`, one row per favorite album. They are kept apart from `track_display`, which
   the sync, the tag pass and a new display version write whole, so that none of those writes has to carry the user
-  fields over and the first sync does no more work than before. `library_meta.mirrored_data_counter` keeps the change
-  counter the last full run mirrored. The library database's version goes to 10.
+  fields over and the first sync does no more work than before. The library database's version goes to 10.
 - A full run reads the favorites, favorite albums, plays and members of the user database, moves album references
   (§15.3), records members, and writes both tables anew in one transaction of the library database while no sync
   writes; files are matched by the content key of their identity. It runs when the library starts, after every change
   of the change counter, after every attach pass (§8.2) and after a change of the own covers; requests during a run
-  collapse into one more run. It is cheap: a few thousand rows at most.
+  collapse into one more run. It is cheap: a few thousand rows at most. It compares no counters and always runs when
+  asked: before the first sync no file is known and a request does nothing, so the first full run of each process comes
+  after the first attach pass, which asks for it. The flows of the user database's counters ask only when a counter
+  really changes: Room reads them again on every write to `user_meta`, also when the value stays.
 - A partial run after each batch of the tag pass writes the rows of the batch's files from the values of the last full
   run, so that after a rebuild or a deletion of the library database favorites and counts come back as the tag pass
   brings the keys back, not only when its run ends.
@@ -1278,7 +1286,9 @@ The owner's decision of 14.11.2026: the album's references follow its tracks.
 
 ### 15.6 Checks
 
-JVM tests: the move, split, tie, merge, no-op and partial cases of §15.3 on tables of members and files; the counting of
+JVM tests: the move, split, tie, merge, no-op and partial cases of §15.3 on tables of members and files, also a
+majority that moved while the rest still names the old key and members on the old key that keep a new key from a
+majority; a counter's flow asking only on a change; the counting of
 playback.md §11 (half, 4 minutes, 30 s, pauses, seeks, a new playback, repeat-one, an unknown length, a resumed
 playback); the listened time in the saved snapshot.
 
@@ -1286,12 +1296,13 @@ Instrumented tests on the API 30 emulator:
 
 - `user.db` from version 3 to 4 with rows of version 3 (`MigrationTestHelper`), the counters copied.
 - The mirror on the real databases: favorites, favorite albums, play counts and last played times written and cleared,
-  copies of one key, the mirrored counter, a favorite that does not make the sync apply the rules again; the references
-  of §15.3 through the real sync for a moved folder (move), a folder split in two (no move), two albums merged by one
-  release ID (merge) and an album left alone (no-op).
+  copies of one key, a favorite that does not make the sync apply the rules again; the references of §15.3 through the
+  real sync for a moved folder (move), two of three files moved with one left behind (move), a folder split in two
+  (no move), two albums merged by one release ID (merge), an album left alone (no-op) and a cover move that fails
+  (finished by the next run).
 - Through the real library: favorites, favorite albums and play counts survive an index rebuild with new IDs and a
   deletion of the library database, coming back as the keys come back.
 - The counting of playback.md §11 on a real player with a test clock, and the service's recorder writing a library
-  song's play by its identity (opened files and songs without one not at all).
+  song's play by its identity (opened files and songs without one not at all) and ending its writer when closed.
 - On the screen: the toggle on Now Playing and in the song menu, on the album page, and the Favorites chip of the
   Albums tab.

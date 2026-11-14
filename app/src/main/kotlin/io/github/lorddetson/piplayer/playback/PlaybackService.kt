@@ -46,6 +46,7 @@ class PlaybackService : MediaLibraryService() {
     private var controls: ServiceControls? = null
     private var effects: AudioEffectSession? = null
     private var tracker: PlayTracker? = null
+    private var recorder: LibraryPlayRecorder? = null
 
     private val handler = Handler(Looper.getMainLooper())
     private val mainScope = MainScope()
@@ -86,7 +87,8 @@ class PlaybackService : MediaLibraryService() {
         player.addListener(effects)
         val controls = ServiceControls(player, StopAfterCurrentStore(this), ::publishControls).also { controls = it }
         // Before the saver, so that a snapshot taken at a change of song already sees the new playback (§11).
-        val tracker = PlayTracker(player, LibraryPlayRecorder(this)).also { tracker = it }
+        val recorder = LibraryPlayRecorder(this).also { recorder = it }
+        val tracker = PlayTracker(player, recorder).also { tracker = it }
         tracker.start()
         val store = PlaybackStateStore.get(this)
         val saver = PlaybackStateSaver(player, store, shuffleOrder = { player.shuffleOrder }, listen = tracker::progress)
@@ -210,6 +212,9 @@ class PlaybackService : MediaLibraryService() {
         // After the last snapshot, which keeps the progress of the playback it ends (§11.3).
         tracker?.release()
         tracker = null
+        // After the end the tracker has just written; the recorder finishes its writes and its writer ends.
+        recorder?.close()
+        recorder = null
         session?.let { session ->
             val player = session.player
             session.release()

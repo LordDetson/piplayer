@@ -13,6 +13,7 @@ import io.github.lorddetson.piplayer.ui.GrantAudioPermission
 import io.github.lorddetson.piplayer.userdata.PlayEventEntity
 import io.github.lorddetson.piplayer.userdata.UserData
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.Rule
 import org.junit.Test
@@ -58,6 +59,23 @@ class LibraryPlayRecorderTest {
     }
 
     @Test
+    fun closeFinishesTheWritesAskedForAndEndsTheWriter() = runBlocking<Unit> {
+        Library.sync(context).awaitIdle()
+        val file = fileOf(1)
+        Library.database(context).library().setContent(file, key(1), 200_000, DurationSource.HEADER)
+        Library.identities(context).attach()
+        val identity = checkNotNull(UserData.database(context).identities().idOfKey(Hex.bytes(key(1))))
+
+        recorder.counted(file.toString(), startedAt = 1_000, listenedMs = 100_000)
+        recorder.ended(file.toString(), startedAt = 1_000, listenedMs = 150_000)
+        recorder.close()
+
+        // The writer ends with the writes, so that no coroutine outlives the service.
+        withTimeout(SAFETY_TIMEOUT_MS) { recorder.awaitClosed() }
+        assertThat(UserData.database(context).plays().events()).containsExactly(PlayEventEntity(identity, 1_000, 150_000))
+    }
+
+    @Test
     fun openedFilesAndSongsWithoutAnIdentityAreNotRecorded() = runBlocking<Unit> {
         Library.sync(context).awaitIdle()
 
@@ -66,5 +84,10 @@ class LibraryPlayRecorderTest {
         recorder.flush()
 
         assertThat(UserData.database(context).plays().events()).isEmpty()
+    }
+
+    private companion object {
+        /** Far more than the writes need; the wait ends when the writer does. */
+        const val SAFETY_TIMEOUT_MS = 30_000L
     }
 }

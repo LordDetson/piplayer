@@ -19,6 +19,7 @@ import io.github.lorddetson.piplayer.userdata.Favorites
 import io.github.lorddetson.piplayer.userdata.PlayStats
 import io.github.lorddetson.piplayer.userdata.UserDatabase
 import java.io.File
+import java.io.IOException
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.After
@@ -102,7 +103,6 @@ class UserMirrorTest {
             TrackMirrorEntity(fileId(3), favorite = true, playCount = 2, lastPlayedAt = 300),
             TrackMirrorEntity(fileId(4), favorite = false, playCount = 1, lastPlayedAt = 200),
         )
-        assertThat(library.mirror().mirroredCounter()).isEqualTo(user.user().changeCounter())
     }
 
     @Test
@@ -116,7 +116,6 @@ class UserMirrorTest {
         mirror.mirror()
 
         assertThat(tracks()).isEmpty()
-        assertThat(library.mirror().mirroredCounter()).isEqualTo(user.user().changeCounter())
     }
 
     @Test
@@ -184,6 +183,68 @@ class UserMirrorTest {
         assertThat(covers.album(old)).isNull()
         assertThat(albums()).containsExactly(new)
         assertThat(user.favorites().members().map { it.albumKey }.toSet()).containsExactly(new)
+    }
+
+    @Test
+    fun mostOfAnAlbumMovedTakesItsFavoriteAndCoverAlongAlsoWhenTheRestStays() = runBlocking<Unit> {
+        val before = listOf(album(1, "Music/A/"), album(2, "Music/A/"), album(3, "Music/A/"))
+        library(before)
+        val old = albumKeyOf(1)
+        favorites.setAlbum(old, favorite = true)
+        covers.setAlbum(old, CoverCopy(cover("old.jpg"), 10, 10))
+        mirror.mirror()
+
+        // Two of the three files move; the third still names the old album.
+        index.volume().rows = before.map {
+            if (it.mediaStoreId == 3L) it else it.copy(relativePath = "Music/B/", generationModified = it.generationModified + 10)
+        }
+        sync.sync()
+        val new = albumKeyOf(1)
+        assertThat(albumKeyOf(3)).isEqualTo(old)
+        mirror.mirror()
+
+        assertThat(user.favorites().favoriteAlbums().map { it.albumKey }).containsExactly(new)
+        covers.load()
+        assertThat(covers.album(new)).isEqualTo("old.jpg")
+        assertThat(covers.album(old)).isNull()
+        assertThat(user.favorites().members().map { it.albumKey }.toSet()).containsExactly(new)
+    }
+
+    @Test
+    fun aCoverMoveThatFailsIsTriedAgainByTheNextRun() = runBlocking<Unit> {
+        val before = listOf(album(1, "Music/A/"), album(2, "Music/A/"))
+        library(before)
+        val old = albumKeyOf(1)
+        favorites.setAlbum(old, favorite = true)
+        covers.setAlbum(old, CoverCopy(cover("old.jpg"), 10, 10))
+        mirror.mirror()
+        index.volume().rows = before.map { it.copy(relativePath = "Music/B/", generationModified = it.generationModified + 10) }
+        sync.sync()
+        val new = albumKeyOf(1)
+
+        val failingOnce = object : AlbumCoverMoves by covers {
+            var failed = false
+
+            override suspend fun moveAlbumCovers(moves: Map<String, String>) {
+                if (!failed) {
+                    failed = true
+                    throw IOException("The test's failed cover move")
+                }
+                covers.moveAlbumCovers(moves)
+            }
+        }
+        val flaky = UserMirror(library, user, sync, failingOnce, clock = { now })
+        try {
+            assertThat(runCatching { flaky.mirror() }.exceptionOrNull()).isInstanceOf(IOException::class.java)
+            flaky.mirror()
+        } finally {
+            flaky.close()
+        }
+
+        covers.load()
+        assertThat(covers.album(new)).isEqualTo("old.jpg")
+        assertThat(covers.album(old)).isNull()
+        assertThat(user.favorites().favoriteAlbums().map { it.albumKey }).containsExactly(new)
     }
 
     @Test

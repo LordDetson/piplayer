@@ -17,7 +17,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
 /** Where counted plays go (docs/library.md §15.5); the service writes them into the user database. */
@@ -84,8 +83,9 @@ class PlayTracker(
     }
 
     override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-        // A change of the queue that keeps the item current goes on with its playback (§11.1).
-        if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED && mediaItem?.mediaId == counter.mediaId) return
+        // Every reported change of the current item is a new playback, also a new queue that starts with the same song
+        // (§11.1). Changes that keep the entry (an insertion, a removal elsewhere, shuffle, new values for the entry in
+        // place) are reported as no transition.
         finish()
         mediaItem?.let(::begin)
     }
@@ -131,27 +131,25 @@ class PlayTracker(
 class LibraryPlayRecorder(context: Context) : PlayRecorder {
 
     private val app = context.applicationContext
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     /** One write after another, also across their suspensions: an end never overtakes its count. */
     private val writes = Channel<suspend () -> Unit>(Channel.UNLIMITED)
 
-    init {
-        scope.launch {
-            for (write in writes) {
-                try {
-                    write()
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (e: Exception) {
-                    Log.w(TAG, "A play could not be recorded", e)
-                }
+    /** The identity each counted playback was recorded under, by its media ID and start. */
+    private val recorded = ConcurrentHashMap<Pair<String, Long>, Long>()
+
+    /** Takes the writes in order until [close]; then it ends, and nothing of the recorder stays behind. */
+    private val writer = CoroutineScope(Dispatchers.IO).launch {
+        for (write in writes) {
+            try {
+                write()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w(TAG, "A play could not be recorded", e)
             }
         }
     }
-
-    /** The identity each counted playback was recorded under, by its media ID and start. */
-    private val recorded = ConcurrentHashMap<Pair<String, Long>, Long>()
 
     override fun counted(mediaId: String, startedAt: Long, listenedMs: Long) {
         val fileId = QueueIds.fileId(mediaId) ?: return
@@ -169,6 +167,15 @@ class LibraryPlayRecorder(context: Context) : PlayRecorder {
             UserData.plays(app).setListened(identity, startedAt, listenedMs)
         }
     }
+
+    /** Takes no more writes; those asked for so far are still done, and then the writer ends. */
+    fun close() {
+        writes.close()
+    }
+
+    /** Waits until the writer has ended after [close]; for tests. */
+    @androidx.annotation.VisibleForTesting
+    suspend fun awaitClosed() = writer.join()
 
     /** Waits until every write asked for so far is done; for tests. */
     @androidx.annotation.VisibleForTesting

@@ -1046,9 +1046,9 @@ used, never through a stored content URI, which goes stale after a media index r
   from the one the library database last mirrored: the merged values of decided fields, favorites (tracks and
   albums), play counts, last played times, the badge state and the Keep as-is/Skip state; the resolver recomputes the
   missing-information reasons at the same time. The folder rules have a counter of their own (`user_meta.rules_counter`,
-  library.md §3.1) that the sync follows, so that a favorite or a play does not make the sync apply the rules again;
-  `library_meta.mirrored_data_counter` keeps the change counter the mirror of favorites and plays last wrote
-  (library.md §15.4). Writes that change nothing mirrored (the listened time of a counted play, own covers, album
+  library.md §3.1) that the sync follows, so that a favorite or a play does not make the sync apply the rules again.
+  The mirror of favorites and plays (M2b) compares no counters: its full run is cheap, and the first attach pass of each
+  process asks for one (library.md §15.4). Writes that change nothing mirrored (the listened time of a counted play, own covers, album
   members, folding old play events) do not raise the counter.
 - A change that touches both files commits the user database first and the library database in its own transaction
   afterwards. If the process dies in between, the start-up mirror and the tag pass bring the library database up to

@@ -38,6 +38,13 @@ data class AlbumMemberEntity(
     @ColumnInfo(name = "identity_id") val identityId: Long,
 )
 
+/** An album member with its identity's content key, for the moves of docs/library.md §15.3. */
+data class MemberKeyRow(
+    @ColumnInfo(name = "album_key") val albumKey: String,
+    @ColumnInfo(name = "identity_id") val identityId: Long,
+    @ColumnInfo(name = "content_key") val contentKey: ByteArray,
+)
+
 /** A favorite song with its identity's content key, for the mirror. */
 data class FavoriteKeyRow(
     @ColumnInfo(name = "identity_id") val identityId: Long,
@@ -85,6 +92,11 @@ interface FavoriteDao {
 
     @Query("SELECT * FROM album_member ORDER BY album_key, identity_id")
     suspend fun members(): List<AlbumMemberEntity>
+
+    @Query(
+        "SELECT m.album_key, m.identity_id, i.content_key FROM album_member m JOIN track_identity i ON i.id = m.identity_id",
+    )
+    suspend fun memberKeys(): List<MemberKeyRow>
 
     @Query("INSERT OR IGNORE INTO album_member (album_key, identity_id) VALUES (:albumKey, :identityId)")
     suspend fun addMember(albumKey: String, identityId: Long)

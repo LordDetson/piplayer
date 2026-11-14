@@ -170,11 +170,11 @@ object Library {
             observer = watcher
             // A change of the folder rules is applied by a sync at once (docs/library.md §3.1, §3.4).
             scope.launch {
-                UserData.database(app).user().rulesCounterFlow().drop(1).collect { opened.value?.sync?.request() }
+                UserData.database(app).user().rulesCounterFlow().counterChanges().collect { opened.value?.sync?.request() }
             }
             // Every change of mirrored user data, and of the own covers whose albums need members, asks the mirror.
             scope.launch {
-                UserData.database(app).user().changeCounterFlow().drop(1).collect { opened.value?.mirror?.request() }
+                UserData.database(app).user().changeCounterFlow().counterChanges().collect { opened.value?.mirror?.request() }
             }
             scope.launch {
                 Covers.own(app).version.drop(1).collect { opened.value?.mirror?.request() }

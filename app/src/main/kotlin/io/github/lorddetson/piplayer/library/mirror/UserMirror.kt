@@ -9,6 +9,7 @@ import io.github.lorddetson.piplayer.library.db.MirrorDao
 import io.github.lorddetson.piplayer.library.identity.Hex
 import io.github.lorddetson.piplayer.library.sync.LibrarySync
 import io.github.lorddetson.piplayer.userdata.Favorites
+import io.github.lorddetson.piplayer.userdata.MemberKeyRow
 import io.github.lorddetson.piplayer.userdata.PlayStats
 import io.github.lorddetson.piplayer.userdata.UserDatabase
 import kotlin.coroutines.cancellation.CancellationException
@@ -149,8 +150,6 @@ class UserMirror(
         }
         sync.exclusive {
             relink()
-            // The counter first: the values read after it hold at least what it counts.
-            val counter = user.user().changeCounter()
             val current = HashMap<String, Values>()
             for (row in user.favorites().favoriteKeys()) current[Hex.text(row.contentKey)] = Values(true, 0, null)
             for (row in user.plays().playedKeys()) {
@@ -166,7 +165,6 @@ class UserMirror(
                     val json = JsonRows().apply { chunk.forEach { key -> row { text(key) } } }.toString()
                     execute("INSERT OR IGNORE INTO album_mirror (album_key) SELECT value->>0 FROM json_each(?)", json)
                 }
-                mirrorDao.setMirroredCounter(counter)
             }
             values = current
         }
@@ -212,20 +210,22 @@ class UserMirror(
     }
 
     /**
-     * Moves the references of albums whose key names nothing any more and records the members of the referenced albums
-     * (docs/library.md §15.3). Writes only the user database and the own covers.
+     * Moves the references of albums most of whose tracks are now in another album, and records the members of the
+     * referenced albums (docs/library.md §15.3). Writes only the user database and the own covers.
      */
     private suspend fun relink() {
         val favorites = user.favorites()
         val favoriteAlbums = favorites.favoriteAlbums().associateBy { it.albumKey }
         val coverTimes = covers?.albumCoverTimes().orEmpty()
         val referenced = favoriteAlbums.keys + coverTimes.keys
-        val members = favorites.members().groupBy({ it.albumKey }, { it.identityId }).mapValues { it.value.toSet() }
+        val memberKeys = favorites.memberKeys().filter { it.albumKey in referenced }
+        val members = memberKeys.groupBy({ it.albumKey }, { it.identityId }).mapValues { it.value.toSet() }
         val present = referenced.toList().chunked(MirrorDao.CHUNK).flatMap { mirrorDao.presentAlbums(it) }.toSet()
-        val gone = referenced - present
 
-        val moves = if (gone.isEmpty()) emptyMap() else AlbumRelink.moves(referenced, present, members, albumsOf(members, gone))
+        val moves = if (members.isEmpty()) emptyMap() else AlbumRelink.moves(referenced, members, albumsOf(memberKeys))
         if (moves.isNotEmpty()) {
+            // The covers first: until the members of an old key go, a later run can still find where its tracks went.
+            covers?.moveAlbumCovers(moves)
             user.withWriteTransaction {
                 var favoritesMoved = false
                 for ((old, new) in moves) {
@@ -240,7 +240,6 @@ class UserMirror(
                 }
                 if (favoritesMoved) user.user().countChange()
             }
-            covers?.moveAlbumCovers(moves)
         }
 
         // Members of the albums referenced now, while their keys name them; only added (§15.3).
@@ -262,10 +261,9 @@ class UserMirror(
         }
     }
 
-    /** The album keys of the files that hold the keys of the members of [gone] albums now, by identity. */
-    private suspend fun albumsOf(members: Map<String, Set<Long>>, gone: Set<String>): Map<Long, Set<String>> {
-        val ids = gone.flatMap { members[it].orEmpty() }.toSet()
-        val keyOf = ids.mapNotNull { id -> user.identities().identity(id)?.let { id to Hex.text(it.contentKey) } }.toMap()
+    /** The album keys of the files that hold the keys of the [members] now, by identity; the old key counts too. */
+    private suspend fun albumsOf(members: List<MemberKeyRow>): Map<Long, Set<String>> {
+        val keyOf = members.associate { it.identityId to Hex.text(it.contentKey) }
         val albumsByKey = keyOf.values.distinct().chunked(MirrorDao.CHUNK)
             .flatMap { mirrorDao.albumsOfKeys(it) }
             .mapNotNull { row -> row.albumKey?.let { row.contentKey to it } }

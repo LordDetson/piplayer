@@ -1,6 +1,7 @@
 package io.github.lorddetson.piplayer.playback
 
 import androidx.media3.common.MediaItem
+import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -166,7 +167,25 @@ class PlayTrackerTest {
     }
 
     @Test
-    fun aChangeOfTheQueueThatKeepsTheSongKeepsItsPlayback() {
+    fun theCurrentItemReplacedInPlaceWithNewValuesKeepsItsPlayback() {
+        start(item("a"))
+        listen(1_000)
+
+        // The refresh of docs/playback.md §2.6: the same entry with the values the tag pass has just read. The player
+        // keeps the entry and reports no transition for it; should it ever report one, this playback must still go on.
+        onMain {
+            val refreshed = item("a").buildUpon().setMediaMetadata(MediaMetadata.Builder().setTitle("Read").build()).build()
+            player.replaceMediaItem(0, refreshed)
+        }
+        awaitPlayer("the item shows its new title") { currentMediaItem?.mediaMetadata?.title == "Read" }
+        listen(2_000)
+
+        assertThat(counted()).containsExactly("a")
+        assertThat(recorded.none { it.kind == "ended" }).isTrue()
+    }
+
+    @Test
+    fun aQueueThatOnlyGrowsElsewhereKeepsThePlayback() {
         start(item("a"))
         listen(1_000)
 
@@ -176,6 +195,22 @@ class PlayTrackerTest {
 
         assertThat(counted()).containsExactly("a")
         assertThat(recorded.none { it.kind == "ended" }).isTrue()
+    }
+
+    @Test
+    fun theSameSongChosenAgainFromAListIsANewPlayback() {
+        start(item("a"))
+        listen(4_000)
+        assertThat(counted()).containsExactly("a")
+
+        // A list played from the same song: the session sets a new queue, as onSetMediaItems does.
+        onMain { player.setMediaItems(listOf(item("a"), item("b")), 0, 0) }
+        awaitPlayer("the new queue plays") { mediaItemCount == 2 && isPlaying }
+        listen(3_000)
+
+        assertThat(recorded.map { it.kind to it.mediaId })
+            .containsExactly("counted" to "a", "ended" to "a", "counted" to "a")
+        assertThat(recorded[1].listenedMs).isEqualTo(4_000)
     }
 
     @Test

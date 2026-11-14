@@ -75,15 +75,6 @@ interface MirrorDao {
     )
     suspend fun albumsOfKeys(keys: List<String>): List<KeyAlbumRow>
 
-    @Query("SELECT COALESCE((SELECT mirrored_data_counter FROM library_meta WHERE id = 1), -1)")
-    suspend fun mirroredCounter(): Long
-
-    @Query(
-        "INSERT INTO library_meta (id, mirrored_user_counter, mirrored_data_counter) VALUES (1, 0, :counter) " +
-            "ON CONFLICT(id) DO UPDATE SET mirrored_data_counter = :counter",
-    )
-    suspend fun setMirroredCounter(counter: Long)
-
     companion object {
         const val CHUNK = 500
     }

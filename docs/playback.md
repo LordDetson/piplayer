@@ -1151,9 +1151,11 @@ whichever comes first; seeking adds nothing; songs shorter than 30 s never count
   buffering does not count.
 - A playback is one listening of one queue item. A new one starts at every change of the current item: the next or
   previous song, a song chosen in the queue or a list, a gapless or crossed-over transition, a repeat-one replay (so a
-  song repeated three times can count three times), a repeat-all wrap. A change of the queue that keeps the same item
-  current (an insertion, a removal elsewhere, shuffle) does not start one. A seek inside the item, also "Previous" that
-  goes back to its start, continues the same playback.
+  song repeated three times can count three times), a repeat-all wrap. A new queue starts one too, also a queue that
+  starts with the song that was playing: choosing the playing song again in a list, or Play on its album or folder, is
+  a new listening from its start. A change of the queue that keeps the same entry current (an insertion, a removal
+  elsewhere, shuffle, new values for the entry in place as the refresh of §2.6 brings them) does not start one. A seek
+  inside the item, also "Previous" that goes back to its start, continues the same playback.
 - A gapless transition is reported a moment after the audio crossed over; the moment counts for the song before.
 
 ### 11.2 When it counts
@@ -1165,7 +1167,8 @@ whichever comes first; seeking adds nothing; songs shorter than 30 s never count
   reached while playing, and at every change of state. Only songs of the library count, by their track identity; an
   opened file or a song whose tags are not read yet is not recorded (library.md §15.5).
 - When the playback ends (another item, the queue replaced, the service destroyed), its listened time is written to
-  the event of a play that counted.
+  the event of a play that counted. Writes go in order on one background writer; when the service is destroyed, the
+  writer finishes the writes asked for and ends.
 
 ### 11.3 Process death
 
@@ -1183,4 +1186,5 @@ unknown length at 4 minutes, pauses and seeks adding nothing, once per playback,
 playback going on and not counting twice; the snapshot keys.
 
 Instrumented tests: the tracker on a real player with a test clock: counting while playing, pauses, a seek, a repeat-one
-replay and a transition to the next song as new playbacks, a change of the queue that keeps the item.
+replay, a transition to the next song and a new queue that starts with the same song as new playbacks; a change of the
+queue that keeps the item and new values for the current entry in place keeping its playback.
