@@ -107,13 +107,13 @@ class PlaylistsScreenTest {
 
     private fun entryFiles(id: Long) = runBlocking { Library.playlists(context).items(id).map { it.song?.id } }
 
-    /** Runs the accessibility action [label] of the row that shows [title]. */
-    private fun action(title: String, label: String) {
+    /** Runs the accessibility action [label] of the row that shows [title], [times] times in a row on one frame. */
+    private fun action(title: String, label: String, times: Int = 1) {
         val row = hasTestTag(PlaylistTags.ROW) and hasAnyAncestor(hasTestTag(PlaylistTags.PAGE_LIST)) and hasText(title, substring = true)
         compose.waitUntilAtLeastOneExists(row, timeoutMillis = 10_000)
         val node = compose.onAllNodes(row, useUnmergedTree = false)[0].fetchSemanticsNode()
         val custom = node.config[SemanticsActions.CustomActions].first { it.label == label }
-        compose.runOnUiThread { custom.action() }
+        compose.runOnUiThread { repeat(times) { custom.action() } }
     }
 
     private fun songsPlaylist(vararg mediaStoreIds: Long): Long = runBlocking {
@@ -202,6 +202,20 @@ class PlaylistsScreenTest {
         compose.waitUntil(10_000) { entryFiles(id) == listOf(fileId(3), fileId(2)) }
         tap(hasText(text(R.string.queue_undo)))
         compose.waitUntil(10_000) { entryFiles(id) == listOf(fileId(1), fileId(3), fileId(2)) }
+    }
+
+    @Test
+    fun twoQuickMovesUpMoveAnEntryTwoPlacesWithoutAnError() {
+        val id = songsPlaylist(1, 2, 3)
+        tab(R.string.tab_playlists)
+        tap(hasText("Mix") and hasAnyAncestor(hasTestTag(PlaylistTags.LIST)))
+
+        // TalkBack sends the second "Move up" before the database gives the page the first move.
+        action("Charlie", text(R.string.queue_move_up), times = 2)
+
+        compose.waitUntil(10_000) { entryFiles(id) == listOf(fileId(3), fileId(1), fileId(2)) }
+        compose.waitForIdle()
+        assertThat(compose.onAllNodes(hasText(text(R.string.playlist_failed))).fetchSemanticsNodes()).isEmpty()
     }
 
     @Test

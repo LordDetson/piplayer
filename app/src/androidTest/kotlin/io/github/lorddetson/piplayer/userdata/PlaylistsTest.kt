@@ -110,6 +110,25 @@ class PlaylistsTest {
     }
 
     @Test
+    fun anEntryMovesByStepsFromWhereItStandsNow() = runBlocking<Unit> {
+        // "Move up" twice before the page shows the first move: each step counts from the entry's place in the database.
+        val id = playlists.create("A")
+        playlists.add(id, (1..4).map { entry(it) })
+        val last = playlists.entries(id)[3]
+
+        assertThat(playlists.moveBy(last.id, -1)).isTrue()
+        assertThat(playlists.moveBy(last.id, -1)).isTrue()
+        assertThat(names(id)).containsExactly("1.mp3", "4.mp3", "2.mp3", "3.mp3")
+        assertThat(playlists.moveBy(last.id, 1)).isTrue()
+        assertThat(names(id)).containsExactly("1.mp3", "2.mp3", "4.mp3", "3.mp3")
+        // At an end there is nowhere to go: nothing moves, which is no failure.
+        val first = playlists.entries(id)[0]
+        assertThat(playlists.moveBy(first.id, -1)).isFalse()
+        assertThat(playlists.moveBy(-5, 1)).isFalse()
+        assertThat(positions(id)).containsExactly(0, 1, 2, 3)
+    }
+
+    @Test
     fun playlistsRaiseNoChangeCounter() = runBlocking<Unit> {
         // Nothing of a playlist is mirrored (docs/library.md §16.5).
         val id = playlists.create("A")

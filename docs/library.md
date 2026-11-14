@@ -1431,7 +1431,9 @@ Decision: an entry never points at a file. It refers to a track identity (§8.1)
   order. A tap on an available entry plays the playlist's available entries from it; a tap on an unavailable one says that
   the song is not in the library now. Each row has a drag handle, and a menu with "Play next", "Add to queue", "Move up",
   "Move down" and "Remove from playlist"; "Move up" and "Move down" are also the row's accessibility actions, so TalkBack
-  and switch access reorder without dragging. Removing says so with "Undo", which puts the entry back in its place. The
+  and switch access reorder without dragging. Decision: each goes one place from where the entry stands in the database,
+  so two sent before the page shows the first move it two places; an entry at an end does not move, and only a write that
+  fails says "The playlist could not be changed". Removing says so with "Undo", which puts the entry back in its place. The
   page has no sort and no search: the playlist's order is the user's. A playlist deleted while its page is open closes
   the page; a page opened for a playlist that is gone says so.
 - "Add to playlist" is in the song menu after "Add to queue", and in the menus of album, artist and folder rows and page

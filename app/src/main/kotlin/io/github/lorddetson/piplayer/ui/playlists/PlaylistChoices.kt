@@ -17,7 +17,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.withContext
 
-/** What the screens do with playlists (docs/library.md §16.3), off the main thread; null or false when it failed. */
+/**
+ * What the screens do with playlists (docs/library.md §16.3), off the main thread; null or false when it failed, except
+ * for the moves, where false means that nothing moved and only null is a failure.
+ */
 class PlaylistChoices(context: Context) {
 
     private val app = context.applicationContext
@@ -44,7 +47,11 @@ class PlaylistChoices(context: Context) {
         true
     }
 
-    suspend fun move(entryId: Long, to: Int): Boolean = safely(false) { playlists.move(entryId, to) }
+    /** Moves the entry to [to]; whether it moved, or null when the move failed (an end reached is no failure). */
+    suspend fun move(entryId: Long, to: Int): Boolean? = safely(null) { playlists.move(entryId, to) }
+
+    /** Moves the entry [by] places from where it stands now; whether it moved, or null when the move failed. */
+    suspend fun moveBy(entryId: Long, by: Int): Boolean? = safely(null) { playlists.moveBy(entryId, by) }
 
     suspend fun import(uri: Uri): ImportResult? = safely(null) { PlaylistFiles(app).import(uri) }
 

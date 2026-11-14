@@ -192,8 +192,14 @@ private fun Entries(id: Long, items: List<PlaylistItem>, host: LibraryHost, modi
         if (fromIndex >= 0 && toIndex >= 0) shownState.value = current.toMutableList().apply { add(toIndex, removeAt(fromIndex)) }
     }
     val failed = { scope.launch { host.snackbar.showSnackbar(resources.getString(R.string.playlist_failed)) }; Unit }
+    // A drop moves to a place; "Move up" and "Move down" go one step from where the entry stands in the database, so
+    // that a second one sent before the page shows the first goes on from there.
     val move = { item: PlaylistItem, to: Int ->
-        PlaylistChoices.scope.launch { if (!choices.move(item.entryId, to)) failed() }
+        PlaylistChoices.scope.launch { if (choices.move(item.entryId, to) == null) failed() }
+        Unit
+    }
+    val step = { item: PlaylistItem, by: Int ->
+        PlaylistChoices.scope.launch { if (choices.moveBy(item.entryId, by) == null) failed() }
         Unit
     }
     val remove = { item: PlaylistItem ->
@@ -243,8 +249,8 @@ private fun Entries(id: Long, items: List<PlaylistItem>, host: LibraryHost, modi
                         }
                     },
                     onAddToQueue = item.song?.let { song -> { next: Boolean -> host.addToQueue(QueueTarget.Songs(listOf(song.id)), next) } },
-                    onMoveUp = if (place > 0) ({ move(item, place - 1) }) else null,
-                    onMoveDown = if (place < shown.lastIndex) ({ move(item, place + 1) }) else null,
+                    onMoveUp = if (place > 0) ({ step(item, -1) }) else null,
+                    onMoveDown = if (place < shown.lastIndex) ({ step(item, 1) }) else null,
                     onRemove = { remove(item) },
                     handle = Modifier.draggableHandle(
                         onDragStarted = { dragFrom = latest.indexOfFirst { it.entryId == item.entryId } },

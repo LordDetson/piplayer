@@ -106,15 +106,23 @@ class Playlists(private val database: UserDatabase, private val clock: () -> Lon
     }
 
     /** Moves the entry [entryId] to position [to] (kept within the playlist); false when nothing moved. */
-    suspend fun move(entryId: Long, to: Int): Boolean = database.withWriteTransaction {
-        val entry = dao.entry(entryId) ?: return@withWriteTransaction false
-        val target = to.coerceIn(0, dao.count(entry.playlistId) - 1)
+    suspend fun move(entryId: Long, to: Int): Boolean = database.withWriteTransaction { moveTo(entryId) { to } }
+
+    /**
+     * Moves the entry [entryId] [by] places from where it stands now (kept within the playlist), so that "Move up" asked
+     * twice before the page shows the first move goes up twice; false when nothing moved.
+     */
+    suspend fun moveBy(entryId: Long, by: Int): Boolean = database.withWriteTransaction { moveTo(entryId) { from -> from + by } }
+
+    private suspend fun moveTo(entryId: Long, target: (Int) -> Int): Boolean {
+        val entry = dao.entry(entryId) ?: return false
         val from = entry.position
-        if (target == from) return@withWriteTransaction false
-        if (target > from) dao.shift(entry.playlistId, from + 1, target + 1, -1) else dao.shift(entry.playlistId, target, from, 1)
-        dao.setPosition(entryId, target)
+        val to = target(from).coerceIn(0, dao.count(entry.playlistId) - 1)
+        if (to == from) return false
+        if (to > from) dao.shift(entry.playlistId, from + 1, to + 1, -1) else dao.shift(entry.playlistId, to, from, 1)
+        dao.setPosition(entryId, to)
         dao.touch(entry.playlistId, clock())
-        true
+        return true
     }
 
     /** Forgets every playlist; tests start so. */
