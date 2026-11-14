@@ -87,7 +87,7 @@ object MergedValues {
         val artistForm = artist?.let(forms::shared)
         val albumForm = album?.let(forms::shared)
         return DisplayValues(
-            albumKey = albumTags?.let { AlbumKey.of(it, volume, relativePath) { text -> forms.shared(text).normalized } },
+            albumKey = albumTags?.let { AlbumKey.of(it, volume, relativePath, { text -> forms.shared(text).normalized }, forms::albumFolder) },
             albumArtist = albumArtist,
             compilation = compilation,
             year = if (read) yearOf(tagValues?.date) ?: yearOf(tagValues?.originalDate) else indexValues?.year?.takeIf { it > 0 },

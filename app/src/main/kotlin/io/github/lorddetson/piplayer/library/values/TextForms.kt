@@ -26,11 +26,13 @@ class TextForm internal constructor(val text: String, val normalized: String, pr
  */
 class TextForms(
     private val keys: (String) -> SortKey = SortKeys::of,
+    private val folders: (String) -> String = AlbumKey::folderKey,
     private val normalizer: (String) -> String = TextNormalizer::normalize,
 ) {
 
     private val kept = HashMap<String, TextForm>()
     private val sortKeys = HashMap<String, SortKey>()
+    private val albumFolders = HashMap<String, String>()
 
     /** The forms of a text that other files of the batch may share, such as an album or an artist. */
     fun shared(text: String): TextForm = kept.getOrPut(text) { TextForm(text, normalizer(text), this) }
@@ -44,9 +46,24 @@ class TextForms(
      */
     fun sortKey(text: String): SortKey = sortKeys.getOrPut(text) { keys(text) }
 
+    /**
+     * The folder part of the album keys of a folder's files (AlbumKey.folderKey), derived once per folder of the batch:
+     * it took a third of resolving a first sync.
+     */
+    fun albumFolder(relativePath: String): String = albumFolders.getOrPut(relativePath) { folders(relativePath) }
+
     companion object {
         /** The search text of the given fields, missing ones left out, as `SearchText.of` gives it. */
-        fun searchText(vararg fields: TextForm?): String =
-            fields.mapNotNull { field -> field?.indexed?.takeIf { it.isNotEmpty() } }.joinToString(" ")
+        fun searchText(vararg fields: TextForm?): String {
+            // Every file of a first sync comes here: no lists in between.
+            val text = StringBuilder()
+            for (field in fields) {
+                val indexed = field?.indexed ?: continue
+                if (indexed.isEmpty()) continue
+                if (text.isNotEmpty()) text.append(' ')
+                text.append(indexed)
+            }
+            return text.toString()
+        }
     }
 }

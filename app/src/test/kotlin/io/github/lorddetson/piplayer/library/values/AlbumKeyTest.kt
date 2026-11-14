@@ -12,6 +12,16 @@ class AlbumKeyTest {
     private fun key(tags: TrackTags, path: String = "Music/Кино/Сказки/", volume: String = "external_primary") =
         AlbumKey.of(tags, volume, path)
 
+    /** Stored keys and the user's own covers refer to these strings, so their form stays as it is (docs/library.md §13.2). */
+    @Test
+    fun `a key is the normalized title, album artist, volume, folder and compilation flag`() {
+        assertThat(key(tags())).isEqualTo("сказки\u001Fкино\u001Fexternal_primary\u001Fmusic/кино/сказки/\u001F0")
+        assertThat(key(tags(albumArtist = null, compilation = true), path = "Music/Кино/Сказки/CD2/"))
+            .isEqualTo("сказки\u001F\u001Fexternal_primary\u001Fmusic/кино/сказки/\u001F1")
+        assertThat(key(tags(album = "+"), path = "")).isEqualTo("+\u001Fкино\u001Fexternal_primary\u001F\u001F0")
+        assertThat(key(tags(release = "abc"))).isEqualTo("mbid:abc")
+    }
+
     @Test
     fun `no album is no key`() {
         assertThat(key(tags(album = null))).isNull()

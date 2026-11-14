@@ -45,6 +45,10 @@ interface LibraryDao {
     @Query("SELECT COALESCE(MAX(id), 0) FROM audio_file")
     suspend fun lastFileId(): Long
 
+    /** Whether the library holds any file; a first sync, or the first after a rebuild, finds it empty. */
+    @Query("SELECT EXISTS (SELECT 1 FROM audio_file)")
+    suspend fun hasFiles(): Boolean
+
     @Query("DELETE FROM audio_file WHERE id IN (:fileIds)")
     suspend fun deleteFiles(fileIds: List<Long>)
 

@@ -112,10 +112,13 @@ object DisplayArtists {
      * [names] as rows, one per key, in order, each sorted by the key of its name; [sortTag], the artist's sort tag, names
      * a single artist (docs/library.md §11.1).
      */
-    fun of(names: List<String>, forms: TextForms = TextForms(), sortTag: String? = null): List<DisplayArtist> =
-        names.map { name ->
+    fun of(names: List<String>, forms: TextForms = TextForms(), sortTag: String? = null): List<DisplayArtist> {
+        fun row(name: String) =
             forms.shared(name).let { DisplayArtist(name, keyOf(name, it.normalized), it.indexed, forms.sortKey(sortTag ?: name)) }
-        }.distinctBy { it.key }
+        // Most files of a first sync have one artist.
+        if (names.size == 1) return listOf(row(names[0]))
+        return names.map(::row).distinctBy { it.key }
+    }
 }
 
 /**

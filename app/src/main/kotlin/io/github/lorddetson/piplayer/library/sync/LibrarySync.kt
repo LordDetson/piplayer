@@ -10,15 +10,19 @@ import io.github.lorddetson.piplayer.library.db.LibraryDatabase
 import io.github.lorddetson.piplayer.library.db.ReadFileRow
 import io.github.lorddetson.piplayer.library.db.StoredPlace
 import io.github.lorddetson.piplayer.library.db.VolumeSyncStateEntity
-import io.github.lorddetson.piplayer.library.db.JsonRows
+import io.github.lorddetson.piplayer.library.db.SqlRows
 import io.github.lorddetson.piplayer.library.db.replaceAll
+import io.github.lorddetson.piplayer.library.db.rowValue
+import io.github.lorddetson.piplayer.library.db.withIndexesBuiltAfter
 import io.github.lorddetson.piplayer.library.values.IndexValues
 import io.github.lorddetson.piplayer.library.rules.FolderRuleMatcher
 import io.github.lorddetson.piplayer.library.rules.Recordings
 import io.github.lorddetson.piplayer.library.rules.RulesSource
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
@@ -161,22 +165,23 @@ class LibrarySync(
 
     /**
      * What a sync writes for one volume. [rows] are the rows to store, the updated ones first; the added ones get their
-     * IDs when they are written. [displays] are their display values, in the same order. [changedFiles] are read files
-     * that changed since, so that what the pass read of them no longer holds. [movedFiles] are read files in another
-     * folder now: their albums need a new look, so the next pass reads them again.
+     * IDs when they are written. [inputs] are what their display values are resolved from, in the same order.
+     * [changedFiles] are read files that changed since, so that what the pass read of them no longer holds. [movedFiles]
+     * are read files in another folder now: their albums need a new look, so the next pass reads them again.
      */
     private class VolumePlan(
         val state: VolumeSyncStateEntity,
         val stateChanged: Boolean,
         val changes: FileChanges,
         val rows: List<IndexRow>,
-        val displays: List<DisplayValues>,
+        val inputs: List<DisplayInput>,
         val changedFiles: List<Long>,
         val movedFiles: List<Long>,
     )
 
     /** Reads the whole index first and writes everything in one transaction, so a failed read writes nothing. */
     private suspend fun syncOnce(): Boolean {
+        val started = System.nanoTime()
         val stored = dao.volumes().associateBy { it.volumeName }
         // An earlier process synced the library: lists may show it while this sync reads the index.
         if (stored.isNotEmpty()) markKnown()
@@ -189,6 +194,7 @@ class LibrarySync(
         // One collation for every key this sync makes; a change of language meanwhile asks for the next sync.
         val collation = SortKeys.current()
         val plans = attached.mapNotNull { volume -> plan(volume, stored[volume], collation) }
+        val read = System.nanoTime()
         val detached = SyncPlanner.detached(stored.keys, attached)
         val detachedFiles = detached.flatMap { volume -> dao.storedFiles(volume).map { it.fileId } }
 
@@ -204,29 +210,37 @@ class LibrarySync(
             mutableStatus.update { it.copy(ready = true, known = true, collation = storedCollation) }
             return false
         }
-        database.withWriteTransaction {
-            if (newDisplayVersion) {
-                with(TrackDisplayWriter) { write(allInputs.map { it.fileId }, derived) }
-                dao.setDisplayVersion(TrackDisplayWriter.VERSION)
-                dao.setCollation(collation.name)
-            }
-            delete(detachedFiles)
-            detached.forEach { dao.forgetVolume(it) }
-            for (plan in plans) {
-                write(plan)
-                if (plan.stateChanged) dao.saveVolume(plan.state)
-            }
-            if (seedMax > 0) dao.raiseLastFileId(seedMax)
-            if (rulesChanged) {
-                // The files written above already carry the new rules; only folders whose files carry another rule
-                // are written again, so that a first sync and a change of one rule stay quick.
-                for (folder in dao.folderRules()) {
-                    val rule = matcher.stateFor(folder.volume, folder.relativePath).stored
-                    if (folder.rule != rule) dao.setFolderRule(folder.volume, folder.relativePath, rule)
+        // The display values are resolved on the other cores while the transaction writes the files, and each chunk is
+        // written as soon as it is ready (docs/library.md §1.3).
+        coroutineScope {
+            val resolving = plans.map { with(TrackDisplayWriter) { resolving(it.inputs, collation) } }
+            database.withWriteTransaction {
+                if (newDisplayVersion) {
+                    with(TrackDisplayWriter) { write(allInputs.map { it.fileId }, derived) }
+                    dao.setDisplayVersion(TrackDisplayWriter.VERSION)
+                    dao.setCollation(collation.name)
                 }
-                dao.setMirroredUserCounter(userCounter)
+                delete(detachedFiles)
+                detached.forEach { dao.forgetVolume(it) }
+                for ((plan, displays) in plans.zip(resolving)) {
+                    write(plan, displays)
+                    if (plan.stateChanged) dao.saveVolume(plan.state)
+                }
+                if (seedMax > 0) dao.raiseLastFileId(seedMax)
+                if (rulesChanged) {
+                    // The files written above already carry the new rules; only folders whose files carry another rule
+                    // are written again, so that a first sync and a change of one rule stay quick.
+                    for (folder in dao.folderRules()) {
+                        val rule = matcher.stateFor(folder.volume, folder.relativePath).stored
+                        if (folder.rule != rule) dao.setFolderRule(folder.volume, folder.relativePath, rule)
+                    }
+                    dao.setMirroredUserCounter(userCounter)
+                }
             }
         }
+        val ended = System.nanoTime()
+        // Where the time of each sync goes, for the budget of the first one (docs/library.md §1.3).
+        Log.i(TAG, "Synced ${plans.sumOf { it.rows.size }} files: index read in ${(read - started) / 1_000_000} ms, written in ${(ended - read) / 1_000_000} ms")
         if (seed.isNotEmpty()) seed = seed - plans.map { it.state.volumeName }.toSet()
         mutableStatus.update {
             it.copy(
@@ -272,7 +286,7 @@ class LibrarySync(
         val inputs = changes.updated.map { update ->
             input(update.fileId, update.row, reads[update.fileId]?.takeIf { it.holdsFor(update.row) })
         } + changes.added.map { input(fileId = 0, it, read = null) }
-        return VolumePlan(state, stateChanged = state != stored, changes, rows, TrackDisplayWriter.resolve(inputs, collation), changedFiles, movedFiles)
+        return VolumePlan(state, stateChanged = state != stored, changes, rows, inputs, changedFiles, movedFiles)
     }
 
     private fun ReadFileRow.holdsFor(row: IndexRow) = size == row.size && mtime == row.modifiedSeconds
@@ -287,7 +301,7 @@ class LibrarySync(
     )
 
     /** Updated files keep their row IDs and added ones take the next free IDs; each table is written in bulk. */
-    private suspend fun TransactionScope<*>.write(plan: VolumePlan) {
+    private suspend fun TransactionScope<*>.write(plan: VolumePlan, displays: List<Deferred<List<DisplayValues>>>) {
         val changes = plan.changes
         delete(changes.removed)
         deleteTracks(plan.changedFiles)
@@ -297,14 +311,18 @@ class LibrarySync(
         val ids = changes.updated.map { it.fileId } + List(changes.added.size) { first + it }
         if (changes.added.isNotEmpty()) dao.raiseLastFileId(first + changes.added.size - 1)
         val indices = plan.rows.indices.toList()
-        if (changes.updated.isEmpty()) {
-            // Only new files, as in a first sync: nothing to keep, and no reading of the table being written.
-            replaceAll("audio_file", FILE_COLUMNS, indices) { i -> file(ids[i], plan.rows[i]) }
-        } else {
-            replaceAll("audio_file", FILE_COLUMNS, indices, KEPT_COLUMNS, SAME_FILE) { i -> file(ids[i], plan.rows[i]) }
+        suspend fun writeTables() {
+            if (changes.updated.isEmpty()) {
+                // Only new files, as in a first sync: nothing to keep, and no reading of the table being written.
+                replaceAll("audio_file", FILE_COLUMNS, indices) { i -> file(ids[i], plan.rows[i]) }
+            } else {
+                replaceAll("audio_file", FILE_COLUMNS, indices, KEPT_COLUMNS, SAME_FILE) { i -> file(ids[i], plan.rows[i]) }
+            }
+            replaceAll("media_index_entry", ENTRY_COLUMNS, indices) { i -> entry(ids[i], plan.rows[i]) }
+            with(TrackDisplayWriter) { writeChunks(ids, displays) }
         }
-        replaceAll("media_index_entry", ENTRY_COLUMNS, indices) { i -> entry(ids[i], plan.rows[i]) }
-        with(TrackDisplayWriter) { write(ids, plan.displays) }
+        // Into an empty library, as a first sync writes, the indexes are built once after the rows.
+        if (dao.hasFiles()) writeTables() else withIndexesBuiltAfter(INDEXED_TABLES) { writeTables() }
         for (chunk in plan.movedFiles.chunked(DELETE_CHUNK)) dao.readAgain(chunk)
     }
 
@@ -329,7 +347,7 @@ class LibrarySync(
         }
     }
 
-    private fun JsonRows.Row.file(id: Long, row: IndexRow) {
+    private fun SqlRows.Row.file(id: Long, row: IndexRow) {
         long(id)
         long(row.mediaStoreId)
         text(row.volume)
@@ -350,7 +368,7 @@ class LibrarySync(
         long(matcher.stateFor(row.volume, row.relativePath).stored.toLong())
     }
 
-    private fun JsonRows.Row.entry(id: Long, row: IndexRow) {
+    private fun SqlRows.Row.entry(id: Long, row: IndexRow) {
         long(id)
         text(row.title)
         text(row.artist)
@@ -367,6 +385,9 @@ class LibrarySync(
         const val TAG = "LibrarySync"
         const val CHANGE_DELAY_MS = 1_000L
         const val DELETE_CHUNK = 500
+
+        /** The tables a sync writes in bulk that have indexes of their own. */
+        val INDEXED_TABLES = listOf("audio_file", "track_display", "display_artist")
 
         // The columns of the entities in LibraryDatabase.kt, in the order the writers above give their values.
         val FILE_COLUMNS = listOf(
@@ -390,7 +411,7 @@ class LibrarySync(
             "embedded_cover_height", "embedded_cover_hash", "tag_length_ms", "content_key", "duration_ms", "duration_source",
         ).associateWith { "o.$it" } + ("unsafe_count" to "COALESCE(o.unsafe_count, 0)")
 
-        val SAME_FILE = "LEFT JOIN audio_file o ON o.id = value->>${FILE_COLUMNS.indexOf("id")} " +
-            "AND o.size = value->>${FILE_COLUMNS.indexOf("size")} AND o.mtime = value->>${FILE_COLUMNS.indexOf("mtime")}"
+        val SAME_FILE = "LEFT JOIN audio_file o ON o.id = ${rowValue(FILE_COLUMNS.indexOf("id"))} " +
+            "AND o.size = ${rowValue(FILE_COLUMNS.indexOf("size"))} AND o.mtime = ${rowValue(FILE_COLUMNS.indexOf("mtime"))}"
     }
 }

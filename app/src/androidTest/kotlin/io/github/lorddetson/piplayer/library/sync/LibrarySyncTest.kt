@@ -97,6 +97,87 @@ class LibrarySyncTest {
         }
     }
 
+    /**
+     * A first sync writes its tables in chunks while it resolves, and builds the indexes after the rows (docs/library.md
+     * §1.7); what it stores must be what each file resolves to on its own.
+     */
+    @Test
+    fun aFirstSyncOfManyFilesStoresWhatEachFileResolvesToAlone() = runBlocking<Unit> {
+        val random = kotlin.random.Random(130)
+        val parts = listOf("Ёлка", "AC/DC", "Beyoncé", "O'Brien", "the end", "a b c", "+", "Sigur Rós", "ДДТ", "01 - intro", "x_y", "🎵", "<unknown>")
+        fun text() = if (random.nextInt(6) == 0) null else List(random.nextInt(1, 3)) { parts.random(random) }.joinToString(" ")
+        val count = 5_123
+        index.volume().rows = List(count) { i ->
+            val id = i + 1L
+            row(
+                id,
+                title = text(),
+                path = "Music/${parts.random(random)}/" + listOf("", "", "CD1/", "Disc 2/").random(random),
+                name = "${text().orEmpty()} $id.mp3",
+                artist = text(),
+                album = text(),
+                albumArtist = text(),
+                year = if (random.nextBoolean()) 1990 + i % 30 else null,
+                trackNumber = listOf(null, 0, 3, 1_004, 2_000).random(random),
+                durationMs = if (random.nextInt(5) == 0) null else 1_000L * i,
+            )
+        }
+        val schema = schemaOf(database)
+
+        sync.sync()
+
+        val files = files()
+        val displays = dao.displays().associateBy { it.fileId }
+        val entries = dao.entries().associateBy { it.fileId }
+        assertThat(files).hasSize(count)
+        for (row in index.volume().rows) {
+            val file = files.getValue(row.mediaStoreId)
+            val expected = DisplayValues.of(row)
+            val stored = displays.getValue(file.id)
+            assertThat(file.relativePath + file.displayName).isEqualTo(row.relativePath + row.displayName)
+            assertThat(entries.getValue(file.id).title).isEqualTo(row.title)
+            assertThat(entries.getValue(file.id).trackNumber).isEqualTo(row.trackNumber)
+            assertThat(
+                listOf(
+                    stored.title, stored.artist, stored.album, stored.durationMs, stored.searchText, stored.missingInfoReasons,
+                    stored.albumKey, stored.albumArtist, stored.compilation, stored.year, stored.discNumber, stored.trackNumber,
+                    stored.artistKey, stored.albumSearch,
+                ),
+            ).describedAs("display of ${row.mediaStoreId}").isEqualTo(
+                listOf(
+                    expected.title, expected.artist, expected.album, expected.durationMs, expected.searchText, expected.reasons,
+                    expected.albumKey, expected.albumArtist, expected.compilation, expected.year, expected.discNumber,
+                    expected.trackNumber, expected.artistKey, expected.albumSearch,
+                ),
+            )
+            assertThat(listOf(stored.titleSort, stored.artistSort, stored.albumSort, stored.albumArtistSort, stored.fileSort))
+                .describedAs("sort keys of ${row.mediaStoreId}")
+                .usingElementComparator { a, b -> if (a.contentEquals(b)) 0 else 1 }
+                .isEqualTo(
+                    listOf(expected.titleSort, expected.artistSort, expected.albumSort, expected.albumArtistSort, expected.fileSort)
+                        .map { it?.bytes },
+                )
+            val artists = dao.displayArtists(file.id)
+            assertThat(artists.map { listOf(it.position, it.name, it.artistKey, it.searchText, it.sortKey.toList()) })
+                .describedAs("artists of ${row.mediaStoreId}")
+                .isEqualTo(expected.displayArtists.mapIndexed { i, it -> listOf(i, it.name, it.key, it.searchText, it.sortKey.bytes.toList()) })
+        }
+        // The indexes are there again, as the schema has them.
+        assertThat(schemaOf(database)).isEqualTo(schema)
+    }
+
+    private fun schemaOf(database: LibraryDatabase) = runBlocking {
+        database.useReaderConnection { connection ->
+            connection.usePrepared("SELECT type, name, sql FROM sqlite_master WHERE type = 'index' ORDER BY name") { statement ->
+                buildList {
+                    while (statement.step()) {
+                        add(listOf(statement.getText(0), statement.getText(1), if (statement.isNull(2)) null else statement.getText(2)))
+                    }
+                }
+            }
+        }
+    }
+
     @Test
     fun valuesThatNeedEscapingArriveAsTheIndexGaveThem() = runBlocking<Unit> {
         val title = "He said \"hi\" \\ O'Brien\n\u0001 Ёжик 🎵"

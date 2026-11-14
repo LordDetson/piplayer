@@ -51,8 +51,9 @@ object SearchText {
         } else {
             emptyList()
         }
-        val glued = (splitWords + shortRuns(normalized)).map { it.replace(" ", "") }.distinct()
-        if (glued.isEmpty()) return normalized
+        val runs = shortRuns(normalized)
+        if (splitWords.isEmpty() && runs.isEmpty()) return normalized
+        val glued = (splitWords + runs).map { it.replace(" ", "") }.distinct()
         return (listOf(normalized) + glued).joinToString(" ")
     }
 

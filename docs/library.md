@@ -68,8 +68,16 @@ The data model it implements is sketched in track-identification.md §10 (TI bel
   keeps its files.
 - **One transaction.** Each sync writes its changes in one transaction, so a list never sees half a sync, and a sync
   that changes no file writes no file rows. A sync that fails is logged and leaves the database as it was. Rows go in
-  as `INSERT OR REPLACE` of up to 2 000 rows per statement, each statement taking its rows as one JSON parameter that
-  `json_each` unpacks; a changed file is written again under its row ID, a new one takes the next free ID.
+  as `INSERT OR REPLACE` of up to 2 000 rows per statement, each statement holding its rows as SQL literals (a quote
+  doubled, a blob as hex, a text with a NUL character as the bytes of its UTF-8, an unpaired surrogate as U+FFFD);
+  a changed file is written again under its row ID, a new one takes the next free ID. SQLite parses literals about
+  three times as fast as it takes the same values out of a JSON parameter, which the writes used before. Room keeps a
+  connection's last 25 prepared statements by their text, and a bulk statement's text never comes again, so each one is
+  pushed out of that cache right after it runs.
+- **The first sync's budget.** The display values are resolved on all cores but one while the transaction writes the
+  files, and each chunk of 2 000 is written as soon as it is resolved; the next statements are built on another thread
+  while SQLite runs the one before. Into an empty library the indexes of the written tables are dropped and created
+  again after the rows, inside the same transaction. Each sync logs how long it read the index and how long it wrote.
 - **What the tag pass found stays.** A file stored again with the same size and modification time, also after a
   rename or an index rebuild, keeps what the tag pass found: its technical columns and `track` row, its failure, its
   content key and its count of failed reads. Its display values are resolved again, so a new name counts where the name
@@ -134,7 +142,7 @@ The data model it implements is sketched in track-identification.md §10 (TI bel
 
 - On the generated library, with an empty library database:
     - from the grant of the permission, which starts the first sync, to the first page of Songs: at most 3 s on the
-      owner's phone and 5 s on the API 30 emulator;
+      owner's phone and 4 s on the API 30 emulator (5 s until the first sync was sped up in M2b);
     - the whole first sync: at most 10 s on both;
     - a later start with the library already synced: the first page within 1 s, without waiting for the start sync
       (the database shows that an earlier process synced it).
