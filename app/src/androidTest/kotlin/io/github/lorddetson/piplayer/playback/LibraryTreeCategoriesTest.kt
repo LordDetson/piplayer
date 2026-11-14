@@ -318,7 +318,8 @@ class LibraryTreeCategoriesTest {
 
         // "rock" is in the search text of Alpha and Bravo: the genre plays in the genre page's order.
         assertThat(play(voice("rock")).titles()).containsExactly("Bravo", "Alpha")
-        assertThat(queueRequests.isNotEmpty()).isTrue()
+        // The queue's request is reported after the play has answered.
+        PlaybackTesting.eventually("the genre is reported") { queueRequests.lastOrNull()?.library?.list?.kind == ListKind.GENRE }
         assertThat(play(voice("evening chill")).titles()).containsExactly("Charlie", "Bravo")
         assertThat(play(voice("recently added")).titles()).hasSize(5)
         // An artist's name still wins.
