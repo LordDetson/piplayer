@@ -57,7 +57,10 @@ import io.github.lorddetson.piplayer.ui.player.FavoriteButton
 import io.github.lorddetson.piplayer.ui.player.FavoriteState
 import kotlinx.coroutines.launch
 
-/** A page's frame: the top bar with back, search and sort, and the mini player (docs/library.md §6.1). */
+/**
+ * A page's frame: the top bar with back, search and sort, and the mini player (docs/library.md §6.1). [titleStyle] sets the
+ * title in italics where a name needs it ("Unknown genre", §19.3).
+ */
 @Composable
 internal fun PageScaffold(
     title: String,
@@ -70,11 +73,12 @@ internal fun PageScaffold(
     sort: @Composable () -> Unit,
     menu: QueueMenu? = null,
     actions: @Composable () -> Unit = {},
+    titleStyle: FontStyle? = null,
     content: @Composable (Modifier) -> Unit,
 ) {
     Scaffold(
         topBar = {
-            LibraryTopBar(title, onBack, searching, search, onSearch, onSearching, sort) {
+            LibraryTopBar(title, onBack, searching, search, onSearch, onSearching, sort, titleStyle) {
                 actions()
                 menu?.let { QueueMenuButton(stringResource(R.string.page_menu), it) }
             }
@@ -267,6 +271,7 @@ fun GenrePage(key: String, host: LibraryHost, onBack: () -> Unit) {
         onSearching = { open -> searching = open; if (!open) search = "" },
         sort = { SortButton(ListName.GENRE_PAGE, songs.order.collectAsStateWithLifecycle().value, songs::setOrder) },
         menu = genre?.let { queue(host, QueueTarget.Genre(key)) },
+        titleStyle = if (genre?.unknown == true) FontStyle.Italic else null,
     ) { modifier ->
         when {
             !access.granted -> PermissionCard(access.deniedForGood, access.request, access.openSettings, modifier)

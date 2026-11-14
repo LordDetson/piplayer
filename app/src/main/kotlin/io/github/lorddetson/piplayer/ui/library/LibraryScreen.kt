@@ -789,6 +789,7 @@ internal fun LibraryTopBar(
     onSearch: (String) -> Unit,
     onSearching: (Boolean) -> Unit,
     sort: @Composable () -> Unit,
+    titleStyle: FontStyle? = null,
     actions: @Composable () -> Unit = {},
 ) {
     TopAppBar(
@@ -809,7 +810,7 @@ internal fun LibraryTopBar(
                     modifier = Modifier.fillMaxWidth().focusRequester(focus),
                 )
             } else {
-                Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.semantics { heading() })
+                Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis, fontStyle = titleStyle, modifier = Modifier.semantics { heading() })
             }
         },
         navigationIcon = {

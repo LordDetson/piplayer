@@ -1872,8 +1872,9 @@ smart lists (§17) in the controller tree (playback.md §10). The owner left the
 ### 19.3 The genre page
 
 - A tap on a genre opens its page, which comes in from the side: the top bar with back, the genre's name ("Unknown
-  genre" in italics for the songs without one), search, sort and the menu of §19.2; under it the number of songs,
-  "Play" and "Shuffle" as on a smart list's page (§17.2); then the songs.
+  genre" in italics for the songs without one, in the top bar as in the heading above the songs, which scrolls away),
+  search, sort and the menu of §19.2; under it the number of songs, "Play" and "Shuffle" as on a smart list's page
+  (§17.2); then the songs.
 - Decision: the page lists songs only. Browsing a genre by artist and album is the nested browsing of v1.x
   (features.md).
 - Its orders are artist, title, album and length (reversible), kept in the settings file for all genre pages
@@ -1944,4 +1945,5 @@ Instrumented tests on the API 30 emulator:
   follows its song.
 - On the screen: the tabs in their order, the tab kept after the activity is recreated; the Genres tab with counts,
   "Unknown genre" last, the sort by songs and the search; the tab updated after the hidden files change; a genre page
-  that plays from a row, "Play", "Shuffle", the menu of a genre row; a genre page found as gone.
+  that plays from a row, "Play", "Shuffle", the menu of a genre row; a genre page found as gone; "Unknown genre" drawn in
+  italics in its row, in its page's top bar and heading, and a real genre's name not.

@@ -1,6 +1,9 @@
 package io.github.lorddetson.piplayer.ui.library
 
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.ExperimentalTestApi
@@ -191,6 +194,35 @@ class GenresScreenTest {
         tap(hasContentDescription(text(R.string.song_menu, "Rock")))
         waitFor(hasText(text(R.string.add_to_playlist)))
         waitFor(hasText(text(R.string.play_next)))
+    }
+
+    /** The font style the first text that [matcher] finds (not merged into its row) is laid out with, as drawn. */
+    private fun fontStyleOf(matcher: SemanticsMatcher): FontStyle? {
+        val layouts = mutableListOf<TextLayoutResult>()
+        compose.onAllNodes(matcher, useUnmergedTree = true)[0].fetchSemanticsNode().config[SemanticsActions.GetTextLayoutResult].action!!.invoke(layouts)
+        return layouts.first().layoutInput.style.fontStyle
+    }
+
+    @Test
+    fun theSongsWithoutAGenreAreNamedInItalicsInTheirRowAndOnTheirPageAlsoInTheTopBar() {
+        tab(R.string.tab_genres)
+        val unknown = hasText(text(R.string.genre_unknown))
+        waitFor(unknown and inList)
+        assertThat(fontStyleOf(unknown and inList)).isEqualTo(FontStyle.Italic)
+        assertThat(fontStyleOf(hasText("Jazz") and inList)).isNotEqualTo(FontStyle.Italic)
+
+        tap(unknown and inList)
+        waitFor(hasText("Delta") and inList)
+        val topBar = unknown and !inList
+        waitFor(topBar)
+        assertThat(fontStyleOf(topBar)).isEqualTo(FontStyle.Italic)
+        assertThat(fontStyleOf(unknown and inList)).isEqualTo(FontStyle.Italic)
+        compose.activityRule.scenario.onActivity { it.onBackPressedDispatcher.onBackPressed() }
+
+        tap(hasText("Jazz") and inList)
+        waitFor(hasText("Charlie") and inList)
+        waitFor(hasText("Jazz") and !inList)
+        assertThat(fontStyleOf(hasText("Jazz") and !inList)).isNotEqualTo(FontStyle.Italic)
     }
 
     @Test
