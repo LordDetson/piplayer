@@ -38,6 +38,12 @@ class PlaybackStateSaver(
 
     private var started = false
 
+    /**
+     * The item that played to its end, by its row and media ID, until playback goes on: a stop after the end leaves the
+     * player idle at the end, and that position must not be saved (docs/playback.md §4.2). Only touched on the main thread.
+     */
+    private var endedItem: Pair<Int, String>? = null
+
     /** The shuffle order last written to the queue file, and that file's revision; only touched on the main thread. */
     private var savedOrder: ShuffleOrder? = null
     private var savedOrderQueue: QueueState? = null
@@ -102,7 +108,9 @@ class PlaybackStateSaver(
         // A queue of added songs only lives in the queue file; without it there is nothing to name.
         if (state.library == null && state.openItems.isEmpty() && queueRevision <= 0) return
         val metadata = item.mediaMetadata
-        val position = if (player.playbackState == Player.STATE_ENDED) 0L else player.currentPosition.coerceAtLeast(0)
+        // A song that played to its end is saved at its start and resumes no playback (§4.2, §11.3).
+        val ended = player.playbackState == Player.STATE_ENDED || endedItem == (row to item.mediaId)
+        val position = if (ended) 0L else player.currentPosition.coerceAtLeast(0)
         val snapshot = PlaybackSnapshot(
             queue = state.library,
             openItems = state.openItems,
@@ -118,7 +126,7 @@ class PlaybackStateSaver(
             uri = uri,
             queueRevision = queueRevision,
             libraryId = state.libraryId,
-            listen = listen(),
+            listen = if (ended) null else listen(),
         )
         if (snapshot == last) return
         last = snapshot
@@ -174,7 +182,10 @@ class PlaybackStateSaver(
 
     override fun onTimelineChanged(timeline: Timeline, reason: Int) = save()
 
-    override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) = save()
+    override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+        endedItem = null
+        save()
+    }
 
     override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) = save()
 
@@ -184,9 +195,20 @@ class PlaybackStateSaver(
         oldPosition: Player.PositionInfo,
         newPosition: Player.PositionInfo,
         reason: Int,
-    ) = save()
+    ) {
+        if (reason == Player.DISCONTINUITY_REASON_SEEK) endedItem = null
+        save()
+    }
 
-    override fun onPlaybackStateChanged(playbackState: Int) = save()
+    override fun onPlaybackStateChanged(playbackState: Int) {
+        when (playbackState) {
+            Player.STATE_ENDED -> endedItem = player.currentMediaItem?.let { player.currentMediaItemIndex to it.mediaId }
+            Player.STATE_BUFFERING, Player.STATE_READY -> endedItem = null
+            // Idle keeps it: a stop after the end does not move the position away from the end.
+            Player.STATE_IDLE -> Unit
+        }
+        save()
+    }
 
     override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) = save()
 

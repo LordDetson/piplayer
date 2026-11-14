@@ -93,6 +93,48 @@ object QueueRestore {
         }
     }
 
+    /** The longest end of a song in which a saved position counts as its end (docs/playback.md §4.3.1). */
+    const val MAX_END_ZONE_MS = 5_000L
+
+    /**
+     * The last part of a song of [durationMs] in which a saved position counts as its end (docs/playback.md §4.3.1): 2 %
+     * of its length, at most [MAX_END_ZONE_MS].
+     */
+    fun endZoneMs(durationMs: Long): Long = minOf(MAX_END_ZONE_MS, durationMs.coerceAtLeast(0) / 50)
+
+    /** Whether [positionMs] is at the end of a song of [durationMs]; never when the length is unknown (§4.3.1). */
+    fun isAtEnd(positionMs: Long, durationMs: Long?): Boolean =
+        durationMs != null && durationMs > 0 && positionMs >= durationMs - endZoneMs(durationMs)
+
+    /**
+     * The row that plays after [index] of [size] rows when its song ends (§4.3.1): the same row with repeat one, else
+     * the next in [playOrder] (the rows in play order, or null for list order), the first after the last with repeat
+     * all; null after the last with repeat off.
+     */
+    fun nextAfterEnd(index: Int, size: Int, repeatMode: Int, playOrder: IntArray?): Int? {
+        if (index !in 0 until size) return null
+        if (repeatMode == PlaybackSnapshot.REPEAT_ONE) return index
+        val order = playOrder?.takeIf { it.size == size }
+        val place = order?.indexOf(index) ?: index
+        if (place < 0) return null
+        val next = when {
+            place + 1 < size -> place + 1
+            repeatMode == PlaybackSnapshot.REPEAT_ALL -> 0
+            else -> return null
+        }
+        return order?.get(next) ?: next
+    }
+
+    /**
+     * [start], moved off the end of its song when its position is there (§4.3.1): to the start of the row that plays
+     * next, or to the start of the same row when none does. The length is the queue item's; an unknown one moves nothing.
+     */
+    fun offTheEnd(order: List<QueueSlot>, start: QueueStart, repeatMode: Int, playOrder: IntArray?): QueueStart {
+        val slot = order.getOrNull(start.index) ?: return start
+        if (!isAtEnd(start.positionMs, slot.durationMs)) return start
+        return QueueStart(nextAfterEnd(start.index, order.size, repeatMode, playOrder) ?: start.index, 0)
+    }
+
     /** The opened files of [order] at the rows they really got after the library was rebuilt. */
     fun openItems(order: List<QueueSlot>): List<SavedOpenItem> = order.mapIndexedNotNull { row, slot ->
         if (slot is QueueSlot.Open) slot.item.copy(index = row) else null
@@ -106,3 +148,11 @@ private val QueueSlot.fileId: Long?
         is QueueSlot.Added -> song.id
         is QueueSlot.Open -> null
     }
+
+/** The length of the entry before the player reads the file, null when it is not known (docs/playback.md §4.3.1). */
+private val QueueSlot.durationMs: Long?
+    get() = when (this) {
+        is QueueSlot.Library -> song.durationMs
+        is QueueSlot.Added -> song.durationMs
+        is QueueSlot.Open -> item.file.durationMs
+    }?.takeIf { it > 0 }

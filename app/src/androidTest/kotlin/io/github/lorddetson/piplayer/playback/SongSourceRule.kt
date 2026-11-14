@@ -45,9 +45,23 @@ class SongSourceRule(private val initial: () -> List<Song> = { emptyList() }) : 
     }
 
     companion object {
-        /** A song that plays a test asset, copied into the app's cache. */
-        fun song(id: Long, title: String, asset: String = PlaybackTesting.SHORT_FIXTURE, artist: String? = "Artist $id") =
-            Song(id, Uri.fromFile(TestFiles.copy(asset)).toString(), title, artist, "Album $id", 2_000L)
+        /**
+         * A song that plays a test asset, copied into the app's cache, with the asset's real length as the library would
+         * have it, or [durationMs] when given (null: unknown). A restore at the end of a song depends on it (§4.3.1).
+         */
+        fun song(
+            id: Long,
+            title: String,
+            asset: String = PlaybackTesting.SHORT_FIXTURE,
+            artist: String? = "Artist $id",
+            durationMs: Long? = lengthOf(asset),
+        ) = Song(id, Uri.fromFile(TestFiles.copy(asset)).toString(), title, artist, "Album $id", durationMs)
+
+        /** The length of the fixtures songs play: 12.042 s for the long one, 2 s for the others. */
+        private fun lengthOf(asset: String): Long = if (asset == PlaybackTesting.LONG_FIXTURE) LONG_FIXTURE_MS else 2_000L
+
+        /** The length of [PlaybackTesting.LONG_FIXTURE], as ffprobe reads it. */
+        const val LONG_FIXTURE_MS = 12_042L
 
         /** A song whose file does not exist. */
         fun missing(id: Long, title: String) =

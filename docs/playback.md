@@ -456,6 +456,12 @@ too often while it plays?), and a large cover (3000x3000) in the profiler.
   seconds of playback are not lost.
 - Since M2b a snapshot also carries the current playback's listened time, whether it has counted as a play and when it
   started (§11.3), under keys of their own; schema 3 stays, and a snapshot without them resumes nothing.
+- A song that played to its end, so that the queue ended, is saved at position zero and without listen progress. This
+  holds also after a stop that follows the end: the stop leaves the player idle with its position at the end, and
+  that position must not reach the file (PIM-68). The system's recent media controls then show the song from its
+  start, and a restore replays it as a new playback, as §4.3.1 does for the last song. A position just before the end,
+  as the five-second save writes it, is kept as it is: whether it counts as the end, and which song follows, is decided
+  at the restore (§4.3.1), when the length, the repeat mode and the order are known together.
 
 ### 4.3 Which song and position
 
@@ -470,6 +476,31 @@ too often while it plays?), and a large cover (3000x3000) in the profiler.
 - Shuffle and repeat are restored with the item. The exact random order from before the process died is not saved: the
   order is generated again with the saved item first and every other item once after it (A3.6). Turning shuffle off
   after the restore continues in list order from the saved item.
+
+#### 4.3.1 A position at the end of the song (M2b, PIM-68)
+
+- A saved position at the end of its song is not applied. "At the end" means at or past the song's length, or within
+  its last 2 %, at most its last 5 s: 0.6 s of a 30-second song, 3.6 s of a 3-minute one, 5 s of anything from 4 min
+  10 s on. Such a position leaves nothing worth hearing (the fade-out or the silence after it), and starting there
+  either ends the queue at once or, with some decoders, never starts at all: on API 30 a constant-bitrate MP3 without a
+  Xing or Info header sought to its very end stays buffering. The share keeps a short song from being skipped when it
+  was paused shortly before its end; the 5 s cap keeps the ending of a long song playable, so one paused 10 s before
+  its end, with a long fade-out still to come, resumes there.
+- Instead the restore moves on as the player would have moved on when the song ended: with repeat one, the same song
+  from its start; otherwise the next song of the play order (the shuffle order when it is restored exactly, §4.8; the
+  list order otherwise, also when the shuffle order is generated again, which then starts with that song), the first
+  one after the last with repeat all. After the last song with repeat off there is none, and the restore starts that
+  last song from its start. The moved start is paused or plays exactly as the restore would have (§4.4).
+- The length used is the one the queue item has before the player reads the file: the library's length of the song,
+  or the length read when the file was opened (§5.2). When it is not known, the saved position is applied as it is.
+- Once the player knows the length of the restored item itself, the same rule is checked again against that length,
+  once, also when the restore already applied it: it catches an unknown or a wrong length in the library (a file
+  replaced by a shorter one). If the position is at the end, the player moves on as above right away, so no restore
+  stays buffering or ends at the end of a song. The check is dropped when a seek, another song or another queue comes
+  first.
+- A restore that moves off the end is a new playback (§11.1): of the next song, or a replay of the same one, which may
+  count as a play again. The saved listen progress is not resumed. When the check against the player's length moves
+  within the same item, the restored playback ends there and a new one starts.
 
 ### 4.4 Opening the app and resuming from the system
 
@@ -544,6 +575,13 @@ Instrumented tests on the API 30, 36 and 37 emulators:
 - Opening the app shows the saved queue paused at its song and position with repeat restored, and keeps it paused. A
   play request on an empty player rebuilds the queue and starts at the saved position. A missing saved song starts at
   its row without the old position.
+- The end of a song (§4.3.1, §4.2), on the 12-second constant-bitrate MP3 without a header: a song played to its end
+  and stopped is saved at zero without listen progress; a saved position at the end of the only opened file, and one
+  past the end of a library song whose length is unknown (the check against the player's length), each play that song
+  from its start on a system play request instead of ending (API 36) or buffering (API 30); a position at the end of a
+  song with a next one opens the app paused at the start of the next song. JVM tests: the zone's size, the moves for
+  repeat off, all and one, the restored shuffle order and an unknown length, and that a moved start resumes no
+  playback.
 - Headset next and previous move through the queue and a double tap of play/pause skips forward and keeps playing; the
   exported receiver is declared for the system's media button.
 - A foreign action, a malformed media button and a play start with no saved queue stop before the system's deadline
@@ -1177,7 +1215,9 @@ whichever comes first; seeking adds nothing; songs shorter than 30 s never count
 - The snapshot of §4.2 carries the listened time, whether the playback counted and when it started. When the saved
   queue is restored and resumes the saved item (§4.3: found by its file or URI, at its saved position), the playback
   goes on from there: the listened time keeps growing toward the threshold, and a play that already counted does not
-  count again. When the saved item is gone, a new playback starts.
+  count again. When the saved item is gone, a new playback starts, and so it does when the saved position was at the
+  end of the song and the restore moved on to the next song or to the start of the same one (§4.3.1). A song that
+  played to its end is saved without progress (§4.2).
 - Snapshots are written every five seconds while playing and at every pause, so a process killed while playing loses at
   most five seconds of listened time; a process killed while paused loses nothing.
 
@@ -1188,5 +1228,6 @@ unknown length at 4 minutes, pauses and seeks adding nothing, once per playback,
 playback going on and not counting twice; the snapshot keys.
 
 Instrumented tests: the tracker on a real player with a test clock: counting while playing, pauses, a seek, a repeat-one
-replay, a transition to the next song and a new queue that starts with the same song as new playbacks; a change of the
+replay, a transition to the next song, a new queue that starts with the same song and a restore that moves from the end of
+the song back to its start (§4.3.1) as new playbacks; a change of the
 queue that keeps the item and new values for the current entry in place keeping its playback.

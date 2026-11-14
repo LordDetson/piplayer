@@ -93,8 +93,14 @@ class PlaybackService : MediaLibraryService() {
         val store = PlaybackStateStore.get(this)
         val saver = PlaybackStateSaver(player, store, shuffleOrder = { player.shuffleOrder }, listen = tracker::progress)
             .also { saver = it }
-        val callback = PlaybackSessionCallback(this, store, controls, onQueueRequest = saver::setQueue, onRestore = tracker::resume)
-            .also { callback = it }
+        val callback = PlaybackSessionCallback(
+            this,
+            store,
+            controls,
+            onRestore = tracker::resume,
+            onReplay = tracker::restart,
+            onQueueRequest = saver::setQueue,
+        ).also { callback = it }
         player.addListener(passGateListener)
         player.addAnalyticsListener(passGateListener)
         playbackLooperForTests = player.playbackLooper

@@ -134,6 +134,22 @@ class PlayTrackerTest {
     }
 
     @Test
+    fun aRestartIsANewPlaybackOfTheSameSong() {
+        start(item("a"))
+        listen(4_000)
+
+        // A restore that moves from the end of the song back to its start (docs/playback.md §4.3.1).
+        onMain { tracker.restart() }
+        listen(2_999)
+
+        assertThat(recorded.map { it.kind to it.mediaId }).containsExactly("counted" to "a", "ended" to "a")
+        assertThat(recorded.last().listenedMs).isEqualTo(4_000)
+        assertThat(onMain { tracker.progress() }?.listenedMs).isEqualTo(2_999)
+        listen(1)
+        assertThat(counted()).containsExactly("a", "a")
+    }
+
+    @Test
     fun theNextSongIsANewPlaybackAndTheCountedOneEndsWithItsListenedTime() {
         start(item("a"), item("b"))
         listen(4_000)

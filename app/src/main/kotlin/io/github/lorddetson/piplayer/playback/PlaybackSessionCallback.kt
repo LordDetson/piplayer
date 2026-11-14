@@ -67,6 +67,8 @@ class PlaybackSessionCallback(
     private val tree: LibraryTree = LibraryTree(context, ProviderArtwork(context)),
     /** The restored current item and its saved progress toward a play, which goes on (docs/playback.md §11.3). */
     private val onRestore: (mediaId: String, progress: ListenProgress) -> Unit = { _, _ -> },
+    /** The restored item moved from its end back to its own start: a new playback of it (docs/playback.md §4.3.1). */
+    onReplay: () -> Unit = {},
     private val onQueueRequest: (QueueState?) -> Unit,
 ) : MediaLibrarySession.Callback, SessionPlayer.Edits {
 
@@ -100,6 +102,9 @@ class PlaybackSessionCallback(
 
     /** The next number an added entry of a controller's add may take; only touched on the main thread. */
     private var nextAddNumber = 1L
+
+    /** Checks a restored start against the length the player reads (§4.3.1); only touched on the main thread. */
+    private val endCheck = RestoredEndCheck(onReplay)
 
     /** A restore or a queue change that is superseded stops before it touches the player. */
     private val restoreGeneration = AtomicInteger()
@@ -568,6 +573,7 @@ class PlaybackSessionCallback(
                             player.repeatMode = snapshot.repeatMode
                             commit(restored.state)
                             resumeListening(snapshot, restored)
+                            watchEnd(player, restored, token)
                             result.set(MediaItemsWithStartPosition(restored.items, restored.start.index, restored.start.positionMs))
                         }
                     }
@@ -617,6 +623,7 @@ class PlaybackSessionCallback(
                         player.repeatMode = snapshot.repeatMode
                         resumeListening(snapshot, restored)
                         player.setMediaItems(restored.items, restored.start.index, restored.start.positionMs)
+                        watchEnd(player, restored, token)
                         commit(restored.state)
                         player.prepare()
                         result.set(SessionResult(SessionResult.RESULT_SUCCESS))
@@ -760,8 +767,10 @@ class PlaybackSessionCallback(
         var order = QueueRestore.withOpened(entries, snapshot, openItems)
         if (order.isEmpty()) return null
         val currentFileId = currentFileId(snapshot, refs)
-        val start = QueueRestore.choose(order, snapshot, currentFileId) ?: return null
-        val shuffled = savedOrder(snapshot, file, order, start.index, currentFileId, libraryId, savedEdits.upNext.toSet())
+        val chosen = QueueRestore.choose(order, snapshot, currentFileId) ?: return null
+        val shuffled = savedOrder(snapshot, file, order, chosen.index, currentFileId, libraryId, savedEdits.upNext.toSet())
+        // A position at the end of the song moves on to what plays after it (§4.3.1); a new order starts at that song.
+        val start = QueueRestore.offTheEnd(order, chosen, snapshot.repeatMode, shuffled?.takeIf { snapshot.shuffle })
         var edits = savedEdits
         var libraryRequest = if (order.any { it is QueueSlot.Library } || !savedEdits.isEmpty) request else null
         if (QueueRebuild.mustFold(savedEdits, songKeys)) {
@@ -780,8 +789,20 @@ class PlaybackSessionCallback(
         }
         val openItems = QueueRestore.openItems(order)
         if (libraryRequest == null && openItems.isEmpty() && edits.added.isEmpty()) return null
-        val resumes = QueueRestore.resumesSavedItem(order, start, snapshot, currentFileId)
+        // A start moved off the end is a new playback (§4.3.1, §11.3).
+        val resumes = start == chosen && QueueRestore.resumesSavedItem(order, start, snapshot, currentFileId)
         return RestoredQueue(items, start, QueueState(libraryRequest, openItems, libraryId, edits), shuffled, resumes)
+    }
+
+    /**
+     * Checks the restored start against the length the player reads from the file (§4.3.1), until another queue or
+     * restore comes. Call it on the main thread.
+     */
+    private fun watchEnd(player: Player, restored: RestoredQueue, token: Int) {
+        val item = restored.items.getOrNull(restored.start.index) ?: return
+        endCheck.watch(player, item.mediaId, restored.start.index, restored.start.positionMs) {
+            !released && token == restoreGeneration.get()
+        }
     }
 
     /** Hands the saved progress toward a play to the counter when the restored queue resumes the saved item (§11.3). */
@@ -934,6 +955,7 @@ class PlaybackSessionCallback(
     /** Releases the expansion thread; the service calls it when it is destroyed. */
     fun release() {
         released = true
+        mainHandler.post { endCheck.cancel() }
         expansion.shutdown()
         browse.shutdown()
         openExpansion.shutdown()

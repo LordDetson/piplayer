@@ -223,4 +223,117 @@ class QueueRestoreTest {
 
         assertThat(order).containsExactly(QueueSlot.Added(1, song(10)), QueueSlot.Open(open), QueueSlot.Added(2, song(20)))
     }
+
+    // The end of a song (docs/playback.md §4.3.1).
+
+    private fun timed(id: Long, durationMs: Long?) = song(id).copy(durationMs = durationMs)
+
+    private val three = listOf(QueueSlot.Library(timed(10, 60_000)), QueueSlot.Library(timed(20, 180_000)), QueueSlot.Library(timed(30, 600_000)))
+
+    @Test
+    fun `the end zone is 2 percent of the song at most 5 s`() {
+        assertThat(QueueRestore.endZoneMs(30_000)).isEqualTo(600)
+        assertThat(QueueRestore.endZoneMs(180_000)).isEqualTo(3_600)
+        assertThat(QueueRestore.endZoneMs(250_000)).isEqualTo(5_000)
+        assertThat(QueueRestore.endZoneMs(3_600_000)).isEqualTo(5_000)
+    }
+
+    @Test
+    fun `a position at or past the end or inside the zone is at the end`() {
+        assertThat(QueueRestore.isAtEnd(180_000, 180_000)).isTrue()
+        assertThat(QueueRestore.isAtEnd(181_000, 180_000)).isTrue()
+        assertThat(QueueRestore.isAtEnd(176_400, 180_000)).isTrue()
+        assertThat(QueueRestore.isAtEnd(176_399, 180_000)).isFalse()
+        assertThat(QueueRestore.isAtEnd(590_000, 600_000)).isFalse()
+        assertThat(QueueRestore.isAtEnd(595_000, 600_000)).isTrue()
+    }
+
+    @Test
+    fun `an unknown length is never at the end`() {
+        assertThat(QueueRestore.isAtEnd(180_000, null)).isFalse()
+        assertThat(QueueRestore.isAtEnd(180_000, 0)).isFalse()
+    }
+
+    @Test
+    fun `a position at the end moves to the start of the next song`() {
+        val start = QueueRestore.offTheEnd(three, QueueStart(1, 179_000), PlaybackSnapshot.REPEAT_OFF, playOrder = null)
+
+        assertThat(start).isEqualTo(QueueStart(2, 0))
+    }
+
+    @Test
+    fun `a position before the zone stays`() {
+        val start = QueueRestore.offTheEnd(three, QueueStart(1, 170_000), PlaybackSnapshot.REPEAT_OFF, playOrder = null)
+
+        assertThat(start).isEqualTo(QueueStart(1, 170_000))
+    }
+
+    @Test
+    fun `the last song with repeat off starts again from its start`() {
+        val start = QueueRestore.offTheEnd(three, QueueStart(2, 600_000), PlaybackSnapshot.REPEAT_OFF, playOrder = null)
+
+        assertThat(start).isEqualTo(QueueStart(2, 0))
+    }
+
+    @Test
+    fun `the last song with repeat all moves to the first`() {
+        val start = QueueRestore.offTheEnd(three, QueueStart(2, 600_000), PlaybackSnapshot.REPEAT_ALL, playOrder = null)
+
+        assertThat(start).isEqualTo(QueueStart(0, 0))
+    }
+
+    @Test
+    fun `repeat one starts the same song again`() {
+        val start = QueueRestore.offTheEnd(three, QueueStart(0, 59_900), PlaybackSnapshot.REPEAT_ONE, playOrder = null)
+
+        assertThat(start).isEqualTo(QueueStart(0, 0))
+    }
+
+    @Test
+    fun `a restored shuffle order decides the next song`() {
+        val order = intArrayOf(2, 0, 1)
+
+        assertThat(QueueRestore.offTheEnd(three, QueueStart(0, 60_000), PlaybackSnapshot.REPEAT_OFF, order)).isEqualTo(QueueStart(1, 0))
+        // The last of the order has no next one with repeat off, and wraps to the first of the order with repeat all.
+        assertThat(QueueRestore.offTheEnd(three, QueueStart(1, 180_000), PlaybackSnapshot.REPEAT_OFF, order)).isEqualTo(QueueStart(1, 0))
+        assertThat(QueueRestore.offTheEnd(three, QueueStart(1, 180_000), PlaybackSnapshot.REPEAT_ALL, order)).isEqualTo(QueueStart(2, 0))
+    }
+
+    @Test
+    fun `a song of unknown length keeps its saved position`() {
+        val slots = listOf(QueueSlot.Library(timed(10, null)), QueueSlot.Library(timed(20, 60_000)))
+
+        assertThat(QueueRestore.offTheEnd(slots, QueueStart(0, 999_000), PlaybackSnapshot.REPEAT_OFF, playOrder = null))
+            .isEqualTo(QueueStart(0, 999_000))
+    }
+
+    @Test
+    fun `an opened file at its end starts again when it is the whole queue`() {
+        val file = opened(0, "alone")
+
+        assertThat(QueueRestore.offTheEnd(listOf(QueueSlot.Open(file)), QueueStart(0, 30_042), PlaybackSnapshot.REPEAT_OFF, null))
+            .isEqualTo(QueueStart(0, 0))
+    }
+
+    @Test
+    fun `the next song after the end follows repeat and the play order`() {
+        assertThat(QueueRestore.nextAfterEnd(0, 3, PlaybackSnapshot.REPEAT_OFF, null)).isEqualTo(1)
+        assertThat(QueueRestore.nextAfterEnd(2, 3, PlaybackSnapshot.REPEAT_OFF, null)).isNull()
+        assertThat(QueueRestore.nextAfterEnd(2, 3, PlaybackSnapshot.REPEAT_ALL, null)).isEqualTo(0)
+        assertThat(QueueRestore.nextAfterEnd(1, 3, PlaybackSnapshot.REPEAT_ONE, null)).isEqualTo(1)
+        assertThat(QueueRestore.nextAfterEnd(0, 1, PlaybackSnapshot.REPEAT_ALL, null)).isEqualTo(0)
+        assertThat(QueueRestore.nextAfterEnd(2, 3, PlaybackSnapshot.REPEAT_OFF, intArrayOf(1, 2, 0))).isEqualTo(0)
+    }
+
+    @Test
+    fun `a start moved off the end resumes no playback`() {
+        val snapshot = librarySnapshot(songId = 20, row = 1, positionMs = 180_000).copy(durationMs = 180_000)
+        val chosen = QueueRestore.choose(three, snapshot, currentFileId = 20)!!
+        val moved = QueueRestore.offTheEnd(three, chosen, PlaybackSnapshot.REPEAT_OFF, playOrder = null)
+        val replay = QueueRestore.offTheEnd(three.take(2), chosen, PlaybackSnapshot.REPEAT_OFF, playOrder = null)
+
+        assertThat(QueueRestore.resumesSavedItem(three, chosen, snapshot, currentFileId = 20)).isTrue()
+        assertThat(QueueRestore.resumesSavedItem(three, moved, snapshot, currentFileId = 20)).isFalse()
+        assertThat(QueueRestore.resumesSavedItem(three.take(2), replay, snapshot, currentFileId = 20)).isFalse()
+    }
 }

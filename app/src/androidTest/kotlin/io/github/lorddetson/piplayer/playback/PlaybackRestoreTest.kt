@@ -379,6 +379,93 @@ class PlaybackRestoreTest {
         }
     }
 
+    // The end of a song (docs/playback.md §4.2, §4.3.1): the long fixture is a constant-bitrate MP3 without a header.
+
+    @Test
+    fun aSongPlayedToItsEndAndStoppedIsSavedAtItsStartWithoutProgress() {
+        controller.tap(QueueRequest(startSongId = 3, startRow = 2), "Charlie")
+        controller.awaitState("Charlie, the last song, plays") { isPlaying && currentMediaItem?.mediaId == "3" }
+        val ends = controller.expect("Charlie plays to its end") { playbackState == Player.STATE_ENDED }
+        onMain { controller.seekTo(SongSourceRule.LONG_FIXTURE_MS - 1_500) }
+        ends.await()
+
+        SavedStates(store).use { saves ->
+            // The stop leaves the player idle at the end; a change of repeat afterwards writes what the saver holds now.
+            onMain {
+                controller.stop()
+                controller.repeatMode = Player.REPEAT_MODE_ALL
+            }
+            saves.await("the stopped queue is saved with repeat all") { saved ->
+                saved?.songId == 3L && saved.repeatMode == Player.REPEAT_MODE_ALL
+            }
+        }
+        val saved = store.readBlocking()
+        assertThat(saved?.positionMs).isEqualTo(0L)
+        assertThat(saved?.listen).isNull()
+    }
+
+    @Test
+    fun aSavedPositionAtTheEndOfTheOnlyOpenedFilePlaysItFromItsStartOnASystemPlayRequest() {
+        val opened = insertAudio("open-with-end.mp3")
+        try {
+            val file = OpenedFile(opened.toString(), "End", null, null, SongSourceRule.LONG_FIXTURE_MS)
+            val saved = PlaybackSnapshot(
+                queue = null,
+                openItems = listOf(SavedOpenItem(0, file)),
+                songId = -1,
+                row = 0,
+                // Where the player stood when the file had played to its end and was stopped.
+                positionMs = SongSourceRule.LONG_FIXTURE_MS,
+                shuffle = false,
+                repeatMode = Player.REPEAT_MODE_OFF,
+                title = "End",
+                artist = null,
+                album = null,
+                durationMs = SongSourceRule.LONG_FIXTURE_MS,
+                uri = opened.toString(),
+            )
+            runBlocking { store.write(saved) }
+
+            val plays = controller.expect("the opened file plays again from its start", capture = { currentPosition }) {
+                isPlaying && mediaItemCount == 1 && currentMediaItem?.mediaId == opened.toString()
+            }
+            onMain { controller.play() }
+            assertThat(plays.await()).isLessThan(3_000L)
+        } finally {
+            onMain {
+                controller.pause()
+                controller.stop()
+                controller.clearMediaItems()
+            }
+            deleteAudio(opened)
+        }
+    }
+
+    @Test
+    fun aPositionAtTheEndOfASongOfUnknownLengthPlaysItFromItsStartOnceThePlayerKnowsTheLength() {
+        songs.songs = listOf(SongSourceRule.song(1, "Alpha", LONG_FIXTURE, durationMs = null))
+        runBlocking { store.write(snapshot(songId = 1, row = 0, positionMs = SongSourceRule.LONG_FIXTURE_MS)) }
+
+        val plays = controller.expect("Alpha plays again from its start", capture = { currentPosition }) {
+            isPlaying && mediaItemCount == 1 && currentMediaItem?.mediaId == "1"
+        }
+        onMain { controller.play() }
+        assertThat(plays.await()).isLessThan(3_000L)
+    }
+
+    @Test
+    fun aPositionAtTheEndOfASongWithANextOneOpensTheAppPausedAtTheStartOfTheNextSong() {
+        runBlocking { store.write(snapshot(songId = 2, row = 1, positionMs = SongSourceRule.LONG_FIXTURE_MS - 100)) }
+
+        ActivityScenario.launch(MainActivity::class.java).use {
+            controller.awaitState("the app shows Charlie, the song after Bravo, paused") {
+                mediaItemCount == 3 && currentMediaItem?.mediaId == "3" && playbackState == Player.STATE_READY &&
+                    !playWhenReady
+            }
+            assertThat(onMain { controller.currentPosition }).isLessThan(500L)
+        }
+    }
+
     private fun openInApp(uri: Uri): ActivityScenario<MainActivity> {
         val intent = Intent(context, MainActivity::class.java)
             .setAction(Intent.ACTION_VIEW)

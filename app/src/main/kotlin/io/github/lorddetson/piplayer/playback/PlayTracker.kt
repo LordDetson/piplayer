@@ -69,6 +69,14 @@ class PlayTracker(
         pending = mediaId to progress
     }
 
+    /** Ends the current playback and starts a new one of the same item (§4.3.1). */
+    fun restart() {
+        if (!started) return
+        pending = null
+        finish()
+        player.currentMediaItem?.let(::begin)
+    }
+
     /** The current playback's progress, if it is of the player's current item, for the snapshot. */
     fun progress(): ListenProgress? = player.currentMediaItem?.mediaId?.let(counter::progress)
 
