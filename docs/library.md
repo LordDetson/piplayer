@@ -1796,11 +1796,13 @@ JVM tests: the rows of a read and an unread file (the resolver's merged values, 
 none after, the file name as the title's last resort, media index placeholders left out), the length row with each source
 and the index's length beside it, values left out when unknown and the rows kept at zero, the cover rows of each source,
 the MusicBrainz links and malformed IDs, the rows of an opened file; the order of the track menu in every place; the
-formats of lengths.
+formats of lengths; the screen's reads: an opened file read once per opening also after the background, a song of the
+library read again when shown again, a failed read keeping the values shown or saying so, a song that left the library.
 
 Instrumented tests on the emulators: the details read from the real databases for an unread file, a read one with an
 identity, a favorite, plays and date added, and each cover source (own song and album covers, embedded, thumbnail, none,
 with a probe for the pictures); a file not in the library; an opened file read through the real `:tagger` (technical data,
-tags, the embedded picture's size); on the screen, "Details" from the song menu of the Songs tab, an album page, a
-playlist page, a queue row and Now Playing's menu, a MusicBrainz row opening its page with `ACTION_VIEW`, and a long press
-copying a value.
+tags, the embedded picture's size), and one that can no longer be opened (the provider's name or the URI's last
+segment, "The file could not be read"); the counts of failed reads used only inside the library's access; on the screen, "Details" from the song menu of the Songs tab, an album page, a
+playlist page, a queue row and Now Playing's menu, a MusicBrainz row opening its page with `ACTION_VIEW`, a long press
+copying a value, and for an opened file the embedded picture in the header and a file that can no longer be opened.
