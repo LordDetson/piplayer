@@ -1779,7 +1779,8 @@ are in playback.md §9.1. The owner left the open choices to the recommendations
   itself when the screen opens: one read through `:tagger` (§4), counted against the file like any outside read (§4.4),
   gives its tags and technical data; the content provider gives its display name, size and MIME type. Values follow the
   same rule, with the file's tags as the only level and the display name as the last resort for the title. The cover is
-  the picture embedded in the file. The section of plays, the folder, date added, modified and the media index's length
+  the picture embedded in the file. Decision: the header shows it too, read as the player reads it and decoded at the
+  header's size, once per opening and with no `:tagger` call; without one the header shows the placeholder. The section of plays, the folder, date added, modified and the media index's length
   are left out; the length is TagLib's.
 - When the read fails (`:tagger` crashed, timed out, the file is unsafe or can no longer be opened) the screen shows what
   the provider gives and says that the file could not be read. Decision: a file that can no longer be opened (deleted,

@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -38,6 +39,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -60,7 +64,6 @@ import io.github.lorddetson.piplayer.R
 import io.github.lorddetson.piplayer.covers.CoverRequest
 import io.github.lorddetson.piplayer.covers.Covers
 import io.github.lorddetson.piplayer.library.Library
-import io.github.lorddetson.piplayer.library.details.TrackDetailsSources
 import io.github.lorddetson.piplayer.library.details.CoverSource
 import io.github.lorddetson.piplayer.library.details.DetailField
 import io.github.lorddetson.piplayer.library.details.DetailRow
@@ -69,15 +72,18 @@ import io.github.lorddetson.piplayer.library.details.DetailValue
 import io.github.lorddetson.piplayer.library.details.LengthSource
 import io.github.lorddetson.piplayer.library.details.TagState
 import io.github.lorddetson.piplayer.library.details.TrackDetails
+import io.github.lorddetson.piplayer.library.details.TrackDetailsSources
 import io.github.lorddetson.piplayer.library.identity.IdentityAttacher
 import io.github.lorddetson.piplayer.library.lists.FolderLevels
 import io.github.lorddetson.piplayer.library.songs.SongList
 import io.github.lorddetson.piplayer.ui.covers.LibraryCover
+import io.github.lorddetson.piplayer.ui.player.CoverImage
 import io.github.lorddetson.piplayer.ui.player.kilohertz
 import java.text.DateFormat
 import java.text.NumberFormat
 import java.util.Date
 import java.util.Locale
+import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
@@ -85,6 +91,9 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+
+/** The size of the header's cover (docs/library.md §18.1). */
+private const val HEADER_COVER_DP = 96
 
 /**
  * The details of the song [fileId] of the library, or of the file opened from another app at [uri] (docs/library.md §18),
@@ -114,13 +123,17 @@ class TrackDetailsViewModel(application: Application, private val fileId: Long?,
         ) { _, _, _, _, _ -> }
     }
 
-    private suspend fun read(): DetailsState.Found? {
-        val details = when {
-            fileId != null -> if (Library.mayRead(app)) TrackDetailsSources.library(app).read(fileId) else null
-            uri != null -> TrackDetailsSources.opened(app).read(uri)
-            else -> null
+    private suspend fun read(): DetailsState.Found? = when {
+        fileId != null -> if (Library.mayRead(app)) TrackDetailsSources.library(app).read(fileId)?.let { DetailsState.Found(it) } else null
+        uri != null -> {
+            val opened = TrackDetailsSources.opened(app)
+            val details = opened.read(uri)
+            // The header shows the opened file's embedded picture; a song of the library has the loader's cover.
+            val embedded = details.value(DetailField.COVER_SOURCE) == DetailValue.Cover(CoverSource.EMBEDDED)
+            val px = (HEADER_COVER_DP * app.resources.displayMetrics.density).roundToInt()
+            DetailsState.Found(details, if (embedded) opened.picture(uri, px)?.asImageBitmap() else null)
         }
-        return details?.let { DetailsState.Found(it) }
+        else -> null
     }
 
     private companion object {
@@ -162,13 +175,13 @@ fun TrackDetailsScreen(fileId: Long?, uri: String?, snackbar: SnackbarHostState,
                 style = MaterialTheme.typography.bodyLarge,
                 modifier = modifier.padding(16.dp),
             )
-            is DetailsState.Found -> DetailsList(shown.details, snackbar, modifier)
+            is DetailsState.Found -> DetailsList(shown.details, shown.picture, snackbar, modifier)
         }
     }
 }
 
 @Composable
-private fun DetailsList(details: TrackDetails, snackbar: SnackbarHostState, modifier: Modifier) {
+private fun DetailsList(details: TrackDetails, picture: ImageBitmap?, snackbar: SnackbarHostState, modifier: Modifier) {
     val context = LocalContext.current
     val resources = LocalResources.current
     val scope = rememberCoroutineScope()
@@ -187,7 +200,7 @@ private fun DetailsList(details: TrackDetails, snackbar: SnackbarHostState, modi
     }
     val sections = remember(details) { details.sections }
     LazyColumn(modifier.testTag(DetailsTags.LIST)) {
-        item(key = "header") { Header(details) }
+        item(key = "header") { Header(details, picture) }
         for ((section, rows) in sections) {
             item(key = section) { SectionHeading(section) }
             items(rows) { row -> RowItem(row, copy, open) }
@@ -195,15 +208,20 @@ private fun DetailsList(details: TrackDetails, snackbar: SnackbarHostState, modi
     }
 }
 
+/** The header (docs/library.md §18.1): the loader's cover of a song of the library, the embedded [picture] of an opened file. */
 @Composable
-private fun Header(details: TrackDetails) {
+private fun Header(details: TrackDetails, picture: ImageBitmap?) {
     Row(
-        Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+        Modifier.testTag(DetailsTags.HEADER).padding(horizontal = 16.dp, vertical = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(16.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        details.fileId?.let { id ->
-            LibraryCover(CoverRequest.Track(id), details.album, size = 96.dp, shape = RoundedCornerShape(8.dp))
+        val shape = RoundedCornerShape(8.dp)
+        val id = details.fileId
+        if (id != null) {
+            LibraryCover(CoverRequest.Track(id), details.album, size = HEADER_COVER_DP.dp, shape = shape)
+        } else {
+            CoverImage(picture, Modifier.size(HEADER_COVER_DP.dp).clip(shape), placeholderName = details.album)
         }
         Column {
             Text(details.title, style = MaterialTheme.typography.titleLarge, maxLines = 3, overflow = TextOverflow.Ellipsis)

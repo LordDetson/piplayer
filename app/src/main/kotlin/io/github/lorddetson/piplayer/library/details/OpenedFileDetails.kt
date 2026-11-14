@@ -3,11 +3,14 @@ package io.github.lorddetson.piplayer.library.details
 import android.content.ContentResolver
 import android.content.Context
 import android.content.res.Resources
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.ParcelFileDescriptor
 import android.provider.OpenableColumns
 import android.util.Log
 import androidx.core.net.toUri
+import io.github.lorddetson.piplayer.covers.EmbeddedPictures
 import io.github.lorddetson.piplayer.library.values.LegacyEncoding
 import io.github.lorddetson.piplayer.library.values.LegacyText
 import io.github.lorddetson.piplayer.library.values.TrackTags
@@ -91,6 +94,21 @@ class OpenedFileDetails(
         )
     }
 
+    /**
+     * The picture embedded in the file at [uri], as the player reads it, decoded at no less than [px] on its shorter side
+     * where it is that large: for the header of the details (docs/library.md §18.5). Null without one, or when the file
+     * cannot be read now.
+     */
+    suspend fun picture(uri: String, px: Int): Bitmap? = try {
+        val bytes = EmbeddedPictures.read(app, uri.toUri())
+        bytes?.let { withContext(Dispatchers.Default) { decode(it, px) } }
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        Log.d(TAG, "The picture of an opened file could not be read", e)
+        null
+    }
+
     /** One read of [file] through `:tagger`; null when it failed in any way, which the details then say. */
     private suspend fun readTags(uri: String, file: ParcelFileDescriptor, name: String): TagReport? = try {
         val result = client.read(outsideTarget(uri, file), file, name, markLegacy = true)
@@ -130,6 +148,17 @@ class OpenedFileDetails(
     private companion object {
         const val TAG = "OpenedFileDetails"
         const val FRONT_COVER = "Front Cover"
+
+        /** [bytes] decoded at the largest power-of-two step down that keeps the shorter side at [px] or more. */
+        fun decode(bytes: ByteArray, px: Int): Bitmap? {
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+            val shorter = minOf(bounds.outWidth, bounds.outHeight)
+            if (shorter <= 0) return null
+            var sample = 1
+            while (shorter / (sample * 2) >= px) sample *= 2
+            return BitmapFactory.decodeByteArray(bytes, 0, bytes.size, BitmapFactory.Options().apply { inSampleSize = sample })
+        }
 
         /** Whether the device or the app speaks a language written in Cyrillic, as the tag pass decides (TI §3.6). */
         fun systemCyrillic(context: Context): Boolean {

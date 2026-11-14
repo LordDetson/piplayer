@@ -13,6 +13,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.github.lorddetson.piplayer.R
 import io.github.lorddetson.piplayer.TestFiles
 import io.github.lorddetson.piplayer.library.details.DetailField
+import io.github.lorddetson.piplayer.ui.player.PlayerTags
 import java.io.File
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.After
@@ -38,6 +39,13 @@ class OpenedFileDetailsScreenTest {
     private fun show(file: File) {
         compose.setContent { TrackDetailsScreen(fileId = null, uri = Uri.fromFile(file).toString(), SnackbarHostState(), onBack = {}) }
         compose.waitUntilAtLeastOneExists(hasTestTag(DetailsTags.LIST), timeoutMillis = 30_000)
+    }
+
+    @Test
+    fun theHeaderShowsThePictureEmbeddedInTheFile() {
+        show(TestFiles.copy("playback/cover-front.mp3").also { copies += it })
+
+        compose.waitUntilAtLeastOneExists(hasTestTag(PlayerTags.COVER) and hasAnyAncestor(hasTestTag(DetailsTags.HEADER)), timeoutMillis = 10_000)
     }
 
     @Test
