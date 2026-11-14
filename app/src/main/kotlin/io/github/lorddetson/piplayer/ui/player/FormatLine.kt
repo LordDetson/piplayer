@@ -18,7 +18,7 @@ fun formatLine(summary: FormatSummary, resources: Resources): String {
 }
 
 /** 44100 as "44.1" (or "44,1"), 11025 as "11.025". */
-private fun kilohertz(hertz: Int, locale: Locale): String = NumberFormat.getNumberInstance(locale).run {
+internal fun kilohertz(hertz: Int, locale: Locale): String = NumberFormat.getNumberInstance(locale).run {
     maximumFractionDigits = 3
     isGroupingUsed = false
     format(hertz / 1_000.0)

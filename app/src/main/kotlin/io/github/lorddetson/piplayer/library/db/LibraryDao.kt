@@ -84,6 +84,18 @@ interface LibraryDao {
     @Query("SELECT * FROM audio_file")
     suspend fun files(): List<AudioFileEntity>
 
+    /** One file, for its details (docs/library.md §18); null when there is no such file. */
+    @Query("SELECT * FROM audio_file WHERE id = :fileId")
+    suspend fun file(fileId: Long): AudioFileEntity?
+
+    /** The media index's values of one file (docs/library.md §18.2). */
+    @Query("SELECT * FROM media_index_entry WHERE file_id = :fileId")
+    suspend fun entry(fileId: Long): MediaIndexEntryEntity?
+
+    /** The first track of one file, as the tag pass read it (docs/library.md §18.2). */
+    @Query("SELECT * FROM track WHERE file_id = :fileId ORDER BY start_ms LIMIT 1")
+    suspend fun trackOf(fileId: Long): TrackEntity?
+
     /** Null when there is no such file. */
     @Query("SELECT unsafe_count FROM audio_file WHERE id = :fileId")
     suspend fun unsafeCount(fileId: Long): Int?

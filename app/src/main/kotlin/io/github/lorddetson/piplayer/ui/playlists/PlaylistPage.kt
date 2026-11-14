@@ -63,8 +63,11 @@ import io.github.lorddetson.piplayer.library.songs.SongList
 import io.github.lorddetson.piplayer.ui.formatDuration
 import io.github.lorddetson.piplayer.ui.library.LibraryHost
 import io.github.lorddetson.piplayer.ui.player.MiniPlayer
-import io.github.lorddetson.piplayer.ui.player.QueueTarget
+import io.github.lorddetson.piplayer.library.songs.Song
 import io.github.lorddetson.piplayer.ui.songs.PermissionCard
+import io.github.lorddetson.piplayer.ui.songs.SongMenu
+import io.github.lorddetson.piplayer.ui.songs.TrackMenuItems
+import io.github.lorddetson.piplayer.ui.songs.TrackMenuPlace
 import io.github.lorddetson.piplayer.ui.songs.rememberAudioAccess
 import io.github.lorddetson.piplayer.userdata.PlaylistSummary
 import io.github.lorddetson.piplayer.userdata.UserData
@@ -248,7 +251,7 @@ private fun Entries(id: Long, items: List<PlaylistItem>, host: LibraryHost, modi
                             host.play(shown.subList(0, place).count { it.available }, song, SongQuery.playlist(id))
                         }
                     },
-                    onAddToQueue = item.song?.let { song -> { next: Boolean -> host.addToQueue(QueueTarget.Songs(listOf(song.id)), next) } },
+                    menu = host.menu,
                     onMoveUp = if (place > 0) ({ step(item, -1) }) else null,
                     onMoveDown = if (place < shown.lastIndex) ({ step(item, 1) }) else null,
                     onRemove = { remove(item) },
@@ -275,7 +278,7 @@ private fun EntryRow(
     playing: Boolean,
     dragging: Boolean,
     onClick: () -> Unit,
-    onAddToQueue: ((next: Boolean) -> Unit)?,
+    menu: SongMenu,
     onMoveUp: (() -> Unit)?,
     onMoveDown: (() -> Unit)?,
     onRemove: () -> Unit,
@@ -309,7 +312,7 @@ private fun EntryRow(
             // A handle for the finger only: TalkBack moves the row with its own actions, so the handle says nothing.
             Icon(painterResource(R.drawable.ic_drag_handle), contentDescription = null, modifier = handle.minimumInteractiveComponentSize())
         },
-        trailingContent = { EntryMenu(title, onAddToQueue, onMoveUp, onMoveDown, onRemove) },
+        trailingContent = { EntryMenu(title, item.song, menu, onMoveUp, onMoveDown, onRemove) },
         tonalElevation = if (dragging) 4.dp else 0.dp,
         shadowElevation = if (dragging) 4.dp else 0.dp,
         modifier = Modifier
@@ -325,11 +328,15 @@ private fun EntryRow(
     )
 }
 
-/** An entry's menu: "Play next" and "Add to queue" for an available song, "Move up", "Move down", "Remove from playlist". */
+/**
+ * An entry's menu (docs/playback.md §9.1): the track menu of an available song, then "Move up", "Move down" and "Remove
+ * from playlist"; an entry not in the library has only those three.
+ */
 @Composable
 private fun EntryMenu(
     title: String,
-    onAddToQueue: ((next: Boolean) -> Unit)?,
+    song: Song?,
+    menu: SongMenu,
     onMoveUp: (() -> Unit)?,
     onMoveDown: (() -> Unit)?,
     onRemove: () -> Unit,
@@ -344,10 +351,7 @@ private fun EntryMenu(
                     action()
                 })
             }
-            onAddToQueue?.let { add ->
-                item(R.string.play_next) { add(true) }
-                item(R.string.add_to_queue) { add(false) }
-            }
+            song?.let { TrackMenuItems(it, TrackMenuPlace.PLAYLIST, menu, close = { open = false }) }
             onMoveUp?.let { item(R.string.queue_move_up, it) }
             onMoveDown?.let { item(R.string.queue_move_down, it) }
             item(R.string.playlist_remove, onRemove)

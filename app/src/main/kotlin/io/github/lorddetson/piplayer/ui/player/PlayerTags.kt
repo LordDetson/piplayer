@@ -8,4 +8,7 @@ object PlayerTags {
     const val COVER_PLACEHOLDER = "cover_placeholder"
     const val SEEK_BAR = "seek_bar"
     const val FAVORITE = "favorite"
+
+    /** Now Playing's "More options" (docs/playback.md §9.1). */
+    const val MORE = "now_playing_more"
 }

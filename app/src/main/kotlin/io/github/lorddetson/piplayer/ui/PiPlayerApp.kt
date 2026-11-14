@@ -25,6 +25,10 @@ import io.github.lorddetson.piplayer.ui.onboarding.rememberOnboarding
 import io.github.lorddetson.piplayer.ui.settings.LicenseTextScreen
 import io.github.lorddetson.piplayer.ui.settings.LicensesScreen
 import io.github.lorddetson.piplayer.ui.songs.SongMenu
+import io.github.lorddetson.piplayer.ui.songs.TrackMenuItems
+import io.github.lorddetson.piplayer.ui.songs.TrackMenuPlace
+import io.github.lorddetson.piplayer.ui.details.TrackDetailsScreen
+import io.github.lorddetson.piplayer.library.songs.Song
 import io.github.lorddetson.piplayer.covers.CoverChoices
 import io.github.lorddetson.piplayer.ui.covers.CoverActions
 import androidx.activity.result.PickVisualMediaRequest
@@ -135,6 +139,13 @@ data object NowPlayingRoute : NavKey
 @Serializable
 data object QueueRoute : NavKey
 
+/**
+ * The details of a song of the library by its file ID, or of a file opened from another app by its URI (docs/library.md
+ * §18.1).
+ */
+@Serializable
+data class TrackDetailsRoute(val fileId: Long? = null, val uri: String? = null) : NavKey
+
 /** The Library folders screen (docs/library.md §3.6). */
 @Serializable
 data object FoldersRoute : NavKey
@@ -194,8 +205,12 @@ fun PiPlayerApp(viewModel: PlayerViewModel = viewModel()) {
         if (backStack.lastOrNull() == NowPlayingRoute) backStack.removeLastOrNull()
         if (backStack.lastOrNull() != route) backStack.add(route)
     }
+    // Details open over whatever shows, Now Playing included, so that back returns there (docs/library.md §18.1).
+    val showDetails = { route: TrackDetailsRoute -> if (backStack.lastOrNull() != route) backStack.add(route) }
     val context = LocalContext.current
-    val currentSongId = rememberCurrentSongId(player)
+    val currentMediaId = rememberCurrentMediaId(player)
+    // An added entry plays a library song too (docs/playback.md §9.4).
+    val currentSongId = currentMediaId?.let(QueueIds::fileId)
     val covers = rememberCoverActions(snackbar)
     val favorites = remember(context) { FavoriteChoices(context) }
     val favoriteActions = rememberFavoriteActions(favorites, snackbar)
@@ -215,6 +230,8 @@ fun PiPlayerApp(viewModel: PlayerViewModel = viewModel()) {
             covers = covers,
             favorites = favoriteActions.actions,
             addToPlaylist = { playlists.addToPlaylist(QueueTarget.Songs(listOf(it.id))) },
+            details = { showDetails(TrackDetailsRoute(fileId = it.id)) },
+            openedDetails = { uri -> showDetails(TrackDetailsRoute(uri = uri)) },
         )
     }
     val host = LibraryHost(
@@ -275,7 +292,11 @@ fun PiPlayerApp(viewModel: PlayerViewModel = viewModel()) {
                     ),
                     snackbar = snackbar,
                     onBack = { close() },
+                    menu = menu,
                 )
+            }
+            entry<TrackDetailsRoute>(metadata = FROM_THE_SIDE) { route ->
+                TrackDetailsScreen(route.fileId, route.uri, snackbar, onBack = { close() })
             }
             entry<SettingsRoute>(metadata = FROM_THE_SIDE) {
                 SettingsScreen(
@@ -324,6 +345,12 @@ fun PiPlayerApp(viewModel: PlayerViewModel = viewModel()) {
                         favorite = currentSongId?.let { id ->
                             val checked by remember(id) { favorites.favoriteFlow(id) }.collectAsStateWithLifecycle(false)
                             FavoriteState(checked) { favoriteActions.setById(id, !checked) }
+                        },
+                        more = currentMediaId?.let { mediaId ->
+                            { closeMenu ->
+                                val song = currentSongId?.let { Song(id = it, uri = mediaId, title = "", artist = null, album = null, durationMs = null) }
+                                TrackMenuItems(song, TrackMenuPlace.NOW_PLAYING, menu, closeMenu, openedUri = mediaId.takeIf { song == null })
+                            }
                         },
                     )
                     SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).windowInsetsPadding(WindowInsets.navigationBars))
@@ -423,15 +450,14 @@ private fun rememberFavoriteActions(favorites: FavoriteChoices, snackbar: Snackb
 private const val SONG_TARGET = "song:"
 private const val ALBUM_TARGET = "album:"
 
-/** The current song's ID in the library, or null for an opened file or nothing. */
+/** The current item's media ID (docs/playback.md §9.4): a library song's, or an opened file's URI; null for nothing. */
 @Composable
-private fun rememberCurrentSongId(player: Player?): Long? {
-    // An added entry plays a library song too (docs/playback.md §9.4).
-    var id by remember(player) { mutableStateOf(player?.currentMediaItem?.mediaId?.let(QueueIds::fileId)) }
+private fun rememberCurrentMediaId(player: Player?): String? {
+    var id by remember(player) { mutableStateOf(player?.currentMediaItem?.mediaId) }
     DisposableEffect(player) {
         val listener = object : Player.Listener {
             override fun onEvents(player: Player, events: Player.Events) {
-                id = player.currentMediaItem?.mediaId?.let(QueueIds::fileId)
+                id = player.currentMediaItem?.mediaId
             }
         }
         player?.addListener(listener)

@@ -3,6 +3,8 @@ package io.github.lorddetson.piplayer.ui.player
 import androidx.annotation.OptIn
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.material3.DropdownMenu
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -80,6 +82,8 @@ fun NowPlaying(
     coverName: String? = null,
     /** The current song's favorite toggle (docs/library.md §15.2); null for an opened file or no song. */
     favorite: FavoriteState? = null,
+    /** The entries of "More options", the current song's track menu (docs/playback.md §9.1); null hides the button. */
+    more: (@Composable (close: () -> Unit) -> Unit)? = null,
 ) {
     val metadata = rememberCurrentItemState(player).mediaMetadata
     val pane = stringResource(R.string.player_now_playing)
@@ -102,6 +106,15 @@ fun NowPlaying(
             favorite?.let { FavoriteButton(it, Modifier.testTag(PlayerTags.FAVORITE)) }
             onOpenQueue?.let { open ->
                 IconButton(onClick = open) { Icon(painterResource(R.drawable.ic_queue), stringResource(R.string.queue_open)) }
+            }
+            more?.let { entries ->
+                var open by remember { mutableStateOf(false) }
+                Box {
+                    IconButton(onClick = { open = true }, modifier = Modifier.testTag(PlayerTags.MORE)) {
+                        Icon(painterResource(R.drawable.ic_more), stringResource(R.string.page_menu))
+                    }
+                    DropdownMenu(expanded = open, onDismissRequest = { open = false }) { entries { open = false } }
+                }
             }
         }
         CoverImage(

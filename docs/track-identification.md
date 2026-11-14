@@ -655,7 +655,8 @@ re-checked before release (M5); in M4a they also drive automatic preparation.
     start-up when the user database changed since the last mirror (§10.3).
 - **Merged values everywhere.** Every surface reads the merged values, never raw tags: lists, search, track details,
   Now Playing, the media session with its notification, lock screen, Bluetooth controllers and watches, and in v1.x
-  car displays, voice requests and the widget. After Apply and Undo the playing item and the queued items of the same
+  car displays, voice requests and the widget. Track details resolve the fields that `track_display` does not hold by
+  the same precedence, per field (library.md §18.2). After Apply and Undo the playing item and the queued items of the same
   tracks are refreshed in place (Media3 `replaceMediaItem`) without restarting playback; verify on devices that the
   player does not prepare the file again.
 - **System surfaces.** The player given to the media session is wrapped (a `ForwardingPlayer`, playback.md §2.6) so that its

@@ -301,7 +301,8 @@ large queue, and a song from an SD card if there is one.
 - From the top: a collapse button, the cover (square, as wide as the window allows), the title, the artist, the album,
   the format line (§3.5), the seek bar with the elapsed time on its left and the remaining time ("-m:ss") on its right,
   then shuffle, previous, play/pause, next and repeat. Since M2b the top row has the favorite toggle of the current song
-  at its right, before the queue button (library.md §15.2); it is hidden for a file opened from another app.
+  at its right, before the queue button (library.md §15.2); it is hidden for a file opened from another app. After the
+  queue button comes "More options" with the track menu of the current song (§9.1).
 - Title, artist and album are those of the queue item, that is of the media index (§2.3); the cover comes from the
   file (§3.4). No artist shows "Unknown artist", as in the list; no album shows nothing. An unknown length shows
   "--:--" and the seek bar cannot be moved.
@@ -994,6 +995,27 @@ By hand on the phone: one of the owner's albums (MP3 with a LAME tag) with the s
   subfolders, as "Play all, with subfolders") in the sort kept for that kind of list (library.md §6.3), without the
   page's search. Since M2b these menus also have "Add to playlist" right after "Add to queue", and playlist rows and
   pages have "Play next" and "Add to queue" for the playlist's available entries in order (library.md §16.3).
+- The track menu (M2b, PIM-65; decision). Wherever a song of the library has a menu, it is one menu with its entries in
+  one order:
+    1. "Play next", 2. "Add to queue", 3. "Add to playlist",
+    4. "Go to album", 5. "Go to artist" (one entry per artist), 6. "Go to folder",
+    7. "Add to favorites" or "Remove from favorites" (library.md §15.2),
+    8. "Choose cover" and, when the song has one, "Remove own cover" (library.md §13.2),
+    9. "Details" (library.md §18), always last of the song's entries. "Identify" (M3) and "Edit tags" (M4b) will go
+       between the cover entries and "Details".
+
+  Entries that need what a place does not have are left out there, and a place's own entries come after the song's:
+    - Song rows of every list and page (the Songs tab and its search, album, artist and folder pages, and the lists that
+      later steps add): the whole menu.
+    - Rows of a playlist page: the whole menu for an available entry, then "Move up", "Move down" and "Remove from
+      playlist"; an entry that is not in the library has only the last three, because it has no file to go to or describe.
+    - Rows of the queue screen (§9.2): the whole menu, then "Remove from queue". A file opened from another app has
+      "Details" (library.md §18.5) and "Remove from queue".
+    - Now Playing: a "More options" button at the right of the top row, after the queue button, opens the menu of the
+      current song without "Play next" and "Add to queue" (the song is the one playing) and without the favorite entry
+      (the heart toggle sits beside it). A file opened from another app has "Details" only.
+  An entry whose song has no tags read yet stays: "Add to favorites" and "Choose cover" then say that the tags are still
+  being read (library.md §13.2, §15.2), and "Details" shows what the index knows.
 - "Play next" puts the songs right after the current one. "Add to queue" puts them after the current song and after
   the songs already added that come right after it: the songs added by "Play next" and "Add to queue" that have not
   played yet form an up-next run behind the current song, and "Add to queue" extends it. A song played, or passed by a
@@ -1010,8 +1032,8 @@ By hand on the phone: one of the owner's albums (MP3 with a LAME tag) with the s
 
 - A "Queue" button on Now Playing opens the queue screen: every entry of the queue in the order it plays, the shuffle
   order while shuffle is on, the current song marked and shown when the screen opens. A tap plays that entry.
-- Each row has a handle to drag it to another place and a menu with "Remove from queue"; a swipe to either side removes
-  it too. TalkBack offers "Move up" and "Move down" on each row in place of the drag. A removal shows "Removed: <title>"
+- Each row has a handle to drag it to another place and a menu with "Remove from queue" (since M2b after the track menu's
+  entries, §9.1); a swipe to either side removes it too. TalkBack offers "Move up" and "Move down" on each row in place of the drag. A removal shows "Removed: <title>"
   with "Undo" for a few seconds; undo puts that entry back where it was, in the list and in the play order, as long as
   the queue has not changed since (another removal, an edit, a new queue, shuffle turned on or off). A newer message
   replaces the one shown. Removing the current song plays the next.
@@ -1061,7 +1083,7 @@ opened rows after inserts, removals and moves; the rebuilt queue from the reques
 the opened files equals the edited one, also on a changed list and with another library ID; folding over 200 edits;
 the queue file formats 3, 2 and 1; removals, moves and inserts next to a song that stands twice, on an unchanged and a
 changed list; a snapshot of added songs only; removing the only entry, and ranges across opened
-files; when a restore folds.
+files; when a restore folds; the entries of the track menu in each place (library.md §18.6).
 
 Instrumented tests on the API 30 emulator: through the service, "Play next" and "Add to queue" with shuffle off and on,
 the run kept when shuffle is turned on, removal and undo, moves with shuffle off and on, an empty player taking added

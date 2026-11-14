@@ -49,7 +49,12 @@ import androidx.media3.common.C
 import androidx.media3.common.Player
 import androidx.media3.common.Timeline
 import io.github.lorddetson.piplayer.R
+import io.github.lorddetson.piplayer.library.songs.Song
+import io.github.lorddetson.piplayer.playback.QueueIds
 import io.github.lorddetson.piplayer.ui.formatDuration
+import io.github.lorddetson.piplayer.ui.songs.SongMenu
+import io.github.lorddetson.piplayer.ui.songs.TrackMenuItems
+import io.github.lorddetson.piplayer.ui.songs.TrackMenuPlace
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
 
@@ -81,7 +86,8 @@ class QueueActions(
 
 /**
  * The queue screen (docs/playback.md §9.2): every entry in the order it plays, the current one marked and shown when the
- * screen opens. A tap plays an entry; a handle drags it, a swipe or its menu removes it.
+ * screen opens. A tap plays an entry; a handle drags it, a swipe or its menu removes it. Each row's menu has the track
+ * menu of [menu] before "Remove from queue" (§9.1).
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -91,6 +97,7 @@ fun QueueScreen(
     snackbar: SnackbarHostState,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
+    menu: SongMenu? = null,
 ) {
     val queue = rememberQueue(player)
     // The order while dragging; the player's again once its timeline changes. One state for the screen's life, so that
@@ -137,6 +144,7 @@ fun QueueScreen(
                             }
                         },
                         onRemove = { actions.remove(entry) },
+                        menu = menu,
                         // Moves without dragging, for TalkBack and switch access.
                         onMoveUp = if (place > 0) ({ actions.move(entry, place, place - 1) }) else null,
                         onMoveDown = if (place < shown.lastIndex) ({ actions.move(entry, place, place + 1) }) else null,
@@ -218,6 +226,7 @@ private fun QueueRow(
     onMoveUp: (() -> Unit)?,
     onMoveDown: (() -> Unit)?,
     handle: Modifier,
+    menu: SongMenu?,
 ) {
     // Not saved: an entry put back by "Undo" under the same key must not come back swiped away and be removed again.
     // Keyed by the entry, so that a refused removal or another entry under the key starts settled.
@@ -254,7 +263,7 @@ private fun QueueRow(
                     modifier = handle.minimumInteractiveComponentSize().testTag(QueueTags.handle(entry.key)),
                 )
             },
-            trailingContent = { RemoveMenu(entry, onRemove) },
+            trailingContent = { RowMenu(entry, onRemove, menu) },
             tonalElevation = if (dragging) 4.dp else 0.dp,
             shadowElevation = if (dragging) 4.dp else 0.dp,
             modifier = Modifier
@@ -271,14 +280,22 @@ private fun QueueRow(
     }
 }
 
+/** A row's menu: the track menu of its song (or "Details" of an opened file), then "Remove from queue" (§9.1). */
 @Composable
-private fun RemoveMenu(entry: QueueEntry, onRemove: () -> Unit) {
+private fun RowMenu(entry: QueueEntry, onRemove: () -> Unit, menu: SongMenu?) {
     var open by remember { mutableStateOf(false) }
     Box {
         IconButton(onClick = { open = true }) {
             Icon(painterResource(R.drawable.ic_more), stringResource(R.string.song_menu, entry.title))
         }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            if (menu != null) {
+                // An added entry plays a library song too (§9.4); anything else is a file opened from another app.
+                val song = QueueIds.fileId(entry.mediaId)?.let { id ->
+                    Song(id = id, uri = entry.mediaId, title = entry.title, artist = entry.artist, album = null, durationMs = entry.durationMs)
+                }
+                TrackMenuItems(song, TrackMenuPlace.QUEUE, menu, close = { open = false }, openedUri = entry.mediaId.takeIf { song == null })
+            }
             DropdownMenuItem(text = { Text(stringResource(R.string.queue_remove)) }, onClick = {
                 open = false
                 onRemove()

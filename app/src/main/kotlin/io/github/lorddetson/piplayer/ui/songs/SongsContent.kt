@@ -17,7 +17,6 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -103,6 +102,10 @@ class SongMenu(
     val favorites: FavoriteActions? = null,
     /** "Add to playlist" (docs/library.md §16.3). */
     val addToPlaylist: ((Song) -> Unit)? = null,
+    /** "Details" of a song (docs/library.md §18). */
+    val details: ((Song) -> Unit)? = null,
+    /** "Details" of a file opened from another app, by its URI (docs/library.md §18.5). */
+    val openedDetails: ((uri: String) -> Unit)? = null,
 )
 
 /** What the song menu does with favorites (docs/library.md §15.2): whether a song is one, and making it one or not. */
@@ -356,76 +359,16 @@ private fun SongRow(song: Song, playing: Boolean, menu: SongMenu?, onClick: () -
     )
 }
 
+/** The song's track menu (docs/playback.md §9.1). */
 @Composable
 private fun SongMenuButton(song: Song, menu: SongMenu) {
     var open by remember { mutableStateOf(false) }
-    var links by remember { mutableStateOf<SongLinks?>(null) }
-    var ownCover by remember { mutableStateOf(false) }
-    var favorite by remember { mutableStateOf(false) }
-    LaunchedEffect(open) {
-        if (open) {
-            links = menu.links(song)
-            ownCover = menu.covers?.songHasOwn?.invoke(song) == true
-            favorite = menu.favorites?.isFavorite?.invoke(song) == true
-        }
-    }
     Box {
         IconButton(onClick = { open = true }) {
             Icon(painterResource(R.drawable.ic_more), stringResource(R.string.song_menu, song.title))
         }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            DropdownMenuItem(text = { Text(stringResource(R.string.play_next)) }, onClick = {
-                open = false
-                menu.playNext(song)
-            })
-            DropdownMenuItem(text = { Text(stringResource(R.string.add_to_queue)) }, onClick = {
-                open = false
-                menu.addToQueue(song)
-            })
-            menu.addToPlaylist?.let { add ->
-                DropdownMenuItem(text = { Text(stringResource(R.string.add_to_playlist)) }, onClick = {
-                    open = false
-                    add(song)
-                })
-            }
-            val found = links
-            found?.albumKey?.let { key ->
-                DropdownMenuItem(text = { Text(stringResource(R.string.go_to_album)) }, onClick = {
-                    open = false
-                    menu.openAlbum(key)
-                })
-            }
-            found?.artists?.forEach { artist ->
-                DropdownMenuItem(text = { Text(stringResource(R.string.go_to_artist, artist.name)) }, onClick = {
-                    open = false
-                    menu.openArtist(artist.key)
-                })
-            }
-            found?.folder?.let { folder ->
-                DropdownMenuItem(text = { Text(stringResource(R.string.go_to_folder)) }, onClick = {
-                    open = false
-                    menu.openFolder(folder.volume, folder.relativePath)
-                })
-            }
-            menu.favorites?.let { favorites ->
-                val label = if (favorite) R.string.favorite_remove else R.string.favorite_add
-                DropdownMenuItem(text = { Text(stringResource(label)) }, onClick = {
-                    open = false
-                    favorites.set(song, !favorite)
-                })
-            }
-            menu.covers?.let { covers ->
-                DropdownMenuItem(text = { Text(stringResource(R.string.cover_choose)) }, onClick = {
-                    open = false
-                    covers.chooseForSong(song)
-                })
-                if (ownCover) {
-                    DropdownMenuItem(text = { Text(stringResource(R.string.cover_remove)) }, onClick = {
-                        open = false
-                        covers.removeForSong(song)
-                    })
-                }
-            }
+            TrackMenuItems(song, TrackMenuPlace.LIST, menu, close = { open = false })
         }
     }
 }

@@ -33,8 +33,22 @@ data class PlayedKeyRow(
     @ColumnInfo(name = "last_played_at") val lastPlayedAt: Long?,
 )
 
+/** An identity's plays all told: its count and its latest start. */
+data class PlayTotalRow(
+    @ColumnInfo(name = "play_count") val playCount: Long?,
+    @ColumnInfo(name = "last_played_at") val lastPlayedAt: Long?,
+)
+
 @Dao
 interface PlayDao {
+
+    /** The plays of [identityId]: its folded count plus its events, and the latest start of either (docs/library.md §18.2). */
+    @Query(
+        "SELECT SUM(plays) AS play_count, MAX(latest) AS last_played_at FROM (" +
+            "SELECT play_count AS plays, last_played_at AS latest FROM play_stats WHERE identity_id = :identityId " +
+            "UNION ALL SELECT COUNT(*) AS plays, MAX(started_at) AS latest FROM play_event WHERE identity_id = :identityId)",
+    )
+    suspend fun totalOf(identityId: Long): PlayTotalRow?
 
     @Query("INSERT OR IGNORE INTO play_event (identity_id, started_at, listened_ms) VALUES (:identityId, :startedAt, :listenedMs)")
     suspend fun addEvent(identityId: Long, startedAt: Long, listenedMs: Long)

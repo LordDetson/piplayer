@@ -524,7 +524,7 @@ keeps playing meanwhile, and the crash leaves a native crash report of `:tagger`
   tap. Each song row
   has a menu with "Play next" and "Add to queue" (playback.md §9.1), "Go to album", "Go to artist" (one entry per
   artist) and "Go to folder"; album, artist and folder rows and the top bars of their pages have "Play next" and "Add
-  to queue".
+  to queue". Since M2b the song menu is the track menu of playback.md §9.1, with "Details" last (§18).
 - The debug entry moves from the list into the top bar.
 
 ### 6.2 Grouping
@@ -1462,8 +1462,8 @@ Decision: an entry never points at a file. It refers to a track identity (§8.1)
 - A tap opens the playlist page: the top bar with back, the name and a menu with "Play next", "Add to queue", "Rename",
   "Export" and "Delete"; under it the number of songs (and of those not in the library), "Play", and the entries in their
   order. A tap on an available entry plays the playlist's available entries from it; a tap on an unavailable one says that
-  the song is not in the library now. Each row has a drag handle, and a menu with "Play next", "Add to queue", "Move up",
-  "Move down" and "Remove from playlist"; "Move up" and "Move down" are also the row's accessibility actions, so TalkBack
+  the song is not in the library now. Each row has a drag handle, and a menu with the track menu of its song (playback.md §9.1), then
+  "Move up", "Move down" and "Remove from playlist"; "Move up" and "Move down" are also the row's accessibility actions, so TalkBack
   and switch access reorder without dragging. Decision: each goes one place from where the entry stands in the database,
   so two sent before the page shows the first move it two places; an entry at an end does not move, and only a write that
   fails says "The playlist could not be changed". Removing says so with "Undo", which puts the entry back in its place. The
@@ -1685,3 +1685,109 @@ Instrumented tests on the API 30 emulator:
 
 JVM tests also cover the reasons of a file the tag pass could not read, the page header (no number and no "Shuffle" on
 the first page), and counts that come back after a failed read.
+
+## 18. Track details (M2b: PIM-61)
+
+What PiPlayer knows of one song, on a screen of its own. The track menu entry that opens it and the order of the menus
+are in playback.md §9.1. The owner left the open choices to the recommendations (14.11.2026); they are marked "decision".
+
+### 18.1 The screen
+
+- Decision: "Details" opens a full screen route (`TrackDetailsRoute`, by file ID, or by URI for a file opened from another
+  app), which comes in from the side like a page, with a top bar with back and the title "Details". Not a sheet: the
+  screen is long, M3 adds the source of each value and a per-field revert to it, and system back and predictive back work
+  as on every page.
+- Under the top bar a header shows the song's cover (§13.1, 96 dp), its title and its artist, then the sections in this
+  order, each with a heading:
+    1. **Song**: title, artist, album, album artist, track (with the total, "3 of 12"), disc (with the total), disc
+       subtitle, date, original date, genre, composer, compilation, label, catalog number, barcode, ISRC, track gain and
+       album gain (ReplayGain, with the peak).
+    2. **Plays**: favorite (yes or no), play count and last played (§15.5).
+    3. **File**: format (the container), codec, bitrate, sample rate, channels, bit depth (lossless codings), length,
+       the media index's length, size, file name, folder, MIME type, the legacy encoding the tags were read in (§5.7),
+       date added, modified, and while the tags are not read, the state of the tag pass.
+    4. **Cover**: its source and its size in pixels (§18.3).
+    5. **IDs**: the MusicBrainz recording, release, release group, track, artist and album artist IDs (§18.4).
+- Decision: a value that is not known is left out, and so is a section left without rows; the screen never shows a list
+  of "Unknown". Lists already say "Unknown artist", and M3's "Songs missing information" names what is missing. Three
+  rows are values even at zero or no: the play count (0), the favorite (no) and the cover's source ("None").
+- Decision: every value can be copied: a long press on its row puts the value as shown (for an ID, the bare ID) on the
+  clipboard, and the row offers "Copy" to TalkBack. From Android 13 the system confirms a copy itself, so the screen
+  says "Copied" only on older versions. Rows are text, not fields: selecting part of a value is not needed.
+- Reading never blocks the main thread: the screen reads both databases and probes the cover on a background thread, and
+  reads again after a sync that changed the library, a batch of the tag pass, an attach pass, a change that the mirror
+  brings over (a favorite, a play, §15.4) and a change of the own covers, so that it follows the song while it is open. A
+  song that left the library while its screen is open says so, with the way back.
+- M3 adds the source of each value and a per-field revert (TI §7.1): each row is a field with a value, kept apart from
+  its label and its format, so that a source can be added to it later. Nothing of that is built in M2b.
+
+### 18.2 Values
+
+- Values are merged values (TI §7.1), never raw tags, by the same precedence as `track_display`: title, artist, album,
+  album artist, year, disc, track and length come from the resolver of the lists itself (`MergedValues`); the other
+  fields follow the same rule per field: the file's tags once the tag pass has read the file, the media index's value
+  before (composer, genre, year), and none from the file name except the title and the artist. Levels 1 and 2 (user edits
+  and confirmed identifications) arrive with M3 and win there too.
+- Before the tag pass has read the file the date row is the index's year, and the track and disc come from the index's
+  track number, which holds the disc in its thousands.
+- Lengths are shown to the millisecond (`3:25.412`, with hours when needed). The length row is the length the lists show
+  (§7), with where it comes from: from the header, measured over all frames, from the header with FLAC's end not checked
+  yet, from the media index, or TagLib's estimate. Decision: the media index's length gets a row of its own only when the
+  length shown comes from elsewhere, so that the measured and the index's length can be compared; TagLib's estimate shows
+  only when it is the length shown.
+- The file name and the folder are those of `audio_file`, the folder with its volume ("Internal storage/Music/Ann/"), and
+  the size in the unit that fits with the exact number of bytes. Modified is the file's modification time; date added is
+  when PiPlayer first saw the song, its track identity's `created_at` (§8.1), so it survives moves, renames and a rebuild
+  of the library. Decision: a song that has no identity yet (tags not read) shows no date added, rather than a time that
+  would change after the tag pass.
+- Plays and the favorite are read from the user database by the song's identity, not from the mirror, so that a play that
+  just counted shows at once. A song without an identity has no plays and cannot be a favorite yet, so the section is left
+  out.
+
+### 18.3 Cover
+
+- The source is the one the loader shows (§13.1), tried in its order: the song's own cover, the album's own cover, the
+  picture embedded in the file (front cover first, as Media3 reads it), the system thumbnail, or "None" when only the
+  placeholder shows.
+- The size: for an own cover the width and height stored with it (§13.2); for an embedded picture the size of the picture
+  read again from the file (only its header is decoded) and its size in bytes from the tag pass. Decision: the system
+  thumbnail has no size row, because Android hands out only a scaled copy whose size says nothing about the original.
+- `embedded_cover_width` and `embedded_cover_height` stay unwritten: the details read the picture when they are opened,
+  and the tag pass and the first sync do no more work for it.
+
+### 18.4 IDs
+
+- The MusicBrainz IDs of the merged values, one row per ID (a track with two artists has two artist IDs). A tap on a row
+  opens its page on musicbrainz.org (`https://musicbrainz.org/<recording|release|release-group|track|artist>/<ID>`) with
+  an `ACTION_VIEW` intent; the row says "Open in MusicBrainz" to TalkBack. Without an app for the link a message says so.
+  Decision: only a well-formed ID (36 characters of hex digits and hyphens) is a link; anything else that a tag holds is
+  shown as text and can be copied, but opens nothing.
+- The AcoustID is not stored in M2b (`fingerprint.acoustid_id` comes with identification, TI §10.1); its row appears in M3.
+  ISRC is a value of the song section, not a link.
+
+### 18.5 A file opened from another app
+
+- Decision: a file opened from another app (playback.md §5) has no library row, so its details are read from the file
+  itself when the screen opens: one read through `:tagger` (§4), counted against the file like any outside read (§4.4),
+  gives its tags and technical data; the content provider gives its display name, size and MIME type. Values follow the
+  same rule, with the file's tags as the only level and the display name as the last resort for the title. The cover is
+  the picture embedded in the file. The section of plays, the folder, date added, modified and the media index's length
+  are left out; the length is TagLib's.
+- When the read fails (`:tagger` crashed, timed out, the file is unsafe or can no longer be opened) the screen shows what
+  the provider gives and says that the file could not be read. A read costs at most one `:tagger` call per opening of the
+  screen; nothing is stored, and the file is never added to the library.
+
+### 18.6 Checks
+
+JVM tests: the rows of a read and an unread file (the resolver's merged values, the index's values before the read and
+none after, the file name as the title's last resort, media index placeholders left out), the length row with each source
+and the index's length beside it, values left out when unknown and the rows kept at zero, the cover rows of each source,
+the MusicBrainz links and malformed IDs, the rows of an opened file; the order of the track menu in every place; the
+formats of lengths.
+
+Instrumented tests on the emulators: the details read from the real databases for an unread file, a read one with an
+identity, a favorite, plays and date added, and each cover source (own song and album covers, embedded, thumbnail, none,
+with a probe for the pictures); a file not in the library; an opened file read through the real `:tagger` (technical data,
+tags, the embedded picture's size); on the screen, "Details" from the song menu of the Songs tab, an album page, a
+playlist page, a queue row and Now Playing's menu, a MusicBrainz row opening its page with `ACTION_VIEW`, and a long press
+copying a value.
