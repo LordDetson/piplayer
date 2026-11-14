@@ -1610,7 +1610,9 @@ Every smart list is a list of the library: it holds visible songs only (§3.5), 
   Songs missing information the number follows the chips. The rows are one composable, so that PIM-64 can show them where
   it puts the playlists among the browse categories.
 - A tap opens the list's page: the top bar with back, the list's name, search and sort; under it the number of songs,
-  "Play" and "Shuffle" (and for Songs missing information the chips); then the songs. A tap on a song plays the list as
+  "Play" and "Shuffle" (and for Songs missing information the chips); then the songs. Decision: while the page shows the
+  first page of its list ahead of the whole list (§1.4), the number is not shown and "Shuffle" is off, since both stand
+  for the whole list; "Play" works, as the first song is already there. A tap on a song plays the list as
   shown from that song. "Play" plays it from its first song, "Shuffle" turns shuffle on and plays it from a random song
   (playback.md §3.6). With no songs both are off, and the list says why: no favorites yet, nothing played yet, or nothing
   missing.
@@ -1639,7 +1641,9 @@ Every smart list is a list of the library: it holds visible songs only (§3.5), 
 
 - A page and the counts read again after every sync that changed the library, after a change of the hidden files and
   after every run of the mirror (§15.4), which follows every change of favorites and plays, every attach pass (so after
-  each sync and each run of the tag pass) and every change of own covers. Reads run off the main thread.
+  each sync and each run of the tag pass) and every change of own covers (the library asks the mirror on every new
+  version of the own covers). Reads run off the main thread. A read of the counts that fails shows no numbers and the
+  next change reads them again.
 - The library database's version goes to 11 (a rebuild with a new first sync, as every version does, §1.1):
   `audio_file.date_added` with an index on it, an index on `track_display.missing_info_reasons` and one on
   `track_mirror.favorite`.
@@ -1668,4 +1672,8 @@ Instrumented tests on the API 30 emulator:
   again before the process dies comes back with the order of the tap.
 - The tag pass gives a file it could not read the reasons of its index values, and a sync that renames it keeps them.
 - On the screen: the smart lists at the top of the Playlists tab with their numbers, a number that follows a new favorite;
-  a page that plays from a row, "Play" and "Shuffle"; the chips of Songs missing information and the reasons of its rows.
+  a page that plays from a row, "Play" and "Shuffle"; the chips of Songs missing information and the reasons of its rows;
+  an own cover set from the app that takes a song off an open page of Songs missing information and lowers its number.
+
+JVM tests also cover the reasons of a file the tag pass could not read, the page header (no number and no "Shuffle" on
+the first page), and counts that come back after a failed read.

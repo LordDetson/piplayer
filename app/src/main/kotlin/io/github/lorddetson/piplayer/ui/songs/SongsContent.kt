@@ -69,7 +69,13 @@ sealed interface SongsState {
      * [songs] are [query]'s, which a tap plays. [scrollTo] is the song to show at the top when the list has just been
      * sorted anew.
      */
-    data class Loaded(val songs: List<Song>, val query: SongQuery = SongQuery.SONGS, val scrollTo: Long? = null) : SongsState
+    /** [complete] is false while [songs] is the first page that shows ahead of the whole list (docs/library.md §1.4). */
+    data class Loaded(
+        val songs: List<Song>,
+        val query: SongQuery = SongQuery.SONGS,
+        val scrollTo: Long? = null,
+        val complete: Boolean = true,
+    ) : SongsState
 }
 
 object SongsTags {

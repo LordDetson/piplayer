@@ -188,7 +188,7 @@ class SongsViewModel(
                 if (newList) {
                     val page = withContext(Dispatchers.IO) { SongList.firstPage(app, FIRST_PAGE, query) }
                     if (page.isNotEmpty() || mutableState.value !is SongsState.Loaded) {
-                        mutableState.value = SongsState.Loaded(page, query)
+                        mutableState.value = SongsState.Loaded(page, query, complete = false)
                     }
                 }
                 if (resort) sortToShow = true

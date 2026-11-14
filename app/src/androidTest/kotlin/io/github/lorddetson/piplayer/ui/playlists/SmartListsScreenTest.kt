@@ -8,16 +8,20 @@ import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isSelected
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.test.performClick
+import androidx.test.espresso.Espresso
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.github.lorddetson.piplayer.MainActivity
 import io.github.lorddetson.piplayer.R
 import io.github.lorddetson.piplayer.TestFiles
+import io.github.lorddetson.piplayer.covers.CoverCopy
+import io.github.lorddetson.piplayer.covers.Covers
 import io.github.lorddetson.piplayer.library.FakeMediaIndex
 import io.github.lorddetson.piplayer.library.FakeMediaIndex.Companion.row
 import io.github.lorddetson.piplayer.library.Library
 import io.github.lorddetson.piplayer.library.LibraryRule
 import io.github.lorddetson.piplayer.library.db.TrackEntity
 import io.github.lorddetson.piplayer.library.identity.Hex
+import io.github.lorddetson.piplayer.library.lists.MissingReasons
 import io.github.lorddetson.piplayer.library.sync.TrackDisplayWriter
 import io.github.lorddetson.piplayer.library.tagpass.DurationSource
 import io.github.lorddetson.piplayer.library.values.TrackTags
@@ -30,6 +34,7 @@ import io.github.lorddetson.piplayer.playback.PlaybackTesting.waitUntil
 import io.github.lorddetson.piplayer.ui.GrantAudioPermission
 import io.github.lorddetson.piplayer.ui.library.LibraryTags
 import io.github.lorddetson.piplayer.userdata.UserData
+import java.io.File
 import kotlinx.coroutines.runBlocking
 import org.junit.Rule
 import org.junit.Test
@@ -143,6 +148,49 @@ class SmartListsScreenTest {
             controller.awaitState("Favorites play shuffled") { mediaItemCount == 2 && shuffleModeEnabled }
         } finally {
             controller.stopAndRelease()
+        }
+    }
+
+    /** Alpha is read with a title, an artist and an album, but no picture and no MusicBrainz ID. */
+    private fun readAlphaWithoutACover() = runBlocking {
+        val database = Library.database(context)
+        val alpha = fileId(1)
+        val tags = mapOf("TITLE" to listOf("Alpha"), "ARTIST" to listOf("Ann"), "ALBUM" to listOf("Red"))
+        database.library().addTrack(TrackEntity.of(alpha, TrackTags.from(tags)))
+        database.library().markRead(alpha, at = 1, readerVersion = 1, format = null, codec = null, sampleRate = null,
+            bitDepth = null, channels = null, bitrate = null, tagEncoding = null, coverPresent = false, coverBytes = null,
+            tagLengthMs = null)
+        TrackDisplayWriter(database).refresh(listOf(alpha))
+        Library.mirror(context).mirror()
+    }
+
+    /**
+     * An own cover changed from the app's menus reaches an open page of Songs missing information and its number on the
+     * Playlists tab without any other change (docs/library.md §17.4).
+     */
+    @Test
+    fun anOwnCoverReachesSongsMissingInformationAndItsNumber() {
+        readAlphaWithoutACover()
+        MissingReasonChoice.chosen.value = MissingReasons.COVER
+        try {
+            tab(R.string.tab_playlists)
+            tap(smartRow(R.string.smart_missing_info, 1))
+            compose.waitUntilAtLeastOneExists(onPage(hasText("Alpha")), timeoutMillis = 10_000)
+
+            runBlocking {
+                val covers = Covers.own(context)
+                covers.load()
+                File(covers.dir.apply { mkdirs() }, "alpha-test.jpg").writeBytes(byteArrayOf(1, 2, 3))
+                check(covers.setTrack(identity(1), CoverCopy("alpha-test.jpg", 10, 10)))
+            }
+            compose.waitUntilDoesNotExist(onPage(hasText("Alpha")), timeoutMillis = 10_000)
+
+            // Back on the tab while its count is still collected: it follows too.
+            Espresso.pressBack()
+            compose.waitUntilAtLeastOneExists(smartRow(R.string.smart_missing_info, 0), timeoutMillis = 10_000)
+        } finally {
+            MissingReasonChoice.chosen.value = MissingReasons.DEFAULT
+            runBlocking { Covers.own(context).removeTrack(identity(1)) }
         }
     }
 

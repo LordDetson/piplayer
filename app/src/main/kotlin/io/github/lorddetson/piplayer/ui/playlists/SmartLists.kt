@@ -53,12 +53,13 @@ import io.github.lorddetson.piplayer.ui.songs.SongsState
 import io.github.lorddetson.piplayer.ui.songs.SongsViewModel
 import io.github.lorddetson.piplayer.ui.songs.rememberAudioAccess
 import kotlin.random.Random
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.stateIn
@@ -133,18 +134,44 @@ internal fun reasonLabel(reason: Int): Int = when (reason) {
 class SmartListsViewModel(application: Application) : AndroidViewModel(application) {
 
     val counts: StateFlow<Map<ListKind, Int>?> =
-        combine(SongList.changes(application, SongQuery.favorites()), MissingReasonChoice.chosen) { _, chosen -> chosen }
-            .mapLatest { chosen ->
-                withContext(Dispatchers.IO) {
-                    ListKind.SMART.associateWith { kind -> SongList.smartCount(application, SongQuery.smart(kind, chosen)) }
-                }
+        smartListCounts(SongList.changes(application, SongQuery.favorites()), MissingReasonChoice.chosen) { chosen ->
+            withContext(Dispatchers.IO) {
+                ListKind.SMART.associateWith { kind -> SongList.smartCount(application, SongQuery.smart(kind, chosen)) }
             }
-            .catch { emit(emptyMap()) }
-            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), null)
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), null)
 
     private companion object {
         const val STOP_TIMEOUT_MS = 5_000L
     }
+}
+
+/**
+ * The numbers [read] gives for the chosen reasons, read again on every value of [changes] and [chosen]. A read that fails
+ * shows no numbers until the next one: the flow goes on (docs/library.md §17.4).
+ */
+@OptIn(ExperimentalCoroutinesApi::class)
+internal fun smartListCounts(changes: Flow<Any>, chosen: Flow<Int>, read: suspend (Int) -> Map<ListKind, Int>): Flow<Map<ListKind, Int>> =
+    combine(changes, chosen) { _, reasons -> reasons }
+        .mapLatest { reasons ->
+            try {
+                read(reasons)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                emptyMap()
+            }
+        }
+
+/** What the header of a smart list's page shows of its list (docs/library.md §17.2). */
+internal object SmartListHeader {
+    /** The number of songs, once the whole list is read: the first page that shows ahead of it is not the number. */
+    fun count(loaded: SongsState.Loaded?): Int? = loaded?.takeIf { it.complete }?.songs?.size
+
+    /** "Play" starts at the first song, which the first page already holds. */
+    fun mayPlay(loaded: SongsState.Loaded?): Boolean = !loaded?.songs.isNullOrEmpty()
+
+    /** "Shuffle" picks its song from the whole list, so it waits for it. */
+    fun mayShuffle(loaded: SongsState.Loaded?): Boolean = loaded != null && loaded.complete && loaded.songs.isNotEmpty()
 }
 
 /** A smart list as the Playlists tab shows it: its kind, its name and its number of songs, when known. */
@@ -243,13 +270,13 @@ fun SmartListPage(kind: ListKind, host: LibraryHost, onBack: () -> Unit) {
 /** The number of songs, "Play" and "Shuffle", and for Songs missing information the chips of its reasons. */
 @Composable
 private fun Header(kind: ListKind, loaded: SongsState.Loaded?, chosen: Int, host: LibraryHost) {
-    val list = loaded?.songs.orEmpty()
+    val count = SmartListHeader.count(loaded)
     Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        if (loaded != null) Text(pluralStringResource(R.plurals.songs_count, list.size, list.size), style = MaterialTheme.typography.bodyMedium)
+        if (count != null) Text(pluralStringResource(R.plurals.songs_count, count, count), style = MaterialTheme.typography.bodyMedium)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(
                 onClick = { loaded?.let { host.play(0, it.songs.first(), it.query) } },
-                enabled = list.isNotEmpty(),
+                enabled = SmartListHeader.mayPlay(loaded),
                 modifier = Modifier.testTag(SmartListTags.PLAY),
             ) {
                 Icon(painterResource(R.drawable.ic_player_play), contentDescription = null)
@@ -262,7 +289,7 @@ private fun Header(kind: ListKind, loaded: SongsState.Loaded?, chosen: Int, host
                         host.shuffle(row, it.songs[row], it.query)
                     }
                 },
-                enabled = list.isNotEmpty(),
+                enabled = SmartListHeader.mayShuffle(loaded),
                 modifier = Modifier.testTag(SmartListTags.SHUFFLE),
             ) {
                 Icon(painterResource(R.drawable.ic_player_shuffle), contentDescription = null)
