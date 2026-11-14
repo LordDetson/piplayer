@@ -124,7 +124,7 @@ class PlaybackServiceTest {
     }
 
     @Test
-    fun theLibraryRootHoldsTheFourTabs() {
+    fun theLibraryRootHoldsFourNodesWithMoreLast() {
         // The tree itself is checked on a library of the test's own (LibraryTreeTest, docs/playback.md §10).
         val browser = connectBrowser()
         try {
@@ -137,7 +137,8 @@ class PlaybackServiceTest {
 
             val children = onMain { browser.getChildren(item.mediaId, 0, 100, null) }.get(10, TimeUnit.SECONDS)
             assertThat(children.resultCode).isEqualTo(LibraryResult.RESULT_SUCCESS)
-            assertThat(children.value!!.map { it.mediaId }).containsExactly("songs", "albums", "artists", "folders")
+            // Since M2b Folders sits under More with Playlists and Genres (docs/playback.md §10.1).
+            assertThat(children.value!!.map { it.mediaId }).containsExactly("songs", "albums", "artists", "more")
         } finally {
             onMain { browser.release() }
         }
