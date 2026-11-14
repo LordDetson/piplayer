@@ -172,4 +172,17 @@ class M3uTest {
         assertThat(match(LinePlace(null, null, "03.mp3"), 202, files)).isNull()
         assertThat(match(LinePlace(null, null, "04.mp3"), null, files)).isNull()
     }
+
+    @Test
+    fun aLineFindsTheFileAtItsPlaceWhateverLengthExtinfGives() {
+        // A VBR MP3 whose length the tag pass measured at 247.8 s; another player wrote 244 s into #EXTINF.
+        val vbr = file(1, Place("external_primary", "Music/A/", "x.mp3"), durationMs = 247_800)
+        val otherCase = file(2, Place("external_primary", "music/b/", "y.MP3"), durationMs = 247_800)
+        val files = listOf(vbr, otherCase)
+
+        assertThat(match(LinePlace("external_primary", "Music/A/", "x.mp3"), 244, files)).isEqualTo(1)
+        assertThat(match(LinePlace("external_primary", "Music/B/", "y.mp3"), 244, files)).isEqualTo(2)
+        // The name alone still needs the length.
+        assertThat(match(LinePlace(null, "Elsewhere/", "x.mp3"), 244, files)).isNull()
+    }
 }

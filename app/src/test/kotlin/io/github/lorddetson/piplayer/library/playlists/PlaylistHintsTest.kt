@@ -131,7 +131,7 @@ class PlaylistHintsTest {
     }
 
     @Test
-    fun thenByThePlaceWithTheLengthThenByTheNameThenByTheMbid() {
+    fun thenByThePlaceAtAnyLengthThenByTheNameWithTheLengthThenByTheMbid() {
         val mbid = "0b8a3a2e-1111-4222-8333-444455556666"
         val files = listOf(
             hintFile(1, old, durationMs = 200_400),
@@ -142,13 +142,15 @@ class PlaylistHintsTest {
             10L to hint(old),
             11L to hint(Place("external_primary", "Nowhere/", "lonely name.mp3")),
             12L to hint(null, mbid = mbid, name = null),
-            // The place with a length 3 s off is another song.
+            // The place names its file whatever the length: #EXTINF gives whole seconds, often from another player.
             13L to hint(old, durationMs = 203_500),
+            // A name with a length 3 s off is another song.
+            14L to hint(Place("external_primary", "Nowhere/", "lonely name.mp3"), durationMs = 203_500),
         )
 
         val linked = PlaylistHints.link(entries, files).mapValues { it.value.fileId }
 
-        assertThat(linked).containsExactlyInAnyOrderEntriesOf(mapOf(10L to 1L, 11L to 2L, 12L to 3L))
+        assertThat(linked).containsExactlyInAnyOrderEntriesOf(mapOf(10L to 1L, 11L to 2L, 12L to 3L, 13L to 1L))
     }
 
     @Test
@@ -214,7 +216,7 @@ class PlaylistHintsTest {
     }
 
     @Test
-    fun anEntryWithoutAnIdentityPlaysItsHintedKeyThenItsPlaceWithTheLength() {
+    fun anEntryWithoutAnIdentityPlaysItsHintedKeyThenTheFileAtItsPlaceAtAnyLength() {
         val byKey = hintFile(1, moved, key = "aa")
         val atOld = hintFile(2, old, durationMs = 200_500)
         val withKey = { key: String -> listOf(byKey).filter { it.contentKey == key } }
@@ -225,7 +227,7 @@ class PlaylistHintsTest {
         assertThat(fileOf(hint(old, key = "aa"))).isEqualTo(1)
         assertThat(fileOf(hint(old, key = "nothing"))).isEqualTo(2)
         assertThat(fileOf(hint(old, durationMs = null))).isEqualTo(2)
-        assertThat(fileOf(hint(old, durationMs = 205_000))).isNull()
+        assertThat(fileOf(hint(old, durationMs = 205_000))).isEqualTo(2)
         assertThat(fileOf(hint(null, name = "01 Song.mp3"))).isNull()
     }
 }

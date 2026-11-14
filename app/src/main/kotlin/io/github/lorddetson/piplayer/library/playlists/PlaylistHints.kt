@@ -32,10 +32,10 @@ data class HintFile(
 )
 
 /**
- * Finds the file a hint names among [files] (docs/library.md §16.2, §16.6), in this order: the content key, the place
- * with the length, the place ignoring case with the length, the display name ignoring case with the length (a name that
- * several files carry goes to the folder that ends most like the hint's, then to the lowest file ID), the recording
- * MBID with the length when one file alone carries it. A length that either side lacks fits, except for the MBID.
+ * Finds the file a hint names among [files] (docs/library.md §16.2, §16.6), in this order: the content key, the place,
+ * the place ignoring case, the display name ignoring case with the length (a name that several files carry goes to the
+ * folder that ends most like the hint's, then to the lowest file ID), the recording MBID with the length when one file
+ * alone carries it. A place names its file at any length; for a name, a length that either side lacks fits.
  */
 class FileMatcher(files: List<HintFile>) {
 
@@ -51,9 +51,8 @@ class FileMatcher(files: List<HintFile>) {
             byKey[key]?.let { copies -> return copies.firstOrNull { it.place == place } ?: copies.minBy { it.fileId } }
         }
         if (place != null) {
-            byPlace[place].orEmpty().filter { lengthFits(hint.durationMs, it.durationMs) }.minByOrNull { it.fileId }?.let { return it }
-            byPlaceIgnoringCase[lower(place)].orEmpty().filter { lengthFits(hint.durationMs, it.durationMs) }
-                .minByOrNull { it.fileId }?.let { return it }
+            byPlace[place]?.minByOrNull { it.fileId }?.let { return it }
+            byPlaceIgnoringCase[lower(place)]?.minByOrNull { it.fileId }?.let { return it }
         }
         hint.displayName?.let { name ->
             val named = byName[name.lowercase(Locale.ROOT)].orEmpty().filter { lengthFits(hint.durationMs, it.durationMs) }
@@ -137,7 +136,7 @@ object PlaylistResolution {
     /**
      * The file [target] plays: with an identity, a copy of its key, the one at the identity's place first, then the one
      * at the entry's place, then the lowest file ID, and nothing while no file holds the key; without one, a copy of
-     * the hinted key, else the file at the hinted place whose length fits.
+     * the hinted key, else the file at the hinted place, whatever its length.
      */
     fun fileOf(target: Target, withKey: (String) -> List<HintFile>, atPlace: (Place) -> List<HintFile>): HintFile? {
         val place = target.hint.place
@@ -147,7 +146,7 @@ object PlaylistResolution {
         }
         target.hint.contentKey?.let { key -> pick(withKey(key), place, null)?.let { return it } }
         place ?: return null
-        return atPlace(place).filter { FileMatcher.lengthFits(target.hint.durationMs, it.durationMs) }.minByOrNull { it.fileId }
+        return atPlace(place).minByOrNull { it.fileId }
     }
 
     private fun pick(copies: List<HintFile>, first: Place?, second: Place?): HintFile? {

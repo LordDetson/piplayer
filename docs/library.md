@@ -1388,8 +1388,11 @@ Decision: an entry never points at a file. It refers to a track identity (§8.1)
 - An entry with an identity plays the first available location of that identity (TI §3.1): the file at the identity's
   hinted place, else the one at the entry's hinted place, else the copy with the lowest file ID. Nothing weaker: while no
   file holds the identity's key, the entry is unavailable, even when another file lies at its old place.
-- An entry without an identity plays the file that holds its hinted content key, else the file at its hinted place whose
-  length is within 1 s of the hinted one (any length when either is unknown).
+- An entry without an identity plays the file that holds its hinted content key, else the file at its hinted place,
+  whatever its length. Decision: a place names its file at any length, here, in linking and in the import (§16.6); only a
+  display name and a recording MBID need the length. The length of such an entry comes from `#EXTINF` in whole seconds,
+  often written by another player, or from the index before the tag pass, which can be far off for a VBR MP3 (§3.5), so
+  it must not keep the file that lies exactly where the entry points from playing.
 - Available means a file of the library database: the hidden kinds and short files of §3.5 play from a playlist, since
   the user put them there; files of excluded folders (§3.4) do not.
 - An unavailable entry stays in its playlist in its place, shown as "Not in the library", and is skipped when the
@@ -1400,8 +1403,8 @@ Decision: an entry never points at a file. It refers to a track identity (§8.1)
       and length, when exactly one such file exists and no other missing identity could take it. It runs in the attach
       pass after step 3 (§8.2), before new identities are made;
     - an entry without an identity is linked by every attach pass to the identity of the file its hints name, in this
-      order: the content key, the place with the length, the display name ignoring case with the length (any length when
-      the hint has none), the recording MBID with the length. A name that several files carry goes to the one whose
+      order: the content key, the place, the place ignoring case, the display name ignoring case with the length (any
+      length when the hint has none), the recording MBID with the length. A name that several files carry goes to the one whose
       folder path ends most like the hinted one, then to the lowest file ID, the rule of the import (§16.6). Linking
       writes only `identity_id`.
 - Identities that entries refer to hold user data: they are never deleted (§8.1).
