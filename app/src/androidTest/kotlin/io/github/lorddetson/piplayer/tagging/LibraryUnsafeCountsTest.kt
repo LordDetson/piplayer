@@ -1,11 +1,14 @@
 package io.github.lorddetson.piplayer.tagging
 
+import android.database.sqlite.SQLiteDatabase
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.github.lorddetson.piplayer.TestFiles
 import io.github.lorddetson.piplayer.library.FakeMediaIndex
 import io.github.lorddetson.piplayer.library.FakeMediaIndex.Companion.row
 import io.github.lorddetson.piplayer.library.db.LibraryDatabase
+import io.github.lorddetson.piplayer.library.identity.LibraryTrackRefs
 import io.github.lorddetson.piplayer.library.sync.LibrarySync
+import java.io.File
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.After
@@ -80,6 +83,38 @@ class LibraryUnsafeCountsTest {
 
         assertThat(counts.count(first)).isZero()
         assertThat(counts.count(second)).isEqualTo(1)
+    }
+
+    @Test
+    fun theCountsUseTheDatabaseOnlyInsideTheLibrarysAccess() = runBlocking<Unit> {
+        val path = File(TestFiles.targetContext.cacheDir, "unsafe-counts-access.db")
+        SQLiteDatabase.deleteDatabase(path)
+        // Each read has the database only while it runs, as a rebuild closes it once the reads under way have ended.
+        val access = object : LibraryTrackRefs.Access {
+            var reads = 0
+
+            override fun <T> read(block: (LibraryDatabase) -> T): T {
+                val open = LibraryDatabase.open(TestFiles.targetContext, path)
+                try {
+                    reads++
+                    return block(open)
+                } finally {
+                    open.close()
+                }
+            }
+        }
+        val counts = LibraryUnsafeCounts(access)
+        try {
+            counts.raise(file)
+            counts.raise(file)
+            assertThat(counts.count(file)).isEqualTo(2)
+            counts.reset(file)
+
+            assertThat(counts.count(file)).isZero()
+            assertThat(access.reads).isGreaterThanOrEqualTo(5)
+        } finally {
+            SQLiteDatabase.deleteDatabase(path)
+        }
     }
 
     @Test

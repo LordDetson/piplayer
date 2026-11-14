@@ -13,6 +13,8 @@ import android.os.ParcelFileDescriptor
 import android.os.Process
 import android.system.Os
 import io.github.lorddetson.piplayer.library.Library
+import io.github.lorddetson.piplayer.library.db.LibraryDatabase
+import io.github.lorddetson.piplayer.library.identity.LibraryTrackRefs
 import io.github.lorddetson.piplayer.tagging.contentkey.DurationCheck
 import io.github.lorddetson.piplayer.tagging.contentkey.DurationPlan
 import java.io.File
@@ -198,7 +200,10 @@ fun outsideTarget(uri: String, file: ParcelFileDescriptor): TagTarget.Outside {
     return TagTarget.Outside(uri, stat.st_size, stat.st_mtim.tv_sec * 1_000 + stat.st_mtim.tv_nsec / 1_000_000)
 }
 
-/** The main process's client, counting in the library database. */
+/**
+ * The main process's client, counting in the library database through the library's lock, so that a rebuild cannot close
+ * the database under a count.
+ */
 object Tagger {
 
     // The client holds the application context only, which lives as long as the process.
@@ -207,6 +212,12 @@ object Tagger {
     private var client: TaggerClient? = null
 
     fun client(context: Context): TaggerClient = client ?: synchronized(this) {
-        client ?: TaggerClient(context, LibraryUnsafeCounts { Library.database(context) }).also { client = it }
+        client ?: run {
+            val app = context.applicationContext
+            val access = object : LibraryTrackRefs.Access {
+                override fun <T> read(block: (LibraryDatabase) -> T): T = Library.read(app, block)
+            }
+            TaggerClient(app, LibraryUnsafeCounts(access)).also { client = it }
+        }
     }
 }

@@ -344,6 +344,10 @@ the way the main process calls it and the count of failed reads; the tag pass of
   count above 0. A size or modification time other than the stored one counts as a new file, with a count of 0; a
   reply deletes the row.
 - `library.db` is rebuildable: a rebuild forgets the counts, which costs at most two more failed reads per unsafe file.
+- Decision: the main process reads and writes the counts through the library's lock, as the lists read it, so that a
+  rebuild, which closes the database once the reads under way have ended, never closes it under a count. A read of an
+  outside file (track details, §18.5) is not stopped by a rebuild as the tag pass is: its count waits for the rebuild
+  and lands in the new database.
 - The library database moves to schema version 3 (step 3 took version 2; no migration, as in §1.1: the next sync
   fills it again).
 
