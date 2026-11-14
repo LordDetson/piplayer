@@ -1203,7 +1203,9 @@ through the media library service: a tree of nodes, each a folder or a song.
     3. a song whose title is the query: the Songs list filtered by the query plays from its first such song;
     4. a playlist whose name is the query plays it (since M2b, PIM-64). The four smart lists of the tree (library.md
        §17.3) answer to their names in the app's language, each only while it holds a song; a user's playlist of the
-       same name comes first, since the user chose that name;
+       same name comes first, since the user chose that name. A user's playlist answers only while it holds an available
+       song: an empty one, or one whose songs have all left the library, would make the request fail, so the query goes
+       on to a genre or the songs it finds;
     5. a genre whose name is the query plays its songs in the genre page's order (since M2b, PIM-64);
     6. else the Songs list filtered by the query plays from its first song;
     7. else the first artist, then the first album, in the orders of their tabs, whose name holds the query.
@@ -1292,7 +1294,8 @@ and every smart list empty; a playlist's items with a song that stands twice pla
 600 entries in runs of rows; an edited playlist seen at the next browse; a deleted playlist's node an error; a genre, a
 playlist and a smart list playing and added; a controller without access refused for More, Playlists, Genres, a genre and
 a playlist and for their play; every node under More within the limits, without artwork data, every ID resolving; a
-voice query that names a genre or a playlist. PiPlayer without music access is not tested on the device: revoking the
+voice query that names a genre or a playlist, and one that names an empty playlist or one whose songs have all left the
+library playing the genre of that name. PiPlayer without music access is not tested on the device: revoking the
 permission ends the test's own process; the nodes under More read the library through the same access check as every
 other node.
 

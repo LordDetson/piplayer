@@ -325,6 +325,19 @@ class LibraryTreeCategoriesTest {
     }
 
     @Test
+    fun aVoiceQueryThatNamesAnEmptyPlaylistPlaysWhatComesAfterIt() = runBlocking<Unit> {
+        // A playlist that plays nothing would make the request fail (docs/playback.md §10.3, item 4).
+        UserData.playlists(context).create("Rock")
+        val gone = UserData.playlists(context).create("Pop")
+        Library.playlists(context).addFiles(gone, listOf(fileId(3)))
+        synchronized(index) { index.volume().rows = index.volume().rows.filter { it.mediaStoreId != 3L } }
+        Library.sync(context).sync()
+
+        assertThat(play(voice("rock")).titles()).containsExactly("Bravo", "Alpha")
+        assertThat(play(voice("pop")).titles()).containsExactly("Alpha")
+    }
+
+    @Test
     fun everyNodeUnderMoreResolvesWithoutArtwork() = runBlocking<Unit> {
         identities()
         UserData.favorites(context).set(identity(1), favorite = true)

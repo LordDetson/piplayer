@@ -34,10 +34,10 @@ sealed interface VoiceMatch {
     companion object {
         /**
          * The best match of [query] among what the app's search finds for it: [artists], [albums] and [songs], each in
-         * its list's order, then [playlists] (the user's first, then the non-empty smart lists by their names in the
-         * app's language) and [genres] (docs/playback.md §10.3): an artist, an album, a song titled as the query, a
-         * playlist, a genre named as it, then the first song found, the first artist and the first album. Null when
-         * nothing matches.
+         * its list's order, then [playlists] (the user's that hold an available song first, then the non-empty smart
+         * lists by their names in the app's language) and [genres] (docs/playback.md §10.3): an artist, an album, a song
+         * titled as the query, a playlist, a genre named as it, then the first song found, the first artist and the first
+         * album. Null when nothing matches.
          */
         fun choose(
             query: String,

@@ -167,14 +167,17 @@ class LibraryTree(context: Context, private val artwork: TreeArtwork = TreeArtwo
     }
 
     /**
-     * The playlists voice may name (§10.3): the user's by name, then the smart lists of the tree that hold a song, by their
-     * names in the app's language. Without access to music none.
+     * The playlists voice may name (§10.3): the user's that hold an available song by name, then the smart lists of the tree
+     * that hold a song, by their names in the app's language. A list that plays nothing would fail the request. Without
+     * access to music none.
      */
     private fun voicePlaylists(query: String): List<VoiceMatch.NamedList> {
         if (!Library.mayRead(app)) return emptyList()
-        val own = runBlocking { UserData.playlists(app).playlists() }.byName().map { VoiceMatch.NamedList(it.name, VoiceMatch.Playlist(it.id)) }
-        // Only a smart list the query names is counted: the others cannot match.
+        // Only a list the query names is read: the others cannot match.
         val wanted = TextNormalizer.normalize(query)
+        val own = runBlocking { UserData.playlists(app).playlists() }.byName()
+            .filter { TextNormalizer.normalize(it.name) == wanted && songsOf(SongQuery.playlist(it.id)).isNotEmpty() }
+            .map { VoiceMatch.NamedList(it.name, VoiceMatch.Playlist(it.id)) }
         val smart = TreeNode.TREE_SMART
             .map { kind -> kind to app.getString(smartListName(kind)) }
             .filter { (kind, name) -> TextNormalizer.normalize(name) == wanted && SongList.smartCount(app, SongQuery.smart(kind)) > 0 }
