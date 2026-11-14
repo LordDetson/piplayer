@@ -1225,10 +1225,12 @@ through the media library service: a tree of nodes, each a folder or a song.
   for playback resumption itself. The same holds for More, Playlists, Genres, genres, playlists and smart lists: a
   controller that may not read the library gets a permission error for each of them, and its play or add of a genre, a
   playlist or a smart list is refused.
-- Without PiPlayer's own access to music the library lists nothing, so every node is empty. More still lists its three
-  nodes, and Playlists, Genres and every list under them are empty: a playlist's name is user data, but its songs come
-  from the library, and a node that plays nothing is a dead end in the car. The app's lists behave the same (library.md
-  §16.4).
+- Without PiPlayer's own access to music the library lists nothing, so every list node is empty: Songs, Albums, Artists,
+  Folders, Playlists and Genres. More still lists its three nodes. A node that only such a list gives (an album, an
+  artist, a folder, and since M2b a genre, a playlist and a smart list) is gone, as a node whose key names nothing
+  (§10.2): an error for its item and its children, and it does not play. A controller may still hold such an ID, from its
+  list of recent items for instance. A playlist's name is user data, but its songs come from the library, and a node
+  that plays nothing is a dead end in the car. The app's lists behave the same (library.md §16.4).
 
 ### 10.5 When the tree is read
 
@@ -1295,9 +1297,10 @@ and every smart list empty; a playlist's items with a song that stands twice pla
 playlist and a smart list playing and added; a controller without access refused for More, Playlists, Genres, a genre and
 a playlist and for their play; every node under More within the limits, without artwork data, every ID resolving; a
 voice query that names a genre or a playlist, and one that names an empty playlist or one whose songs have all left the
-library playing the genre of that name. PiPlayer without music access is not tested on the device: revoking the
-permission ends the test's own process; the nodes under More read the library through the same access check as every
-other node.
+library playing the genre of that name. PiPlayer without music access cannot be tested through the service: revoking the
+permission ends the test's own process. A tree built on a context that reports the permission denied checks it instead:
+More with its three nodes, the list nodes empty, and an album, a genre (also `!none`), a playlist and a smart list gone
+and not playing.
 
 ## 11. Play statistics (M2b, PIM-49)
 

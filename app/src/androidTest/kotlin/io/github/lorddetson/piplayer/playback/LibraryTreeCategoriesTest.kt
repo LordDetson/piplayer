@@ -1,5 +1,7 @@
 package io.github.lorddetson.piplayer.playback
 
+import android.content.Context
+import android.content.ContextWrapper
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.os.Process
@@ -335,6 +337,35 @@ class LibraryTreeCategoriesTest {
 
         assertThat(play(voice("rock")).titles()).containsExactly("Bravo", "Alpha")
         assertThat(play(voice("pop")).titles()).containsExactly("Alpha")
+    }
+
+    @Test
+    fun withoutPiPlayersAccessToMusicTheNodesUnderMoreAreEmptyOrGone() = runBlocking<Unit> {
+        identities()
+        UserData.favorites(context).set(identity(1), favorite = true)
+        Library.mirror(context).mirror()
+        val mix = playlist("Mix", 1)
+        val album = items("albums").first().mediaId
+        val tree = LibraryTree(NoMusicAccess(context))
+
+        assertThat(tree.children("more", 0, Int.MAX_VALUE)!!.map { it.mediaId }).containsExactly("playlists", "genres", "folders")
+        for (id in listOf("songs", "albums", "artists", "playlists", "genres")) {
+            assertThat(tree.children(id, 0, Int.MAX_VALUE)).describedAs(id).isEmpty()
+        }
+        // Nothing lists them, so each is gone, as an album is (docs/playback.md §10.4).
+        for (id in listOf(album, "genre/rock", "genre/%21none", "playlist/$mix", "smart/favorites", "smart/added")) {
+            assertThat(tree.item(id)).describedAs(id).isNull()
+            assertThat(tree.children(id, 0, Int.MAX_VALUE)).describedAs(id).isNull()
+            assertThat(tree.playRequest(id)).describedAs(id).isNull()
+        }
+    }
+
+    /** The app's context as PiPlayer without the audio permission sees it. */
+    private class NoMusicAccess(base: Context) : ContextWrapper(base) {
+        override fun getApplicationContext(): Context = this
+
+        override fun checkSelfPermission(permission: String): Int =
+            if (permission == AudioPermission.name) PackageManager.PERMISSION_DENIED else super.checkSelfPermission(permission)
     }
 
     @Test

@@ -326,7 +326,7 @@ class LibraryTree(context: Context, private val artwork: TreeArtwork = TreeArtwo
             val query = SongQuery.playlist(node.id)
             Entries(emptyList(), SongOutline.of(songsOf(query)), query, fresh = true)
         }
-        is TreeNode.SmartList -> smartQuery(node.kind).let { Entries(emptyList(), SongOutline.of(songsOf(it)), it, fresh = true) }
+        is TreeNode.SmartList -> smartQuery(node.kind).takeIf { Library.mayRead(app) }?.let { Entries(emptyList(), SongOutline.of(songsOf(it)), it, fresh = true) }
         TreeNode.Root, is TreeNode.Bucket -> null
     }
 
@@ -345,7 +345,7 @@ class LibraryTree(context: Context, private val artwork: TreeArtwork = TreeArtwo
         return smart + playlists
     }
 
-    /** The name of the playlist [id], or null when it is gone or there is no access to music. */
+    /** The name of the playlist [id], or null when it is gone or there is no access to music (then nothing lists it, §10.4). */
     private fun playlistName(id: Long): String? =
         if (Library.mayRead(app)) runBlocking { UserData.playlists(app).playlist(id) }?.name else null
 
@@ -395,7 +395,8 @@ class LibraryTree(context: Context, private val artwork: TreeArtwork = TreeArtwo
         is TreeNode.Folder -> node.folder.takeIf { levels().contains(it.volume, it.relativePath) }?.let(::folderItem)
         is TreeNode.Genre -> read { it.genre(node.key) }?.let(::genreItem)
         is TreeNode.Playlist -> playlistName(node.id)?.let { playlistItem(node.id, it) }
-        is TreeNode.SmartList -> smartItem(node.kind)
+        // Without access to music nothing lists a smart list, as nothing lists a genre or a playlist (§10.4).
+        is TreeNode.SmartList -> if (Library.mayRead(app)) smartItem(node.kind) else null
         is TreeNode.Bucket -> entries(node.parent)?.let { entries -> find(entries, node)?.let { bucketItem(node.parent, entries, it) } }
     }
 
