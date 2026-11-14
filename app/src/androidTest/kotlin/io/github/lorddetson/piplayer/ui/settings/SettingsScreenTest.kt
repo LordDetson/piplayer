@@ -9,6 +9,7 @@ import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.test.espresso.Espresso
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.github.lorddetson.piplayer.MainActivity
@@ -94,7 +95,8 @@ class SettingsScreenTest {
      */
     private fun choose(label: Int, saved: ThemeMode) {
         compose.waitUntilExactlyOneExists(hasText(text(label)), timeoutMillis = 5_000)
-        compose.onNodeWithText(text(label)).performClick()
+        // The Library section above it may push the theme below the bottom of a small screen (docs/library.md §5.7).
+        compose.onNodeWithText(text(label)).performScrollTo().performClick()
         runCatching { compose.waitUntil(5_000) { AppearanceSettings(context).readTheme() == saved } }
         assertThat(AppearanceSettings(context).readTheme()).isEqualTo(saved)
     }

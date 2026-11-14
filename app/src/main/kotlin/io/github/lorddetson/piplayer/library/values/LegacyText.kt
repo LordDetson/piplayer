@@ -1,6 +1,8 @@
 package io.github.lorddetson.piplayer.library.values
 
+import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
+import java.nio.charset.Charset
 import java.nio.charset.CharacterCodingException
 import java.nio.charset.CodingErrorAction
 
@@ -37,13 +39,20 @@ object LegacyText {
     /** [encoding] is what the legacy fields were read as; null when none holds a byte above ASCII. */
     class Decoded(val properties: Map<String, List<String>>, val encoding: String?)
 
-    /** [cyrillicLanguage] allows Windows-1251; without that condition other legacy text would read as words in it. */
-    fun decode(properties: Map<String, List<String>>, cyrillicLanguage: Boolean): Decoded {
+    /**
+     * [cyrillicLanguage] allows Windows-1251; without that condition other legacy text would read as words in it. A
+     * [manual] choice replaces that guess (TI §3.6).
+     */
+    fun decode(properties: Map<String, List<String>>, cyrillicLanguage: Boolean, manual: LegacyEncoding? = null): Decoded {
         val legacy = properties.values.flatten().filter(::isMarked)
         if (legacy.isEmpty()) return Decoded(properties, null)
         val utf8 = legacy.associateWith(::utf8OrNull)
+        // Windows-1251 keeps the own table; another choice goes through the platform, which has it where it is offered.
+        val charset = manual?.takeIf { it.name != WINDOWS_1251 }?.let { charsetOrNull(it.charset) }
+        val chosen = manual?.takeIf { it.name == WINDOWS_1251 || charset != null }
         val encoding = when {
             utf8.values.all { it != null } -> UTF_8
+            chosen != null -> chosen.name
             cyrillicLanguage && readsAsCyrillic(legacy) -> WINDOWS_1251
             else -> LATIN_1
         }
@@ -53,7 +62,8 @@ object LegacyText {
                     !isMarked(value) -> value
                     encoding == UTF_8 -> utf8.getValue(value)!!
                     encoding == WINDOWS_1251 -> value.unmarked(::windows1251)
-                    else -> value.unmarked(::latin1)
+                    encoding == LATIN_1 -> value.unmarked(::latin1)
+                    else -> value.decodedIn(charset!!)
                 }
             }
         }
@@ -76,6 +86,36 @@ object LegacyText {
         for (char in this@unmarked) {
             append(if (char.code in FIRST_MARK..LAST_MARK) decoded(char.code - MARK_BASE) else char)
         }
+    }
+
+    /**
+     * The value in [charset]: each run of ASCII and marked characters is one byte sequence, because the second byte of a
+     * two-byte code page may lie in the ASCII range. A sequence the code page does not know becomes U+FFFD.
+     */
+    private fun String.decodedIn(charset: Charset): String = buildString(length) {
+        val bytes = ByteArrayOutputStream(this@decodedIn.length)
+        fun flush() {
+            if (bytes.size() == 0) return
+            append(String(bytes.toByteArray(), charset))
+            bytes.reset()
+        }
+        for (char in this@decodedIn) {
+            when (char.code) {
+                in 0 until 0x80 -> bytes.write(char.code)
+                in FIRST_MARK..LAST_MARK -> bytes.write(char.code - MARK_BASE)
+                else -> {
+                    flush()
+                    append(char)
+                }
+            }
+        }
+        flush()
+    }
+
+    private fun charsetOrNull(name: String): Charset? = try {
+        Charset.forName(name)
+    } catch (_: IllegalArgumentException) {
+        null
     }
 
     /** The value as UTF-8 written into a Latin-1 field; null when it is not valid UTF-8. */

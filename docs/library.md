@@ -213,9 +213,10 @@ The data model it implements is sketched in track-identification.md §10 (TI bel
 ### 3.2 Settings files
 
 - Settings live in DataStore in the main process, in two files (TI §10):
-    - `settings`, backed up: the theme, the hidden-file choices (§3.5) and the sleep timer's last choice;
-    - `device_state`, not backed up: "stop after current track" (playback.md §6.4) and whether the audio permission was
-      denied before (playback.md §2.2).
+    - `settings`, backed up: the theme, the hidden-file choices (§3.5), the sleep timer's last choice and, from M2b,
+      the legacy encoding (`legacy_encoding`, §5.7);
+    - `device_state`, not backed up: "stop after current track" (playback.md §6.4), whether the audio permission was
+      denied before (playback.md §2.2) and, from M2b, the legacy encoding the library was last decoded with (§5.7).
 - The three SharedPreferences files of M1 (`player`, `playback_controls`, `songs`) move into them under the same keys
   the first time each file is read, and are deleted afterwards.
 
@@ -258,7 +259,8 @@ The data model it implements is sketched in track-identification.md §10 (TI bel
 ### 3.6 Settings screen and theme
 
 - A Settings screen, opened from the Songs screen's top bar, has two sections in M2a: Library (the hidden-file
-  settings and Library folders) and Appearance (the theme). Other sections arrive with their milestones.
+  settings and Library folders; from M2b also the legacy tag encoding, §5.7) and Appearance (the theme). Other
+  sections arrive with their milestones.
 - The theme is System (the default), Light or Dark; dynamic color stays on where the system has it. The choice is
   read before the activity draws anything and becomes the night mode of its configuration, so its window background and
   the system bars follow it from the first frame on. Android 12 and later also keep it as the app's night mode, which
@@ -451,6 +453,43 @@ keeps playing meanwhile, and the crash leaves a native crash report of `:tagger`
 - **Read all tags again**: every file is read again, those that failed before too. `tag_pass_at` stays set, so lists keep
   showing what they show until the new values land.
 - **Rebuild the library**, which keeps the user data, came with step 8, because it relies on re-attachment (§8.5).
+
+### 5.7 The legacy encoding (M2b)
+
+- **Legacy tag encoding**, in the Library section of the settings, chooses how text in legacy fields is decoded
+  (TI §3.6): Automatic, the default, or one code page. The row shows the choice; a dialog lists Automatic first and
+  then the code pages the device supports, each as its script with the code page's name ("Cyrillic (KOI8-R)"), with
+  a line that says which tags it is for. A choice applies when it is tapped; there is nothing to confirm, because
+  choosing Automatic again undoes it.
+- The choice is stored in the `settings` file under `legacy_encoding` as the code page's name in lower case; no value
+  means Automatic. It goes into backups with the other settings.
+- Reads after a change decode with the new setting at once. Files read before it are decoded again by the tag pass's
+  thread, as part of a run: a change asks for a run, and a run that is already reading does it before its next file,
+  so a choice made during the first pass of a large library shows at once and not only after the pass.
+- Decoding again reads no file. It takes the files whose `tag_encoding` is set, which are exactly those whose legacy
+  fields hold bytes above ASCII, decodes their stored raw tags with the new setting, and leaves a file as it is when its
+  code page stays the same (files whose legacy fields are valid UTF-8, for example, or every file when the choice
+  equals what the automatic mode found). Files without legacy text are never touched. Values over 16 KiB, which the raw
+  tags leave out, are not decoded again; none of them is a value the lists use.
+- `device_state` keeps the choice the stored files were last decoded with (`legacy_encoding_decoded`, no value for
+  Automatic), written when a decoding again has finished. Every run compares it with the setting before it reads, so
+  a change that no run could finish before the process ended is still applied, and a decoding stopped half-way goes on
+  where it stopped, because the files it finished already carry the new code page. It describes the library database,
+  so it is not backed up either; every library of M2a was decoded automatically, so an update to M2b starts with no
+  work.
+- It stores in batches like the pass (§5.2): up to 200 files a transaction, while no sync runs, each with its track,
+  artists, genres and album built again as a read builds them, and the new `tag_encoding`. A file whose album title or
+  album artist changes moves to another album key, as after a tag edit by another app.
+- Lists and system surfaces get the new values as after a batch of the pass (§5.4): rows change in place, the session's
+  items and the controller tree follow, albums, artists and genres group again after the run, and the list is sorted
+  anew at the next point §5.4 names.
+- The automatic mode's language condition is read at each decoding; a change of the device's or the app's languages
+  alone does not decode the library again in M2b ("Read all tags again" does).
+- Checks: the decoding again of only the affected files without a read, a wrong choice and its undoing, albums,
+  artists and genres that follow the new text, a choice made while a run reads, a change no run applied before the
+  process ended and a decoding stopped half-way, the lists' batches through the runner; the fixtures of TI §11.2
+  through the real reader; the setting and the remembered choice in their files; the setting's dialog with its labels
+  and actions.
 
 ## 6. Library tabs and pages (M2a step 6)
 

@@ -12,6 +12,7 @@ import io.github.lorddetson.piplayer.library.db.TrackGenreEntity
 import io.github.lorddetson.piplayer.library.sync.LibrarySync
 import io.github.lorddetson.piplayer.library.sync.TrackDisplayWriter
 import io.github.lorddetson.piplayer.library.values.AlbumKey
+import io.github.lorddetson.piplayer.library.values.LegacyEncoding
 import io.github.lorddetson.piplayer.library.values.LegacyText
 import io.github.lorddetson.piplayer.library.values.TextForms
 import io.github.lorddetson.piplayer.library.values.TrackTags
@@ -19,6 +20,7 @@ import io.github.lorddetson.piplayer.nativelib.taglib.TagReadError
 import io.github.lorddetson.piplayer.tagging.TagReadGuard
 import io.github.lorddetson.piplayer.tagging.TagReport
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 import kotlin.time.TimeSource
@@ -74,6 +76,10 @@ class TagPass(
     private val sync: LibrarySync,
     private val reader: PassReader,
     private val cyrillicLanguage: () -> Boolean,
+    /** The manual choice of the legacy encoding, null for Automatic; read on the pass's thread (docs/library.md §5.7). */
+    private val legacyEncoding: suspend () -> LegacyEncoding? = { null },
+    /** What the stored files were last decoded with, so that a change left unfinished is applied by a later run. */
+    private val decodedEncoding: DecodedEncoding = DecodedEncoding.InMemory(),
     private val readerVersion: Int = READER_VERSION,
     private val batchSize: Int = BATCH_SIZE,
     private val crashBackoff: Duration = CRASH_BACKOFF,
@@ -87,11 +93,22 @@ class TagPass(
     /** Files that failed in this process in a way a later process may get past; only a change of the file brings them back here. */
     private val failedHere = ConcurrentHashMap.newKeySet<Triple<Long, Long, Long>>()
 
+    /** A change of the legacy encoding asked for the stored files to be decoded again (docs/library.md §5.7). */
+    private val redecodeAsked = AtomicBoolean()
+
+    /** The manual legacy encoding the reads decode with: taken when a run starts and whenever the files are decoded again. */
+    @Volatile
+    private var choice: LegacyEncoding? = null
+
     private val mutableProgress = MutableStateFlow(PassProgress())
     val progress: StateFlow<PassProgress> = mutableProgress
 
     /** One run over what is still to read, from a list taken now; a file that comes later waits for the next run. */
     suspend fun run(): PassResult {
+        choice = legacyEncoding()
+        // Also when no change asked: one may have come too late for a run before the process ended.
+        if (choice?.name != decodedEncoding.read()) redecodeAsked.set(true)
+        redecodeIfAsked()
         val files = sync.exclusive { dao.unreadFiles(readerVersion, TagReadGuard.UNSAFE_COUNT) }.filter { it.key() !in failedHere }
         mutableProgress.value = PassProgress(running = true, done = 0, total = files.size)
         var read = 0
@@ -107,6 +124,12 @@ class TagPass(
                 pendingBytes = 0
             }
             for (file in files) {
+                if (redecodeAsked.get()) {
+                    // What this run stored so far was decoded with the old choice.
+                    gate()
+                    flush()
+                    redecodeIfAsked()
+                }
                 var answer: PassRead
                 while (true) {
                     gate()
@@ -127,12 +150,51 @@ class TagPass(
                 if (pause.isPositive()) delay(pause)
             }
             flush()
+            // A change during the last read.
+            redecodeIfAsked()
             // Also when there was nothing to read: a sync may have removed the last tracks of an album.
             removeOrphans()
         } finally {
             mutableProgress.update { it.copy(running = false) }
         }
         return PassResult(read, failed)
+    }
+
+    /** The legacy encoding changed: the next run, or the one under way before its next file, decodes the stored files again. */
+    fun askRedecode() = redecodeAsked.set(true)
+
+    /**
+     * Decodes the stored files with legacy text again from their raw tags, reading no file, when a change of the setting
+     * asked for it: only those whose code page changes, in batches, while no sync runs (docs/library.md §5.7).
+     */
+    private suspend fun redecodeIfAsked() {
+        if (!redecodeAsked.getAndSet(false)) return
+        choice = legacyEncoding()
+        val manual = choice
+        val cyrillic = cyrillicLanguage()
+        val ids = sync.exclusive { dao.legacyFileIds() }
+        for (chunk in ids.chunked(batchSize)) {
+            val rows = sync.exclusive {
+                val changed = ArrayList<Long>()
+                database.withWriteTransaction {
+                    for (row in dao.legacyTracksOf(chunk)) {
+                        val raw = row.rawTagsJson?.let { Json.decodeFromString<Map<String, List<String>>>(it) } ?: continue
+                        val decoded = LegacyText.decode(raw, cyrillic, manual)
+                        if (decoded.encoding == row.tagEncoding) continue
+                        storeTrack(row.fileId, TrackTags.from(decoded.properties), row.rawTagsJson, row.trackKey, row.volume, row.relativePath)
+                        dao.setTagEncoding(row.fileId, decoded.encoding)
+                        changed += row.fileId
+                    }
+                    if (changed.isNotEmpty()) {
+                        val inputs = displays.inputsOf(changed)
+                        with(TrackDisplayWriter) { write(inputs.map { it.fileId }, TextForms().let { forms -> inputs.map { it.resolve(forms) } }) }
+                    }
+                }
+                changed.chunked(CHUNK).flatMap { dao.songRowsOf(it) }
+            }
+            if (rows.isNotEmpty()) onBatch(rows)
+        }
+        decodedEncoding.write(manual?.name)
     }
 
     /** The files that failed in this process get another try in the next run. */
@@ -145,8 +207,8 @@ class TagPass(
     /** Null for a reply that holds no tags. */
     private fun parse(report: TagReport): ParsedRead? {
         if (report.error != null) return null
-        val decoded = LegacyText.decode(report.properties, cyrillicLanguage())
-        // As read, marks included, so that the manual choice of M2b can decode them again without a read.
+        val decoded = LegacyText.decode(report.properties, cyrillicLanguage(), choice)
+        // As read, marks included, so that a change of the legacy encoding can decode them again without a read.
         val raw = report.properties.mapValues { (_, values) -> values.filter { it.length <= MAX_RAW_VALUE_CHARS } }
             .filterValues { it.isNotEmpty() }
         return ParsedRead(report, TrackTags.from(decoded.properties), decoded.encoding, Json.encodeToString(raw))
@@ -200,29 +262,8 @@ class TagPass(
 
     private suspend fun store(fileId: Long, parsed: ParsedRead, state: FileState) {
         val report = parsed.report
-        val tags = parsed.tags
-        val ids = listOf(fileId)
-        dao.deleteTrackArtists(ids)
-        dao.deleteTrackGenres(ids)
-        dao.deleteTracks(ids)
-        val albumId = AlbumKey.of(tags, state.volume, state.relativePath)?.let { key ->
-            dao.addAlbum(key, tags.album.orEmpty(), tags.albumArtist, tags.releaseMbid, tags.compilation)
-            // The newest spelling: a file tagged again keeps its key, but not its old name.
-            dao.updateAlbum(key, tags.album.orEmpty(), tags.albumArtist, tags.compilation)
-            dao.albumId(key)
-        }
         val trackKey = report.content?.let { "${it.key}:$TRACK_START_MS" }
-        val trackId = dao.addTrack(TrackEntity.of(fileId, tags, parsed.rawTags, albumId).copy(trackKey = trackKey))
-        val credits = artists(trackId, ROLE_ARTIST, tags.artists, tags.artistMbids, tags.artistSort) +
-            artists(trackId, ROLE_ALBUM_ARTIST, tags.albumArtists, tags.albumArtistMbids, tags.albumArtistSort) +
-            artists(trackId, ROLE_COMPOSER, tags.composers, emptyList(), sort = null)
-        if (credits.isNotEmpty()) dao.addTrackArtists(credits)
-        val genres = tags.genres.map { name ->
-            val key = keyOf(name)
-            dao.addGenre(key, name)
-            TrackGenreEntity(trackId, dao.genreId(key))
-        }.distinct()
-        if (genres.isNotEmpty()) dao.addTrackGenres(genres)
+        storeTrack(fileId, parsed.tags, parsed.rawTags, trackKey, state.volume, state.relativePath)
         val cover = report.pictures.firstOrNull { it.pictureType == FRONT_COVER } ?: report.pictures.firstOrNull()
         dao.markRead(
             fileId,
@@ -240,6 +281,38 @@ class TagPass(
             tagLengthMs = report.audio?.lengthMs?.takeIf { it > 0 }?.toLong(),
         )
         storeContent(fileId, report, state)
+    }
+
+    /** The track of a read file, with its album, artists and genres, built anew from [tags]. */
+    private suspend fun storeTrack(
+        fileId: Long,
+        tags: TrackTags,
+        rawTags: String?,
+        trackKey: String?,
+        volume: String,
+        relativePath: String,
+    ) {
+        val ids = listOf(fileId)
+        dao.deleteTrackArtists(ids)
+        dao.deleteTrackGenres(ids)
+        dao.deleteTracks(ids)
+        val albumId = AlbumKey.of(tags, volume, relativePath)?.let { key ->
+            dao.addAlbum(key, tags.album.orEmpty(), tags.albumArtist, tags.releaseMbid, tags.compilation)
+            // The newest spelling: a file tagged again keeps its key, but not its old name.
+            dao.updateAlbum(key, tags.album.orEmpty(), tags.albumArtist, tags.compilation)
+            dao.albumId(key)
+        }
+        val trackId = dao.addTrack(TrackEntity.of(fileId, tags, rawTags, albumId).copy(trackKey = trackKey))
+        val credits = artists(trackId, ROLE_ARTIST, tags.artists, tags.artistMbids, tags.artistSort) +
+            artists(trackId, ROLE_ALBUM_ARTIST, tags.albumArtists, tags.albumArtistMbids, tags.albumArtistSort) +
+            artists(trackId, ROLE_COMPOSER, tags.composers, emptyList(), sort = null)
+        if (credits.isNotEmpty()) dao.addTrackArtists(credits)
+        val genres = tags.genres.map { name ->
+            val key = keyOf(name)
+            dao.addGenre(key, name)
+            TrackGenreEntity(trackId, dao.genreId(key))
+        }.distinct()
+        if (genres.isNotEmpty()) dao.addTrackGenres(genres)
     }
 
     private suspend fun storeContent(fileId: Long, report: TagReport, state: FileState) {

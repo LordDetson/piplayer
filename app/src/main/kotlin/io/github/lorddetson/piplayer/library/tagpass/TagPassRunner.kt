@@ -73,6 +73,15 @@ class TagPassRunner(
     /** One more run: a full read asks for this, which no sync would. */
     fun runAgain() = requests.update { it + 1 }
 
+    /**
+     * The legacy encoding changed: a run decodes the stored files again, or the run under way does it before its next file
+     * (docs/library.md §5.7).
+     */
+    fun redecode() {
+        pass.askRedecode()
+        runAgain()
+    }
+
     /** One more run over every file, those that failed in this process too. */
     fun readAllAgain() {
         pass.forgetFailures()

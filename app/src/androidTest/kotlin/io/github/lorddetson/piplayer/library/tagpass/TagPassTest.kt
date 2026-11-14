@@ -11,6 +11,8 @@ import io.github.lorddetson.piplayer.library.db.SongRow
 import io.github.lorddetson.piplayer.library.rules.FolderRule
 import io.github.lorddetson.piplayer.library.sync.LibrarySync
 import io.github.lorddetson.piplayer.library.sync.MediaKinds
+import io.github.lorddetson.piplayer.library.values.LegacyEncoding
+import io.github.lorddetson.piplayer.library.values.LegacyEncodings
 import io.github.lorddetson.piplayer.library.values.LegacyText
 import io.github.lorddetson.piplayer.nativelib.taglib.TagReadError
 import io.github.lorddetson.piplayer.tagging.TagReport
@@ -37,6 +39,8 @@ class TagPassTest {
     private val sync = LibrarySync(database, index, mayRead = { true }, rules)
     private val batches = CopyOnWriteArrayList<List<SongRow>>()
     private var cyrillic = true
+    private var manual: LegacyEncoding? = null
+    private val decoded = DecodedEncoding.InMemory()
 
     /** Answers from [answers] by index ID, else with a title made of the display name. */
     private inner class FakeReader : PassReader {
@@ -57,6 +61,8 @@ class TagPassTest {
     private fun pass(readerVersion: Int = 1, batchSize: Int = 200) = TagPass(
         database, sync, reader,
         cyrillicLanguage = { cyrillic },
+        legacyEncoding = { manual },
+        decodedEncoding = decoded,
         readerVersion = readerVersion,
         batchSize = batchSize,
         crashBackoff = 1.milliseconds,
@@ -538,6 +544,238 @@ class TagPassTest {
         assertThat(reader.reads.get()).isEqualTo(1)
         assertThat(dao.tracks().single().albumId).isNotEqualTo(before)
         assertThat(dao.albums()).hasSize(1)
+    }
+
+    private fun encoding(name: String) = LegacyEncodings.ALL.single { it.name == name }
+
+    /** [text] as a legacy field holds it in [charset], read back in [shownIn]. */
+    private fun misread(text: String, charset: String, shownIn: String) =
+        String(text.toByteArray(Charset.forName(charset)), Charset.forName(shownIn))
+
+    /** Decodes the stored files again with the setting now, as a change of it asks (docs/library.md §5.7). */
+    private suspend fun redecode(pass: TagPass = pass()) {
+        pass.askRedecode()
+        pass.run()
+    }
+
+    @Test
+    fun aManualChoiceDecodesNewReadsInThatCodePage() = runBlocking<Unit> {
+        library(1)
+        manual = encoding("koi8-r")
+        reader.answers[1] = tagged("TITLE" to marked("Кино", "KOI8-R"))
+
+        pass().run()
+
+        assertThat(display(1).title).isEqualTo("Кино")
+        assertThat(files().getValue(1).tagEncoding).isEqualTo("koi8-r")
+    }
+
+    @Test
+    fun aChangedChoiceDecodesOnlyTheLegacyFilesAgainAndReadsNoFile() = runBlocking<Unit> {
+        library(1, 2, 3)
+        reader.answers[1] = tagged("TITLE" to markedCp1251("Кино"))
+        reader.answers[2] = tagged("TITLE" to "Юникод")
+        reader.answers[3] = tagged("TITLE" to "Ascii")
+        pass().run()
+        val tracksBefore = dao.tracks().associate { it.fileId to it.id }
+        batches.clear()
+        reader.reads.set(0)
+
+        manual = encoding("koi8-r")
+        redecode()
+
+        assertThat(reader.reads.get()).describedAs("files read").isZero()
+        assertThat(display(1).title).isEqualTo(misread("Кино", "windows-1251", "KOI8-R"))
+        assertThat(files().getValue(1).tagEncoding).isEqualTo("koi8-r")
+        assertThat(display(2).title).isEqualTo("Юникод")
+        assertThat(display(3).title).isEqualTo("Ascii")
+        val id1 = files().getValue(1).id
+        val tracksAfter = dao.tracks().associate { it.fileId to it.id }
+        assertThat(tracksAfter.filterKeys { it != id1 }).describedAs("the other tracks stay as they were")
+            .isEqualTo(tracksBefore.filterKeys { it != id1 })
+        assertThat(batches.flatten().map { it.fileId }).describedAs("rows handed to the lists").containsExactly(id1)
+        assertThat(batches.flatten().single().title).isEqualTo(misread("Кино", "windows-1251", "KOI8-R"))
+    }
+
+    @Test
+    fun aWrongChoiceIsUndoneByAutomatic() = runBlocking<Unit> {
+        library(1)
+        reader.answers[1] = tagged("TITLE" to markedCp1251("Кино"), "ARTIST" to markedCp1251("Цой"))
+        pass().run()
+        assertThat(display(1).title).isEqualTo("Кино")
+
+        manual = encoding("shift_jis")
+        redecode()
+        assertThat(display(1).title).isNotEqualTo("Кино")
+        assertThat(files().getValue(1).tagEncoding).isEqualTo("shift_jis")
+
+        manual = null
+        redecode()
+        assertThat(display(1).title).isEqualTo("Кино")
+        assertThat(display(1).artist).isEqualTo("Цой")
+        assertThat(files().getValue(1).tagEncoding).isEqualTo(LegacyText.WINDOWS_1251)
+        assertThat(reader.reads.get()).isEqualTo(1)
+    }
+
+    @Test
+    fun filesWhoseCodePageStaysAreNotTouched() = runBlocking<Unit> {
+        library(1, 2)
+        reader.answers[1] = tagged("TITLE" to markedCp1251("Кино"))
+        reader.answers[2] = tagged("TITLE" to marked("Сплин", "UTF-8"))
+        pass().run()
+        assertThat(files().getValue(2).tagEncoding).isEqualTo(LegacyText.UTF_8)
+        val tracksBefore = dao.tracks().map { it.id }
+        batches.clear()
+
+        // The same code page the automatic mode found, and valid UTF-8, which a manual choice keeps.
+        manual = encoding("windows-1251")
+        redecode()
+
+        assertThat(dao.tracks().map { it.id }).isEqualTo(tracksBefore)
+        assertThat(batches.flatten()).isEmpty()
+        assertThat(display(2).title).isEqualTo("Сплин")
+    }
+
+    @Test
+    fun albumsArtistsAndGenresFollowTheTextDecodedAgain() = runBlocking<Unit> {
+        index.volume().rows = listOf(row(1, path = "Music/A/"))
+        sync.sync()
+        reader.answers[1] = tagged(
+            "TITLE" to markedCp1251("Кино"), "ALBUM" to markedCp1251("Чёрный альбом"), "ARTIST" to markedCp1251("Цой"),
+            "GENRE" to markedCp1251("Рок"),
+        )
+        pass().run()
+        assertThat(dao.albums().map { it.title }).containsExactly("Чёрный альбом")
+
+        manual = encoding("koi8-r")
+        redecode()
+
+        assertThat(dao.albums().map { it.title }).containsExactly(misread("Чёрный альбом", "windows-1251", "KOI8-R"))
+        assertThat(dao.artists().map { it.name }).containsExactly(misread("Цой", "windows-1251", "KOI8-R"))
+        assertThat(dao.genres().map { it.name }).containsExactly(misread("Рок", "windows-1251", "KOI8-R"))
+        assertThat(dao.tracks().single().albumId).isEqualTo(dao.albums().single().id)
+
+        manual = null
+        redecode()
+
+        assertThat(dao.albums().map { it.title }).containsExactly("Чёрный альбом")
+        assertThat(dao.artists().map { it.name }).containsExactly("Цой")
+        assertThat(dao.genres().map { it.name }).containsExactly("Рок")
+    }
+
+    @Test
+    fun aChoiceMadeWhileARunReadsAppliesToTheFilesItHasStoredBeforeItsNextFile() = runBlocking<Unit> {
+        library(1, 2, 3, 4)
+        for (id in 1L..4L) reader.answers[id] = tagged("TITLE" to markedCp1251("Кино"))
+        val pass = pass(batchSize = 1)
+        val storedBeforeFile3 = mutableListOf<String?>()
+        reader.before = { file ->
+            when (file.mediaStoreId) {
+                2L -> {
+                    manual = encoding("koi8-r")
+                    pass.askRedecode()
+                }
+                3L -> storedBeforeFile3 += listOf(1L, 2L).map { id -> dao.files().single { it.mediaStoreId == id }.tagEncoding }
+            }
+        }
+
+        pass.run()
+
+        assertThat(storedBeforeFile3).describedAs("decoded again before the next file").containsExactly("koi8-r", "koi8-r")
+        assertThat(reader.reads.get()).isEqualTo(4)
+        for (id in 1L..4L) assertThat(files().getValue(id).tagEncoding).describedAs("file $id").isEqualTo("koi8-r")
+    }
+
+    @Test
+    fun aChoiceMadeDuringTheLastReadIsAppliedBeforeTheRunEnds() = runBlocking<Unit> {
+        library(1, 2, 3)
+        for (id in 1L..3L) reader.answers[id] = tagged("TITLE" to markedCp1251("Кино"))
+        val pass = pass(batchSize = 1)
+        reader.before = { file ->
+            if (file.mediaStoreId == 3L) {
+                manual = encoding("koi8-r")
+                pass.askRedecode()
+            }
+        }
+
+        pass.run()
+
+        assertThat(reader.reads.get()).isEqualTo(3)
+        for (id in 1L..3L) {
+            assertThat(files().getValue(id).tagEncoding).describedAs("file $id").isEqualTo("koi8-r")
+            assertThat(display(id).title).describedAs("file $id").isEqualTo(misread("Кино", "windows-1251", "KOI8-R"))
+        }
+    }
+
+    @Test
+    fun aRunWithTheChoiceTheFilesWereDecodedWithTouchesNothing() = runBlocking<Unit> {
+        library(1)
+        reader.answers[1] = tagged("TITLE" to markedCp1251("Кино"))
+        manual = encoding("koi8-r")
+        redecode()
+        val tracksBefore = dao.tracks().map { it.id }
+        batches.clear()
+
+        pass().run()
+
+        assertThat(dao.tracks().map { it.id }).isEqualTo(tracksBefore)
+        assertThat(batches).isEmpty()
+    }
+
+    @Test
+    fun aChangeNoRunCouldApplyBeforeTheProcessEndedIsAppliedByTheNextRun() = runBlocking<Unit> {
+        library(1)
+        reader.answers[1] = tagged("TITLE" to markedCp1251("Кино"))
+        pass().run()
+        assertThat(decoded.read()).isNull()
+
+        // The setting changed, but no run decoded the files before the process ended: nothing asks the new run.
+        manual = encoding("koi8-r")
+        pass().run()
+
+        assertThat(display(1).title).isEqualTo(misread("Кино", "windows-1251", "KOI8-R"))
+        assertThat(decoded.read()).isEqualTo("koi8-r")
+        assertThat(reader.reads.get()).isEqualTo(1)
+
+        manual = null
+        pass().run()
+
+        assertThat(display(1).title).isEqualTo("Кино")
+        assertThat(decoded.read()).isNull()
+    }
+
+    @Test
+    fun aDecodingThatFailsHalfWayIsFinishedByTheNextRun() = runBlocking<Unit> {
+        library(1, 2)
+        reader.answers[1] = tagged("TITLE" to markedCp1251("Кино"))
+        reader.answers[2] = tagged("TITLE" to markedCp1251("Кино"))
+        pass().run()
+        manual = encoding("koi8-r")
+        var failed = false
+        val failing = TagPass(
+            database, sync, reader, cyrillicLanguage = { cyrillic }, legacyEncoding = { manual }, decodedEncoding = decoded,
+            batchSize = 1,
+            onBatch = {
+                if (!failed) {
+                    failed = true
+                    throw CancellationException("The process ended")
+                }
+            },
+        )
+
+        runCatching { redecode(failing) }
+
+        assertThat(decoded.read()).describedAs("not marked as decoded").isNull()
+        pass().run()
+        for (id in 1L..2L) assertThat(display(id).title).isEqualTo(misread("Кино", "windows-1251", "KOI8-R"))
+        assertThat(decoded.read()).isEqualTo("koi8-r")
+    }
+
+    private fun marked(text: String, charset: String) = buildString {
+        for (byte in text.toByteArray(Charset.forName(charset))) {
+            val value = byte.toInt() and 0xFF
+            append(if (value < 0x80) value.toChar() else (LegacyText.MARK_BASE + value).toChar())
+        }
     }
 
     private fun markedCp1251(text: String) = buildString {

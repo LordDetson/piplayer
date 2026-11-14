@@ -154,6 +154,21 @@ interface LibraryDao {
         tagLengthMs: Long?,
     )
 
+    /** The read files whose legacy fields hold text above ASCII: those a change of the legacy encoding may change. */
+    @Query("SELECT id FROM audio_file WHERE tag_encoding IS NOT NULL AND tag_pass_at IS NOT NULL ORDER BY id")
+    suspend fun legacyFileIds(): List<Long>
+
+    /** What decoding [fileIds] again needs: their raw tags as read, their track key and their place (docs/library.md §5.7). */
+    @Query(
+        "SELECT f.id AS fileId, f.tag_encoding AS tagEncoding, f.volume_name AS volume, f.relative_path AS relativePath, " +
+            "t.raw_tags_json AS rawTagsJson, t.track_key AS trackKey FROM audio_file f JOIN track t ON t.file_id = f.id " +
+            "WHERE f.id IN (:fileIds) AND f.tag_encoding IS NOT NULL AND f.tag_pass_at IS NOT NULL",
+    )
+    suspend fun legacyTracksOf(fileIds: List<Long>): List<LegacyTrackRow>
+
+    @Query("UPDATE audio_file SET tag_encoding = :tagEncoding WHERE id = :fileId")
+    suspend fun setTagEncoding(fileId: Long, tagEncoding: String?)
+
     /** The tracks the pass has read in [volume], with what the display needs of their files. */
     @Query("$READ_FILES WHERE f.volume_name = :volume AND f.tag_pass_at IS NOT NULL")
     suspend fun readFilesIn(volume: String): List<ReadFileRow>
@@ -525,6 +540,16 @@ data class FoundFileRow(
     val displayName: String,
     val contentKey: String?,
     val durationMs: Long?,
+)
+
+/** A read file with legacy text, as decoding it again needs it (docs/library.md §5.7). */
+data class LegacyTrackRow(
+    val fileId: Long,
+    val tagEncoding: String?,
+    val volume: String,
+    val relativePath: String,
+    val rawTagsJson: String?,
+    val trackKey: String?,
 )
 
 /** A file's size, modification time and place as the database holds them now. */

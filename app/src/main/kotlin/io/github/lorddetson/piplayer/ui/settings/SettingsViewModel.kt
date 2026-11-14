@@ -4,6 +4,8 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import io.github.lorddetson.piplayer.library.Library
+import io.github.lorddetson.piplayer.library.values.LegacyEncoding
+import io.github.lorddetson.piplayer.library.values.LegacyEncodings
 import io.github.lorddetson.piplayer.settings.AppearanceSettings
 import io.github.lorddetson.piplayer.settings.HiddenFiles
 import io.github.lorddetson.piplayer.settings.LibrarySettings
@@ -15,6 +17,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 
 /** The Settings screen's state (docs/library.md §3.6). */
 class SettingsViewModel(application: Application) : AndroidViewModel(application) {
@@ -41,6 +44,18 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
 
     fun setMinLengthSeconds(seconds: Int) {
         viewModelScope.launch { library.setMinLengthSeconds(seconds) }
+    }
+
+    /** The manual choice of the legacy encoding, null for Automatic (docs/library.md §5.7). */
+    val legacyEncoding: StateFlow<LegacyEncoding?> =
+        library.legacyEncoding.stateIn(viewModelScope, SharingStarted.Eagerly, runBlocking { library.readLegacyEncoding() })
+
+    /** The code pages this device can decode. */
+    val availableLegacyEncodings: List<LegacyEncoding> = LegacyEncodings.available()
+
+    /** Stores the choice; the library follows it without a read of any file (docs/library.md §5.7). */
+    fun setLegacyEncoding(encoding: LegacyEncoding?) {
+        viewModelScope.launch { library.setLegacyEncoding(encoding) }
     }
 
     /** Looks for new and changed files now (docs/library.md §5.6). */

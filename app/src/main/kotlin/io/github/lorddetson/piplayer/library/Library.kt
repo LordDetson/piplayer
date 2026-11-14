@@ -36,6 +36,8 @@ import io.github.lorddetson.piplayer.library.tagpass.TagPass
 import io.github.lorddetson.piplayer.library.tagpass.TagPassRunner
 import io.github.lorddetson.piplayer.library.tagpass.TaggerPassReader
 import io.github.lorddetson.piplayer.library.values.LegacyText
+import io.github.lorddetson.piplayer.settings.DecodedLegacyEncoding
+import io.github.lorddetson.piplayer.settings.LibrarySettings
 import io.github.lorddetson.piplayer.tagging.Tagger
 import io.github.lorddetson.piplayer.userdata.FolderRuleEntity
 import io.github.lorddetson.piplayer.userdata.UserData
@@ -179,6 +181,10 @@ object Library {
             scope.launch {
                 Covers.own(app).version.drop(1).collect { opened.value?.mirror?.request() }
             }
+            // A change of the legacy encoding decodes the stored files again, reading none (docs/library.md §5.7).
+            scope.launch {
+                LibrarySettings(app).legacyEncoding.drop(1).collect { opened.value?.pass?.redecode() }
+            }
         }
         sync.request()
     }
@@ -203,6 +209,8 @@ object Library {
                 val locales = listOf(Resources.getSystem().configuration.locales, app.resources.configuration.locales)
                 LegacyText.isCyrillicLanguage(locales.flatMap { list -> List(list.size()) { list[it].language } })
             },
+            legacyEncoding = { LibrarySettings(app).readLegacyEncoding() },
+            decodedEncoding = DecodedLegacyEncoding(app),
             gate = passGate::awaitOpen,
             onBatch = { rows ->
                 SongList.applyInPlace(rows)

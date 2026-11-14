@@ -135,6 +135,122 @@ class LegacyTextTest {
         }
     }
 
+    private fun encoding(name: String) = LegacyEncodings.ALL.single { it.name == name }
+
+    private fun marked(text: String, charset: String) = marked(text.toByteArray(Charset.forName(charset)))
+
+    private fun manual(name: String, vararg fields: String, cyrillicLanguage: Boolean = true) = LegacyText.decode(
+        fields.withIndex().associate { (i, value) -> "KEY$i" to listOf(value) },
+        cyrillicLanguage,
+        manual = encoding(name),
+    )
+
+    @ParameterizedTest
+    @CsvSource(
+        "windows-1251, Кино",
+        "koi8-r, Кино",
+        "koi8-u, Біла хата",
+        "ibm866, Кино",
+        "iso-8859-5, Кино",
+        "windows-1250, Łódź",
+        "iso-8859-2, Łódź",
+        "windows-1252, Beyoncé €",
+        "iso-8859-15, €uro",
+        "windows-1253, Ελλάδα",
+        "windows-1254, İstanbul ğ",
+        "windows-1255, שלום",
+        "windows-1256, سلام",
+        "windows-1257, Ąžuolas",
+        "windows-1258, Đà",
+        "tis-620, สวัสดี",
+        "shift_jis, 東京事変",
+        "euc-jp, 東京事変",
+        "gbk, 王菲",
+        "big5, 周杰倫",
+        "euc-kr, 서울",
+    )
+    fun `a manual choice decodes every legacy file in that code page`(name: String, text: String) {
+        val decoded = manual(name, marked(text, encoding(name).charset))
+
+        assertThat(decoded.value()).isEqualTo(text)
+        assertThat(decoded.encoding).isEqualTo(name)
+    }
+
+    @Test
+    fun `every code page of the list has a sample above`() {
+        // Keeps the parameterized test above in step with the list.
+        assertThat(LegacyEncodings.ALL.map { it.name }).containsExactlyInAnyOrder(
+            "windows-1251", "koi8-r", "koi8-u", "ibm866", "iso-8859-5", "windows-1250", "iso-8859-2", "windows-1252",
+            "iso-8859-15", "windows-1253", "windows-1254", "windows-1255", "windows-1256", "windows-1257", "windows-1258",
+            "tis-620", "shift_jis", "euc-jp", "gbk", "big5", "euc-kr",
+        )
+    }
+
+    @Test
+    fun `KOI8-R text in the automatic mode reads as Windows-1251, which is why the choice exists`() {
+        val decoded = decode(marked("Кино", "KOI8-R"))
+
+        assertThat(decoded.encoding).isEqualTo(LegacyText.WINDOWS_1251)
+        assertThat(decoded.value()).isNotEqualTo("Кино")
+        assertThat(manual("koi8-r", marked("Кино", "KOI8-R")).value()).isEqualTo("Кино")
+    }
+
+    @Test
+    fun `a manual choice needs no Cyrillic language and no word`() {
+        assertThat(manual("windows-1251", cp1251("Кино"), cyrillicLanguage = false).value()).isEqualTo("Кино")
+        assertThat(manual("windows-1251", cp1251("Я"), cyrillicLanguage = false).value()).isEqualTo("Я")
+    }
+
+    @Test
+    fun `a manual choice keeps valid UTF-8`() {
+        val decoded = manual("koi8-r", utf8("Кино"), utf8("Beyoncé"))
+
+        assertThat(decoded.value(0)).isEqualTo("Кино")
+        assertThat(decoded.value(1)).isEqualTo("Beyoncé")
+        assertThat(decoded.encoding).isEqualTo(LegacyText.UTF_8)
+    }
+
+    @Test
+    fun `a manual choice leaves text without marks as it is`() {
+        val decoded = manual("shift_jis", "Ascii title", "Юникод из кадра UTF-16")
+
+        assertThat(decoded.value(0)).isEqualTo("Ascii title")
+        assertThat(decoded.value(1)).isEqualTo("Юникод из кадра UTF-16")
+        assertThat(decoded.encoding).isNull()
+    }
+
+    @Test
+    fun `a wrong manual choice shows other text, and the right one gives it back`() {
+        val bytes = cp1251("Группа крови")
+
+        assertThat(manual("koi8-r", bytes).value()).isNotEqualTo("Группа крови")
+        assertThat(decode(bytes).value()).isEqualTo("Группа крови")
+    }
+
+    @Test
+    fun `a second byte in the ASCII range belongs to its character`() {
+        // ソ is 0x83 0x5C in Shift_JIS, and 0x5C is a backslash on its own.
+        val decoded = manual("shift_jis", marked("ソニー\\1", "Shift_JIS"))
+
+        assertThat(decoded.value()).isEqualTo("ソニー\\1")
+    }
+
+    @Test
+    fun `a broken two-byte sequence becomes a replacement character and the rest still decodes`() {
+        val lead = marked(byteArrayOf(0x93.toByte()))
+        val decoded = manual("shift_jis", lead + "-" + marked("東京", "Shift_JIS"), marked("東京", "Shift_JIS") + lead)
+
+        assertThat(decoded.value(0)).endsWith("東京").contains("�")
+        assertThat(decoded.value(1)).isEqualTo("東京�")
+    }
+
+    @Test
+    fun `characters that are neither ASCII nor marks stay between decoded runs`() {
+        val decoded = manual("koi8-r", marked("Кино", "KOI8-R") + " · " + marked("Цой", "KOI8-R"))
+
+        assertThat(decoded.value()).isEqualTo("Кино · Цой")
+    }
+
     @Test
     fun `the Cyrillic languages are Russian, Belarusian and Ukrainian`() {
         assertThat(LegacyText.isCyrillicLanguage(listOf("en", "ru"))).isTrue()

@@ -11,6 +11,11 @@ import io.github.lorddetson.piplayer.library.songs.SongList
 import io.github.lorddetson.piplayer.library.songs.SongSource
 import io.github.lorddetson.piplayer.library.sync.LibraryStatus
 import io.github.lorddetson.piplayer.library.sync.LibrarySync
+import io.github.lorddetson.piplayer.library.values.LegacyEncoding
+import io.github.lorddetson.piplayer.library.values.LegacyEncodings
+import io.github.lorddetson.piplayer.library.values.LegacyText
+import java.nio.charset.Charset
+import kotlinx.coroutines.flow.first
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.eventually
 import io.github.lorddetson.piplayer.tagging.TagReport
 import java.util.concurrent.CountDownLatch
@@ -40,6 +45,7 @@ class TagPassRunnerTest {
     private val reads = AtomicInteger()
     private val cancelled = AtomicBoolean()
     private var reader = PassReader { read() }
+    private var manual: LegacyEncoding? = null
 
     private suspend fun read(): PassRead {
         reads.incrementAndGet()
@@ -48,7 +54,8 @@ class TagPassRunnerTest {
 
     private val pass by lazy {
         TagPass(
-            database, sync, { reader.read(it) }, cyrillicLanguage = { false }, gate = gate::awaitOpen, batchSize = 1,
+            database, sync, { reader.read(it) }, cyrillicLanguage = { false }, legacyEncoding = { manual }, gate = gate::awaitOpen,
+            batchSize = 1,
             crashBackoff = 1.milliseconds, onBatch = SongList::applyInPlace,
         )
     }
@@ -299,6 +306,34 @@ class TagPassRunnerTest {
         read(1)
 
         eventually("a sort is due") { SongList.resortDue() }
+    }
+
+    @Test
+    fun aChangedLegacyEncodingDecodesTheLibraryAgainWithoutReadingAndTheKeptListsFollow() = runBlocking<Unit> {
+        gate.setUiVisible(true)
+        library(1)
+        val kino = buildString {
+            for (byte in "Кино".toByteArray(Charset.forName("windows-1251"))) append((LegacyText.MARK_BASE + (byte.toInt() and 0xFF)).toChar())
+        }
+        reader = PassReader {
+            reads.incrementAndGet()
+            PassRead.Replied(TagReport(properties = mapOf("TITLE" to listOf(kino))))
+        }
+        val fileId = dao().files().single().id
+        SongList.load(SongSource { listOf(song(fileId, "Index title")) })
+        val start = SongList.batches.value
+        runner.start()
+        withTimeout(10.seconds) { SongList.batches.first { it > start } }
+        // No Cyrillic language here: the automatic mode reads Latin-1.
+        assertThat(SongList.keptSong(fileId)?.title).isEqualTo("Êèíî")
+        val afterRead = SongList.batches.value
+
+        manual = LegacyEncodings.ALL.single { it.name == "windows-1251" }
+        runner.redecode()
+
+        withTimeout(10.seconds) { SongList.batches.first { it > afterRead } }
+        assertThat(SongList.keptSong(fileId)?.title).isEqualTo("Кино")
+        assertThat(reads.get()).describedAs("files read").isEqualTo(1)
     }
 
     private fun song(id: Long, title: String) = Song(id, "uri$id", title, null, null, null)

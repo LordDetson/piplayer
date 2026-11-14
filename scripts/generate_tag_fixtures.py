@@ -14,6 +14,8 @@ import sys
 import tempfile
 
 OUT = pathlib.Path("nativelib/src/androidTest/assets/tags")
+# The app's tests of the legacy encodings (app/src/androidTest/.../TagPassThroughTaggerTest.kt) read their own copies.
+APP_OUT = pathlib.Path("app/src/androidTest/assets/tagging")
 
 LATIN = {
     "title": "Paper Lanterns",
@@ -67,10 +69,10 @@ def strip_id3v2(path):
     path.write_bytes(data[end:])
 
 
-def id3v1(title="", artist="", album="", pad=b"\0"):
-    """An ID3v1 tag; its text is Windows-1251, as an old tagger on a Russian Windows wrote it."""
+def id3v1(title="", artist="", album="", pad=b"\0", encoding="cp1251"):
+    """An ID3v1 tag; its text is Windows-1251, as an old tagger on a Russian Windows wrote it, unless said otherwise."""
     def field(text, size):
-        return text.encode("cp1251").ljust(size, pad)
+        return text.encode(encoding).ljust(size, pad)
     return b"TAG" + field(title, 30) + field(artist, 30) + field(album, 30) + b"1990" + b"\0" * 30 + bytes([255])
 
 
@@ -107,6 +109,20 @@ def make_legacy_fixtures():
     (OUT / "legacy-riff.wav").write_bytes(b"RIFF" + struct.pack("<I", len(body)) + body)
 
 
+def make_app_legacy_fixtures():
+    """The legacy fixtures above, and two that only the manual choice of the encoding reads (TI §3.6)."""
+    APP_OUT.mkdir(parents=True, exist_ok=True)
+    for name in ("legacy-id3v1.mp3", "legacy-id3v23.mp3", "legacy-riff.wav"):
+        shutil.copyfile(OUT / name, APP_OUT / name)
+    audio = (OUT / "id3v1.mp3").read_bytes()[:-128]
+    koi8 = lambda text: b"\0" + text.encode("koi8_r")
+    # Read as Windows-1251, KOI8-R gives Cyrillic words of mixed case, so the automatic mode takes it for Windows-1251.
+    (APP_OUT / "legacy-koi8r-id3v23.mp3").write_bytes(
+        id3v23(("TIT2", koi8("Звезда по имени Солнце")), ("TPE1", koi8("Кино")), ("TALB", koi8("Звезда"))) + audio)
+    (APP_OUT / "legacy-shift-jis-id3v1.mp3").write_bytes(
+        audio + id3v1("東京事変", "椎名林檎", "教育", encoding="shift_jis"))
+
+
 def main():
     if shutil.which("ffmpeg") is None:
         sys.exit("ffmpeg is not on PATH")
@@ -128,6 +144,7 @@ def main():
                 strip_id3v2(OUT / name)
             print(f"{name}: {(OUT / name).stat().st_size} bytes")
     make_legacy_fixtures()
+    make_app_legacy_fixtures()
 
 
 if __name__ == "__main__":

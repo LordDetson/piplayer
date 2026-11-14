@@ -54,6 +54,7 @@ fun SettingsScreen(
 ) {
     val theme by viewModel.theme.collectAsStateWithLifecycle()
     val hidden by viewModel.hiddenFiles.collectAsStateWithLifecycle()
+    val legacyEncoding by viewModel.legacyEncoding.collectAsStateWithLifecycle()
     SettingsScaffold(stringResource(R.string.settings_title), onBack) { padding ->
         Column(
             Modifier
@@ -75,6 +76,7 @@ fun SettingsScreen(
                 viewModel::setShowRecordings,
             )
             MinLengthChoice(hidden.minLengthSeconds, viewModel::setMinLengthSeconds)
+            LegacyEncodingChoice(legacyEncoding, viewModel.availableLegacyEncodings, viewModel::setLegacyEncoding)
             TextRow(
                 stringResource(R.string.settings_library_folders),
                 stringResource(R.string.settings_library_folders_summary),

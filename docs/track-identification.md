@@ -295,7 +295,33 @@ before text search, scoring and the diff, so the "old" column shows readable tex
 - The choice is stored in `audio_file.tag_encoding`. Without the language condition other legacy text would pass the
   rule (`Þú`, `ÅÄÖ`, and GBK or EUC-KR names), so that condition stays; a lone `Я` stays ISO-8859-1, and a Russian
   speaker on a phone with no such language keeps the old text. The manual choice of M2b covers both.
-- A manual choice in settings overrides the automatic mode for the whole library.
+- A manual choice in settings overrides the automatic mode for the whole library (M2b, decided 14.11.2026):
+  - The setting is **Automatic** (the default) or one code page. The list, grouped by script: Cyrillic (Windows-1251,
+    KOI8-R, KOI8-U, CP866, ISO-8859-5), Central European (Windows-1250, ISO-8859-2), Western (Windows-1252,
+    ISO-8859-15), Greek (Windows-1253), Turkish (Windows-1254), Hebrew (Windows-1255), Arabic (Windows-1256), Baltic
+    (Windows-1257), Vietnamese (Windows-1258), Thai (TIS-620), Japanese (Shift_JIS, EUC-JP), Simplified Chinese (GBK),
+    Traditional Chinese (Big5) and Korean (EUC-KR). These are the single-byte and double-byte code pages that old
+    taggers wrote into Latin-1 fields. Android guarantees only UTF-8, UTF-16, US-ASCII and ISO-8859-1, so the decoding
+    goes through the platform's `Charset` and a code page the device does not support is not offered; an instrumented
+    test checks every entry on API 30 and 36. Windows-1251 keeps the own table of the automatic mode.
+  - The choice replaces steps 3 and 4: step 1 stays, and so does step 2, because taggers that put UTF-8 into a Latin-1
+    field do so whatever code page the user's other files use, and legacy text is almost never valid UTF-8 by accident
+    (a field of only `ВЁ` in Windows-1251 is; such a file needs the per-file choice below). The language condition
+    does not apply to a manual choice, and neither does the word rule: a lone `Я` is Windows-1251 once the user says so.
+  - A code page of two bytes per character (Shift_JIS, EUC-JP, GBK, Big5, EUC-KR) decodes each run of ASCII and marked
+    characters as one byte sequence, because a second byte may lie in the ASCII range (`ソ` is 0x83 0x5C in
+    Shift_JIS); a sequence the code page does not know becomes U+FFFD, and the rest of the value still decodes.
+  - `audio_file.tag_encoding` holds the code page the file was decoded with (`iso-8859-1`, `windows-1251`, `utf-8` or
+    the name of the chosen code page in lower case), so whether a new setting changes a file is known without decoding
+    it again.
+  - A stored name that is unknown or that the device does not support (a backup restored onto another phone) counts
+    as Automatic.
+  - A change of the setting decodes the affected files again from their stored raw tags, without reading any file,
+    and the lists and system surfaces follow (library.md §5.7). Choosing Automatic again brings back exactly what the
+    automatic mode gave, so a wrong choice is undone by the same setting.
+  - A per-file choice is not part of M2b: one setting serves the case that matters, a library written by one old
+    tagger in one code page. A choice for a single file comes with the manual tag editor (M4b), where the user sees
+    that file's fields; it will be stored as user data by identity, not in `library.db`.
 - Writes (§7.2) store changed fields in Unicode and leave unchanged legacy frames as they are, read without marks;
   converting those is a reviewed fix in v1.x.
 
@@ -1085,6 +1111,7 @@ tests, and a high-band error rate within the threshold of §11.4.
 | M2b | Start-up mirror: when the user database's change counter differs from the mirrored one, favorites, statistics and the badge state are mirrored again; M3 adds the merged values of decided fields and the Keep as-is/Skip state |
 | M2a | IPC from `:tagger` for the tag pass: each result stays under 128 KB; a larger result or a value over 16 KB travels through a file; no cover bytes cross the process boundary |
 | M2b | Legacy encodings, per file: "Кино", "Ёжик" and "Би-2" stored as Windows-1251 are decoded as such in automatic mode; "Beyoncé", "Motörhead", "Sigur Rós" and "ÉTÉ" stay ISO-8859-1; ID3v1, encoding-0 ID3v2 frames and RIFF INFO |
+| M2b | Manual legacy encoding: every code page of the list decodes its own sample (also a Shift_JIS second byte in the ASCII range and a broken two-byte sequence); the choice ignores the language condition and the word rule but keeps valid UTF-8; KOI8-R text in automatic mode reads as Windows-1251, which is why the choice exists; an unknown or unsupported stored name is Automatic |
 | M2b | "Songs missing information": the reasons of §1 on merged values, including a title from the file name (level 5, or level 4 equal to the display name), the cover rule (embedded, saved, album thumbnail) and the MusicBrainz filter being off by default |
 | M3 | Keep as-is and Skip are remembered by identity and mirrored; a Skip lapses when the tag pass records a new size, modification time or content key; undoing either restores the earlier list state |
 | M0 | Filename parser: a table of real-world names → (artist, title, track number) or "unknown" |
@@ -1122,6 +1149,7 @@ tests, and a high-band error rate within the threshold of §11.4.
 | M2a | Exact duration of VBR MP3 without a frame-count header and of raw ADTS matches the decoded length within one frame; truncated WAV, MP4 and FLAC files report the length of what is left |
 | M2a | Re-attachment (§3.1): a moved or renamed file and a media index rebuild with new IDs keep their track identity, which favorites, playlists and statistics refer to from M2b; a moved Ogg file whose comments an external tool rewrote keeps its content key and re-attaches by it |
 | M2a | `:tagger` isolation: a fixture that crashes the native reader and a call that hangs for more than 30 s are counted; the second time the file is marked unsafe; playback continues |
+| M2b | Legacy-encoding fixtures through the real reader: the Windows-1251 ID3v1, ID3v2 and RIFF INFO fixtures read in automatic mode and with the Windows-1251 choice, the KOI8-R and Shift_JIS fixtures with their own choice; a wrong choice shows other text, and Automatic brings the right text back without reading the file again; every code page of the list is supported by the device |
 | M2b | Deleting `library.db` keeps favorites, playlists, statistics and (from M3) decisions, which re-attach after the rebuild |
 | M3 | Decoding table: every format the player plays is read with `MediaExtractorCompat`, decoded and fingerprinted |
 | M3 | Snippet: a playing main player pauses for the snippet and resumes at the same position; a main player paused before the snippet stays paused; queue, position and statistics do not change; a focus loss during the snippet stops it without resuming the main player |
