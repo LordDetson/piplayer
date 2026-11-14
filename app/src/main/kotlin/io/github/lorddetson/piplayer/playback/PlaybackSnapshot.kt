@@ -28,6 +28,8 @@ data class PlaybackSnapshot(
     val queueRevision: Long = 0,
     /** Read from schema 1 or 2: [songId] and the request's start are media index IDs, not file IDs. */
     val mediaIndexIds: Boolean = false,
+    /** How far the current playback got toward a play (docs/playback.md §11.3); null when nothing is known. */
+    val listen: ListenProgress? = null,
 ) {
 
     init {

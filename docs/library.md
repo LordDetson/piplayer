@@ -201,8 +201,14 @@ The data model it implements is sketched in track-identification.md §10 (TI bel
     - `library_folder_rule(volume_name, relative_path, mode)`: a folder the user included or excluded (§3.4);
     - `user_meta(id, change_counter)`: one row whose counter goes up in the same transaction as every write of user
       data, so that the library database can tell whether it still mirrors it (TI §10.3).
-- Version 2 adds the track identities (§8.1), version 3 the references of own covers (§13.2). Later tables (favorites, playlists, statistics, decisions) arrive with
+- Version 2 adds the track identities (§8.1), version 3 the references of own covers (§13.2), version 4 favorites,
+  favorite albums, their album members and play statistics (§15.1). Later tables (playlists, decisions) arrive with
   their milestones.
+- Since version 4 `user_meta` also has `rules_counter`, which goes up only with the folder rules: the sync applies the
+  rules again when it changes (§3.4), so that a favorite or a play does not make the sync walk the rules and read the
+  lists again. `change_counter` goes up with every write the library database mirrors (folder rules, favorites,
+  favorite albums, plays) and is what the mirror of §15.4 follows; the migration to version 4 copies it into
+  `rules_counter`, so that the rules already mirrored are not applied again.
 
 ### 3.2 Settings files
 
@@ -232,7 +238,7 @@ The data model it implements is sketched in track-identification.md §10 (TI bel
   who includes `Recordings/Lectures/` wants to see the lectures.
 - The library database mirrors the rules: every file carries the rule of its folder (none, include or exclude), set
   by each sync, so that lists filter without reading the user database. The library database keeps the user
-  database's change counter it last mirrored (TI §10.3); a sync that finds another counter applies the rules to every
+  database's rules counter it last mirrored (§3.1, TI §10.3); a sync that finds another counter applies the rules to every
   file again. A write of the rules asks for a sync at once.
 
 ### 3.5 Hidden files
@@ -635,11 +641,12 @@ saved queue that refers to identities is in playback.md §4.
   name one of the places, the one it named before while that file is still there.
 - `missing_since` is empty while a file holds the identity's key and is set when none does any more. An identity that
   holds no user data and has been missing for 30 days is deleted: a deleted file, an SD card left out of the phone. An
-  identity that holds user data is never deleted. In M2a the only user data that refers to identities is a song's own
-  cover (§13.2); favorites, playlists and statistics (M2b) and decisions (M3) will add theirs.
-- Attaching changes no user data, so it does not raise the user database's change counter (§3.1), which would ask
-  for a sync. Nothing is written into the library database: lists do not need the identity, and the two files keep no
-  row IDs of each other (TI §10).
+  identity that holds user data is never deleted. User data that refers to identities: a song's own cover (§13.2), a
+  favorite, play events and play statistics (§15); playlists (M2b) and decisions (M3) will add theirs. Album members
+  (§15.3) are not user data: they never keep an identity.
+- Attaching changes no user data, so it does not raise the user database's change counter (§3.1). Nothing is written
+  into the library database: lists do not need the identity, and the two files keep no row IDs of each other (TI §10).
+  Each pass asks the mirror of §15.4 for a run afterwards, because favorites and play counts follow the keys.
 
 ### 8.2 The attach pass
 
@@ -845,8 +852,8 @@ Covers for controllers outside PiPlayer (part B, §13.8): a content provider tha
   index and a rebuild of the library. A song gets an identity once the tag pass has read it; until then "Choose cover"
   says that the song's tags are still being read and changes nothing.
 - An album's own cover belongs to its album key (§6.2, §6.5), so it survives renamed files and a rebuild of the library.
-  It no longer applies when the key changes: the tag pass finds a release ID, or the album's folder moves. The reference
-  stays stored; linking it again is left for later.
+  When the key changes (the tag pass finds a release ID, or the album's folder moves), the cover follows the album's
+  tracks to the new key as §15.3 says; until it can, the reference stays stored and applies to nothing.
 - PiPlayer keeps a copy of the chosen image and never changes an audio file. The image is decoded (the decoder applies
   its orientation), scaled down to at most 1500 px on its longer side and saved as JPEG at quality 92, or as PNG when it
   has transparency, under a random name in `no_backup/covers/`. A new choice replaces the old copy; "Remove own cover"
@@ -857,8 +864,8 @@ Covers for controllers outside PiPlayer (part B, §13.8): a content provider tha
   the two tables (an automatic migration with the exported schema `3.json`).
 - An identity with an own cover holds user data: it is never deleted, and step 4 of the attach pass (§8.3) tries to keep
   it on its file.
-- Setting or removing a cover does not raise the change counter of §3.1: the library database mirrors nothing of it, and
-  a raised counter would ask for a sync.
+- Setting or removing a cover does not raise the change counter of §3.1: the library database mirrors nothing of it. It
+  asks the mirror of §15.4 for a run, which records the album's members (§15.3).
 - Backup: the references are backed up with `user.db`; the copies, in the no-backup files, are not (TI §10.3). After a
   restore a reference whose copy is missing counts as no own cover, and the next source shows: the first read of the own
   covers drops such references, so that neither the menus ("Remove own cover"), nor an artist's choice of album, nor the
@@ -1177,3 +1184,114 @@ Instrumented tests: the onboarding screen and its "Allow" button; the gate shows
 and never with the permission; onboarding keeps the mini player of an opened file; the empty states for no permission,
 scanning and no music, and "No music found" on every tab of a library with no songs; Settings opens the licences screen, which lists a Media3 module and TagLib, and opens a licence text; every
 text the list names opens from the assets.
+
+## 15. Favorites, album references and play statistics (M2b: PIM-43, PIM-66, PIM-49)
+
+The tables are in TI §10.2 and the mirror in TI §10.1 and §10.3; how a play is counted from the player is in
+playback.md §11.
+
+### 15.1 What `user.db` version 4 adds
+
+- `favorite(identity_id, added_at)`: a favorite song, by its track identity (§8.1).
+- `favorite_album(album_key, release_mbid, added_at)`: a favorite album, by its album key (§6.2), keyed by it. An album
+  with a release ID has the key `mbid:<release ID>`, and then `release_mbid` holds the same ID as a 16-byte blob; other
+  albums are found by their normalized title and album artist within their folder, as the key says.
+- `album_member(album_key, identity_id)`: the identities seen on an album that a favorite or an own cover refers to
+  (§15.3).
+- `play_event(identity_id, started_at, listened_ms)`, keyed by the identity and the start, and
+  `play_stats(identity_id, play_count, listened_ms, last_played_at)` (§15.5).
+- `user_meta.rules_counter` (§3.1).
+- Version 3 migrates by an automatic migration with the exported schema `4.json`, which then copies `change_counter`
+  into `rules_counter`; a test runs it on a database of version 3 with rows.
+
+### 15.2 Favorites
+
+- A favorite toggle (a heart) sits on Now Playing, at the right of its top row before the queue button, and the song
+  menu of every list has "Add to favorites" or "Remove from favorites". The album page's top bar has the same toggle for
+  the album. Each toggle is labelled "Favorite" and states on or off (playback.md §3.8).
+- A song becomes a favorite through its track identity, so it stays one through renames, moves, a new media index and a
+  rebuild of the library, as an own cover does (§13.2). A song gets an identity once the tag pass has read it; until
+  then the toggle says that the song's tags are still being read and changes nothing. A file opened from another app
+  has no identity, and Now Playing shows no toggle for it.
+- Byte-identical copies share one identity (§8.1), so they are favorites together.
+- An album becomes a favorite by its album key. The Albums tab has a "Favorites" filter chip above its list or grid;
+  on, the tab shows only favorite albums, with the same sort, search, list or grid. The choice lasts while the app runs
+  and is not saved. With no favorite album it says "No favorite albums".
+- Every change of a favorite raises the change counter of §3.1 in the same transaction, and the mirror (§15.4) brings it
+  into the library database. Now Playing, the song menu and the album page read the user database itself, so they show
+  a change at once; lists read the mirror.
+
+### 15.3 When an album's key changes
+
+The owner's decision of 14.11.2026: the album's references follow its tracks.
+
+- An own album cover (§13.2) and a favorite album refer to an album key. The key changes when the tag pass finds a
+  release ID, when the album's folder moves, or when the album or album artist tags change.
+- Members: while a referenced key names an album (a file of the library database has it as its album key, hidden or
+  not), every full mirror run records the identities of its files in `album_member`. Members are only added: a member
+  stays when its file leaves the album, so that an album that leaves its key in steps is judged by all its tracks.
+  Members of a key that nothing refers to any more go, and so do members whose identity is deleted (§8.1). Files the
+  tag pass has not read yet have no identity and are no members; a reference made before the album's tags are read can
+  follow only once they are.
+- A move: a referenced key that names no album any more moves its references to the new key that holds more than half
+  of its present members. A member is present when a file of the library holds its identity's key; the album key of
+  that file counts for it (an identity with copies in several albums counts for each). Members that are gone count for
+  nothing.
+- No move: while the old key still names an album (a split that leaves some tracks behind), on a tie, or when no new key
+  holds more than half (a split into three), the references stay where they are, applying to nothing, and every later
+  run looks again. A key that comes back has its references back with it.
+- A merge: when several old keys move to one new key, or the new key already has references, a favorite stays one, with
+  the earliest `added_at`; of the own covers the one set last (`set_at`) wins and the others are deleted with their
+  copies. The members of the old keys join the new key's.
+- It runs in the full mirror run of §15.4, after a sync, an attach pass or a run of the tag pass, never when a list is
+  read. Moving a favorite raises the change counter; moving a cover does not, as setting one does not (§13.2).
+
+### 15.4 The mirror
+
+- The library database holds the mirrored user fields in two tables beside `track_display` (TI §10.1):
+  `track_mirror(file_id, favorite, play_count, last_played_at)`, a row only for a file whose identity is a favorite or
+  has plays, and `album_mirror(album_key)`, one row per favorite album. They are kept apart from `track_display`, which
+  the sync, the tag pass and a new display version write whole, so that none of those writes has to carry the user
+  fields over and the first sync does no more work than before. `library_meta.mirrored_data_counter` keeps the change
+  counter the last full run mirrored. The library database's version goes to 10.
+- A full run reads the favorites, favorite albums, plays and members of the user database, moves album references
+  (§15.3), records members, and writes both tables anew in one transaction of the library database while no sync
+  writes; files are matched by the content key of their identity. It runs when the library starts, after every change
+  of the change counter, after every attach pass (§8.2) and after a change of the own covers; requests during a run
+  collapse into one more run. It is cheap: a few thousand rows at most.
+- A partial run after each batch of the tag pass writes the rows of the batch's files from the values of the last full
+  run, so that after a rebuild or a deletion of the library database favorites and counts come back as the tag pass
+  brings the keys back, not only when its run ends.
+- Lists that need the fields join these tables: the Albums tab's filter (§15.2), and the smart lists Recently played and
+  Most played (PIM-37), for which `LibraryLists.recentlyPlayed` and `mostPlayed` already give the visible songs with
+  plays, the latest play or the most plays first.
+
+### 15.5 Play statistics
+
+- How a play is counted is in playback.md §11. A counted play writes one `play_event` row with the identity, the time
+  the playback started (wall clock) and the time listened so far, and raises the change counter. When the playback ends
+  its listened time is updated without raising the counter, because nothing of it is mirrored.
+- A song's play count is its `play_stats.play_count` plus its events, its last played time the latest start of either.
+- Events older than 90 days are folded into `play_stats` (count, listened time, latest start) by the first full mirror
+  run of each process; the mirrored values do not change, so the counter does not go up.
+- Plays of a file without an identity (its tags not read yet, or a file opened from another app) are not recorded.
+
+### 15.6 Checks
+
+JVM tests: the move, split, tie, merge, no-op and partial cases of §15.3 on tables of members and files; the counting of
+playback.md §11 (half, 4 minutes, 30 s, pauses, seeks, a new playback, repeat-one, an unknown length, a resumed
+playback); the listened time in the saved snapshot.
+
+Instrumented tests on the API 30 emulator:
+
+- `user.db` from version 3 to 4 with rows of version 3 (`MigrationTestHelper`), the counters copied.
+- The mirror on the real databases: favorites, favorite albums, play counts and last played times written and cleared,
+  copies of one key, the mirrored counter, a favorite that does not make the sync apply the rules again; the references
+  of §15.3 through the real sync for a moved folder (move), a folder split in two (no move), two albums merged by one
+  release ID (merge) and an album left alone (no-op).
+- Through the real library: favorites, favorite albums and play counts survive an index rebuild with new IDs and a
+  deletion of the library database, coming back as the keys come back.
+- The counting of playback.md §11 on a real player with a test clock, and the service's recorder writing a library
+  song's play by its identity (opened files and songs without one not at all).
+- On the screen: the toggle on Now Playing and in the song menu, on the album page, and the Favorites chip of the
+  Albums tab.

@@ -86,6 +86,8 @@ data class LibraryMetaEntity(
     @ColumnInfo(name = "last_file_id", defaultValue = "0") val lastFileId: Long = 0,
     /** The collation the sort keys were made by (`Collation.name`, docs/library.md §11.1). */
     val collation: String? = null,
+    /** The user database's change counter that `track_mirror` and `album_mirror` last mirrored (docs/library.md §15.4). */
+    @ColumnInfo(name = "mirrored_data_counter", defaultValue = "-1") val mirroredDataCounter: Long = -1,
 )
 
 /** A cached fingerprint (TI §10.1, docs/library.md §8.3): the raw items of Chromaprint, by the key of their file. */
@@ -203,13 +205,18 @@ data class VolumeSyncStateEntity(
         GenreEntity::class,
         TrackGenreEntity::class,
         FingerprintEntity::class,
+        TrackMirrorEntity::class,
+        AlbumMirrorEntity::class,
     ],
-    version = 9,
+    // 10: the mirror of favorites and plays (docs/library.md §15.4).
+    version = 10,
     exportSchema = false,
 )
 abstract class LibraryDatabase : RoomDatabase() {
 
     abstract fun library(): LibraryDao
+
+    abstract fun mirror(): MirrorDao
 
     companion object {
         const val FILE_NAME = "library.db"

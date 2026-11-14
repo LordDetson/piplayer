@@ -1,6 +1,7 @@
 package io.github.lorddetson.piplayer.ui.library
 
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.size
 import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.semantics.toggleableState
 import androidx.compose.ui.semantics.role
@@ -28,6 +29,8 @@ import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -109,6 +112,8 @@ object LibraryTags {
     const val LIST = "library_list"
     const val TOP_BAR = "library_top_bar"
     const val GRID = "library_grid"
+    const val ALBUM_FAVORITE = "album_favorite"
+    const val FAVORITES_CHIP = "favorites_chip"
 }
 
 /** What the library screens need from the app: playing, the mini player, and the way to the pages. */
@@ -217,11 +222,16 @@ fun LibraryScreen(host: LibraryHost, onOpenSettings: () -> Unit) {
                 emptyText = if (search.isBlank()) null else stringResource(R.string.search_nothing_found),
                 onOpenLibrarySettings = onOpenSettings,
             )
-            LibraryTab.ALBUMS -> Groups(
-                access, albums, modifier, search, empty,
-                sections = { list -> list.map { it.section } },
-                tiles = { list -> albumTiles(list, host) },
-            ) { list -> albumItems(list, host) }
+            LibraryTab.ALBUMS -> {
+                val favoritesOnly by albums.favoritesOnly.collectAsStateWithLifecycle()
+                Groups(
+                    access, albums, modifier, search, empty,
+                    sections = { list -> list.map { it.section } },
+                    tiles = { list -> albumTiles(list, host) },
+                    header = { FavoritesChip(favoritesOnly, albums::setFavoritesOnly) },
+                    emptyText = if (favoritesOnly) stringResource(R.string.favorite_albums_none) else null,
+                ) { list -> albumItems(list, host) }
+            }
             LibraryTab.ARTISTS -> Groups(
                 access, artists, modifier, search, empty,
                 sections = { list -> list.map { it.section } },
@@ -251,6 +261,10 @@ private fun <T : List<*>> Groups(
     empty: TabEmptyStates,
     sections: (T) -> List<String?>,
     tiles: LazyGridScope.(T) -> Unit,
+    /** Above the list or grid, also when it is empty: the Albums tab's filter (docs/library.md §15.2). */
+    header: (@Composable () -> Unit)? = null,
+    /** What an empty list without a search says instead of "No music found". */
+    emptyText: String? = null,
     items: LazyListScope.(T) -> Unit,
 ) {
     if (!access.granted) return PermissionCard(access.deniedForGood, access.request, access.openSettings, modifier)
@@ -258,10 +272,35 @@ private fun <T : List<*>> Groups(
         viewModel.onStart(access.granted)
         onStopOrDispose { viewModel.onStop() }
     }
+    if (header == null) {
+        GroupsContent(viewModel, modifier, search, empty, sections, tiles, emptyText, items)
+    } else {
+        Column(modifier) {
+            header()
+            GroupsContent(viewModel, Modifier.weight(1f).fillMaxWidth(), search, empty, sections, tiles, emptyText, items)
+        }
+    }
+}
+
+@Composable
+private fun <T : List<*>> GroupsContent(
+    viewModel: GroupsViewModel<T>,
+    modifier: Modifier,
+    search: String,
+    empty: TabEmptyStates,
+    sections: (T) -> List<String?>,
+    tiles: LazyGridScope.(T) -> Unit,
+    emptyText: String?,
+    items: LazyListScope.(T) -> Unit,
+) {
     when (val state = viewModel.state.collectAsStateWithLifecycle().value) {
         GroupsState.Loading -> if (empty.scanning) Scanning(modifier) else Loading(modifier)
         is GroupsState.Loaded -> if (state.value.isEmpty()) {
-            if (search.isBlank()) NoMusic(empty.openSettings, modifier) else Empty(stringResource(R.string.search_nothing_found), modifier)
+            when {
+                search.isNotBlank() -> Empty(stringResource(R.string.search_nothing_found), modifier)
+                emptyText != null -> Empty(emptyText, modifier)
+                else -> NoMusic(empty.openSettings, modifier)
+            }
         } else {
             val grid by viewModel.grid.collectAsStateWithLifecycle()
             val labels = remember(state.value) { sections(state.value) }
@@ -283,6 +322,22 @@ private fun <T : List<*>> Groups(
             }
         }
     }
+}
+
+/** The Albums tab's "Favorites" filter (docs/library.md §15.2): on, only favorite albums show. */
+@Composable
+private fun FavoritesChip(on: Boolean, onChange: (Boolean) -> Unit) {
+    FilterChip(
+        selected = on,
+        onClick = { onChange(!on) },
+        label = { Text(stringResource(R.string.favorites_filter)) },
+        leadingIcon = if (on) {
+            { Icon(painterResource(R.drawable.ic_favorite), contentDescription = null, Modifier.size(FilterChipDefaults.IconSize)) }
+        } else {
+            null
+        },
+        modifier = Modifier.padding(horizontal = 16.dp).testTag(LibraryTags.FAVORITES_CHIP),
+    )
 }
 
 /** Grid columns are at least this wide: two on a phone held upright (docs/library.md §11.3). */

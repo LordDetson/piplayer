@@ -65,6 +65,20 @@ class QueueRestoreTest {
     }
 
     @Test
+    fun `only a start at the saved song itself resumes its playback`() {
+        val snapshot = librarySnapshot(songId = 20, row = 0)
+        val order = QueueRestore.order(listOf(song(10), song(20), song(30)), snapshot)
+        val found = QueueRestore.choose(order, snapshot)!!
+        val gone = librarySnapshot(songId = 99, row = 1)
+        val fallback = QueueRestore.choose(order, gone)!!
+
+        assertThat(QueueRestore.resumesSavedItem(order, found, snapshot, currentFileId = 20)).isTrue()
+        assertThat(QueueRestore.resumesSavedItem(order, fallback, gone, currentFileId = null)).isFalse()
+        // The saved song resolved to another file than the one at the start.
+        assertThat(QueueRestore.resumesSavedItem(order, QueueStart(0, 12_345), snapshot, currentFileId = 20)).isFalse()
+    }
+
+    @Test
     fun `a row beyond the list starts at the last song`() {
         val snapshot = librarySnapshot(songId = 99, row = 20)
         val order = QueueRestore.order(listOf(song(10), song(20), song(30)), snapshot)

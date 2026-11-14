@@ -71,6 +71,18 @@ class PlaybackSnapshotPreferencesTest {
     }
 
     @Test
+    fun `the listened time of the current playback survives the preferences round trip`() {
+        val listening = snapshot.copy(listen = ListenProgress(listenedMs = 61_000, counted = true, startedAt = 1_700_000_000_000))
+        val preferences = mutablePreferencesOf()
+
+        preferences.putSnapshot(listening)
+
+        assertThat(preferences.toSnapshot()).isEqualTo(listening)
+        preferences.putSnapshot(snapshot)
+        assertThat(preferences.toSnapshot()?.listen).isNull()
+    }
+
+    @Test
     fun `a queue of opened files survives the preferences round trip`() {
         val preferences = mutablePreferencesOf()
 

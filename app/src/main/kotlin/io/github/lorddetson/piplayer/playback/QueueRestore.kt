@@ -79,6 +79,20 @@ object QueueRestore {
         return QueueStart(fallback, 0)
     }
 
+    /**
+     * Whether [start] resumes the saved item itself, so that its playback goes on (docs/playback.md §11.3): a song found
+     * as [currentFileId], or the saved opened file, at the saved position.
+     */
+    fun resumesSavedItem(order: List<QueueSlot>, start: QueueStart, snapshot: PlaybackSnapshot, currentFileId: Long?): Boolean {
+        val slot = order.getOrNull(start.index) ?: return false
+        if (start.positionMs != snapshot.positionMs) return false
+        return if (snapshot.songId < 0) {
+            slot is QueueSlot.Open && slot.item.uri == snapshot.uri
+        } else {
+            currentFileId != null && slot.fileId == currentFileId
+        }
+    }
+
     /** The opened files of [order] at the rows they really got after the library was rebuilt. */
     fun openItems(order: List<QueueSlot>): List<SavedOpenItem> = order.mapIndexedNotNull { row, slot ->
         if (slot is QueueSlot.Open) slot.item.copy(index = row) else null

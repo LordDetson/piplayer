@@ -21,6 +21,7 @@ import io.github.lorddetson.piplayer.library.identity.FingerprintStep
 import io.github.lorddetson.piplayer.library.identity.IdentityAttacher
 import io.github.lorddetson.piplayer.library.identity.LibraryFingerprints
 import io.github.lorddetson.piplayer.library.identity.LibraryTrackRefs
+import io.github.lorddetson.piplayer.library.mirror.UserMirror
 import io.github.lorddetson.piplayer.library.rules.FolderRule
 import io.github.lorddetson.piplayer.library.rules.RulesSource
 import io.github.lorddetson.piplayer.library.songs.AudioPermission
@@ -67,6 +68,7 @@ object Library {
         val sync: LibrarySync,
         val identities: IdentityAttacher,
         val trackRefs: LibraryTrackRefs,
+        val mirror: UserMirror,
     ) {
         @Volatile
         var pass: TagPassRunner? = null
@@ -100,6 +102,16 @@ object Library {
 
     /** The attach pass of the track identities (docs/library.md §8.2). */
     fun identities(context: Context): IdentityAttacher = opened(context).identities
+
+    /** The mirror of favorites and plays into the library database (docs/library.md §15.4). */
+    fun mirror(context: Context): UserMirror = opened(context).mirror
+
+    /** Raised after every run of the mirror; it follows the library across [reopen] and a rebuild. */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    fun mirrorVersion(context: Context): Flow<Long> {
+        opened(context)
+        return opened.filterNotNull().flatMapLatest { it.mirror.version }
+    }
 
     /**
      * Track references of the saved queue (docs/playback.md §4.8). They read the library through [read], so a rebuild
@@ -138,6 +150,7 @@ object Library {
         val sync = sync(app)
         startTagPass(app)
         identities(app).request()
+        mirror(app).request()
         synchronized(lock) {
             if (observer != null) return
             // Every change of the index's audio rows, on every volume; a burst brings one sync a second later.
@@ -155,9 +168,16 @@ object Library {
                 watcher,
             )
             observer = watcher
-            // A change of the folder rules is applied by a sync at once.
+            // A change of the folder rules is applied by a sync at once (docs/library.md §3.1, §3.4).
             scope.launch {
-                UserData.database(app).user().changeCounterFlow().drop(1).collect { opened.value?.sync?.request() }
+                UserData.database(app).user().rulesCounterFlow().drop(1).collect { opened.value?.sync?.request() }
+            }
+            // Every change of mirrored user data, and of the own covers whose albums need members, asks the mirror.
+            scope.launch {
+                UserData.database(app).user().changeCounterFlow().drop(1).collect { opened.value?.mirror?.request() }
+            }
+            scope.launch {
+                Covers.own(app).version.drop(1).collect { opened.value?.mirror?.request() }
             }
         }
         sync.request()
@@ -184,7 +204,11 @@ object Library {
                 LegacyText.isCyrillicLanguage(locales.flatMap { list -> List(list.size()) { list[it].language } })
             },
             gate = passGate::awaitOpen,
-            onBatch = SongList::applyInPlace,
+            onBatch = { rows ->
+                SongList.applyInPlace(rows)
+                // Favorites and play counts come back with the keys (docs/library.md §15.4).
+                library.mirror.requestFiles(rows.map { it.fileId })
+            },
         )
         val walks = DurationWalks(library.database, library.sync, reader, passGate, onBatch = SongList::applyLengths)
         return TagPassRunner(pass, library.sync.status, passGate, walks = walks, onRunEnd = library.identities::request)
@@ -242,6 +266,7 @@ object Library {
         if (mayRead(app)) {
             startTagPass(app)
             identities(app).request()
+            mirror(app).request()
             sync(app).request()
         }
     }
@@ -254,6 +279,7 @@ object Library {
         // closes under it.
         library.sync.closeAndJoin()
         library.identities.closeAndJoin()
+        library.mirror.closeAndJoin()
     }
 
     /** Waits, off the main thread, until the library is ready, or [timeoutMs] has passed (docs/library.md §1.4). */
@@ -316,6 +342,14 @@ object Library {
             seed = seed,
         )
         val user = UserData.database(context)
+        val mirror = UserMirror(
+            database,
+            user,
+            sync,
+            covers = Covers.own(context),
+            // Before the first sync no file is known, and a run would write an empty mirror for nothing.
+            ready = { sync.status.value.known },
+        )
         val fingerprints = LibraryFingerprints(context, database, uriOf = { file ->
             val id = runBlocking { database.library().mediaStoreIdOf(file.fileId) } ?: -1L
             ContentUris.withAppendedId(MediaStore.Audio.Media.getContentUri(file.place.volume), id)
@@ -324,19 +358,21 @@ object Library {
             database,
             user,
             sync,
-            // An own cover is user data: its identity is never deleted (docs/library.md §13.2).
-            holders = { Covers.own(context).identitiesWithCovers() },
+            // Own covers, favorites and plays are user data: their identities are never deleted (docs/library.md §8.1).
+            holders = { user.user().identitiesHoldingData().toSet() },
             fingerprints = FingerprintStep(fingerprints),
             // Before the first sync every identity would look missing.
             ready = { sync.status.value.known },
+            // Favorites and plays follow the keys the pass attaches (docs/library.md §8.1, §15.4).
+            afterPass = mirror::request,
         )
         identities.follow(sync.status)
-        return Opened(database, sync, identities, newTrackRefs(context))
+        return Opened(database, sync, identities, newTrackRefs(context), mirror)
     }
 
     /** The folder rules of the user database (docs/library.md §3.4). */
     private fun userRules(context: Context) = object : RulesSource {
-        override suspend fun counter() = UserData.database(context).user().changeCounter()
+        override suspend fun counter() = UserData.database(context).user().rulesCounter()
 
         override suspend fun rules() = UserData.database(context).user().folderRules()
             .map { FolderRule(it.volumeName, it.relativePath, it.mode == FolderRuleEntity.INCLUDE) }

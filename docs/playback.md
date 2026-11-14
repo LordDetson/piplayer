@@ -297,7 +297,8 @@ large queue, and a song from an SD card if there is one.
 
 - From the top: a collapse button, the cover (square, as wide as the window allows), the title, the artist, the album,
   the format line (§3.5), the seek bar with the elapsed time on its left and the remaining time ("-m:ss") on its right,
-  then shuffle, previous, play/pause, next and repeat.
+  then shuffle, previous, play/pause, next and repeat. Since M2b the top row has the favorite toggle of the current song
+  at its right, before the queue button (library.md §15.2); it is hidden for a file opened from another app.
 - Title, artist and album are those of the queue item, that is of the media index (§2.3); the cover comes from the
   file (§3.4). No artist shows "Unknown artist", as in the list; no album shows nothing. An unknown length shows
   "--:--" and the seek bar cannot be moved.
@@ -378,7 +379,7 @@ large queue, and a song from an SD card if there is one.
 
 - Every control has a label, and the toggles a state: play/pause is "Play" or "Pause"; "Previous" and "Next";
   "Shuffle" with the state on or off; "Repeat" with the state off, all or one and the action "Change repeat mode"; the
-  collapse button "Close Now Playing". The mini player reads its title and artist and offers "Open Now Playing" as its
+  collapse button "Close Now Playing"; the favorite toggle "Favorite" with the state on or off (M2b). The mini player reads its title and artist and offers "Open Now Playing" as its
   action; its play/pause button stays a control of its own.
 - The seek bar is labelled "Playback position" and states the position in words ("1 minute, 2 seconds of 3 minutes, 45
   seconds"). The accessibility adjust actions move it by a twentieth of the song and seek.
@@ -452,6 +453,8 @@ too often while it plays?), and a large cover (3000x3000) in the profiler.
   never replace the last snapshot.
 - The service writes the current state once more before it is destroyed, after saving on a task swipe, so the last
   seconds of playback are not lost.
+- Since M2b a snapshot also carries the current playback's listened time, whether it has counted as a play and when it
+  started (§11.3), under keys of their own; schema 3 stays, and a snapshot without them resumes nothing.
 
 ### 4.3 Which song and position
 
@@ -1134,3 +1137,50 @@ cannot play or add library items. On a library database, the outline of every ki
 sections, the bytes of Cyrillic, Chinese and emoji texts). On the generated library, the timing check of §10.5, on the
 phone too. The cover URIs of the tree's
 items have the checks of library.md §13.8.8.
+
+## 11. Play statistics (M2b, PIM-49)
+
+The owner's decision of 14.11.2026: a play counts once the time actually listened reaches half of the song or 4 minutes,
+whichever comes first; seeking adds nothing; songs shorter than 30 s never count. What is stored is in library.md §15.5.
+
+### 11.1 Listened time
+
+- The service measures it from its own player in the main process: the time that passes on the monotonic clock while
+  the player is playing (`isPlaying`), so a pause, buffering, a call that holds playback, an error and the end of the
+  queue add nothing. A seek adds nothing either: it jumps the position, not the clock, and the time a seek spends
+  buffering does not count.
+- A playback is one listening of one queue item. A new one starts at every change of the current item: the next or
+  previous song, a song chosen in the queue or a list, a gapless or crossed-over transition, a repeat-one replay (so a
+  song repeated three times can count three times), a repeat-all wrap. A change of the queue that keeps the same item
+  current (an insertion, a removal elsewhere, shuffle) does not start one. A seek inside the item, also "Previous" that
+  goes back to its start, continues the same playback.
+- A gapless transition is reported a moment after the audio crossed over; the moment counts for the song before.
+
+### 11.2 When it counts
+
+- The threshold is half of the song's length or 4 minutes, whichever is less. The length is the player's once it knows
+  it, otherwise the queue item's; a song whose length is not known at all counts at 4 minutes. A song shorter than 30 s
+  never counts.
+- A playback counts at most once, at the moment the threshold is reached: the service checks at the time it will be
+  reached while playing, and at every change of state. Only songs of the library count, by their track identity; an
+  opened file or a song whose tags are not read yet is not recorded (library.md §15.5).
+- When the playback ends (another item, the queue replaced, the service destroyed), its listened time is written to
+  the event of a play that counted.
+
+### 11.3 Process death
+
+- The snapshot of §4.2 carries the listened time, whether the playback counted and when it started. When the saved
+  queue is restored and resumes the saved item (§4.3: found by its file or URI, at its saved position), the playback
+  goes on from there: the listened time keeps growing toward the threshold, and a play that already counted does not
+  count again. When the saved item is gone, a new playback starts.
+- Snapshots are written every five seconds while playing and at every pause, so a process killed while playing loses at
+  most five seconds of listened time; a process killed while paused loses nothing.
+
+### 11.4 Checks
+
+JVM tests: the counter on a test clock: half of a 3-minute song, 4 minutes of a 20-minute one, never under 30 s, an
+unknown length at 4 minutes, pauses and seeks adding nothing, once per playback, a new playback counting again, a resumed
+playback going on and not counting twice; the snapshot keys.
+
+Instrumented tests: the tracker on a real player with a test clock: counting while playing, pauses, a seek, a repeat-one
+replay and a transition to the next song as new playbacks, a change of the queue that keeps the item.

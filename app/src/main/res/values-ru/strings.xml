@@ -232,4 +232,11 @@
     <string name="cover_not_read">Теги песни ещё читаются. Попробуйте чуть позже.</string>
     <string name="cover_no_image">Не удалось прочитать изображение</string>
     <string name="cover_failed">Не удалось изменить обложку</string>
+    <!-- Избранное (docs/library.md §15.2). -->
+    <string name="favorite">Избранное</string>
+    <string name="favorite_add">Добавить в избранное</string>
+    <string name="favorite_remove">Убрать из избранного</string>
+    <string name="favorites_filter">Избранные</string>
+    <string name="favorite_albums_none">Нет избранных альбомов</string>
+    <string name="favorite_failed">Не удалось изменить избранное</string>
 </resources>

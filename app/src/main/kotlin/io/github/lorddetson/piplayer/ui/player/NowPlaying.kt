@@ -78,6 +78,8 @@ fun NowPlaying(
     onOpenAlbum: (() -> Unit)? = null,
     onOpenQueue: (() -> Unit)? = null,
     coverName: String? = null,
+    /** The current song's favorite toggle (docs/library.md §15.2); null for an opened file or no song. */
+    favorite: FavoriteState? = null,
 ) {
     val metadata = rememberCurrentItemState(player).mediaMetadata
     val pane = stringResource(R.string.player_now_playing)
@@ -97,6 +99,7 @@ fun NowPlaying(
                 Icon(painterResource(R.drawable.ic_player_collapse), stringResource(R.string.player_close_now_playing))
             }
             Spacer(Modifier.weight(1f))
+            favorite?.let { FavoriteButton(it, Modifier.testTag(PlayerTags.FAVORITE)) }
             onOpenQueue?.let { open ->
                 IconButton(onClick = open) { Icon(painterResource(R.drawable.ic_queue), stringResource(R.string.queue_open)) }
             }

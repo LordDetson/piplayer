@@ -43,6 +43,8 @@ class IdentityAttacher(
     private val clock: () -> Long = System::currentTimeMillis,
     /** Whether the library knows its files; before its first sync every identity would look missing. */
     private val ready: () -> Boolean = { true },
+    /** Called after every pass, whatever it wrote: the mirror follows the keys (docs/library.md §15.4). */
+    private val afterPass: () -> Unit = {},
 ) {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -118,6 +120,7 @@ class IdentityAttacher(
         }
         fingerprints?.let { step -> takeOver(step, files, holding) }
         dropStaleFingerprints(now)
+        afterPass()
         plan
     }
 

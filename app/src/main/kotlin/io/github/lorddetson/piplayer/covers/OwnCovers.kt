@@ -1,6 +1,7 @@
 package io.github.lorddetson.piplayer.covers
 
 import androidx.room3.withWriteTransaction
+import io.github.lorddetson.piplayer.library.mirror.AlbumCoverMoves
 import io.github.lorddetson.piplayer.userdata.UserDatabase
 import java.io.File
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -17,7 +18,7 @@ data class CoverCopy(val fileName: String, val width: Int, val height: Int)
  * every change raises [version]. Changes do not raise the user database's change counter: nothing of them is mirrored.
  */
 class OwnCovers(private val database: UserDatabase, val dir: File, private val clock: () -> Long = System::currentTimeMillis) :
-    OwnCoverIndex {
+    OwnCoverIndex, AlbumCoverMoves {
 
     private class Snapshot(val tracks: Map<Long, String>, val albums: Map<String, String>)
 
@@ -98,6 +99,38 @@ class OwnCovers(private val database: UserDatabase, val dir: File, private val c
         }
         dir.listFiles().orEmpty().forEach(File::delete)
         Snapshot(emptyMap(), emptyMap())
+    }
+
+    override suspend fun albumCoverTimes(): Map<String, Long> {
+        load()
+        return dao.albumCovers().filter { snapshot?.albums?.containsKey(it.albumKey) == true }.associate { it.albumKey to it.setAt }
+    }
+
+    /**
+     * Moves album covers to the new keys of their albums (docs/library.md §15.3). Covers that meet on one key, moved there
+     * or already there, keep the one set last; the others go with their copies.
+     */
+    override suspend fun moveAlbumCovers(moves: Map<String, String>) = change { current ->
+        val rows = dao.albumCovers().associateBy { it.albumKey }
+        if (moves.keys.none { it in rows }) return@change current
+        val albums = current.albums.toMutableMap()
+        val dropped = mutableListOf<String>()
+        database.withWriteTransaction {
+            for ((target, olds) in moves.entries.groupBy({ it.value }, { it.key })) {
+                val staying = rows[target]?.takeIf { target !in moves }
+                val candidates = olds.mapNotNull { rows[it] } + listOfNotNull(staying)
+                val winner = candidates.maxByOrNull { it.setAt } ?: continue
+                for (candidate in candidates) {
+                    dao.removeAlbumCover(candidate.albumKey)
+                    albums.remove(candidate.albumKey)
+                    if (candidate.fileName != winner.fileName) dropped += candidate.fileName
+                }
+                dao.putAlbumCover(target, winner.fileName, winner.width, winner.height, winner.setAt)
+                albums[target] = winner.fileName
+            }
+        }
+        dropped.forEach { delete(it) }
+        Snapshot(current.tracks, albums)
     }
 
     /** The identities that hold an own cover, which the attach pass never deletes (docs/library.md §8.1). */

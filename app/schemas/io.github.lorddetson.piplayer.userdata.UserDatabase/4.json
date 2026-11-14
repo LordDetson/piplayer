@@ -1,0 +1,409 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 4,
+    "identityHash": "00e8e75b74fc9aaf1ea77ccbbf2b51b4",
+    "entities": [
+      {
+        "tableName": "library_folder_rule",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`volume_name` TEXT NOT NULL, `relative_path` TEXT NOT NULL, `mode` INTEGER NOT NULL, PRIMARY KEY(`volume_name`, `relative_path`))",
+        "fields": [
+          {
+            "fieldPath": "volumeName",
+            "columnName": "volume_name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "relativePath",
+            "columnName": "relative_path",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "mode",
+            "columnName": "mode",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "volume_name",
+            "relative_path"
+          ]
+        }
+      },
+      {
+        "tableName": "user_meta",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER NOT NULL, `change_counter` INTEGER NOT NULL, `rules_counter` INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "changeCounter",
+            "columnName": "change_counter",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "rulesCounter",
+            "columnName": "rules_counter",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        }
+      },
+      {
+        "tableName": "track_identity",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `content_key` BLOB NOT NULL, `start_ms` INTEGER NOT NULL DEFAULT 0, `duration_ms` INTEGER, `recording_mbid` BLOB, `hint_volume_name` TEXT, `hint_relative_path` TEXT, `hint_display_name` TEXT, `hint_size` INTEGER, `created_at` INTEGER NOT NULL, `missing_since` INTEGER)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "contentKey",
+            "columnName": "content_key",
+            "affinity": "BLOB",
+            "notNull": true
+          },
+          {
+            "fieldPath": "startMs",
+            "columnName": "start_ms",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          },
+          {
+            "fieldPath": "durationMs",
+            "columnName": "duration_ms",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "recordingMbid",
+            "columnName": "recording_mbid",
+            "affinity": "BLOB"
+          },
+          {
+            "fieldPath": "hintVolumeName",
+            "columnName": "hint_volume_name",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "hintRelativePath",
+            "columnName": "hint_relative_path",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "hintDisplayName",
+            "columnName": "hint_display_name",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "hintSize",
+            "columnName": "hint_size",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "created_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "missingSince",
+            "columnName": "missing_since",
+            "affinity": "INTEGER"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_track_identity_content_key_start_ms",
+            "unique": true,
+            "columnNames": [
+              "content_key",
+              "start_ms"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_track_identity_content_key_start_ms` ON `${TABLE_NAME}` (`content_key`, `start_ms`)"
+          }
+        ]
+      },
+      {
+        "tableName": "track_cover",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`identity_id` INTEGER NOT NULL, `file_name` TEXT NOT NULL, `width` INTEGER NOT NULL, `height` INTEGER NOT NULL, `set_at` INTEGER NOT NULL, PRIMARY KEY(`identity_id`))",
+        "fields": [
+          {
+            "fieldPath": "identityId",
+            "columnName": "identity_id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "fileName",
+            "columnName": "file_name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "width",
+            "columnName": "width",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "height",
+            "columnName": "height",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "setAt",
+            "columnName": "set_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "identity_id"
+          ]
+        }
+      },
+      {
+        "tableName": "album_cover",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`album_key` TEXT NOT NULL, `file_name` TEXT NOT NULL, `width` INTEGER NOT NULL, `height` INTEGER NOT NULL, `set_at` INTEGER NOT NULL, PRIMARY KEY(`album_key`))",
+        "fields": [
+          {
+            "fieldPath": "albumKey",
+            "columnName": "album_key",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "fileName",
+            "columnName": "file_name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "width",
+            "columnName": "width",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "height",
+            "columnName": "height",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "setAt",
+            "columnName": "set_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "album_key"
+          ]
+        }
+      },
+      {
+        "tableName": "favorite",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`identity_id` INTEGER NOT NULL, `added_at` INTEGER NOT NULL, PRIMARY KEY(`identity_id`))",
+        "fields": [
+          {
+            "fieldPath": "identityId",
+            "columnName": "identity_id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "addedAt",
+            "columnName": "added_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "identity_id"
+          ]
+        }
+      },
+      {
+        "tableName": "favorite_album",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`album_key` TEXT NOT NULL, `release_mbid` BLOB, `added_at` INTEGER NOT NULL, PRIMARY KEY(`album_key`))",
+        "fields": [
+          {
+            "fieldPath": "albumKey",
+            "columnName": "album_key",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "releaseMbid",
+            "columnName": "release_mbid",
+            "affinity": "BLOB"
+          },
+          {
+            "fieldPath": "addedAt",
+            "columnName": "added_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "album_key"
+          ]
+        }
+      },
+      {
+        "tableName": "album_member",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`album_key` TEXT NOT NULL, `identity_id` INTEGER NOT NULL, PRIMARY KEY(`album_key`, `identity_id`))",
+        "fields": [
+          {
+            "fieldPath": "albumKey",
+            "columnName": "album_key",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "identityId",
+            "columnName": "identity_id",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "album_key",
+            "identity_id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_album_member_identity_id",
+            "unique": false,
+            "columnNames": [
+              "identity_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_album_member_identity_id` ON `${TABLE_NAME}` (`identity_id`)"
+          }
+        ]
+      },
+      {
+        "tableName": "play_event",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`identity_id` INTEGER NOT NULL, `started_at` INTEGER NOT NULL, `listened_ms` INTEGER NOT NULL, PRIMARY KEY(`identity_id`, `started_at`))",
+        "fields": [
+          {
+            "fieldPath": "identityId",
+            "columnName": "identity_id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "startedAt",
+            "columnName": "started_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "listenedMs",
+            "columnName": "listened_ms",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "identity_id",
+            "started_at"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_play_event_started_at",
+            "unique": false,
+            "columnNames": [
+              "started_at"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_play_event_started_at` ON `${TABLE_NAME}` (`started_at`)"
+          }
+        ]
+      },
+      {
+        "tableName": "play_stats",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`identity_id` INTEGER NOT NULL, `play_count` INTEGER NOT NULL, `listened_ms` INTEGER NOT NULL, `last_played_at` INTEGER, PRIMARY KEY(`identity_id`))",
+        "fields": [
+          {
+            "fieldPath": "identityId",
+            "columnName": "identity_id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "playCount",
+            "columnName": "play_count",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "listenedMs",
+            "columnName": "listened_ms",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastPlayedAt",
+            "columnName": "last_played_at",
+            "affinity": "INTEGER"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "identity_id"
+          ]
+        }
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '00e8e75b74fc9aaf1ea77ccbbf2b51b4')"
+    ]
+  }
+}

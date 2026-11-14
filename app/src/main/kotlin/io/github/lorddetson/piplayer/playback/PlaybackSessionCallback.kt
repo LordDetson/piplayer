@@ -65,6 +65,8 @@ class PlaybackSessionCallback(
     },
     /** The library tree that controllers browse (docs/playback.md §10), with the cover provider's URIs (library.md §13.8). */
     private val tree: LibraryTree = LibraryTree(context, ProviderArtwork(context)),
+    /** The restored current item and its saved progress toward a play, which goes on (docs/playback.md §11.3). */
+    private val onRestore: (mediaId: String, progress: ListenProgress) -> Unit = { _, _ -> },
     private val onQueueRequest: (QueueState?) -> Unit,
 ) : MediaLibrarySession.Callback, SessionPlayer.Edits {
 
@@ -565,6 +567,7 @@ class PlaybackSessionCallback(
                             player.shuffleModeEnabled = snapshot.shuffle
                             player.repeatMode = snapshot.repeatMode
                             commit(restored.state)
+                            resumeListening(snapshot, restored)
                             result.set(MediaItemsWithStartPosition(restored.items, restored.start.index, restored.start.positionMs))
                         }
                     }
@@ -612,6 +615,7 @@ class PlaybackSessionCallback(
                         restored.order?.let { (player as? SessionPlayer)?.awaitOrder(it, restored.items.map { item -> item.mediaId }) }
                         player.shuffleModeEnabled = snapshot.shuffle
                         player.repeatMode = snapshot.repeatMode
+                        resumeListening(snapshot, restored)
                         player.setMediaItems(restored.items, restored.start.index, restored.start.positionMs)
                         commit(restored.state)
                         player.prepare()
@@ -776,7 +780,15 @@ class PlaybackSessionCallback(
         }
         val openItems = QueueRestore.openItems(order)
         if (libraryRequest == null && openItems.isEmpty() && edits.added.isEmpty()) return null
-        return RestoredQueue(items, start, QueueState(libraryRequest, openItems, libraryId, edits), shuffled)
+        val resumes = QueueRestore.resumesSavedItem(order, start, snapshot, currentFileId)
+        return RestoredQueue(items, start, QueueState(libraryRequest, openItems, libraryId, edits), shuffled, resumes)
+    }
+
+    /** Hands the saved progress toward a play to the counter when the restored queue resumes the saved item (§11.3). */
+    private fun resumeListening(snapshot: PlaybackSnapshot, restored: RestoredQueue) {
+        val listen = snapshot.listen ?: return
+        if (!restored.resumes) return
+        restored.items.getOrNull(restored.start.index)?.let { onRestore(it.mediaId, listen) }
     }
 
     /** The queue file [snapshot] names, or null when there is none or it is of another revision. */
@@ -896,6 +908,8 @@ class PlaybackSessionCallback(
         val state: QueueState,
         /** The restored shuffle order, or null for a new one. */
         val order: IntArray?,
+        /** Whether the start is the saved item itself, whose playback goes on (docs/playback.md §11.3). */
+        val resumes: Boolean = false,
     )
 
     /**

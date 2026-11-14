@@ -23,6 +23,8 @@ class PlaybackStateSaver(
     private val store: PlaybackStateStore,
     /** The player's shuffle order, saved exactly while shuffle is on (docs/playback.md §4.8). */
     private val shuffleOrder: () -> ShuffleOrder? = { null },
+    /** The current playback's progress toward a play, saved with it (docs/playback.md §11.3). */
+    private val listen: () -> ListenProgress? = { null },
 ) : Player.Listener {
 
     private val handler = Handler(Looper.getMainLooper())
@@ -116,6 +118,7 @@ class PlaybackStateSaver(
             uri = uri,
             queueRevision = queueRevision,
             libraryId = state.libraryId,
+            listen = listen(),
         )
         if (snapshot == last) return
         last = snapshot

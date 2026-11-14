@@ -10,6 +10,8 @@ import io.github.lorddetson.piplayer.library.lists.LibraryLists
 import io.github.lorddetson.piplayer.library.lists.SongLinks
 import io.github.lorddetson.piplayer.settings.LibrarySettings
 import io.github.lorddetson.piplayer.ui.library.AlbumPage
+import io.github.lorddetson.piplayer.ui.player.FavoriteState
+import io.github.lorddetson.piplayer.ui.songs.FavoriteActions
 import io.github.lorddetson.piplayer.ui.library.ArtistPage
 import io.github.lorddetson.piplayer.ui.library.FolderPage
 import io.github.lorddetson.piplayer.ui.library.LibraryHost
@@ -183,6 +185,8 @@ fun PiPlayerApp(viewModel: PlayerViewModel = viewModel()) {
     val context = LocalContext.current
     val currentSongId = rememberCurrentSongId(player)
     val covers = rememberCoverActions(snackbar)
+    val favorites = remember(context) { FavoriteChoices(context) }
+    val favoriteActions = rememberFavoriteActions(favorites, snackbar)
     val menu = remember {
         SongMenu(
             links = { song -> linksOf(context, song.id) },
@@ -192,6 +196,7 @@ fun PiPlayerApp(viewModel: PlayerViewModel = viewModel()) {
             playNext = { viewModel.addToQueue(QueueTarget.Songs(listOf(it.id)), next = true) },
             addToQueue = { viewModel.addToQueue(QueueTarget.Songs(listOf(it.id)), next = false) },
             covers = covers,
+            favorites = favoriteActions.actions,
         )
     }
     val host = LibraryHost(
@@ -292,6 +297,10 @@ fun PiPlayerApp(viewModel: PlayerViewModel = viewModel()) {
                         onOpenAlbum = links?.albumKey?.let { { openLatest { latest -> latest.albumKey?.let(::AlbumRoute) } } },
                         onOpenQueue = { if (backStack.lastOrNull() != QueueRoute) backStack.add(QueueRoute) },
                         coverName = coverName,
+                        favorite = currentSongId?.let { id ->
+                            val checked by remember(id) { favorites.favoriteFlow(id) }.collectAsStateWithLifecycle(false)
+                            FavoriteState(checked) { favoriteActions.setById(id, !checked) }
+                        },
                     )
                     SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).windowInsetsPadding(WindowInsets.navigationBars))
                 }
@@ -357,6 +366,33 @@ private fun rememberCoverActions(snackbar: SnackbarHostState): CoverActions {
             removeForAlbum = { key -> run { choices.removeForAlbum(key) } },
             albumHasOwn = { key -> choices.albumHasOwn(key) },
         )
+    }
+}
+
+/** The song menu's favorites and Now Playing's toggle (docs/library.md §15.2), which say when a song cannot be one yet. */
+private class AppFavoriteActions(
+    private val favorites: FavoriteChoices,
+    private val say: (Int) -> Unit,
+) {
+    fun setById(fileId: Long, favorite: Boolean) {
+        FavoriteChoices.scope.launch {
+            when (favorites.setSong(fileId, favorite)) {
+                FavoriteChoices.Result.DONE -> Unit
+                FavoriteChoices.Result.NOT_READ -> say(R.string.cover_not_read)
+                FavoriteChoices.Result.FAILED -> say(R.string.favorite_failed)
+            }
+        }
+    }
+
+    val actions = FavoriteActions(isFavorite = { song -> favorites.isFavorite(song.id) }, set = { song, on -> setById(song.id, on) })
+}
+
+@Composable
+private fun rememberFavoriteActions(favorites: FavoriteChoices, snackbar: SnackbarHostState): AppFavoriteActions {
+    val resources = LocalResources.current
+    val scope = rememberCoroutineScope()
+    return remember(favorites) {
+        AppFavoriteActions(favorites) { id -> scope.launch { snackbar.showSnackbar(resources.getString(id)) } }
     }
 }
 

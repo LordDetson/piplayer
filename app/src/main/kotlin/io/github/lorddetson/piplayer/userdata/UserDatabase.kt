@@ -10,6 +10,8 @@ import androidx.room3.PrimaryKey
 import androidx.room3.Query
 import androidx.room3.Room
 import androidx.room3.RoomDatabase
+import androidx.room3.migration.AutoMigrationSpec
+import androidx.sqlite.SQLiteConnection
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -34,6 +36,8 @@ data class FolderRuleEntity(
 data class UserMetaEntity(
     @PrimaryKey val id: Int = 1,
     @ColumnInfo(name = "change_counter") val changeCounter: Long,
+    /** Goes up only with the folder rules, which the sync applies again when it changes (docs/library.md §3.1). */
+    @ColumnInfo(name = "rules_counter", defaultValue = "0") val rulesCounter: Long = 0,
 )
 
 @Dao
@@ -62,6 +66,33 @@ interface UserDao {
             "ON CONFLICT(id) DO UPDATE SET change_counter = change_counter + 1",
     )
     suspend fun countChange()
+
+    @Query("SELECT COALESCE((SELECT rules_counter FROM user_meta WHERE id = 1), 0)")
+    suspend fun rulesCounter(): Long
+
+    @Query("SELECT COALESCE((SELECT rules_counter FROM user_meta WHERE id = 1), 0)")
+    fun rulesCounterFlow(): Flow<Long>
+
+    /** A change of the folder rules; [countChange] goes up with it. */
+    @Query(
+        "INSERT INTO user_meta (id, change_counter, rules_counter) VALUES (1, 0, 1) " +
+            "ON CONFLICT(id) DO UPDATE SET rules_counter = rules_counter + 1",
+    )
+    suspend fun countRulesChange()
+
+    /** The identities that user data refers to, which the attach pass never deletes (docs/library.md §8.1, §15). */
+    @Query(
+        "SELECT identity_id FROM track_cover UNION SELECT identity_id FROM favorite UNION SELECT identity_id FROM play_event " +
+            "UNION SELECT identity_id FROM play_stats",
+    )
+    suspend fun identitiesHoldingData(): List<Long>
+}
+
+/** Version 4 copies the change counter into the new rules counter, so that the rules mirrored already stay mirrored. */
+class RulesCounterMigration : AutoMigrationSpec {
+    override suspend fun onPostMigrate(connection: SQLiteConnection) {
+        connection.prepare("UPDATE user_meta SET rules_counter = change_counter").use { it.step() }
+    }
 }
 
 /**
@@ -71,12 +102,18 @@ interface UserDao {
 @Database(
     entities = [
         FolderRuleEntity::class, UserMetaEntity::class, TrackIdentityEntity::class, TrackCoverEntity::class,
-        AlbumCoverEntity::class,
+        AlbumCoverEntity::class, FavoriteEntity::class, FavoriteAlbumEntity::class, AlbumMemberEntity::class,
+        PlayEventEntity::class, PlayStatsEntity::class,
     ],
-    version = 3,
+    version = 4,
     exportSchema = true,
-    // Version 2 adds the track identities (docs/library.md §8.1), version 3 the own covers (§13.2).
-    autoMigrations = [AutoMigration(from = 1, to = 2), AutoMigration(from = 2, to = 3)],
+    // Version 2 adds the track identities (docs/library.md §8.1), version 3 the own covers (§13.2), version 4 favorites,
+    // album members, plays and the rules counter (§15.1).
+    autoMigrations = [
+        AutoMigration(from = 1, to = 2),
+        AutoMigration(from = 2, to = 3),
+        AutoMigration(from = 3, to = 4, spec = RulesCounterMigration::class),
+    ],
 )
 abstract class UserDatabase : RoomDatabase() {
 
@@ -85,6 +122,10 @@ abstract class UserDatabase : RoomDatabase() {
     abstract fun identities(): TrackIdentityDao
 
     abstract fun covers(): OwnCoverDao
+
+    abstract fun favorites(): FavoriteDao
+
+    abstract fun plays(): PlayDao
 
     companion object {
         const val NAME = "user.db"

@@ -211,8 +211,15 @@ class LibraryLists(private val database: LibraryDatabase, private val hidden: Hi
         return if (query.reversed) songs.reversed() else songs
     }
 
-    fun albums(sort: AlbumSort = AlbumSort.TITLE, reversed: Boolean = false, search: String = ""): List<AlbumGroup> {
+    /** The albums, all or only the favorite ones ([favoritesOnly], docs/library.md §15.2). */
+    fun albums(
+        sort: AlbumSort = AlbumSort.TITLE,
+        reversed: Boolean = false,
+        search: String = "",
+        favoritesOnly: Boolean = false,
+    ): List<AlbumGroup> {
         val sql = Sql(hidden)
+        if (favoritesOnly) sql.where("d.album_key IN (SELECT album_key FROM album_mirror)")
         sql.having("d.album_search", search)
         val albums = runAlbums(sql)
         val comparator = when (sort) {
@@ -303,6 +310,24 @@ class LibraryLists(private val database: LibraryDatabase, private val hidden: Hi
             "FROM track_display d JOIN audio_file f ON f.id = d.file_id WHERE f.id IN (" + chunk.joinToString(",") { "?" } + ")"
         run(RoomRawQuery(sql) { statement -> chunk.forEachIndexed { i, id -> statement.bindLong(i + 1, id) } })
     }.associate { it.fileId to songOf(it) }
+
+    /** The visible songs with plays, the latest play first (docs/library.md §15.4): the smart list Recently played. */
+    fun recentlyPlayed(limit: Int): List<Song> = played("m.last_played_at DESC, m.play_count DESC, f.id", limit)
+
+    /** The visible songs with plays, the most plays first (docs/library.md §15.4): the smart list Most played. */
+    fun mostPlayed(limit: Int): List<Song> = played("m.play_count DESC, m.last_played_at DESC, f.id", limit)
+
+    private fun played(order: String, limit: Int): List<Song> {
+        val sql = Sql(hidden)
+        val conditions = sql.conditions()
+        val query = sql.raw(
+            "SELECT f.id AS fileId, f.media_store_id AS mediaStoreId, d.title, d.artist, d.album, d.duration_ms AS durationMs, " +
+                "d.disc_number AS discNumber, f.relative_path AS relativePath, NULL AS sectionKey, NULL AS sectionNumber " +
+                "FROM track_mirror m JOIN track_display d ON d.file_id = m.file_id JOIN audio_file f ON f.id = m.file_id " +
+                "WHERE m.play_count > 0 AND $conditions ORDER BY $order LIMIT $limit",
+        )
+        return run(query).map(::songOf)
+    }
 
     private fun filterOf(query: SongQuery): Pair<String, List<Any>>? = when (query.kind) {
         ListKind.SONGS -> "1" to emptyList()

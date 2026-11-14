@@ -17,4 +17,8 @@ object UserData {
     }
 
     fun folderRules(context: Context) = FolderRules(database(context))
+
+    fun favorites(context: Context) = Favorites(database(context))
+
+    fun plays(context: Context) = PlayStats(database(context))
 }

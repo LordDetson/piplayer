@@ -91,7 +91,12 @@ class SongMenu(
     val addToQueue: (Song) -> Unit = {},
     /** "Choose cover" and "Remove own cover" (docs/library.md §13.2). */
     val covers: CoverActions? = null,
+    /** "Add to favorites" or "Remove from favorites" (docs/library.md §15.2). */
+    val favorites: FavoriteActions? = null,
 )
+
+/** What the song menu does with favorites (docs/library.md §15.2): whether a song is one, and making it one or not. */
+class FavoriteActions(val isFavorite: suspend (Song) -> Boolean, val set: (Song, favorite: Boolean) -> Unit)
 
 /**
  * A song list without its state holder: the permission card, the list or its empty state. [header] comes before the
@@ -333,10 +338,12 @@ private fun SongMenuButton(song: Song, menu: SongMenu) {
     var open by remember { mutableStateOf(false) }
     var links by remember { mutableStateOf<SongLinks?>(null) }
     var ownCover by remember { mutableStateOf(false) }
+    var favorite by remember { mutableStateOf(false) }
     LaunchedEffect(open) {
         if (open) {
             links = menu.links(song)
             ownCover = menu.covers?.songHasOwn?.invoke(song) == true
+            favorite = menu.favorites?.isFavorite?.invoke(song) == true
         }
     }
     Box {
@@ -369,6 +376,13 @@ private fun SongMenuButton(song: Song, menu: SongMenu) {
                 DropdownMenuItem(text = { Text(stringResource(R.string.go_to_folder)) }, onClick = {
                     open = false
                     menu.openFolder(folder.volume, folder.relativePath)
+                })
+            }
+            menu.favorites?.let { favorites ->
+                val label = if (favorite) R.string.favorite_remove else R.string.favorite_add
+                DropdownMenuItem(text = { Text(stringResource(label)) }, onClick = {
+                    open = false
+                    favorites.set(song, !favorite)
                 })
             }
             menu.covers?.let { covers ->

@@ -937,11 +937,15 @@ made live in the user database.
   date, original date, track and disc numbers and totals, disc subtitle, compilation, label, catalog number, barcode,
   ISRC, MusicBrainz IDs, ReplayGain values.
 - `album`, `artist`, `track_artist(track_id, artist_id, role, position, join_phrase)`, `genre`, `track_genre`:
-  grouping by release MBID, otherwise normalized title + album artist + folder, plus the compilation flag, the
-  mirrored album favorite and the result of the album's thumbnail probe (§1).
+  grouping by release MBID, otherwise normalized title + album artist + folder, plus the compilation flag and the
+  result of the album's thumbnail probe (§1).
+- `track_mirror(file_id, favorite, play_count, last_played_at)` and `album_mirror(album_key)` (M2b): the mirrored user
+  fields of §10.3, a row only for a file whose identity is a favorite or has plays, and one per favorite album. They
+  sit beside `track_display` rather than in it, so that the writers of display rows (sync, tag pass, a new display
+  version) never carry user fields over (library.md §15.4).
 - `track_display(file_id, <merged values>, <normalized search columns>, missing_info_reasons,
-  missing_info_decision, favorite, play_count, last_played_at, badge_state)`: merged values (§7.1) and the mirrored
-  user fields, for lists, sorting, smart lists and search. It is keyed by file, because a file has a display row before
+  missing_info_decision, badge_state)`: merged values (§7.1), for lists, sorting, smart lists and search; lists join
+  `track_mirror` for the mirrored user fields. It is keyed by file, because a file has a display row before
   the tag pass has made a `track` row of it; CUE sheets will change that. The reasons are empty until the file is read,
   because the index fills albums with folder names. Search (M0 spike): one `search_text` column holds the
   title, artists, album, composer, genre and file name, each normalized like §4.1 and joined by spaces. Each field also
@@ -1003,10 +1007,12 @@ used, never through a stored content URI, which goes stale after a media index r
   copies live in no-backup app storage.
 - `saved_cover(id, release_mbid, path, width, height, bytes, hash, source)`: accepted covers; the image files live in
   no-backup app storage (§10).
-- `favorite(identity_id, added_at)`, `favorite_album(release_mbid, album_key, added_at)` (by release MBID when known,
-  otherwise by normalized title + album artist), `play_event(identity_id, started_at, listened_ms)` for the last
-  90 days, and `play_stats(identity_id, play_count, listened_ms, last_played_at)`, into which older events are
-  folded.
+- `favorite(identity_id, added_at)`, `favorite_album(album_key, release_mbid, added_at)` (by the library's album key:
+  the release MBID when known, then also stored as a blob, otherwise normalized title + album artist within the
+  folder), `album_member(album_key, identity_id)` (the identities seen on a referenced album, so that its favorite and
+  own cover follow its tracks to a new key, library.md §15.3), `play_event(identity_id, started_at, listened_ms)` for
+  the last 90 days, and `play_stats(identity_id, play_count, listened_ms, last_played_at)`, into which older events are
+  folded (M2b, version 4, library.md §15).
 - `playlist(id, name, created_at, updated_at)` and `playlist_entry(playlist_id, position, identity_id,
   hint_volume_name, hint_relative_path, hint_display_name, hint_duration_ms, hint_content_key, hint_recording_mbid)`;
   an entry plays the first available location of its identity.
@@ -1039,7 +1045,11 @@ used, never through a stored content URI, which goes stale after a media index r
 - Mirrored into the library database on every change and at start-up when the user database's change counter differs
   from the one the library database last mirrored: the merged values of decided fields, favorites (tracks and
   albums), play counts, last played times, the badge state and the Keep as-is/Skip state; the resolver recomputes the
-  missing-information reasons at the same time.
+  missing-information reasons at the same time. The folder rules have a counter of their own (`user_meta.rules_counter`,
+  library.md §3.1) that the sync follows, so that a favorite or a play does not make the sync apply the rules again;
+  `library_meta.mirrored_data_counter` keeps the change counter the mirror of favorites and plays last wrote
+  (library.md §15.4). Writes that change nothing mirrored (the listened time of a counted play, own covers, album
+  members, folding old play events) do not raise the counter.
 - A change that touches both files commits the user database first and the library database in its own transaction
   afterwards. If the process dies in between, the start-up mirror and the tag pass bring the library database up to
   date (§7.2 step 7).

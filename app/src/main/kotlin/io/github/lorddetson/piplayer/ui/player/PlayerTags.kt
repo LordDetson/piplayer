@@ -7,4 +7,5 @@ object PlayerTags {
     const val COVER = "cover"
     const val COVER_PLACEHOLDER = "cover_placeholder"
     const val SEEK_BAR = "seek_bar"
+    const val FAVORITE = "favorite"
 }

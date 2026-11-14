@@ -38,6 +38,11 @@ internal object PlaybackKeys {
     val refDuration = longPreferencesKey("ref_duration_ms")
     val libraryId = stringPreferencesKey("library_id")
     val queueRevision = longPreferencesKey("queue_revision")
+
+    // The current playback's progress toward a play (docs/playback.md §11.3).
+    val listened = longPreferencesKey("listened_ms")
+    val listenCounted = booleanPreferencesKey("listen_counted")
+    val listenStartedAt = longPreferencesKey("listen_started_at")
 }
 
 private val openItemsJson = Json {
@@ -76,6 +81,11 @@ internal fun MutablePreferences.putSnapshot(snapshot: PlaybackSnapshot) {
     }
     snapshot.libraryId?.let { this[PlaybackKeys.libraryId] = it }
     if (snapshot.queueRevision > 0) this[PlaybackKeys.queueRevision] = snapshot.queueRevision
+    snapshot.listen?.let { listen ->
+        this[PlaybackKeys.listened] = listen.listenedMs
+        this[PlaybackKeys.listenCounted] = listen.counted
+        this[PlaybackKeys.listenStartedAt] = listen.startedAt
+    }
 }
 
 /** The saved snapshot, or null when there is none or it cannot be understood. */
@@ -88,6 +98,7 @@ internal fun Preferences.toSnapshot(): PlaybackSnapshot? = when (this[PlaybackKe
     PlaybackSnapshot.SCHEMA_VERSION -> withOpenItems(queueRevision = (this[PlaybackKeys.queueRevision] ?: 0L).coerceAtLeast(0))?.copy(
         current = currentRef(),
         libraryId = this[PlaybackKeys.libraryId],
+        listen = listen(),
     )
     else -> null
 }
@@ -98,6 +109,13 @@ private fun Preferences.withOpenItems(queueRevision: Long = 0): PlaybackSnapshot
         runCatching { openItemsJson.decodeFromString<List<SavedOpenItem>>(value) }.getOrNull() ?: return null
     } ?: emptyList()
     return snapshot(queue = queue, openItems = openItems, queueRevision = queueRevision)
+}
+
+private fun Preferences.listen(): ListenProgress? {
+    val listened = this[PlaybackKeys.listened] ?: return null
+    val startedAt = this[PlaybackKeys.listenStartedAt] ?: return null
+    if (listened < 0) return null
+    return ListenProgress(listened, this[PlaybackKeys.listenCounted] ?: false, startedAt)
 }
 
 private fun Preferences.currentRef(): TrackRef? {

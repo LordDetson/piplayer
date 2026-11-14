@@ -235,4 +235,11 @@
     <string name="cover_not_read">The song\'s tags are still being read. Try again in a moment.</string>
     <string name="cover_no_image">The image could not be read</string>
     <string name="cover_failed">The cover could not be changed</string>
+    <!-- Favorites (docs/library.md §15.2). -->
+    <string name="favorite">Favorite</string>
+    <string name="favorite_add">Add to favorites</string>
+    <string name="favorite_remove">Remove from favorites</string>
+    <string name="favorites_filter">Favorites</string>
+    <string name="favorite_albums_none">No favorite albums</string>
+    <string name="favorite_failed">The favorite could not be changed</string>
 </resources>

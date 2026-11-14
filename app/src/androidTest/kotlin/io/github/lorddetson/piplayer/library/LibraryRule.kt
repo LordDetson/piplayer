@@ -44,7 +44,7 @@ class LibraryRule(private val index: () -> MediaIndex? = { null }) : ExternalRes
     }
 
     companion object {
-        /** No folder rules, no track identities and the default hidden files (docs/library.md §3.4, §3.5, §8). */
+        /** No folder rules, no track identities, favorites or plays, and the default hidden files (docs/library.md §3.4, §3.5, §8, §15). */
         suspend fun cleanUserData() {
             val context = TestFiles.targetContext
             val rules = UserData.folderRules(context)
@@ -53,6 +53,9 @@ class LibraryRule(private val index: () -> MediaIndex? = { null }) : ExternalRes
             // covers to its files, whose IDs, sizes and times come again.
             Covers.own(context).clear()
             Covers.clearCaches(context)
+            // Favorites and plays refer to identities too (docs/library.md §15).
+            UserData.favorites(context).clear()
+            UserData.plays(context).clear()
             UserData.database(context).identities().deleteAll()
             val settings = LibrarySettings(context)
             settings.setShowSystemSounds(false)

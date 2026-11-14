@@ -49,6 +49,10 @@ import io.github.lorddetson.piplayer.ui.covers.LibraryCover
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.Alignment
+import io.github.lorddetson.piplayer.ui.FavoriteChoices
+import io.github.lorddetson.piplayer.ui.player.FavoriteButton
+import io.github.lorddetson.piplayer.ui.player.FavoriteState
+import kotlinx.coroutines.launch
 
 /** A page's frame: the top bar with back, search and sort, and the mini player (docs/library.md §6.1). */
 @Composable
@@ -62,11 +66,13 @@ private fun PageScaffold(
     onSearching: (Boolean) -> Unit,
     sort: @Composable () -> Unit,
     menu: QueueMenu? = null,
+    actions: @Composable () -> Unit = {},
     content: @Composable (Modifier) -> Unit,
 ) {
     Scaffold(
         topBar = {
             LibraryTopBar(title, onBack, searching, search, onSearch, onSearching, sort) {
+                actions()
                 menu?.let { QueueMenuButton(stringResource(R.string.page_menu), it) }
             }
         },
@@ -91,6 +97,10 @@ fun AlbumPage(key: String, host: LibraryHost, onBack: () -> Unit) {
     }
     val state = header.state.collectAsStateWithLifecycle().value
     val album = (state as? GroupsState.Loaded)?.value
+    // The album's favorite toggle (docs/library.md §15.2), read from the user database itself.
+    val favorites = remember(app) { FavoriteChoices(app) }
+    val favorite by remember(key) { favorites.albumFlow(key) }.collectAsStateWithLifecycle(false)
+    val failed = stringResource(R.string.favorite_failed)
     PageScaffold(
         title = album?.title.orEmpty(),
         host = host,
@@ -101,6 +111,18 @@ fun AlbumPage(key: String, host: LibraryHost, onBack: () -> Unit) {
         onSearching = { open -> searching = open; if (!open) search = "" },
         sort = { SortButton(ListName.ALBUM_PAGE, songs.order.collectAsStateWithLifecycle().value, songs::setOrder) },
         menu = album?.let { albumMenu(host, key) },
+        actions = {
+            if (album != null) {
+                FavoriteButton(
+                    FavoriteState(favorite) {
+                        FavoriteChoices.scope.launch {
+                            if (favorites.setAlbum(key, !favorite) == FavoriteChoices.Result.FAILED) host.snackbar.showSnackbar(failed)
+                        }
+                    },
+                    Modifier.testTag(LibraryTags.ALBUM_FAVORITE),
+                )
+            }
+        },
     ) { modifier ->
         when {
             !access.granted -> PermissionCard(access.deniedForGood, access.request, access.openSettings, modifier)

@@ -27,6 +27,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -78,6 +80,9 @@ abstract class GroupsViewModel<T>(application: Application, val list: ListName?)
 
     protected abstract fun read(lists: LibraryLists, order: ListOrder, search: String): T
 
+    /** More that the list is read again for when it changes. */
+    protected open val inputs: kotlinx.coroutines.flow.Flow<Any?> = kotlinx.coroutines.flow.flowOf(Unit)
+
     fun setOrder(order: ListOrder) {
         mutableOrder.value = order
         val name = list ?: return
@@ -96,7 +101,9 @@ abstract class GroupsViewModel<T>(application: Application, val list: ListName?)
         val app = getApplication<Application>()
         watching = viewModelScope.launch {
             val typed = search.debounce { if (it.isEmpty()) 0L else SEARCH_PAUSE_MS }
-            combine(SongList.changes(app), mutableOrder, typed, again) { key, order, search, again -> listOf(key, order, search, again) }
+            combine(SongList.changes(app), mutableOrder, typed, again, inputs) { key, order, search, again, more ->
+                listOf(key, order, search, again, more)
+            }
                 .collectLatest { inputs ->
                     if (inputs == lastRead) return@collectLatest
                     val order = inputs[1] as ListOrder
@@ -125,8 +132,24 @@ abstract class GroupsViewModel<T>(application: Application, val list: ListName?)
 }
 
 class AlbumsViewModel(application: Application) : GroupsViewModel<List<AlbumGroup>>(application, ListName.ALBUMS) {
+
+    private val mutableFavoritesOnly = MutableStateFlow(false)
+
+    /** Whether the tab shows only favorite albums (docs/library.md §15.2); kept while the app runs, not saved. */
+    val favoritesOnly: StateFlow<Boolean> = mutableFavoritesOnly.asStateFlow()
+
+    fun setFavoritesOnly(on: Boolean) {
+        mutableFavoritesOnly.value = on
+    }
+
+    // The filter reads the mirror, so a run of the mirror reads it again while it is on.
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    override val inputs = mutableFavoritesOnly.flatMapLatest { on ->
+        if (on) Library.mirrorVersion(application).map { on to it } else kotlinx.coroutines.flow.flowOf(on to 0L)
+    }
+
     override fun read(lists: LibraryLists, order: ListOrder, search: String) =
-        lists.albums(AlbumSort.valueOf(order.field.uppercase()), order.reversed, search)
+        lists.albums(AlbumSort.valueOf(order.field.uppercase()), order.reversed, search, favoritesOnly = mutableFavoritesOnly.value)
 }
 
 class ArtistsViewModel(application: Application) : GroupsViewModel<List<ArtistGroup>>(application, ListName.ARTISTS) {

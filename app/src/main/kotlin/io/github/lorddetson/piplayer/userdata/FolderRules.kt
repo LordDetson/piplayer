@@ -13,11 +13,13 @@ class FolderRules(private val database: UserDatabase) {
     suspend fun set(volume: String, path: String, include: Boolean) = database.withWriteTransaction {
         dao.putFolderRule(volume, path, if (include) FolderRuleEntity.INCLUDE else FolderRuleEntity.EXCLUDE)
         dao.countChange()
+        dao.countRulesChange()
     }
 
     /** Lets the folder follow its parent again. */
     suspend fun remove(volume: String, path: String) = database.withWriteTransaction {
         dao.removeFolderRule(volume, path)
         dao.countChange()
+        dao.countRulesChange()
     }
 }

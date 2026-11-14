@@ -101,6 +101,60 @@ class UserDatabaseTest {
     }
 
     @Test
+    fun versionThreeMigratesToFourKeepingItsDataAndCopyingTheCounterIntoTheRulesCounter() = runBlocking<Unit> {
+        migrations.createDatabase(3).use { connection ->
+            connection.prepare(
+                "INSERT INTO track_identity (id, content_key, start_ms, duration_ms, created_at) VALUES (7, x'0102', 0, 1000, 1)",
+            ).use { it.step() }
+            connection.prepare("INSERT INTO album_cover (album_key, file_name, width, height, set_at) VALUES ('k', 'a.jpg', 1, 2, 3)")
+                .use { it.step() }
+            connection.prepare("INSERT INTO user_meta (id, change_counter) VALUES (1, 9)").use { it.step() }
+        }
+
+        // Checks the migrated schema against the committed app/schemas/.../4.json.
+        migrations.runMigrationsAndValidate(4).close()
+
+        val opened = UserDatabase.open(context, file.name)
+        try {
+            assertThat(opened.identities().identities().map { it.id }).containsExactly(7L)
+            assertThat(opened.covers().albumCover("k")?.fileName).isEqualTo("a.jpg")
+            assertThat(opened.user().changeCounter()).isEqualTo(9)
+            // The rules mirrored under counter 9 stay mirrored (docs/library.md §3.1).
+            assertThat(opened.user().rulesCounter()).isEqualTo(9)
+            val favorites = Favorites(opened) { 50 }
+            favorites.set(7, favorite = true)
+            favorites.setAlbum("mbid:0b8a3a2e-1111-4222-8333-444455556666", favorite = true)
+            PlayStats(opened).record(7, startedAt = 60, listenedMs = 70)
+            assertThat(opened.favorites().favorites()).containsExactly(FavoriteEntity(7, 50))
+            assertThat(opened.favorites().favoriteAlbums().single().releaseMbid)
+                .isEqualTo(io.github.lorddetson.piplayer.library.identity.Hex.mbidBytes("0b8a3a2e-1111-4222-8333-444455556666"))
+            assertThat(opened.plays().events()).containsExactly(PlayEventEntity(7, 60, 70))
+            assertThat(opened.user().identitiesHoldingData()).containsExactly(7L)
+        } finally {
+            opened.close()
+        }
+    }
+
+    @Test
+    fun favoritesAndPlaysRaiseTheChangeCounterButNotTheRulesCounter() = runBlocking<Unit> {
+        val dao = database.user()
+        val favorites = Favorites(database)
+
+        favorites.set(1, favorite = true)
+        favorites.setAlbum("album", favorite = true)
+        PlayStats(database).record(1, startedAt = 5, listenedMs = 6)
+        PlayStats(database).setListened(1, startedAt = 5, listenedMs = 60)
+
+        assertThat(dao.changeCounter()).isEqualTo(3)
+        assertThat(dao.rulesCounter()).isZero()
+        assertThat(database.plays().events().single().listenedMs).isEqualTo(60)
+
+        rules.set("external_primary", "Music/", include = true)
+        assertThat(dao.changeCounter()).isEqualTo(4)
+        assertThat(dao.rulesCounter()).isEqualTo(1)
+    }
+
+    @Test
     fun anIdentityKeepsItsBlobsAndOneKeyHasOneIdentity() = runBlocking<Unit> {
         val dao = database.identities()
         val key = ByteArray(32) { it.toByte() }
