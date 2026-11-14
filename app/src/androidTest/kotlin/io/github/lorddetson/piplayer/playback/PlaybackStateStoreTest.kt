@@ -7,10 +7,10 @@ import io.github.lorddetson.piplayer.library.identity.Place
 import io.github.lorddetson.piplayer.library.identity.TrackRef
 import java.io.File
 import java.util.UUID
+import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
@@ -131,7 +131,7 @@ class PlaybackStateStoreTest {
     }
 
     @Test
-    fun `every write reaches the collectors of the saved state`() {
+    fun `each awaited write reaches the collectors of the saved state`() {
         runBlocking {
             val seen = Channel<Long?>(Channel.UNLIMITED)
             val collecting = launch(Dispatchers.IO) { store.saved.collect { seen.send(it?.positionMs) } }

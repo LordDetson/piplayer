@@ -15,6 +15,7 @@ import io.github.lorddetson.piplayer.MainActivity
 import io.github.lorddetson.piplayer.R
 import io.github.lorddetson.piplayer.TestFiles
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.LONG_FIXTURE
+import io.github.lorddetson.piplayer.playback.PlaybackTesting.awaitState
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.connectController
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.eventually
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.expect
@@ -285,7 +286,7 @@ class PlaybackRestoreTest {
         try {
             val request = QueueRequest(startSongId = 2, startRow = 1)
             controller.tap(request, "Bravo")
-            controller.waitUntil("Bravo plays as the second of three") {
+            controller.awaitState("Bravo plays as the second of three") {
                 isPlaying && currentMediaItem?.mediaId == "2" && mediaItemCount == 3
             }
 
@@ -318,9 +319,9 @@ class PlaybackRestoreTest {
         val opened = insertAudio("open-with-shuffled.mp3")
         try {
             controller.tap(QueueRequest(startSongId = 1, startRow = 0), "Song 01")
-            controller.waitUntil("the queue plays") { isPlaying && mediaItemCount == 20 }
+            controller.awaitState("the queue plays") { isPlaying && mediaItemCount == 20 }
             onMain { controller.shuffleModeEnabled = true }
-            controller.waitUntil("shuffle is on") { shuffleModeEnabled }
+            controller.awaitState("shuffle is on") { shuffleModeEnabled }
             val before = onMain { shuffledIds() }
 
             val plays = controller.expect("the opened file plays", capture = { shuffledIds() }) {
@@ -362,7 +363,7 @@ class PlaybackRestoreTest {
                 controller.stop()
                 controller.clearMediaItems()
             }
-            controller.waitUntil("the player is empty") { mediaItemCount == 0 }
+            controller.awaitState("the player is empty") { mediaItemCount == 0 }
             val rebuilt = controller.expect("the saved opened file is rebuilt and plays") {
                 isPlaying && mediaItemCount == 1 && currentMediaItem?.mediaId == opened.toString()
             }

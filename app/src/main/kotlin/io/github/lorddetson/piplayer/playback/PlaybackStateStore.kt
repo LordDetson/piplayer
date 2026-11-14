@@ -136,8 +136,9 @@ class PlaybackStateStore internal constructor(
     fun readBlocking(): PlaybackSnapshot? = runBlocking { read() }
 
     /**
-     * The saved state each time a write changes it, starting with the one on disk. A test collects it to see a state
-     * that a later write replaces soon, such as the queue while a short song plays.
+     * The saved state as DataStore reports it, starting with the one on disk. A test collects it to see a state that a
+     * later write replaces soon, such as the queue while a short song plays. DataStore conflates its updates, so a slow
+     * collector may skip a state that the next write replaced within moments.
      */
     @VisibleForTesting
     val saved: Flow<PlaybackSnapshot?>

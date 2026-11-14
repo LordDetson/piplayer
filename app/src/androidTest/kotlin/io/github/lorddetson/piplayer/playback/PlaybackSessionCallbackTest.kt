@@ -28,6 +28,7 @@ import io.github.lorddetson.piplayer.library.songs.AudioPermission
 import io.github.lorddetson.piplayer.library.songs.SongList
 import io.github.lorddetson.piplayer.library.songs.SongSource
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.LONG_FIXTURE
+import io.github.lorddetson.piplayer.playback.PlaybackTesting.SAFETY_TIMEOUT
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.SHORT_FIXTURE
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.awaitState
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.eventually
@@ -369,7 +370,7 @@ class PlaybackSessionCallbackTest {
 
         val result = onMain {
             callback.onCustomCommand(session, piPlayer, PlaybackSessionCallback.RESTORE_COMMAND, Bundle.EMPTY, null)
-        }.get(10, TimeUnit.SECONDS)
+        }.get(SAFETY_TIMEOUT.inWholeMilliseconds, TimeUnit.MILLISECONDS)
 
         assertThat(result.resultCode).isEqualTo(SessionResult.RESULT_SUCCESS)
         assertThat(onMain { session.player.mediaItemCount }).isEqualTo(3)
@@ -387,7 +388,7 @@ class PlaybackSessionCallbackTest {
 
         onMain {
             callback.onCustomCommand(session, piPlayer, PlaybackSessionCallback.RESTORE_COMMAND, Bundle.EMPTY, null)
-        }.get(10, TimeUnit.SECONDS)
+        }.get(SAFETY_TIMEOUT.inWholeMilliseconds, TimeUnit.MILLISECONDS)
 
         assertThat(onMain { session.player.currentMediaItemIndex }).isEqualTo(1)
         player().awaitState("the fallback song is ready") { playbackState == Player.STATE_READY }
@@ -609,7 +610,7 @@ class PlaybackSessionCallbackTest {
                 openArgs(first, second),
                 null,
             )
-        }.get(15, TimeUnit.SECONDS)
+        }.get(SAFETY_TIMEOUT.inWholeMilliseconds, TimeUnit.MILLISECONDS)
 
         assertThat(result.resultCode).isEqualTo(SessionResult.RESULT_SUCCESS)
         assertThat(result.extras.getInt(PlaybackSessionCallback.EXTRA_SKIPPED, 0)).isZero()
@@ -640,7 +641,7 @@ class PlaybackSessionCallbackTest {
                 openArgs(first, second),
                 null,
             )
-        }.get(15, TimeUnit.SECONDS)
+        }.get(SAFETY_TIMEOUT.inWholeMilliseconds, TimeUnit.MILLISECONDS)
 
         assertThat(result.resultCode).isEqualTo(SessionResult.RESULT_SUCCESS)
         assertThat(onMain { session.player.mediaItemCount }).isEqualTo(2)

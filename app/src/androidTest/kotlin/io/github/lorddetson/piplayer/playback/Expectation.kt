@@ -100,8 +100,9 @@ class Expectation<P : Player, T> internal constructor(
 }
 
 /**
- * Every state [store] saves from the moment this is made, so that a test sees one that a later write replaces soon (the
- * queue while a short song plays, on a runner too slow to read the file in time). Close it after use.
+ * Every state [store] reports from the moment this is made, so that a test sees one that a later write replaces soon (the
+ * queue while a short song plays, on a runner too slow to read the file in time). DataStore conflates its updates, so a
+ * state replaced within moments may be skipped; a state that lasts as long as a song plays is not. Close it after use.
  */
 class SavedStates(store: PlaybackStateStore) : AutoCloseable {
 
@@ -110,7 +111,7 @@ class SavedStates(store: PlaybackStateStore) : AutoCloseable {
 
     init {
         scope.launch { store.saved.collect { state -> seen.update { it.orEmpty() + state } } }
-        // The state on disk comes first; after it, no write can be missed.
+        // The state on disk comes first; every state the store reports after it is kept.
         runBlocking {
             withTimeoutOrNull(SAFETY_TIMEOUT) { seen.first { it != null } }
                 ?: throw AssertionError("The saved state never came").also { close() }
