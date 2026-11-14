@@ -164,6 +164,37 @@ class MergedValuesTest {
         assertThat(merge().reasons).isNull()
     }
 
+    /** A file the tag pass tried and could not read, in the folder `Music/` (TI §1, docs/library.md §17.1). */
+    private fun failed(displayName: String, index: IndexValues) =
+        MergedValues.of(displayName, index, tags = null, read = false, relativePath = "Music/", failed = true)
+
+    @Test
+    fun `a file the tag pass could not read is judged by the index, its title equal to the display name from the file name`() {
+        val reasons = failed("track07.mp3", IndexValues(title = "track07", artist = "<unknown>", album = "Music")).reasons
+
+        // The index fills an album without a tag with the folder's name: that is no album.
+        assertThat(reasons).isEqualTo(
+            MergedValues.TITLE_FROM_FILE_NAME or MergedValues.NO_ARTIST or MergedValues.NO_ALBUM or MergedValues.NO_COVER or
+                MergedValues.NO_RECORDING_ID,
+        )
+    }
+
+    @Test
+    fun `a file the tag pass could not read keeps the index values that are there and lacks a cover and an ID`() {
+        val reasons = failed("01.mp3", IndexValues(title = "Song", artist = "Ann", album = "First")).reasons
+
+        assertThat(reasons).isEqualTo(MergedValues.NO_COVER or MergedValues.NO_RECORDING_ID)
+    }
+
+    @Test
+    fun `a file the tag pass could not read without an index title takes its title from the file name`() {
+        val reasons = failed("Ann - Song.mp3", IndexValues(album = "First")).reasons!!
+
+        assertThat(reasons and MergedValues.TITLE_FROM_FILE_NAME).isNotZero()
+        // The artist guessed from the file name is an artist, as for a read file.
+        assertThat(reasons and MergedValues.NO_ARTIST).isZero()
+    }
+
     @Test
     fun `a read file with everything has no reason except what is asked of it`() {
         val full = TrackTags.from(

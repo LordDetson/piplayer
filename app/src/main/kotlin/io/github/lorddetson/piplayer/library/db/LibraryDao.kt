@@ -229,6 +229,10 @@ interface LibraryDao {
     )
     suspend fun pendingDurations(unsafeCount: Int): List<PendingDuration>
 
+    /** The files of [volume] the tag pass tried and could not read, with the size and time they had then. */
+    @Query("SELECT id AS fileId, size, mtime FROM audio_file WHERE volume_name = :volume AND tag_failure IS NOT NULL AND tag_pass_at IS NULL")
+    suspend fun failedFilesIn(volume: String): List<FailedFileRow>
+
     @Query("UPDATE audio_file SET tag_failure = :failure, reader_version = :readerVersion WHERE id = :fileId")
     suspend fun markFailed(fileId: Long, failure: String, readerVersion: Int?)
 
@@ -596,6 +600,9 @@ data class FileState(
     val durationSource: String?,
 )
 
+/** A file the tag pass could not read, by the size and modification time it kept its failure for. */
+data class FailedFileRow(val fileId: Long, val size: Long, val mtime: Long)
+
 /** A read track as the display needs it; no raw tags, because a sync may read this for every file. */
 data class ReadFileRow(
     val fileId: Long,
@@ -644,6 +651,8 @@ data class IndexInputRow(
     val trackNumber: Int?,
     val volume: String,
     val relativePath: String,
+    /** Whether the tag pass tried the file and could not read it. */
+    val failed: Boolean,
 )
 
 /** A folder of a volume, as the media index gives its path. */
@@ -702,5 +711,6 @@ private const val READ_FILES = "SELECT t.file_id AS fileId, t.title, t.artist, t
 
 private const val INDEX_INPUTS = "SELECT f.id AS fileId, f.display_name AS displayName, e.title, e.artist, e.album, " +
     "e.composer, e.genre, e.duration_ms AS durationMs, f.duration_ms AS exactDurationMs, e.album_artist AS albumArtist, " +
-    "e.year, e.track_number AS trackNumber, f.volume_name AS volume, f.relative_path AS relativePath " +
+    "e.year, e.track_number AS trackNumber, f.volume_name AS volume, f.relative_path AS relativePath, " +
+    "f.tag_failure IS NOT NULL AS failed " +
     "FROM audio_file f LEFT JOIN media_index_entry e ON e.file_id = f.id"

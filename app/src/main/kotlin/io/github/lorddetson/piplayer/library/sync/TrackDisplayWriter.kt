@@ -31,6 +31,8 @@ internal class DisplayInput(
     private val exactDurationMs: Long? = read?.exactDurationMs,
     private val volume: String = "",
     private val relativePath: String = "",
+    /** The tag pass tried the file and could not read it (`tag_failure`); counts only while it is unread. */
+    private val failed: Boolean = false,
 ) {
     /** Normalizes, so not on a thread that playback or a list waits for; [forms] are shared by a batch. */
     fun resolve(forms: TextForms = TextForms()): DisplayValues = MergedValues.of(
@@ -44,6 +46,7 @@ internal class DisplayInput(
         volume = volume,
         relativePath = relativePath,
         forms = forms,
+        failed = read == null && failed,
     )
 }
 
@@ -82,6 +85,7 @@ class TrackDisplayWriter(private val database: LibraryDatabase) {
         exactDurationMs,
         volume = volume,
         relativePath = relativePath,
+        failed = failed,
     )
 
     companion object {

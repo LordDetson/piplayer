@@ -246,6 +246,8 @@ class TagPass(
                 states[item.file.fileId]?.let { it.size == item.file.size && it.mtime == item.file.mtime } == true
             }
             val read = current.filter { it.parsed != null }.map { it.file.fileId }
+            // A failure gives the file the reasons of its index values (docs/library.md §17.1).
+            val failed = current.filter { it.parsed == null && it.answer !is PassRead.Unavailable }.map { it.file.fileId }
             database.withWriteTransaction {
                 for (item in current) {
                     if (item.parsed != null) {
@@ -254,7 +256,7 @@ class TagPass(
                         fail(item, states)
                     }
                 }
-                val inputs = displays.inputsOf(read)
+                val inputs = displays.inputsOf(read + failed)
                 with(TrackDisplayWriter) { write(inputs.map { it.fileId }, TextForms().let { forms -> inputs.map { it.resolve(forms) } }) }
             }
             read.chunked(CHUNK).flatMap { dao.songRowsOf(it) }

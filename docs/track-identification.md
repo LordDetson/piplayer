@@ -114,7 +114,10 @@ in PiPlayer's database by default, and optionally into the file's tags with undo
   on by default, cover and MusicBrainz ID off), each row with its reasons, and the list as a queue request. Decision: **No
   cover** in M2b means no embedded cover and no own cover of the track or its album; the album thumbnail probe comes
   with the batch over the list (M4a), and until then the cover reason is off by default, since a folder image counts as no
-  cover. Keep as-is, Skip and `missing_info_decision` come with M3 and M4a.
+  cover. Keep as-is, Skip and `missing_info_decision` come with M3 and M4a. Decision: a file the tag pass has not tried
+  yet has no reasons and is not listed; a file it tried and could not read keeps the index's values for good, and its
+  reasons come from them, with the level 4 title rule above, an index album equal to the folder's name counted as no
+  album, and no cover and no MusicBrainz ID (library.md §17.1).
 
 ## 2. User stories
 

@@ -277,6 +277,8 @@ class LibrarySync(
         val rows = changes.updated.map { it.row } + changes.added
         // A file stored again keeps what the pass read of it, unless its size or modification time changed.
         val reads = if (changes.updated.isEmpty()) emptyMap() else dao.readFilesIn(volume).associateBy { it.fileId }
+        // So does a file the pass could not read keep its failure, and the reasons judged from it (docs/library.md §17.1).
+        val failed = if (changes.updated.isEmpty()) emptyMap() else dao.failedFilesIn(volume).associateBy { it.fileId }
         val changedFiles = changes.updated.filter { update ->
             reads[update.fileId]?.let { !it.holdsFor(update.row) } == true
         }.map { it.fileId }
@@ -284,20 +286,22 @@ class LibrarySync(
             reads[update.fileId]?.let { it.holdsFor(update.row) && it.relativePath != update.row.relativePath } == true
         }.map { it.fileId }
         val inputs = changes.updated.map { update ->
-            input(update.fileId, update.row, reads[update.fileId]?.takeIf { it.holdsFor(update.row) })
+            val stillFailed = failed[update.fileId]?.let { it.size == update.row.size && it.mtime == update.row.modifiedSeconds } == true
+            input(update.fileId, update.row, reads[update.fileId]?.takeIf { it.holdsFor(update.row) }, stillFailed)
         } + changes.added.map { input(fileId = 0, it, read = null) }
         return VolumePlan(state, stateChanged = state != stored, changes, rows, inputs, changedFiles, movedFiles)
     }
 
     private fun ReadFileRow.holdsFor(row: IndexRow) = size == row.size && mtime == row.modifiedSeconds
 
-    private fun input(fileId: Long, row: IndexRow, read: ReadFileRow?) = DisplayInput(
+    private fun input(fileId: Long, row: IndexRow, read: ReadFileRow?, failed: Boolean = false) = DisplayInput(
         fileId,
         row.displayName,
         IndexValues(row.title, row.artist, row.album, row.composer, row.genre, row.durationMs, row.albumArtist, row.year, row.trackNumber),
         read,
         volume = row.volume,
         relativePath = row.relativePath,
+        failed = failed,
     )
 
     /** Updated files keep their row IDs and added ones take the next free IDs; each table is written in bulk. */

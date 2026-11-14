@@ -9,6 +9,7 @@ import io.github.lorddetson.piplayer.library.FakeMediaIndex.Companion.row
 import io.github.lorddetson.piplayer.library.FakeRules
 import io.github.lorddetson.piplayer.library.db.LibraryDatabase
 import io.github.lorddetson.piplayer.library.db.SongRow
+import io.github.lorddetson.piplayer.library.lists.MissingReasons
 import io.github.lorddetson.piplayer.library.rules.FolderRule
 import io.github.lorddetson.piplayer.library.sync.LibrarySync
 import io.github.lorddetson.piplayer.library.sync.MediaKinds
@@ -212,6 +213,38 @@ class TagPassTest {
         sync.sync()
         pass().run()
         assertThat(reader.reads.get()).isEqualTo(1)
+    }
+
+    /**
+     * A file the pass could not read gets the reasons of Songs missing information from the index's values (TI §1,
+     * docs/library.md §17.1), and keeps them through a sync that renames it; a file not yet tried has none.
+     */
+    @Test
+    fun aFileThePassCouldNotReadGetsTheReasonsOfItsIndexValues() = runBlocking<Unit> {
+        index.volume().rows = listOf(
+            row(1, title = "track07", name = "track07.mp3", artist = null, album = "Music"),
+            row(2, title = "Song", name = "02.mp3", artist = "Ann", album = "First"),
+            row(3, title = "Third", name = "03.mp3"),
+        )
+        sync.sync()
+        reader.answers[1] = PassRead.Replied(TagReport(error = TagReadError.NATIVE_ERROR))
+        reader.answers[2] = PassRead.Crashed
+        assertThat(display(1).missingInfoReasons).isNull()
+
+        pass().run()
+
+        assertThat(display(1).missingInfoReasons).isEqualTo(MissingReasons.ALL)
+        assertThat(display(1).title).isEqualTo("track07")
+        assertThat(display(2).missingInfoReasons).isEqualTo(MissingReasons.COVER or MissingReasons.RECORDING_ID)
+        assertThat(display(3).missingInfoReasons).isNotNull()
+
+        // Renamed, same size and time: the failure stands, and so do the reasons.
+        val renamed = row(1, title = "track07", name = "track 07.mp3", artist = null, album = "Music", generation = 9)
+        index.volume().rows = listOf(renamed) + index.volume().rows.drop(1)
+        sync.sync()
+        assertThat(files().getValue(1).tagFailure).isEqualTo("read")
+        assertThat(display(1).missingInfoReasons).isEqualTo(MissingReasons.ARTIST or MissingReasons.ALBUM or
+            MissingReasons.COVER or MissingReasons.RECORDING_ID)
     }
 
     @Test

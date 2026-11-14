@@ -38,7 +38,8 @@ object MergedValues {
     /**
      * [read] says the tag pass has read the file (`tag_pass_at` is set): from then on the index no longer fills empty
      * tags, only the file name does. The length is not one of those values: TagLib's is an estimate for a VBR MP3 without
-     * a header, so it comes last (TI §3.5).
+     * a header, so it comes last (TI §3.5). [failed] says the tag pass tried an unread file and could not read it
+     * (`tag_failure` is set): its reasons come from the index's values (TI §1, docs/library.md §17.1).
      */
     fun of(
         displayName: String,
@@ -52,6 +53,7 @@ object MergedValues {
         volume: String = "",
         relativePath: String = "",
         forms: TextForms = TextForms(),
+        failed: Boolean = false,
     ): DisplayValues {
         val tagValues = tags.takeIf { read }
         val indexValues = index.takeIf { !read }
@@ -114,20 +116,33 @@ object MergedValues {
                 (tagValues?.genres?.joinToString(" ") ?: indexValues?.genre.present())?.let(forms::shared),
                 fileForm,
             ),
-            // Unknown until read: the index fills albums with folder names (docs/playback.md §2.2).
-            reasons = if (!read) {
-                null
-            } else {
-                var reasons = 0
-                if (titleFromLevels == null) reasons = reasons or TITLE_FROM_FILE_NAME
-                if (artist == null) reasons = reasons or NO_ARTIST
-                if (album == null) reasons = reasons or NO_ALBUM
-                if (!embeddedCover) reasons = reasons or NO_COVER
-                if (tags?.recordingMbid == null) reasons = reasons or NO_RECORDING_ID
-                reasons
+            // Unknown until read, as the tag pass soon does: the index fills albums with folder names (docs/playback.md
+            // §2.2). A file the pass could not read keeps the index's values, so they are judged (docs/library.md §17.1).
+            reasons = when {
+                read -> {
+                    var reasons = 0
+                    if (titleFromLevels == null) reasons = reasons or TITLE_FROM_FILE_NAME
+                    if (artist == null) reasons = reasons or NO_ARTIST
+                    if (album == null) reasons = reasons or NO_ALBUM
+                    if (!embeddedCover) reasons = reasons or NO_COVER
+                    if (tags?.recordingMbid == null) reasons = reasons or NO_RECORDING_ID
+                    reasons
+                }
+                failed -> {
+                    // No picture and no MusicBrainz ID are known of a file none of whose tags were read.
+                    var reasons = NO_COVER or NO_RECORDING_ID
+                    if (titleFromLevels == null || titleFromLevels == fileName) reasons = reasons or TITLE_FROM_FILE_NAME
+                    if (artist == null) reasons = reasons or NO_ARTIST
+                    if (album == null || album == folderName(relativePath)) reasons = reasons or NO_ALBUM
+                    reasons
+                }
+                else -> null
             },
         )
     }
+
+    /** The name of the folder [relativePath] ends in, which the index gives a file without an album tag as its album. */
+    private fun folderName(relativePath: String): String? = relativePath.trimEnd('/').substringAfterLast('/').ifEmpty { null }
 
     private val fourDigits = Regex("""^\d{4}""")
 

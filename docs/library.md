@@ -1573,9 +1573,19 @@ Every smart list is a list of the library: it holds visible songs only (§3.5), 
   counts, here or in Recently played.
 - The three lists of 100 have their own order, the sort `position` (§6.4); "Reverse order" reverses the same 100 songs, it
   does not pick the oldest or the least played. Their order is kept for each list on its own.
-- **Songs missing information**: the songs the tag pass has read whose reasons (TI §1, stored in
-  `track_display.missing_info_reasons`) hold one of the reasons chosen on the page. Unread files have no reasons yet and are
-  not listed. It has the orders of the Songs tab, kept for it alone, and the page's search.
+- **Songs missing information**: the songs whose reasons (TI §1, stored in `track_display.missing_info_reasons`) hold one
+  of the reasons chosen on the page. It has the orders of the Songs tab, kept for it alone, and the page's search.
+    - The tag pass's read decides the reasons. A file the pass has not tried yet has none and is not listed: the pass
+      reads it soon, and until then the index fills an album without a tag with its folder's name.
+    - Decision: a file the pass tried and could not read (`tag_failure` set and `tag_pass_at` not: TagLib does not know
+      the format, the read failed or crashed, the file is marked unsafe) keeps the index's values for good, so its reasons
+      come from them: "Title from the file name" when the index has no title or its title equals the display name without
+      the extension (the level 4 case of TI §1), "No artist" when neither the index nor the file name gives one, "No album"
+      when the index has none or gives the name of the file's folder, which is what it fills in for a file without an
+      album tag, and always "No cover" and "No MusicBrainz ID", since no tag was read. The tag pass writes these reasons
+      with the failure, and a sync that stores the file again with the same size and modification time keeps them; a
+      later successful read replaces them. An album named like its folder is counted as missing on such a file; that is
+      the price of judging a file whose tags cannot be read, and identification (M3) settles it.
     - Decision: the page has one filter chip per reason: "Title from the file name", "No artist", "No album", "No cover" and
       "No MusicBrainz ID". The first three are on by default; "No cover" and "No MusicBrainz ID" are off by default, as TI
       says of the MusicBrainz reason. A song is listed when it has at least one reason that is on. The choice lasts while
@@ -1656,5 +1666,6 @@ Instrumented tests on the API 30 emulator:
 - Through the service: a request of each list plays it from the tapped song, and a saved queue of a smart list comes back
   from its request after the process died; a queue of Recently played and of Most played whose current song is counted
   again before the process dies comes back with the order of the tap.
+- The tag pass gives a file it could not read the reasons of its index values, and a sync that renames it keeps them.
 - On the screen: the smart lists at the top of the Playlists tab with their numbers, a number that follows a new favorite;
   a page that plays from a row, "Play" and "Shuffle"; the chips of Songs missing information and the reasons of its rows.
