@@ -87,6 +87,38 @@ class DetailsStatesTest {
     }
 
     @Test
+    fun aFailedReadWhenTheScreenIsShownAgainKeepsTheDetailsShownBeforeAndTheNextChangeReadsAgain() = runTest {
+        val changes = MutableSharedFlow<Unit>()
+        var reads = 0
+        val errors = mutableListOf<Exception>()
+        // Each watch reads once when it starts, then on each change.
+        val firstAndChanges = flow {
+            emit(Unit)
+            changes.collect { emit(it) }
+        }
+        val state = DetailsStates.of(backgroundScope, firstAndChanges, once = false, onError = { errors += it }) {
+            reads++
+            if (reads == 2) throw IOException("user.db is busy")
+            DetailsState.Found(details("Read $reads"))
+        }
+
+        val shown = watch(state)
+        runCurrent()
+        assertThat(state.value).isEqualTo(DetailsState.Found(details("Read 1")))
+        shown.cancel()
+        // Home, and back after the stop timeout: the first read of the new watch fails.
+        advanceTimeBy(DetailsStates.STOP_TIMEOUT_MS * 2)
+        watch(state)
+        runCurrent()
+        assertThat(errors).hasSize(1)
+        assertThat(state.value).isEqualTo(DetailsState.Found(details("Read 1")))
+        changes.emit(Unit)
+        runCurrent()
+
+        assertThat(state.value).isEqualTo(DetailsState.Found(details("Read 3")))
+    }
+
+    @Test
     fun aFirstReadThatFailsSaysSoRatherThanThatTheSongIsGoneAndTheNextChangeReadsAgain() = runTest {
         val changes = MutableSharedFlow<Unit>()
         var reads = 0

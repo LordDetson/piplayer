@@ -1726,6 +1726,8 @@ are in playback.md §9.1. The owner left the open choices to the recommendations
   screen keeps the values it shows, or says "The details could not be read" when it shows none yet, and the next change
   reads again. The reads of a song of the library stop five seconds after the screen is no longer shown and start again
   when it comes back, so that it does not follow the library in the background; an opened file is read once (§18.5).
+  The values kept on a failed read are the last ones the screen showed, also when the read is the first one after the
+  screen comes back.
 - M3 adds the source of each value and a per-field revert (TI §7.1): each row is a field with a value, kept apart from
   its label and its format, so that a source can be added to it later. Nothing of that is built in M2b.
 

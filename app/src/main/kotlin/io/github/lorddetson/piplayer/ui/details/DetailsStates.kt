@@ -2,6 +2,7 @@ package io.github.lorddetson.piplayer.ui.details
 
 import androidx.compose.ui.graphics.ImageBitmap
 import io.github.lorddetson.piplayer.library.details.TrackDetails
+import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -35,7 +36,8 @@ object DetailsStates {
      * The states of the details read by [read] on each of [changes], in [scope]. [once] reads a single time for the life
      * of [scope] (a file opened from another app, whose read costs a `:tagger` call); otherwise the reads stop shortly
      * after the screen stops watching and start again when it is shown. A read that throws goes to [onError] and keeps
-     * the details shown, or says that they could not be read when none are, and the next change reads again.
+     * the details shown, also when it is the first read after the screen is shown again, or says that they could not be
+     * read when none are, and the next change reads again.
      */
     fun of(
         scope: CoroutineScope,
@@ -44,8 +46,9 @@ object DetailsStates {
         onError: (Exception) -> Unit = {},
         read: suspend () -> DetailsState.Found?,
     ): StateFlow<DetailsState> {
+        // Outlives each watch, so that a failed first read after the screen is shown again keeps what it showed before.
+        val shown = AtomicReference<DetailsState.Found?>(null)
         val states = flow {
-            var shown: DetailsState.Found? = null
             changes
                 .mapLatest {
                     try {
@@ -58,8 +61,8 @@ object DetailsStates {
                     }
                 }
                 .collect { state ->
-                    if (state != null) shown = state as? DetailsState.Found
-                    emit(state ?: shown ?: DetailsState.Failed)
+                    if (state != null) shown.set(state as? DetailsState.Found)
+                    emit(state ?: shown.get() ?: DetailsState.Failed)
                 }
         }
         val started = if (once) SharingStarted.Lazily else SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS)
