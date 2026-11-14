@@ -12,6 +12,7 @@ import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeUp
@@ -114,7 +115,12 @@ class LibraryTabsScreenTest {
         compose.onAllNodes(matcher)[0].performClick()
     }
 
-    private fun tab(id: Int) = tap(hasText(text(id)) and hasAnyAncestor(hasTestTag(LibraryTags.TABS)))
+    // The tab row scrolls: Folders, the last of six tabs, may be out of sight (docs/library.md §19.2).
+    private fun tab(id: Int) {
+        val matcher = hasText(text(id)) and hasAnyAncestor(hasTestTag(LibraryTags.TABS))
+        waitFor(matcher)
+        compose.onAllNodes(matcher)[0].performScrollTo().performClick()
+    }
 
     /** The file IDs the library gave the songs of these media index IDs, which the test chose. */
     private fun fileIds(vararg mediaStoreIds: Long): List<Long> {

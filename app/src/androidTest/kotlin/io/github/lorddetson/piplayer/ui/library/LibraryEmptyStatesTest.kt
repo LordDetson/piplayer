@@ -8,6 +8,7 @@ import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.github.lorddetson.piplayer.MainActivity
 import io.github.lorddetson.piplayer.R
@@ -38,7 +39,7 @@ class LibraryEmptyStatesTest {
     private fun tab(id: Int) {
         val matcher = hasText(text(id)) and hasAnyAncestor(hasTestTag(LibraryTags.TABS))
         waitFor(matcher)
-        compose.onNode(matcher).performClick()
+        compose.onNode(matcher).performScrollTo().performClick()
     }
 
     @Test

@@ -1909,7 +1909,9 @@ smart lists (§17) in the controller tree (playback.md §10). The owner left the
 - The library database's version goes to 12 (a rebuild with a new first sync, as every version does, §1.1).
 - The first sync writes one `display_genre` row per genre of a file and, in an empty library, builds the index on
   `genre_key` after the rows, with the indexes of `audio_file`, `track_display` and `display_artist` (§1.3). The limits of
-  §1.7 do not change.
+  §1.7 do not change. Decision: the generated library (§1.6) keeps its one genre per file in PIM-64, so that the release
+  check's timings stay comparable with the earlier ones; a file of several genres costs one row more per genre, which the
+  first sync writes in the chunks of `display_artist`.
 - The Genres list is one grouping query over `display_genre` joined to `track_display` and `audio_file` by their keys;
   the number of "Unknown genre" one count of the visible display rows without a `display_genre` row. A genre's songs are
   the visible display rows whose file has a row of its key (by the index on `genre_key`).
