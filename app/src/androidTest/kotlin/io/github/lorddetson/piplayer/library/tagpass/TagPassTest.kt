@@ -725,6 +725,39 @@ class TagPassTest {
         assertThat(dao.genres().map { it.name }).containsExactly("Рок")
     }
 
+    /** The genres lists group by follow the text decoded again, as the tag pass's own genres do (docs/library.md §19.1). */
+    @Test
+    fun displayGenresFollowTheTextDecodedAgain() = runBlocking<Unit> {
+        index.volume().rows = listOf(row(1, path = "Music/A/", genre = "Index genre"))
+        sync.sync()
+        assertThat(dao.allDisplayGenres().map { it.name }).containsExactly("Index genre")
+        reader.answers[1] = tagged("TITLE" to markedCp1251("Кино"), "GENRE" to markedCp1251("Рок"))
+        pass().run()
+        assertThat(dao.allDisplayGenres().map { it.name }).containsExactly("Рок")
+
+        manual = encoding("koi8-r")
+        redecode()
+
+        val misread = misread("Рок", "windows-1251", "KOI8-R")
+        assertThat(dao.allDisplayGenres().map { it.name to it.genreKey })
+            .containsExactly(misread to io.github.lorddetson.piplayer.library.lists.GenreKeys.of(misread))
+    }
+
+    /** After the read the tags' genres replace the index's, and a file whose tags hold none has none (§19.1). */
+    @Test
+    fun theTagPassReplacesTheIndexsGenresByTheTags() = runBlocking<Unit> {
+        index.volume().rows = listOf(row(1, path = "Music/A/", genre = "Index genre"), row(2, path = "Music/A/", genre = "Index genre"))
+        sync.sync()
+        reader.answers[1] = tagged("TITLE" to "One", "GENRE" to "Jazz; Blues")
+        reader.answers[2] = tagged("TITLE" to "Two")
+
+        pass().run()
+
+        val byFile = dao.allDisplayGenres().groupBy({ it.fileId }) { it.name }
+        assertThat(byFile.getValue(files().getValue(1).id)).containsExactly("Jazz", "Blues")
+        assertThat(byFile[files().getValue(2).id]).isNull()
+    }
+
     @Test
     fun aChoiceMadeWhileARunReadsAppliesToTheFilesItHasStoredBeforeItsNextFile() = runBlocking<Unit> {
         library(1, 2, 3, 4)

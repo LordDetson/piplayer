@@ -74,4 +74,14 @@ class DisplayValuesTest {
         assertThat(DisplayValues.of(row(durationMs = 0)).durationMs).isNull()
         assertThat(DisplayValues.of(row(durationMs = -1)).durationMs).isNull()
     }
+
+    @Test
+    fun `an index row carries its genres split, trimmed and without placeholders, and its search text keeps them`() {
+        val values = DisplayValues.of(row(genre = "Rock ; <unknown>;Hip-Hop/Rap;;"))
+
+        assertThat(values.genres).containsExactly("Rock", "Hip-Hop/Rap")
+        assertThat(values.displayGenres.map { it.key }).containsExactly("rock", "hip hop rap")
+        assertThat(values.searchText).contains("rock")
+        assertThat(DisplayValues.of(row(genre = null)).genres).isEmpty()
+    }
 }

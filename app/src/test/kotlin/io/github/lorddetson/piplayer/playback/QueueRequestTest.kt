@@ -2,6 +2,7 @@ package io.github.lorddetson.piplayer.playback
 
 import io.github.lorddetson.piplayer.library.db.FolderKey
 import io.github.lorddetson.piplayer.library.lists.ArtistLink
+import io.github.lorddetson.piplayer.library.lists.GenreKeys
 import io.github.lorddetson.piplayer.library.lists.ListKind
 import io.github.lorddetson.piplayer.library.lists.MissingReasons
 import io.github.lorddetson.piplayer.library.lists.SongLinks
@@ -218,5 +219,34 @@ class QueueRequestTest {
         assertThat(QueueRequest.rekeyed(album, keyExists = false, links = links.copy(albumKey = null))).isEqualTo(album)
         assertThat(QueueRequest.rekeyed(folder, keyExists = false, links = links)).isEqualTo(folder)
         assertThat(QueueRequest.rekeyed(QueueRequest(7, 3), keyExists = false, links = links)).isEqualTo(QueueRequest(7, 3))
+    }
+
+    @Test
+    fun `a genre is named by its key and plays by artist by default`() {
+        assertThat(SongQuery.genre("rock").sort).isEqualTo(SongSort.ARTIST)
+        assertThat(ListKind.GENRE.token).isEqualTo("genre")
+        assertThat(ListKind.GENRE.keyed).isTrue()
+        assertThat(ListKind.GENRE.smart).isFalse()
+        val keys = listOf("rock", "hip hop", "электроника", "!", "<>", "a&b=c#d/e!f%g+h?i", "🎵", GenreKeys.NONE)
+        for (key in keys) {
+            val request = QueueRequest(9, 4, SongQuery.genre(key).copy(sort = SongSort.LENGTH, reversed = true, search = "x y"))
+            assertThat(QueueRequest.parse(request.mediaId)).describedAs(request.mediaId).isEqualTo(request)
+        }
+        assertThat(QueueRequest(1, 0, SongQuery.genre(GenreKeys.NONE)).mediaId).startsWith("q2/genre?key=%21none&sort=artist&")
+        // A genre always has a key.
+        assertThat(QueueRequest.parse("q2/genre?key=&sort=artist&rev=0&q=&start=1&index=0")).isNull()
+    }
+
+    @Test
+    fun `a saved genre whose key names nothing any more follows the saved song to its first genre or to none`() {
+        val genre = QueueRequest(7, 3, SongQuery.genre("old genre").copy(sort = SongSort.TITLE))
+
+        assertThat(QueueRequest.rekeyed(genre, keyExists = false, links = links, genreKeys = listOf("jazz", "rock")))
+            .isEqualTo(genre.copy(list = genre.list.copy(key = "jazz")))
+        assertThat(QueueRequest.rekeyed(genre, keyExists = false, links = links, genreKeys = emptyList()))
+            .isEqualTo(genre.copy(list = genre.list.copy(key = GenreKeys.NONE)))
+        assertThat(QueueRequest.rekeyed(genre, keyExists = true, links = links, genreKeys = listOf("jazz"))).isEqualTo(genre)
+        // A song that is gone has nothing to follow.
+        assertThat(QueueRequest.rekeyed(genre, keyExists = false, links = null, genreKeys = emptyList())).isEqualTo(genre)
     }
 }

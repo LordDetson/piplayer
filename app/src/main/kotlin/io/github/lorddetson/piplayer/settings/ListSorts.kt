@@ -19,6 +19,10 @@ enum class ListName(val id: String, val fields: List<String>, val offersGrid: Bo
     ALBUM_PAGE("album_page", listOf("track")),
     ARTIST_PAGE("artist_page", listOf("year", "title")),
 
+    /** The Genres tab and the genre pages (docs/library.md §19.2, §19.3). */
+    GENRES("genres", listOf("name", "songs")),
+    GENRE_PAGE("genre_page", listOf("artist", "title", "album", "length")),
+
     /** The smart lists (docs/library.md §17.1), each with its own order; the three lists of 100 in their own order only. */
     FAVORITES("favorites", listOf("title", "artist", "album", "length")),
     RECENTLY_ADDED("recently_added", listOf("position")),
@@ -70,15 +74,17 @@ class ListSorts(context: Context) {
         }
     }
 
-    private fun orderOf(preferences: Preferences, list: ListName): ListOrder {
-        // A field a later version no longer offers falls back to the default.
-        val field = preferences[fieldKey(list)]?.takeIf { it in list.fields } ?: list.defaultField
-        return ListOrder(field, preferences[reversedKey(list)] ?: false)
+    companion object {
+        /** The order of [list] in [preferences]; a field a later version no longer offers falls back to the default. */
+        internal fun orderOf(preferences: Preferences, list: ListName): ListOrder {
+            val field = preferences[fieldKey(list)]?.takeIf { it in list.fields } ?: list.defaultField
+            return ListOrder(field, preferences[reversedKey(list)] ?: false)
+        }
+
+        internal fun fieldKey(list: ListName) = stringPreferencesKey("sort_${list.id}")
+
+        internal fun reversedKey(list: ListName) = booleanPreferencesKey("sort_${list.id}_reversed")
+
+        private fun gridKey(list: ListName) = booleanPreferencesKey("grid_${list.id}")
     }
-
-    private fun fieldKey(list: ListName) = stringPreferencesKey("sort_${list.id}")
-
-    private fun reversedKey(list: ListName) = booleanPreferencesKey("sort_${list.id}_reversed")
-
-    private fun gridKey(list: ListName) = booleanPreferencesKey("grid_${list.id}")
 }

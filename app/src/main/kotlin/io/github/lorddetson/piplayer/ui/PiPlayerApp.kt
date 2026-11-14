@@ -14,6 +14,7 @@ import io.github.lorddetson.piplayer.ui.player.FavoriteState
 import io.github.lorddetson.piplayer.ui.songs.FavoriteActions
 import io.github.lorddetson.piplayer.ui.library.ArtistPage
 import io.github.lorddetson.piplayer.ui.library.FolderPage
+import io.github.lorddetson.piplayer.ui.library.GenrePage
 import io.github.lorddetson.piplayer.ui.library.LibraryHost
 import io.github.lorddetson.piplayer.ui.library.LibraryScreen
 import io.github.lorddetson.piplayer.library.lists.ListKind
@@ -127,6 +128,10 @@ data class LibraryFolderRoute(val volume: String, val relativePath: String) : Na
 /** A playlist's page, found by its ID (docs/library.md §16.3). */
 @Serializable
 data class PlaylistRoute(val id: Long) : NavKey
+
+/** A genre page, found by its genre key, `!none` for the songs without one (docs/library.md §19.4). */
+@Serializable
+data class GenreRoute(val key: String) : NavKey
 
 /** A smart list's page, found by the token of its list kind (docs/library.md §17.2). */
 @Serializable
@@ -250,6 +255,7 @@ fun PiPlayerApp(viewModel: PlayerViewModel = viewModel()) {
         openFolder = menu.openFolder,
         covers = covers,
         playlists = playlists,
+        openGenre = { open(GenreRoute(it)) },
     )
     // What the artist and the album on Now Playing open (docs/library.md §6.1).
     var playingLinks by remember { mutableStateOf<SongLinks?>(null) }
@@ -280,6 +286,7 @@ fun PiPlayerApp(viewModel: PlayerViewModel = viewModel()) {
                 FolderPage(route.volume, route.relativePath, host, onBack = { close() })
             }
             entry<PlaylistRoute>(metadata = FROM_THE_SIDE) { route -> PlaylistPage(route.id, host, playlists, onBack = { close() }) }
+            entry<GenreRoute>(metadata = FROM_THE_SIDE) { route -> GenrePage(route.key, host, onBack = { close() }) }
             entry<SmartListRoute>(metadata = FROM_THE_SIDE) { route ->
                 ListKind.of(route.kind)?.takeIf { it.smart }?.let { SmartListPage(it, host, onBack = { close() }) }
             }

@@ -182,7 +182,7 @@ is heard as a click. The becoming-noisy broadcast is protected, so emulator test
   The UI never builds thousands of media items. M1 had one form, `q1/songs?sort=title&start=<ID>&index=<row>`, which is
   still read; since M2a step 6 a request names any list of the library with its sort, reverse and search
   (`q2/...`, library.md §6.4); since M2b also a playlist (library.md §16.4) and each smart list (library.md §17.3), whose
-  songs the service reads anew for every request. Recently played and Most played, which their own plays reorder, become
+  songs the service reads anew for every request, and a genre (library.md §19.4). Recently played and Most played, which their own plays reorder, become
   a queue of added entries at once (§9.4), so that a restore keeps the order of the tap.
 - The playback service expands the request in `onSetMediaItems`, on a background thread: it takes the shared list of
   the request's list (or reads it, if the service runs without the screen or no longer keeps it), builds one media item per song (media ID, content URI, title,
@@ -994,7 +994,9 @@ By hand on the phone: one of the owner's albums (MP3 with a LAME tag) with the s
   an album, artist and folder page. An album adds its songs by disc and track, an artist and a folder (with all its
   subfolders, as "Play all, with subfolders") in the sort kept for that kind of list (library.md §6.3), without the
   page's search. Since M2b these menus also have "Add to playlist" right after "Add to queue", and playlist rows and
-  pages have "Play next" and "Add to queue" for the playlist's available entries in order (library.md §16.3).
+  pages have "Play next" and "Add to queue" for the playlist's available entries in order (library.md §16.3). Genre rows
+  and the top bar of a genre page have "Play next", "Add to queue" and "Add to playlist" too; a genre adds its songs in
+  the order kept for genre pages (library.md §19.2).
 - The track menu (M2b, PIM-65; decision). Wherever a song of the library has a menu, it is one menu with its entries in
   one order:
     1. "Play next", 2. "Add to queue", 3. "Add to playlist",
@@ -1102,9 +1104,10 @@ through the media library service: a tree of nodes, each a folder or a song.
 
 ### 10.1 Nodes
 
-- The root (media ID `root`) has exactly four browsable children, the app's tabs: Songs, Albums, Artists and Folders.
-  Android Auto shows at most four root children. Node IDs do not name their parent, so when M2b adds genres and playlists
-  under a node "More", a node can move under it and keep its ID.
+- The root (media ID `root`) has exactly four browsable children: Songs, Albums, Artists and More. Android Auto shows
+  at most four root children. Since M2b (PIM-64) More holds Playlists, Genres and Folders, in the order of the app's
+  tabs (library.md §19.2); Folders kept its ID `folders` when it moved under More, since node IDs do not name their
+  parent.
 - What each node holds, in the order the app keeps for that kind of list (library.md §6.3), never with a search:
 
 | Node | Media ID | Children |
@@ -1112,23 +1115,36 @@ through the media library service: a tree of nodes, each a folder or a song.
 | Songs | `songs` | every song, in the Songs tab's order |
 | Albums | `albums` | the albums, in the Albums tab's order |
 | Artists | `artists` | the artists, in the Artists tab's order |
+| More | `more` | Playlists, Genres, Folders |
 | Folders | `folders` | the Folders tab's top level: with one volume, the subfolders of its root, then the songs right in it; with more, one node per volume |
+| Playlists | `playlists` | the smart lists Favorites, Recently added, Recently played and Most played that hold a song, then the playlists by name |
+| Genres | `genres` | the genres, in the Genres tab's order, "Unknown genre" last |
 | An album | `album/<album key>` | its songs, in the album page's order |
 | An artist | `artist/<artist key>` | the artist's albums by year, then all their songs, in the artist page's order |
 | A folder | `folder/<volume and path>` | its subfolders by name, then its own songs, in the folder page's order |
+| A genre | `genre/<genre key>` | its songs, in the genre page's order |
+| A playlist | `playlist/<playlist ID>` | its available entries in order, each copy of a song that stands twice as its own item |
+| A smart list | `smart/<list>` (`favorites`, `added`, `recent`, `most`) | its songs, in the order kept for it |
 
 - The keys are those of the app's pages (library.md §6.5), percent-encoded as in queue requests (library.md §6.4): an
   album by its album key, an artist by their artist key, a folder by its volume, `/` and relative path encoded as one
   key (`folder/external_primary%2FMusic%2F`). They survive a rebuild of the library database and a new media index.
+  Since M2b a genre by its genre key (`genre/%21none` for the songs without one), a playlist by its ID in decimal, a
+  smart list by the token of its queue requests (library.md §17.3).
 - A song's media ID is the compact request (§2.3) of the list it is shown in, starting at it: the song's file ID
   (library.md §8.4), which survives a rebuild too, and its row as the fallback.
 - An item has its title and the media type of what it is (a folder of titles, albums, artists or mixed, an album, an
   artist, music); an album also its artist and year, a song its artist, album and length, a volume the name the app
-  gives it. Browsable nodes are folders; songs and the nodes of §10.3 that play are playable.
+  gives it. Browsable nodes are folders; songs and the nodes of §10.3 that play are playable. More, Playlists and Genres
+  are folders of mixed items, of playlists and of genres; a genre has the type genre, a playlist and a smart list the
+  type playlist; genres, playlists and smart lists are playable. The node of the songs without a genre keeps the last
+  place among the genres; the tree has no italics, so a real genre named "Unknown genre" shows the same title but sits
+  among the others by name.
 - No item carries artwork data. Media3 decodes it into a bitmap for every item it hands a legacy browser, and Android
   Auto warns that such bitmaps can exceed the binder's 1 MB. Songs, albums and artists carry an artwork URI instead, a
   content URI of PiPlayer's cover provider (library.md §13.8, since M2a step 13 part B), which the tree builds without
-  reading anything. The tabs, buckets and folders carry none.
+  reading anything. The tabs, buckets and folders carry none, nor do More, Playlists, Genres, genres, playlists and
+  smart lists.
 
 ### 10.2 Long lists
 
@@ -1146,6 +1162,10 @@ through the media library service: a tree of nodes, each a folder or a song.
 - A list whose entries have no section (disc and track order), or whose sections would make more than 500 buckets, splits
   into runs of rows instead, cut the same way and titled by their rows (`1-420`). The list of buckets itself is not
   weighed: it would take more than about 250 buckets with very long folder paths to fill a legacy answer.
+- The Playlists node's entries and a playlist's songs have no section: past 500 entries or the weight limit they split
+  into runs of rows (`1-420`). A smart list's songs split by the sections of its order like the Songs list's, and the
+  three lists of 100 in their own order, which has no section, into runs of rows. Genres split by the sections of their
+  order like artists.
 - A bucket's media ID is its node's ID, `!` and the section (percent-encoded; empty for runs of rows), then `!` and the
   part from the second part on: `songs!A`, `songs!A!2`, `songs!!3`. It has the type of what it holds; a bucket of songs
   is playable. A bucket's place depends on the lengths of the names before it, so a change of the library may move the
@@ -1157,10 +1177,13 @@ through the media library service: a tree of nodes, each a folder or a song.
 ### 10.3 Playing and adding from the tree
 
 - A song plays the list it is shown in from that song, as a tap in the app: Songs in the tab's order, an album, an
-  artist's songs, a folder's own songs.
+  artist's songs, a folder's own songs, and since M2b a genre's songs, a playlist from that copy of the song (its row)
+  and a smart list.
 - A playable node plays its list from the start: Songs, an album, an artist's songs, a folder with all its subfolders
-  (as "Play all, with subfolders"), and a bucket of songs its whole list from the bucket's first song. Albums, Artists,
-  Folders and the buckets of albums, artists and folders do not play.
+  (as "Play all, with subfolders"), and a bucket of songs its whole list from the bucket's first song; since M2b a genre
+  its songs in the genre page's order, a playlist its available entries in order and a smart list its songs in its kept
+  order. Albums, Artists, Folders, More, Playlists, Genres and the buckets of albums, artists, folders, genres and
+  playlists do not play.
 - The list is read when the request comes, in the order the app keeps for its kind at that moment. The request
   becomes the queue's compact request, so the queue is saved and restored as one from the app's screen.
 - An add from a controller (Media3 `addMediaItems`, a legacy queue add) adds songs by their media IDs: a song of the tree
@@ -1171,13 +1194,24 @@ through the media library service: a tree of nodes, each a folder or a song.
 - Search: a controller's search answers with the app's search (library.md §6.3: every word of the query, normalized as
   the library is): up to 100 artists and 100 albums whose names hold it, then up to 300 songs of the Songs list filtered by
   it, cut where a legacy answer is full (§10.2). A song found plays the filtered list from it, as the app's Songs tab
-  does while searching.
+  does while searching. Genres and playlists are not search results.
 - Voice: a play request with a search query and no media ID (how Media3 hands over a legacy `playFromSearch`, such as
-  "play X on PiPlayer" from the Assistant) plays the best match with its list. An artist whose name is the query (as
-  normalized) plays the artist's songs; else an album whose title is the query plays the album; else the Songs list
-  filtered by the query plays from its first song whose title is the query, or else from its first song; else the
-  first artist, then the first album, in the orders of their tabs, whose name holds the query. An empty query plays every song; when nothing is
-  found the request fails. An add with a search query adds the songs that the play would queue, from the match on.
+  "play X on PiPlayer" from the Assistant) plays the best match with its list, in this order (each name as
+  normalized):
+    1. an artist whose name is the query plays the artist's songs;
+    2. an album whose title is the query plays the album;
+    3. a song whose title is the query: the Songs list filtered by the query plays from its first such song;
+    4. a playlist whose name is the query plays it (since M2b, PIM-64). The four smart lists of the tree (library.md
+       §17.3) answer to their names in the app's language, each only while it holds a song; a user's playlist of the
+       same name comes first, since the user chose that name;
+    5. a genre whose name is the query plays its songs in the genre page's order (since M2b, PIM-64);
+    6. else the Songs list filtered by the query plays from its first song;
+    7. else the first artist, then the first album, in the orders of their tabs, whose name holds the query.
+
+  An empty query plays every song; when nothing is found the request fails. An add with a search query adds the songs
+  that the play would queue, from the match on. Since M2b a query that names a playlist or a genre and no artist, album
+  or song title plays that playlist or genre, where it played the Songs list filtered by the query before (which holds
+  that genre's songs, since a song's search text holds its genres, and possibly others).
 
 ### 10.4 Who may browse
 
@@ -1186,8 +1220,13 @@ through the media library service: a tree of nodes, each a folder or a song.
   controller gets the root, whose children are an empty list; every other node, item and search is refused with a
   permission error, and a play or add of library items fails. The media notification's controller counts as another app
   here too; Media3 also hands System UI's browsing to the callback as that controller, and serves System UI's recent root
-  for playback resumption itself.
-- Without PiPlayer's own access to music the library lists nothing, so every node is empty.
+  for playback resumption itself. The same holds for More, Playlists, Genres, genres, playlists and smart lists: a
+  controller that may not read the library gets a permission error for each of them, and its play or add of a genre, a
+  playlist or a smart list is refused.
+- Without PiPlayer's own access to music the library lists nothing, so every node is empty. More still lists its three
+  nodes, and Playlists, Genres and every list under them are empty: a playlist's name is user data, but its songs come
+  from the library, and a node that plays nothing is a dead end in the car. The app's lists behave the same (library.md
+  §16.4).
 
 ### 10.5 When the tree is read
 
@@ -1201,7 +1240,12 @@ through the media library service: a tree of nodes, each a folder or a song.
 - The tree keeps the outlines and bucket layouts of its last four lists while the library's revision, the hidden files,
   the collation and the tag pass (each of its batches) stay, and the albums, artists and folders once for each revision,
   hidden files, collation and order. The results of the last search are kept the same way. The tap on a song reads its
-  list for the queue as the app's tap does (§2.3).
+  list for the queue as the app's tap does (§2.3). The genres are kept like the artists, and a genre's outline like an
+  artist's. Playlists, smart lists and the Playlists node are read anew for every browse, play and add, as the app reads
+  them (library.md §16.4, §17.3): edits, plays and favorites change them without changing the library's revision, so
+  they bypass the outlines kept by the revision, the hidden files, the collation and the tag pass, and their bucket
+  layouts are cut anew each time and not kept, so that they never push the kept layouts of the Songs list and the lists
+  browsed last out.
 - The Songs root and one of its buckets on the generated library answer within 200 ms on the owner's phone, each read by
   a new tree with no list kept, as a controller's first browse after a start (the median of 5 after a warm-up,
   `@TimingTest`); the API 30 emulator keeps the earlier 300 ms. A browse in the car should feel immediate. On the phone
@@ -1213,15 +1257,20 @@ through the media library service: a tree of nodes, each a folder or a song.
 - The content style hints of Android Auto (lists or grids, group titles in search results) are unstable Media3 API and
   wait until the covers of step 13 make grids worth having. Media focus extras of voice requests (an artist or album
   named apart from the query) are not read. A root children limit below four is not honoured.
-- Playlists and the smart lists (library.md §16, §17) are not in the tree yet: the root's four children are taken, and
-  PIM-64 brings the node that holds them, the smart lists at the top of the playlists as in the app (library.md §17.3).
+- Songs missing information is not in the tree (library.md §17.3). Genres and playlists are not search results; media
+  focus extras that name a genre or a playlist apart from the query are not read. "Unknown genre" does not answer to
+  voice.
 
 ### 10.7 Checks
 
 JVM tests: node IDs for every kind with keys of every kind of character, malformed IDs refused; buckets by section, runs
 of one section split, sections that repeat, entries without a section, too many sections; pages of children, also with
 the largest page size; the weight of an item and buckets cut by weight, the weight from an outline's bytes equal to the
-weight from the texts; the best match of a voice query; an add at a row in the journal.
+weight from the texts; the best match of a voice query; an add at a row in the journal. Since M2b: the IDs of More,
+Playlists, Genres, a genre (also `!none`), a playlist and each smart list of the tree, malformed ones refused (a playlist
+ID that is not a decimal number, Songs missing information); the voice order: a query that is a genre's name and a word
+in songs' search text plays the genre, one that is a song's title and a playlist's name plays the song, a user's
+playlist before a smart list of its name, an empty smart list not matched.
 
 Instrumented tests on the API 30 emulator, on a library database filled from a test index: the root and its four nodes;
 the children of every node in the app's order, with every ID they give resolving to the same item; buckets on a list
@@ -1235,6 +1284,17 @@ cannot play or add library items. On a library database, the outline of every ki
 sections, the bytes of Cyrillic, Chinese and emoji texts). On the generated library, the timing check of §10.5, on the
 phone too. The cover URIs of the tree's
 items have the checks of library.md §13.8.8.
+
+Since M2b, on the API 30 emulator: the root of four with More; More's three nodes, Folders by its old ID; the genres and a
+genre's songs; the Playlists node with non-empty smart lists first and the playlists by name, a first favorite showing
+Favorites and the last one removed hiding it with no change of the library's revision, the node empty with no playlists
+and every smart list empty; a playlist's items with a song that stands twice playing from the tapped copy; a playlist of
+600 entries in runs of rows; an edited playlist seen at the next browse; a deleted playlist's node an error; a genre, a
+playlist and a smart list playing and added; a controller without access refused for More, Playlists, Genres, a genre and
+a playlist and for their play; every node under More within the limits, without artwork data, every ID resolving; a
+voice query that names a genre or a playlist. PiPlayer without music access is not tested on the device: revoking the
+permission ends the test's own process; the nodes under More read the library through the same access check as every
+other node.
 
 ## 11. Play statistics (M2b, PIM-49)
 

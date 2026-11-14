@@ -3,6 +3,8 @@ package io.github.lorddetson.piplayer.playback
 import io.github.lorddetson.piplayer.library.lists.AlbumCredit
 import io.github.lorddetson.piplayer.library.lists.AlbumGroup
 import io.github.lorddetson.piplayer.library.lists.ArtistGroup
+import io.github.lorddetson.piplayer.library.lists.GenreGroup
+import io.github.lorddetson.piplayer.library.lists.ListKind
 import io.github.lorddetson.piplayer.library.songs.Song
 import io.github.lorddetson.piplayer.library.sort.SortKey
 import org.assertj.core.api.Assertions.assertThat
@@ -78,5 +80,66 @@ class VoiceMatchTest {
     @Test
     fun nothingFoundIsNoMatch() {
         assertThat(VoiceMatch.choose("zzzq", emptyList(), emptyList(), emptyList())).isNull()
+    }
+
+    private fun genre(name: String) = GenreGroup(name.lowercase(), name, songs = 4)
+
+    private fun playlist(name: String, id: Long) = VoiceMatch.NamedList(name, VoiceMatch.Playlist(id))
+
+    private fun smart(name: String, kind: ListKind) = VoiceMatch.NamedList(name, VoiceMatch.SmartList(kind))
+
+    @Test
+    fun aGenreNamedAsTheQueryPlaysTheGenreRatherThanTheSongsItsWordFinds() {
+        // Every song of the genre holds "rock" in its search text, so the filtered Songs list is not empty.
+        val songs = listOf(song(1, "Stone Cold"), song(2, "Rocket Man"))
+
+        assertThat(VoiceMatch.choose("Rock", emptyList(), emptyList(), songs, genres = listOf(genre("Rock and Roll"), genre("ROCK"))))
+            .isEqualTo(VoiceMatch.Genre("rock"))
+        // A genre whose name only holds the query is no match: the songs play.
+        assertThat(VoiceMatch.choose("rock", emptyList(), emptyList(), songs, genres = listOf(genre("Rock and Roll"))))
+            .isEqualTo(VoiceMatch.FoundSongs(1))
+    }
+
+    @Test
+    fun aSongTitledAsTheQueryComesBeforeAPlaylistOfThatName() {
+        val songs = listOf(song(1, "Road Trip Anthem"), song(2, "Road Trip"))
+
+        assertThat(VoiceMatch.choose("road trip", emptyList(), emptyList(), songs, playlists = listOf(playlist("Road Trip", 5))))
+            .isEqualTo(VoiceMatch.FoundSongs(2))
+        assertThat(VoiceMatch.choose("road trip", emptyList(), emptyList(), songs.take(1), playlists = listOf(playlist("Road Trip", 5))))
+            .isEqualTo(VoiceMatch.Playlist(5))
+    }
+
+    @Test
+    fun aPlaylistComesBeforeAGenreOfTheSameNameAndAUsersPlaylistBeforeASmartList() {
+        val songs = listOf(song(1, "Something"))
+
+        assertThat(
+            VoiceMatch.choose("chill", emptyList(), emptyList(), songs, playlists = listOf(playlist("Chill", 3)), genres = listOf(genre("Chill"))),
+        ).isEqualTo(VoiceMatch.Playlist(3))
+        assertThat(
+            VoiceMatch.choose("favorites", emptyList(), emptyList(), songs, playlists = listOf(playlist("Favorites", 8), smart("Favorites", ListKind.FAVORITES))),
+        ).isEqualTo(VoiceMatch.Playlist(8))
+        assertThat(VoiceMatch.choose("избранное", emptyList(), emptyList(), emptyList(), playlists = listOf(smart("Избранное", ListKind.FAVORITES))))
+            .isEqualTo(VoiceMatch.SmartList(ListKind.FAVORITES))
+    }
+
+    @Test
+    fun anArtistOrAlbumNamedAsTheQueryStillWinsOverAPlaylistOrAGenre() {
+        val playlists = listOf(playlist("Queen", 1))
+        val genres = listOf(genre("Queen"))
+
+        assertThat(VoiceMatch.choose("queen", listOf(artist("Queen")), emptyList(), emptyList(), playlists, genres)).isEqualTo(VoiceMatch.Artist("queen"))
+        assertThat(VoiceMatch.choose("queen", emptyList(), listOf(album("Queen", "q")), emptyList(), playlists, genres)).isEqualTo(VoiceMatch.Album("q"))
+    }
+
+    @Test
+    fun withNoPlaylistOrGenreOfTheNameTheOldOrderHolds() {
+        val songs = listOf(song(7, "Love Me Do"))
+
+        assertThat(VoiceMatch.choose("love", emptyList(), emptyList(), songs, listOf(playlist("Lovers", 2)), listOf(genre("Love Songs"))))
+            .isEqualTo(VoiceMatch.FoundSongs(7))
+        assertThat(VoiceMatch.choose("nov", listOf(artist("Nova", "n")), emptyList(), emptyList(), listOf(playlist("Novelties", 2)), emptyList()))
+            .isEqualTo(VoiceMatch.Artist("n"))
     }
 }

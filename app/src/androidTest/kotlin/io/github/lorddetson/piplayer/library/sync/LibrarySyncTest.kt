@@ -123,6 +123,9 @@ class LibrarySyncTest {
                 year = if (random.nextBoolean()) 1990 + i % 30 else null,
                 trackNumber = listOf(null, 0, 3, 1_004, 2_000).random(random),
                 durationMs = if (random.nextInt(5) == 0) null else 1_000L * i,
+                // Genres split at ";" (docs/library.md §19.1), one in ten files with several.
+                genre = listOf(null, "Rock", "Rock; Pop", " jazz ;<unknown>; ", "Hip-Hop/Rap", "ДДТ; ддт; Ёлка", "+", "")
+                    .random(random),
             )
         }
         val schema = schemaOf(database)
@@ -164,7 +167,12 @@ class LibrarySyncTest {
             assertThat(artists.map { listOf(it.position, it.name, it.artistKey, it.searchText, it.sortKey.toList()) })
                 .describedAs("artists of ${row.mediaStoreId}")
                 .isEqualTo(expected.displayArtists.mapIndexed { i, it -> listOf(i, it.name, it.key, it.searchText, it.sortKey.bytes.toList()) })
+            val genres = dao.displayGenres(file.id)
+            assertThat(genres.map { listOf(it.position, it.name, it.genreKey, it.searchText, it.sortKey.toList()) })
+                .describedAs("genres of ${row.mediaStoreId}")
+                .isEqualTo(expected.displayGenres.mapIndexed { i, it -> listOf(i, it.name, it.key, it.searchText, it.sortKey.bytes.toList()) })
         }
+        assertThat(dao.allDisplayGenres()).isNotEmpty()
         // The indexes are there again, as the schema has them.
         assertThat(schemaOf(database)).isEqualTo(schema)
     }
@@ -351,6 +359,36 @@ class LibrarySyncTest {
         assertThat(files().keys).containsExactly(1L)
         assertThat(dao.entries().map { it.fileId }).doesNotContain(removed)
         assertThat(dao.displays().map { it.fileId }).doesNotContain(removed)
+    }
+
+    /** No `display_genre` row outlives its file, and a genre only it had leaves the list (docs/library.md §19.5). */
+    @Test
+    fun filesRemovedByASyncTakeTheirDisplayGenresWithThem() = runBlocking<Unit> {
+        index.volume().rows = listOf(row(1, genre = "Rock"), row(2, genre = "Rock; Polka"), row(3, genre = "Polka"))
+        sync.sync()
+        val removed = listOf(files().getValue(2).id, files().getValue(3).id)
+        assertThat(dao.allDisplayGenres().map { it.fileId }).containsAll(removed)
+
+        index.volume().rows = listOf(row(1, genre = "Rock"))
+        assertThat(sync.sync()).isTrue()
+
+        assertThat(dao.allDisplayGenres().map { it.fileId }).doesNotContainAnyElementsOf(removed)
+        val lists = io.github.lorddetson.piplayer.library.lists.LibraryLists(database)
+        assertThat(lists.genres().map { it.name }).containsExactly("Rock")
+    }
+
+    /** A later sync writes a changed file's genres again, also with fewer of them (docs/library.md §19.1). */
+    @Test
+    fun aLaterSyncWritesTheGenresOfAChangedFileAgain() = runBlocking<Unit> {
+        index.volume().rows = listOf(row(1, genre = "Rock; Pop; Jazz"), row(2, genre = null))
+        sync.sync()
+        assertThat(dao.displayGenres(files().getValue(1).id).map { it.name }).containsExactly("Rock", "Pop", "Jazz")
+
+        index.volume().rows = listOf(row(1, genre = "Soul", generation = 10), row(2, genre = "Funk", generation = 11))
+        sync.sync()
+
+        assertThat(dao.displayGenres(files().getValue(1).id).map { it.name }).containsExactly("Soul")
+        assertThat(dao.displayGenres(files().getValue(2).id).map { it.name }).containsExactly("Funk")
     }
 
     @Test

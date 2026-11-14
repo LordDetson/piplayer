@@ -1,5 +1,6 @@
 package io.github.lorddetson.piplayer.playback
 
+import io.github.lorddetson.piplayer.library.lists.GenreKeys
 import io.github.lorddetson.piplayer.library.lists.ListKind
 import io.github.lorddetson.piplayer.library.lists.SongLinks
 import io.github.lorddetson.piplayer.library.lists.SongQuery
@@ -50,12 +51,17 @@ data class QueueRequest(val startSongId: Long, val startRow: Int, val list: Song
             return QueueRequest(id, index.toInt(), list)
         }
 
-        /** [request] with its key followed to where the saved song is now, when the key names nothing any more. */
-        fun rekeyed(request: QueueRequest, keyExists: Boolean, links: SongLinks?): QueueRequest {
+        /**
+         * [request] with its key followed to where the saved song is now, when the key names nothing any more; [genreKeys]
+         * are the song's genres for a genre's request (docs/library.md §19.4).
+         */
+        fun rekeyed(request: QueueRequest, keyExists: Boolean, links: SongLinks?, genreKeys: List<String> = emptyList()): QueueRequest {
             if (keyExists || links == null) return request
             val key = when (request.list.kind) {
                 ListKind.ALBUM -> links.albumKey
                 ListKind.ARTIST -> links.artists.firstOrNull()?.key
+                // The song's first genre, or the songs without one (docs/library.md §19.4).
+                ListKind.GENRE -> genreKeys.firstOrNull() ?: GenreKeys.NONE
                 // A folder's key is its place, which no read of the tags changes; the songs list has none.
                 else -> null
             } ?: return request

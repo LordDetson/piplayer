@@ -15,6 +15,9 @@ enum class ListKind(val token: String, val defaultSort: SongSort) {
     /** A playlist by its ID, in its own order (docs/library.md §16.4). */
     PLAYLIST("playlist", SongSort.POSITION),
 
+    /** A genre by its genre key, [GenreKeys.NONE] for the songs without one (docs/library.md §19.4). */
+    GENRE("genre", SongSort.ARTIST),
+
     /** The smart lists (docs/library.md §17): the favorite songs. */
     FAVORITES("favorites", SongSort.TITLE),
 
@@ -114,6 +117,8 @@ data class SongQuery(
         fun tree(volume: String, relativePath: String) = SongQuery(ListKind.TREE, FolderKey(volume, relativePath).key)
 
         fun playlist(id: Long) = SongQuery(ListKind.PLAYLIST, id.toString())
+
+        fun genre(key: String) = SongQuery(ListKind.GENRE, key)
 
         fun favorites() = SongQuery(ListKind.FAVORITES)
 

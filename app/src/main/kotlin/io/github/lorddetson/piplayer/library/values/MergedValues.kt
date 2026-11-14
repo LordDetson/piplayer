@@ -3,6 +3,7 @@ package io.github.lorddetson.piplayer.library.values
 import android.provider.MediaStore
 import io.github.lorddetson.piplayer.identification.text.FileNameParser
 import io.github.lorddetson.piplayer.library.lists.DisplayArtists
+import io.github.lorddetson.piplayer.library.lists.DisplayGenres
 import io.github.lorddetson.piplayer.library.sync.DisplayValues
 
 /** What the media index says of a file, precedence level 4 (TI §7.1). */
@@ -84,6 +85,8 @@ object MergedValues {
         val albumSortTag = tagValues?.albumSort.present().takeIf { overrides.album == null && tagValues?.album != null }
         val albumArtistSortTag = tagValues?.albumArtistSort.present()
         // Each text normalized once: the title and file name for this file, the others for the batch (TextForms).
+        // The genres lists group by (docs/library.md §19.1): the tags' once read, else the index's split as the tags are.
+        val genres = if (read) tagValues?.genres.orEmpty() else indexValues?.genre?.split(';')?.map(String::trim)?.filter { it.present() != null }.orEmpty()
         val titleForm = forms.once(title)
         val fileForm = forms.once(fileName)
         val artistForm = artist?.let(forms::shared)
@@ -96,6 +99,7 @@ object MergedValues {
             discNumber = disc,
             trackNumber = track,
             displayArtists = DisplayArtists.of(artists, forms, if (artists.size == 1) artistSortTag else null),
+            displayGenres = DisplayGenres.of(genres, forms),
             artistKey = artistForm?.let { DisplayArtists.keyOf(it.text, it.normalized) },
             albumSearch = if (albumForm == null) "" else TextForms.searchText(albumForm, (albumArtist ?: artist)?.let(forms::shared)),
             titleSort = titleSortTag?.let(forms::sortKey) ?: titleForm.sortKey,

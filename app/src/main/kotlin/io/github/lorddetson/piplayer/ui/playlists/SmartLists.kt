@@ -100,7 +100,7 @@ internal fun smartListName(kind: ListKind): Int = when (kind) {
 }
 
 /** The kind of list whose order [kind] keeps (docs/library.md §17.1). */
-private fun smartListOrder(kind: ListKind): ListName = when (kind) {
+internal fun smartListOrder(kind: ListKind): ListName = when (kind) {
     ListKind.FAVORITES -> ListName.FAVORITES
     ListKind.RECENTLY_ADDED -> ListName.RECENTLY_ADDED
     ListKind.RECENTLY_PLAYED -> ListName.RECENTLY_PLAYED
@@ -172,6 +172,39 @@ internal object SmartListHeader {
 
     /** "Shuffle" picks its song from the whole list, so it waits for it. */
     fun mayShuffle(loaded: SongsState.Loaded?): Boolean = loaded != null && loaded.complete && loaded.songs.isNotEmpty()
+}
+
+/**
+ * The number of songs once the whole list is read, then "Play" and "Shuffle" (docs/library.md §17.2): a smart list's page
+ * and a genre page share them (§19.3).
+ */
+@Composable
+internal fun PlayAndShuffle(loaded: SongsState.Loaded?, host: LibraryHost, playTag: String, shuffleTag: String) {
+    val count = SmartListHeader.count(loaded)
+    if (count != null) Text(pluralStringResource(R.plurals.songs_count, count, count), style = MaterialTheme.typography.bodyMedium)
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Button(
+            onClick = { loaded?.let { host.play(0, it.songs.first(), it.query) } },
+            enabled = SmartListHeader.mayPlay(loaded),
+            modifier = Modifier.testTag(playTag),
+        ) {
+            Icon(painterResource(R.drawable.ic_player_play), contentDescription = null)
+            Text(stringResource(R.string.playlist_play), modifier = Modifier.padding(start = 8.dp))
+        }
+        OutlinedButton(
+            onClick = {
+                loaded?.let {
+                    val row = Random.nextInt(it.songs.size)
+                    host.shuffle(row, it.songs[row], it.query)
+                }
+            },
+            enabled = SmartListHeader.mayShuffle(loaded),
+            modifier = Modifier.testTag(shuffleTag),
+        ) {
+            Icon(painterResource(R.drawable.ic_player_shuffle), contentDescription = null)
+            Text(stringResource(R.string.smart_shuffle), modifier = Modifier.padding(start = 8.dp))
+        }
+    }
 }
 
 /** A smart list as the Playlists tab shows it: its kind, its name and its number of songs, when known. */
@@ -270,32 +303,8 @@ fun SmartListPage(kind: ListKind, host: LibraryHost, onBack: () -> Unit) {
 /** The number of songs, "Play" and "Shuffle", and for Songs missing information the chips of its reasons. */
 @Composable
 private fun Header(kind: ListKind, loaded: SongsState.Loaded?, chosen: Int, host: LibraryHost) {
-    val count = SmartListHeader.count(loaded)
     Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        if (count != null) Text(pluralStringResource(R.plurals.songs_count, count, count), style = MaterialTheme.typography.bodyMedium)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(
-                onClick = { loaded?.let { host.play(0, it.songs.first(), it.query) } },
-                enabled = SmartListHeader.mayPlay(loaded),
-                modifier = Modifier.testTag(SmartListTags.PLAY),
-            ) {
-                Icon(painterResource(R.drawable.ic_player_play), contentDescription = null)
-                Text(stringResource(R.string.playlist_play), modifier = Modifier.padding(start = 8.dp))
-            }
-            OutlinedButton(
-                onClick = {
-                    loaded?.let {
-                        val row = Random.nextInt(it.songs.size)
-                        host.shuffle(row, it.songs[row], it.query)
-                    }
-                },
-                enabled = SmartListHeader.mayShuffle(loaded),
-                modifier = Modifier.testTag(SmartListTags.SHUFFLE),
-            ) {
-                Icon(painterResource(R.drawable.ic_player_shuffle), contentDescription = null)
-                Text(stringResource(R.string.smart_shuffle), modifier = Modifier.padding(start = 8.dp))
-            }
-        }
+        PlayAndShuffle(loaded, host, SmartListTags.PLAY, SmartListTags.SHUFFLE)
         if (kind == ListKind.MISSING_INFO) {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 for (reason in MissingReasons.ORDER) {

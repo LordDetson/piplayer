@@ -285,6 +285,49 @@ class LibraryLists(
     /** The artist of [key], or null when no visible song has them. */
     fun artist(key: String): ArtistGroup? = runArtists(Sql(hidden).where("a.artist_key = ?", key)).singleOrNull()
 
+    /** The genres with a visible song, then "Unknown genre" unless searching (docs/library.md §19.2). */
+    fun genres(sort: GenreSort = GenreSort.NAME, reversed: Boolean = false, search: String = ""): List<GenreGroup> {
+        val sql = Sql(hidden)
+        sql.having("g.search_text", search)
+        val searching = SearchTerms.of(search).isNotEmpty()
+        val buckets by lazy(LazyThreadSafetyMode.NONE) { SortKeys.current().buckets }
+        return GenreOrder.of(runGenres(sql), if (searching) 0 else unknownGenreSongs(), sort, reversed, searching) { key ->
+            Sections.letter(key, buckets)
+        }
+    }
+
+    /** The genre of [key] ([GenreKeys.NONE] for "Unknown genre"), or null when no visible song has it. */
+    fun genre(key: String): GenreGroup? {
+        if (key == GenreKeys.NONE) return unknownGenreSongs().takeIf { it > 0 }?.let { GenreGroup(GenreKeys.NONE, "", it) }
+        return runGenres(Sql(hidden).where("g.genre_key = ?", key)).singleOrNull()
+    }
+
+    /** The genre keys of the file [fileId] in the order of its tags (docs/library.md §19.4). */
+    fun genreKeys(fileId: Long): List<String> = runBlocking { dao.displayGenres(fileId) }.map { it.genreKey }
+
+    /** How many visible songs have no genre (docs/library.md §19.5). */
+    private fun unknownGenreSongs(): Int {
+        val sql = Sql(hidden)
+        return runBlocking {
+            dao.count(
+                sql.raw(
+                    "SELECT COUNT(*) FROM track_display d JOIN audio_file f ON f.id = d.file_id WHERE ${sql.conditions()} " +
+                        "AND $NO_GENRE",
+                ),
+            )
+        }
+    }
+
+    private fun runGenres(sql: Sql): List<GenreGroup> = runBlocking {
+        dao.genreGroups(
+            sql.raw(
+                "SELECT g.genre_key AS genreKey, MIN(g.name) AS name, COUNT(*) AS songs, MIN(g.sort_key) AS sortKey " +
+                    "FROM display_genre g JOIN track_display d ON d.file_id = g.file_id JOIN audio_file f ON f.id = g.file_id " +
+                    "WHERE ${sql.conditions()} GROUP BY g.genre_key${sql.havingClause()}",
+            ),
+        )
+    }.map { GenreGroup(it.genreKey, it.name, it.songs, sortKey = SortKey.of(it.sortKey)) }
+
     /** The folder levels of the visible songs. */
     fun folders(): FolderLevels {
         val sql = Sql(hidden)
@@ -334,6 +377,8 @@ class LibraryLists(
         ListKind.FOLDER -> query.folder?.let { "f.volume_name = ? AND f.relative_path = ?" to listOf(it.volume, it.relativePath) }
         // A playlist's songs come from the user database too (docs/library.md §16.4): `PlaylistSongs`, not these lists.
         ListKind.TREE, ListKind.PLAYLIST -> null
+        // A genre by the index on `genre_key`; the songs without one by having no row (docs/library.md §19.5).
+        ListKind.GENRE -> if (query.key == GenreKeys.NONE) NO_GENRE to emptyList() else GENRE_FILES to listOf(query.key)
         // The smart lists have queries of their own (docs/library.md §17.4): `smart`.
         ListKind.FAVORITES, ListKind.RECENTLY_ADDED, ListKind.RECENTLY_PLAYED, ListKind.MOST_PLAYED, ListKind.MISSING_INFO -> null
     }
@@ -594,6 +639,12 @@ class LibraryLists(
         private fun visible(f: String, d: String) = "$f.folder_rule != 2 AND ($f.folder_rule = 1 OR (" +
             "(? OR NOT ($f.is_ringtone OR $f.is_notification OR $f.is_alarm)) AND (? OR NOT $f.recording) " +
             "AND ($d.duration_ms IS NULL OR $d.duration_ms >= ?)))"
+
+        /** The display row `d` has no genre (docs/library.md §19.4). */
+        private const val NO_GENRE = "NOT EXISTS (SELECT 1 FROM display_genre g WHERE g.file_id = d.file_id)"
+
+        /** The display row `d` has the genre of the one argument. */
+        private const val GENRE_FILES = "d.file_id IN (SELECT file_id FROM display_genre WHERE genre_key = ?)"
 
         /** File IDs bound in one query, well under SQLite's limit of arguments. */
         private const val ID_CHUNK = 500

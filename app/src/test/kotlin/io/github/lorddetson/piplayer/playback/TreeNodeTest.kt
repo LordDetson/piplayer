@@ -1,6 +1,8 @@
 package io.github.lorddetson.piplayer.playback
 
 import io.github.lorddetson.piplayer.library.db.FolderKey
+import io.github.lorddetson.piplayer.library.lists.GenreKeys
+import io.github.lorddetson.piplayer.library.lists.ListKind
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 
@@ -86,5 +88,54 @@ class TreeNodeTest {
         }
         // A bucket of a bucket is no node either.
         assertThat(TreeNode.parse("songs!A!2!B")).isNull()
+    }
+
+    @Test
+    fun moreHoldsPlaylistsGenresAndFoldersWhoseIdsAreShort() {
+        assertThat(TreeNode.More.mediaId).isEqualTo("more")
+        assertThat(TreeNode.Playlists.mediaId).isEqualTo("playlists")
+        assertThat(TreeNode.Genres.mediaId).isEqualTo("genres")
+        for (node in listOf(TreeNode.More, TreeNode.Playlists, TreeNode.Genres, TreeNode.Folders)) {
+            assertThat(TreeNode.parse(node.mediaId)).describedAs(node.mediaId).isEqualTo(node)
+        }
+    }
+
+    @Test
+    fun genresPlaylistsAndSmartListsRoundTrip() {
+        for (key in keys + listOf(GenreKeys.NONE, "hip hop", "электроника")) {
+            val node = TreeNode.Genre(key)
+            assertThat(node.mediaId).startsWith("genre/")
+            assertThat(node.mediaId.substringAfter('/')).describedAs(node.mediaId).matches("[A-Za-z0-9.*_%-]+")
+            assertThat(TreeNode.parse(node.mediaId)).describedAs(node.mediaId).isEqualTo(node)
+        }
+        assertThat(TreeNode.Genre(GenreKeys.NONE).mediaId).isEqualTo("genre/%21none")
+        for (id in listOf(0L, 1L, 42L, Long.MAX_VALUE)) {
+            assertThat(TreeNode.Playlist(id).mediaId).isEqualTo("playlist/$id")
+            assertThat(TreeNode.parse("playlist/$id")).isEqualTo(TreeNode.Playlist(id))
+        }
+        assertThat(TreeNode.TREE_SMART).containsExactly(ListKind.FAVORITES, ListKind.RECENTLY_ADDED, ListKind.RECENTLY_PLAYED, ListKind.MOST_PLAYED)
+        for (kind in TreeNode.TREE_SMART) {
+            assertThat(TreeNode.parse("smart/${kind.token}")).isEqualTo(TreeNode.SmartList(kind))
+        }
+        assertThat(TreeNode.SmartList(ListKind.FAVORITES).mediaId).isEqualTo("smart/favorites")
+        assertThat(TreeNode.SmartList(ListKind.MOST_PLAYED).mediaId).isEqualTo("smart/most")
+        // They have buckets like every list.
+        for (parent in listOf(TreeNode.Genres, TreeNode.Playlists, TreeNode.Genre("rock"), TreeNode.Genre(GenreKeys.NONE), TreeNode.Playlist(7), TreeNode.SmartList(ListKind.FAVORITES))) {
+            for (bucket in listOf(TreeNode.Bucket(parent, "R"), TreeNode.Bucket(parent, "", 3))) {
+                assertThat(TreeNode.parse(bucket.mediaId)).describedAs(bucket.mediaId).isEqualTo(bucket)
+            }
+        }
+    }
+
+    @Test
+    fun malformedGenresPlaylistsAndSmartListsAreRefused() {
+        val malformed = listOf(
+            "More", "genre", "genre/", "genre/a+b", "genre/%41", "playlist", "playlist/", "playlist/abc", "playlist/-1",
+            "playlist/007", "playlist/1.5", "playlist/ 1", "playlist/99999999999999999999", "smart", "smart/", "smart/missing",
+            "smart/songs", "smart/genre", "smart/Favorites", "smart/playlist",
+        )
+        for (id in malformed) {
+            assertThat(TreeNode.parse(id)).describedAs(id).isNull()
+        }
     }
 }

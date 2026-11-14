@@ -1,6 +1,7 @@
 package io.github.lorddetson.piplayer.userdata
 
 import androidx.room3.withWriteTransaction
+import java.text.Collator
 import kotlinx.coroutines.flow.Flow
 
 /** A new entry: its song's identity when it has one, and its hints (docs/library.md §16.2). */
@@ -15,6 +16,12 @@ data class NewEntry(
     val title: String? = null,
     val artist: String? = null,
 )
+
+/** The playlists by name, as the Playlists tab and the controller tree list them (the locale's collator, docs/library.md §16.3). */
+fun List<PlaylistSummary>.byName(): List<PlaylistSummary> {
+    val collator = Collator.getInstance().apply { strength = Collator.SECONDARY }
+    return sortedWith(compareBy<PlaylistSummary, String>(collator) { it.name }.thenBy { it.id })
+}
 
 /**
  * Playlists of the user database (docs/library.md §16.1): every change keeps the positions of a playlist from 0 without

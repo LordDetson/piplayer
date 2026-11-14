@@ -168,6 +168,21 @@ data class DisplayArtistEntity(
 )
 
 /**
+ * A genre of a file as lists group it (docs/library.md §19.1): each genre of its tags once read, otherwise the media
+ * index's genre split at ";"; [genreKey] is the normalized name, which the genre's page is found by.
+ */
+@Entity(tableName = "display_genre", primaryKeys = ["file_id", "position"], indices = [Index("genre_key")])
+data class DisplayGenreEntity(
+    @ColumnInfo(name = "file_id") val fileId: Long,
+    val position: Int,
+    @ColumnInfo(name = "genre_key") val genreKey: String,
+    val name: String,
+    @ColumnInfo(name = "search_text") val searchText: String,
+    /** The collator's key of the name (docs/library.md §11.1). */
+    @ColumnInfo(name = "sort_key", typeAffinity = ColumnInfo.BLOB) val sortKey: ByteArray,
+)
+
+/**
  * A file outside the library that crashed or hung `:tagger` (docs/library.md §4.4); another size or modification time
  * makes it a new file.
  */
@@ -197,6 +212,7 @@ data class VolumeSyncStateEntity(
         MediaIndexEntryEntity::class,
         TrackDisplayEntity::class,
         DisplayArtistEntity::class,
+        DisplayGenreEntity::class,
         VolumeSyncStateEntity::class,
         LibraryMetaEntity::class,
         OutsideFileEntity::class,
@@ -211,7 +227,8 @@ data class VolumeSyncStateEntity(
         AlbumMirrorEntity::class,
     ],
     // 10: the mirror of favorites and plays (docs/library.md §15.4). 11: the smart lists' date added and indexes (§17.4).
-    version = 11,
+    // 12: the genres of display rows (§19.5).
+    version = 12,
     exportSchema = false,
 )
 abstract class LibraryDatabase : RoomDatabase() {

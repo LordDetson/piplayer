@@ -61,6 +61,9 @@ interface LibraryDao {
     @Query("DELETE FROM display_artist WHERE file_id IN (:fileIds)")
     suspend fun deleteDisplayArtists(fileIds: List<Long>)
 
+    @Query("DELETE FROM display_genre WHERE file_id IN (:fileIds)")
+    suspend fun deleteDisplayGenres(fileIds: List<Long>)
+
     /** Every folder that holds a file, with its volume. */
     @Query("SELECT DISTINCT volume_name AS volume, relative_path AS relativePath FROM audio_file")
     suspend fun folders(): List<FolderKey>
@@ -299,6 +302,15 @@ interface LibraryDao {
 
     @Query("SELECT * FROM display_artist WHERE file_id = :fileId ORDER BY position")
     suspend fun displayArtists(fileId: Long): List<DisplayArtistEntity>
+
+    @Query("SELECT * FROM display_genre WHERE file_id = :fileId ORDER BY position")
+    suspend fun displayGenres(fileId: Long): List<DisplayGenreEntity>
+
+    @Query("SELECT * FROM display_genre")
+    suspend fun allDisplayGenres(): List<DisplayGenreEntity>
+
+    @RawQuery
+    suspend fun genreGroups(query: RoomRawQuery): List<GenreGroupRow>
 
     @Query("SELECT * FROM album")
     suspend fun albums(): List<AlbumEntity>
@@ -542,6 +554,9 @@ data class AlbumGroupRow(
 )
 
 data class ArtistGroupRow(val artistKey: String, val name: String, val songs: Int, val albums: Int, val sortKey: ByteArray?)
+
+/** A genre with its number of visible songs and the lowest sort key of its spellings (docs/library.md §19.5). */
+data class GenreGroupRow(val genreKey: String, val name: String, val songs: Int, val sortKey: ByteArray?)
 
 data class FolderCountRow(val volume: String, val relativePath: String, val songs: Int)
 

@@ -54,7 +54,6 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -87,6 +86,8 @@ import io.github.lorddetson.piplayer.library.lists.AlbumGroup
 import io.github.lorddetson.piplayer.library.lists.ArtistGroup
 import io.github.lorddetson.piplayer.library.lists.FolderEntry
 import io.github.lorddetson.piplayer.library.lists.FolderLevels
+import io.github.lorddetson.piplayer.library.lists.GenreGroup
+import androidx.compose.ui.text.font.FontStyle
 import io.github.lorddetson.piplayer.library.lists.SongQuery
 import io.github.lorddetson.piplayer.library.lists.SongSort
 import io.github.lorddetson.piplayer.library.songs.Song
@@ -118,6 +119,14 @@ object LibraryTags {
     const val FAVORITES_CHIP = "favorites_chip"
 }
 
+/** Test tags of the Genres tab and the genre pages (docs/library.md §19.2, §19.3). */
+object GenreTags {
+    /** A genre's row on the Genres tab. */
+    const val ROW = "genre_row"
+    const val PLAY = "genre_play"
+    const val SHUFFLE = "genre_shuffle"
+}
+
 /** What the library screens need from the app: playing, the mini player, and the way to the pages. */
 class LibraryHost(
     val player: Player?,
@@ -140,40 +149,48 @@ class LibraryHost(
     val playlists: PlaylistActions? = null,
     /** Turns shuffle on and plays a list from a song: a smart list's "Shuffle" (docs/library.md §17.2). */
     val shuffle: (row: Int, song: Song?, list: SongQuery) -> Unit = { _, _, _ -> },
+    /** Opens the page of the genre [key] (docs/library.md §19.3). */
+    val openGenre: (key: String) -> Unit = {},
 )
 
+/**
+ * The tabs in their order (docs/library.md §19.2): the first three are the root of the controller tree, the last three its
+ * node "More" (docs/playback.md §10.1).
+ */
 private enum class LibraryTab(val label: Int) {
     SONGS(R.string.tab_songs),
     ALBUMS(R.string.tab_albums),
     ARTISTS(R.string.tab_artists),
-    FOLDERS(R.string.tab_folders),
-
-    /** After Folders (docs/library.md §16.3); PIM-64 may move it among the browse categories. */
     PLAYLISTS(R.string.tab_playlists),
+    GENRES(R.string.tab_genres),
+    FOLDERS(R.string.tab_folders),
 }
 
 /**
  * The library screen (docs/library.md §6.1): the top bar with search, sort and the settings, the tabs Songs, Albums,
- * Artists and Folders, and the mini player. The search filters the tab shown.
+ * Artists, Playlists, Genres and Folders, and the mini player. The search filters the tab shown.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LibraryScreen(host: LibraryHost, onOpenSettings: () -> Unit) {
     val app = LocalContext.current.applicationContext as Application
     val access = rememberAudioAccess()
-    var tabIndex by rememberSaveable { mutableIntStateOf(0) }
-    val tab = LibraryTab.entries[tabIndex]
+    // Kept by its name, so that a new tab never turns a kept choice into another one (docs/library.md §19.2).
+    var tabName by rememberSaveable { mutableStateOf(LibraryTab.SONGS.name) }
+    val tab = LibraryTab.entries.firstOrNull { it.name == tabName } ?: LibraryTab.SONGS
     var searching by rememberSaveable { mutableStateOf(false) }
     var search by rememberSaveable { mutableStateOf("") }
 
     val songs = viewModel(key = "songs") { SongsViewModel(app) }
     val albums = viewModel(key = "albums") { AlbumsViewModel(app) }
     val artists = viewModel(key = "artists") { ArtistsViewModel(app) }
+    val genres = viewModel(key = "genres") { GenresViewModel(app) }
     val folders = viewModel(key = "folders") { FolderPageViewModel(app, folder = null) }
     LaunchedEffect(search) {
         songs.setSearch(search)
         albums.setSearch(search)
         artists.setSearch(search)
+        genres.setSearch(search)
         folders.setSearch(search)
     }
 
@@ -191,6 +208,7 @@ fun LibraryScreen(host: LibraryHost, onOpenSettings: () -> Unit) {
             LibraryTab.FOLDERS -> SortButton(ListName.FOLDERS, folders.order.collectAsStateWithLifecycle().value, folders::setOrder)
             // Playlists sort by name only (docs/library.md §16.3).
             LibraryTab.PLAYLISTS -> Unit
+            LibraryTab.GENRES -> SortButton(ListName.GENRES, genres.order.collectAsStateWithLifecycle().value, genres::setOrder)
         }
     }
     Scaffold(
@@ -213,9 +231,9 @@ fun LibraryScreen(host: LibraryHost, onOpenSettings: () -> Unit) {
                         Icon(painterResource(R.drawable.ic_settings), stringResource(R.string.settings_open))
                     }
                 }
-                PrimaryScrollableTabRow(selectedTabIndex = tabIndex, modifier = Modifier.testTag(LibraryTags.TABS), edgePadding = 8.dp) {
-                    LibraryTab.entries.forEachIndexed { index, entry ->
-                        Tab(selected = index == tabIndex, onClick = { tabIndex = index }, text = { Text(stringResource(entry.label)) })
+                PrimaryScrollableTabRow(selectedTabIndex = tab.ordinal, modifier = Modifier.testTag(LibraryTags.TABS), edgePadding = 8.dp) {
+                    LibraryTab.entries.forEach { entry ->
+                        Tab(selected = entry == tab, onClick = { tabName = entry.name }, text = { Text(stringResource(entry.label)) })
                     }
                 }
             }
@@ -255,8 +273,44 @@ fun LibraryScreen(host: LibraryHost, onOpenSettings: () -> Unit) {
             ) { list -> artistItems(list, host) }
             LibraryTab.FOLDERS -> FolderContent(access, folders, folder = null, host, modifier, search, empty)
             LibraryTab.PLAYLISTS -> host.playlists?.let { PlaylistsContent(host, it, search, modifier) }
+            // No grid: genres have no cover (docs/library.md §19.2).
+            LibraryTab.GENRES -> Groups(
+                access, genres, modifier, search, empty,
+                sections = { list -> list.map { it.section } },
+                tiles = {},
+            ) { list -> genreItems(list, host) }
         }
     }
+}
+
+private fun LazyListScope.genreItems(genres: List<GenreGroup>, host: LibraryHost) {
+    items(genres, key = { "genre " + it.key }) { genre -> GenreRow(genre, host) }
+}
+
+/** "Unknown genre" in italics, so that a real genre of that name is never taken for it (docs/library.md §19.2). */
+@Composable
+internal fun genreName(genre: GenreGroup): String = if (genre.unknown) stringResource(R.string.genre_unknown) else genre.name
+
+/** A genre with its number of songs and the menu of §19.2; "Unknown genre" in italics. */
+@Composable
+private fun GenreRow(genre: GenreGroup, host: LibraryHost) {
+    val name = genreName(genre)
+    ListItem(
+        headlineContent = {
+            Text(
+                name,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                fontStyle = if (genre.unknown) FontStyle.Italic else null,
+            )
+        },
+        supportingContent = { Text(pluralStringResource(R.plurals.songs_count, genre.songs, genre.songs)) },
+        leadingContent = { Icon(painterResource(R.drawable.ic_genre), contentDescription = null) },
+        trailingContent = { QueueMenuButton(stringResource(R.string.song_menu, name), queue(host, QueueTarget.Genre(genre.key))) },
+        modifier = Modifier
+            .clickable(onClickLabel = stringResource(R.string.open_genre), role = Role.Button) { host.openGenre(genre.key) }
+            .testTag(GenreTags.ROW),
+    )
 }
 
 /**

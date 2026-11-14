@@ -1,6 +1,7 @@
 package io.github.lorddetson.piplayer.library.sync
 
 import io.github.lorddetson.piplayer.library.lists.DisplayArtist
+import io.github.lorddetson.piplayer.library.lists.DisplayGenre
 import io.github.lorddetson.piplayer.library.sort.SortKey
 import io.github.lorddetson.piplayer.library.values.IndexValues
 import io.github.lorddetson.piplayer.library.values.MergedValues
@@ -32,9 +33,14 @@ data class DisplayValues(
     val albumSort: SortKey? = null,
     val albumArtistSort: SortKey? = null,
     val fileSort: SortKey = SortKey.EMPTY,
+    /** The genres lists group the file by (docs/library.md §19.1). */
+    val displayGenres: List<DisplayGenre> = emptyList(),
 ) {
     /** The names of [displayArtists]. */
     val artists: List<String> get() = displayArtists.map { it.name }
+
+    /** The names of [displayGenres]. */
+    val genres: List<String> get() = displayGenres.map { it.name }
 
     companion object {
         /** The values of a file only the index has spoken of. */

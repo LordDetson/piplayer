@@ -98,7 +98,7 @@ class LibraryTreeTest {
     private fun album(title: String) = children("albums").single { it.mediaMetadata.title.toString() == title }
 
     @Test
-    fun theRootHasTheFourTabsAsBrowsableNodes() {
+    fun theRootHasFourBrowsableNodesWithMoreLast() {
         val root = onMain { browser.getLibraryRoot(null) }.get(10, TimeUnit.SECONDS).value!!
         assertThat(root.mediaId).isEqualTo(PlaybackSessionCallback.ROOT_ID)
         assertThat(root.mediaMetadata.isBrowsable).isTrue()
@@ -106,8 +106,9 @@ class LibraryTreeTest {
 
         val nodes = children(root.mediaId)
 
-        assertThat(nodes.map { it.mediaId }).containsExactly("songs", "albums", "artists", "folders")
-        assertThat(titles(nodes)).containsExactly("Songs", "Albums", "Artists", "Folders")
+        // Since M2b Folders sits under More with Playlists and Genres (docs/playback.md §10.1).
+        assertThat(nodes.map { it.mediaId }).containsExactly("songs", "albums", "artists", "more")
+        assertThat(titles(nodes)).containsExactly("Songs", "Albums", "Artists", "More")
         assertThat(nodes).allSatisfy { assertThat(it.mediaMetadata.isBrowsable).isTrue() }
         assertThat(nodes.map { it.mediaMetadata.isPlayable }).containsExactly(true, false, false, false)
     }
@@ -163,6 +164,9 @@ class LibraryTreeTest {
             }
         }
         assertThat(nodes).isGreaterThan(40)
+        // More, its three nodes and a genre were walked too (docs/playback.md §10.1).
+        assertThat(seen).contains("more", "playlists", "genres", "folders")
+        assertThat(seen.any { it.startsWith("genre/") }).isTrue()
         // An ID that names nothing is an error.
         assertThat(onMain { browser.getChildren("album/nothing", 0, 10, null) }.get(10, TimeUnit.SECONDS).resultCode)
             .isEqualTo(LibraryResult.RESULT_ERROR_BAD_VALUE)
@@ -320,7 +324,7 @@ class LibraryTreeTest {
         val wide = children(music).single { it.mediaMetadata.title.toString() == "Wide" }.mediaId
         val wideBuckets = children(wide)
         assertThat(wideBuckets.size).describedAs("buckets of Wide").isGreaterThan(1)
-        val nodes = wideBuckets.map { it.mediaId } + children(album("Long").mediaId).map { it.mediaId } + listOf("songs!A", "artists", "songs")
+        val nodes = wideBuckets.map { it.mediaId } + children(album("Long").mediaId).map { it.mediaId } + listOf("songs!A", "artists", "songs", "more", "playlists", "genres")
 
         val connected = CountDownLatch(1)
         val platform = onMain {

@@ -42,6 +42,7 @@ The data model it implements is sketched in track-identification.md §10 (TI bel
       extension with spaces, leaving out empty values, and keeps the glued forms of each field's names (TI §10.1).
       Search itself arrives in step 12; the column and its index exist now, so that
       search can be measured on the real schema early.
+- Since M2b `display_genre`: each genre of a file as lists group it (§19.1), from the same resolver.
 - `volume_sync_state`: per volume, the index version and generation the last sync reached.
 
 ### 1.3 Sync
@@ -511,7 +512,8 @@ keeps playing meanwhile, and the crash leaves a native crash report of `:tagger`
 ### 6.1 Screens
 
 - The library screen has a top bar with the app's name and actions for search, sort and the settings, then the tabs
-  Songs, Albums, Artists and Folders, and the mini player at the bottom. Without the audio permission every tab and page
+  Songs, Albums, Artists and Folders (since M2b Songs, Albums, Artists, Playlists, Genres and Folders, §19.2), and the
+  mini player at the bottom. Without the audio permission every tab and page
   shows the permission card of playback.md §2.2; access granted from any of them starts the library.
 - A tap on an album, an artist or a folder opens its page, which comes in from the side and has its own top bar with
   back, search and sort, and the mini player.
@@ -566,6 +568,8 @@ keeps playing meanwhile, and the crash leaves a native crash report of `:tagger`
 | Album page | disc and track | disc and track |
 | Artist page songs | album by year, title | album by year |
 | Folders tab and folder pages | songs by file name or title; subfolders always by name | file name |
+| Genres (M2b, §19.2) | name, number of songs (most first) | name |
+| Genre page (M2b, §19.3) | artist, title, album, length | artist |
 
 - Every list also has "Reverse order", which reverses the whole list (on a folder page, its subfolders too). Ties go by
   title, then by the index's ID, so that the order is total and the reverse exact; disc and track go by the file name
@@ -590,8 +594,8 @@ keeps playing meanwhile, and the crash leaves a native crash report of `:tagger`
   and the search: `q2/<list>?key=<key>&sort=<field>&rev=<0|1>&q=<query>&start=<ID>&index=<row>`, the key and the query
   percent-encoded, the start the song's file ID (§8.4). The lists are `songs` (no key), `album` (its album key), `artist` (its artist key), `folder` (the
   volume, `/` and the relative path), `tree` (a folder with all its subfolders) and, since M2b, `playlist` (its
-  playlist ID, with the sort `position`, §16.4) and the smart lists `favorites`, `added`, `recent`, `most` (no key) and
-  `missing` (the chosen reasons, §17.3).
+  playlist ID, with the sort `position`, §16.4), the smart lists `favorites`, `added`, `recent`, `most` (no key) and
+  `missing` (the chosen reasons, §17.3), and `genre` (its genre key, `!none` for the songs without one, §19.4).
 - `tree` plays the folder's own songs first, in the folder page's sort, then each subfolder in name order, in turn with
   its own songs first. "Reverse order" reverses the whole list.
 - The service expands a request from the list the screen shows when it holds the start song, otherwise by reading the
@@ -601,13 +605,13 @@ keeps playing meanwhile, and the crash leaves a native crash report of `:tagger`
   list follows the rules of §5.4.
 - A saved queue of an album or an artist whose key names nothing any more when it is restored (the tag pass has found a
   release ID or another album artist since) follows its saved song to that song's album or first artist, and the saved
-  request takes the new key.
+  request takes the new key. Since M2b a genre follows the same way, to the song's first genre (§19.4).
 - Requests of version 1 still name the Songs list by title, so that saved queues stay valid.
 
 ### 6.5 Routes
 
-- Pages are found by natural keys, not by row IDs: an album by its album key, an artist by its artist key, a folder by
-  its volume and relative path. They survive a rebuild of the library database and a new index. A key that no longer
+- Pages are found by natural keys, not by row IDs: an album by its album key, an artist by its artist key, a genre by
+  its genre key (since M2b, §19.4), a folder by its volume and relative path. They survive a rebuild of the library database and a new index. A key that no longer
   names anything (the tag pass found a release ID, the folder is gone) shows that the album, artist or folder is not
   found, with the way back.
 - While the tag pass runs, the lists of albums, artists and folders are not grouped again under the user's finger:
@@ -1456,8 +1460,7 @@ Decision: an entry never points at a file. It refers to a track identity (§8.1)
 
 ### 16.3 Screens
 
-- Decision: the Playlists list is a tab after Folders. Its content is one composable that PIM-64 can move among the
-  browse categories. It starts with "New playlist" and "Import" and lists the playlists by name (the collator of the
+- The Playlists list is a tab; since PIM-64 it comes after Artists (§19.2). Its content is one composable. It starts with "New playlist" and "Import" and lists the playlists by name (the collator of the
   locale), each with its number of songs; the top bar's search filters them by name, and the tab has no sort. With none
   it says "No playlists yet".
 - "New playlist" and "Rename" open a dialog with a name field; its confirm button stays off while the name is blank.
@@ -1642,9 +1645,9 @@ Every smart list is a list of the library: it holds visible songs only (§3.5), 
   requests: a restored queue reads the list as it is then, so a favorite removed since is gone from Favorites.
 - Decision: smart lists are read anew for every request and for every change and never kept between reads (§6.4), as a
   playlist's list is (§16.4): plays and favorites change them without changing the library's revision.
-- Decision: the controller tree (playback.md §10) does not show them yet. Its root has exactly four children, which
-  Android Auto shows at most; the node that holds genres and playlists is PIM-64's, and the smart lists go there, at the
-  top of the playlists as in the app. Their lists can already be read as an outline for the tree.
+- Decision (PIM-64): the controller tree shows Favorites, Recently added, Recently played and Most played at the top of
+  its node Playlists, in this order, each only while it holds a song (playback.md §10.1). Songs missing information stays
+  out of the tree: it is a list to fix tags by, with chips the car has no room for.
 
 ### 17.4 Updates and the database
 
@@ -1808,3 +1811,131 @@ tags, the embedded picture's size), and one that can no longer be opened (the pr
 segment, "The file could not be read"); the counts of failed reads used only inside the library's access; on the screen, "Details" from the song menu of the Songs tab, an album page, a
 playlist page, a queue row and Now Playing's menu, a MusicBrainz row opening its page with `ACTION_VIEW`, a long press
 copying a value, and for an opened file the embedded picture in the header and a file that can no longer be opened.
+
+## 19. Genres and the Playlists category (M2b: PIM-64)
+
+The Genres tab and the genre pages, the place of the Playlists tab (§16.3) among the tabs, and genres, playlists and the
+smart lists (§17) in the controller tree (playback.md §10). The owner left the open choices to the recommendations
+(14.11.2026); they are marked "decision".
+
+### 19.1 The genres of a file
+
+- A file's genres are those of its merged values (TI §7.1): every genre of its tags once the tag pass has read it
+  (TagLib's values, split at ";" as the tag pass splits every list, §5.2), otherwise the media index's genre.
+  Decision: the index's value is split the same way: at ";", each part trimmed, empty parts and parts that are the
+  index's placeholder `<unknown>` dropped. A tagger that writes one field per format joins several genres with "; "
+  (TI §7.5), and the index passes that field on as it is. A "/" never splits: "Hip-Hop/Rap" and "R&B/Soul" are one
+  genre each. The tags' values are trimmed and blank ones dropped too.
+- After the read the index no longer fills an empty genre, as for every field (§1.2): a file whose tags hold no genre
+  has none, whatever the index says.
+- A genre is one by its key, the name normalized as for search (TI §4.1), as an artist is (§6.2): "Rock" and "ROCK",
+  "Hip-Hop" and "Hip Hop", "Электроника" and "электроника" are one genre. A name of punctuation alone keeps itself in
+  lower case as its key. Two values of one file with the same key count once; the file keeps the order of its tags.
+- A genre shows the lowest of its spellings in code point order (the artists' rule, so "Rock" before "rock").
+- ID3 genre numbers: TagLib gives the names of ID3v1 genre numbers ("(17)" reads as "Rock"), so after the read such a
+  genre is named. Decision: the index's value is not translated; a device whose index gives "(17)" shows that until the
+  tag pass has read the file.
+- `display_genre` holds them, one row per genre of a file, written by the one writer of `track_display` (TI §7.1) in the
+  same transaction and chunks as `display_artist`: by the sync from the index's values, by the tag pass from the tags,
+  and again whenever display rows are derived again (a new display version, another collation, text decoded again with
+  another legacy encoding, §1.3, §5.7, §11.1). A file without a genre has no row.
+
+### 19.2 The Genres tab
+
+- Decision: the tabs are Songs, Albums, Artists, Playlists, Genres and Folders, in this order: the first three are the
+  root of the controller tree and the last three its node "More" (playback.md §10.1), so the app and the car list the
+  categories alike. This moves Playlists from after Folders (§16.3) and Folders to the end. The tab row scrolls (§6.1).
+- Decision: the tab shown is kept by its name, not its place, so that a new tab never turns a kept choice into another
+  tab after the activity is recreated.
+- The Genres tab lists every genre with a visible song (§3.5), each with its number of visible songs. A song with two
+  genres counts in both. The number counts song rows as the Songs tab lists them: two files with byte-identical audio
+  are two songs and count twice, although they share one identity (§8.1), as in the smart lists (§17.1).
+- Its orders are name (the collator of the locale, §11.1) and number of songs (most first), each reversible, kept in the
+  settings file as every list's (§6.3, `genres`). Ties go by the name's sort key, then the genre's key. Decision: no
+  grid, since genres have no cover (features.md lists genre images for v1.x).
+- Decision: songs with no genre are one more row, "Unknown genre", always last whatever the order and its reverse, so
+  that untagged songs stay reachable. Its name is shown in italics, so that a real genre named "Unknown" or "Unknown
+  genre", which takes its place by name among the others, is never taken for it. Its number counts its songs as above.
+  It shows whenever a visible song has no genre, also in a library without any genre, where it is the only row. It is
+  not shown while a search is typed, since it has no name to match.
+- The search filters genres by name (every word of the query, normalized as the library is, §6.3).
+- The scroll thumb's bubble shows the letter by name and the number of songs by count (§11.2); "Unknown genre" takes the
+  section of the row before it.
+- A row's menu has "Play next", "Add to queue" and "Add to playlist" (playback.md §9.1), which add the genre's songs in
+  the order kept for genre pages, without a search.
+- With no music the tab shows the empty states of §14.1. The tab is read as the Artists tab is (§6.5): when it first
+  starts, after a sync that changed the library (also one under another collation), after a change of the hidden files,
+  the order or the search, and once more at the first return after a pass of the tag pass that changed rows; never for
+  the batches of a pass, so that nothing is grouped again under the user's finger. A genre page's header follows the
+  same rule, and its songs change in place as on every page (§5.4).
+
+### 19.3 The genre page
+
+- A tap on a genre opens its page, which comes in from the side: the top bar with back, the genre's name ("Unknown
+  genre" in italics for the songs without one), search, sort and the menu of §19.2; under it the number of songs,
+  "Play" and "Shuffle" as on a smart list's page (§17.2); then the songs.
+- Decision: the page lists songs only. Browsing a genre by artist and album is the nested browsing of v1.x
+  (features.md).
+- Its orders are artist, title, album and length (reversible), kept in the settings file for all genre pages
+  (`genre_page`). Decision: artist is the default, which keeps an artist's songs of the genre together; ties go as in
+  the Songs tab (§6.3).
+- A tap on a song plays the page's list from that song, in the order and with the search shown. "Play" plays it from its
+  first song; "Shuffle" turns shuffle on and plays it from a random song (playback.md §3.6). Song rows have the track
+  menu of every list (playback.md §9.1).
+- A genre that no visible song has any more (retagged, hidden, gone) shows that the genre is not found, with the way
+  back (§6.5).
+
+### 19.4 Keys, routes and requests
+
+- A genre page is found by the genre's key (§19.1), which survives a rebuild of the library database and a new index.
+  Decision: the songs without a genre have the key `!none`, which no name gives: a key from a name is either normalized
+  text, which holds no punctuation, or a name of punctuation alone, which holds no letter.
+- A genre plays through a compact request of the list `genre` (§6.4): `q2/genre?key=<genre key>&sort=<field>...`, the key
+  percent-encoded. Its list is kept between reads like an artist's (§6.4), since only the library's revision, the tag
+  pass and the hidden files change it.
+- A saved queue of a genre whose key names nothing any more when it is restored follows its saved song to that song's
+  first genre (or to "Unknown genre" when it has none), as an album or an artist does (§6.4), and the saved request takes
+  the new key.
+
+### 19.5 The library database
+
+- `display_genre(file_id, position, genre_key, name, search_text, sort_key)`, primary key `(file_id, position)`, an index
+  on `genre_key`. The search text is the name normalized with its glued forms (TI §10.1); the sort key is the collator's
+  key of the name (§11.1). Genres have no sort tags.
+- The tables `genre` and `track_genre` of the tag pass stay as they are: they hold what the file says, while lists group
+  by `display_genre`, which also holds the index's genres before the read.
+- A file the index no longer lists loses its `display_genre` rows together with its other rows, in the same chunks, so
+  that no row outlives its file (file IDs are never reused, §8.4).
+- The library database's version goes to 12 (a rebuild with a new first sync, as every version does, §1.1).
+- The first sync writes one `display_genre` row per genre of a file and, in an empty library, builds the index on
+  `genre_key` after the rows, with the indexes of `audio_file`, `track_display` and `display_artist` (§1.3). The limits of
+  §1.7 do not change.
+- The Genres list is one grouping query over `display_genre` joined to `track_display` and `audio_file` by their keys;
+  the number of "Unknown genre" one count of the visible display rows without a `display_genre` row. A genre's songs are
+  the visible display rows whose file has a row of its key (by the index on `genre_key`).
+
+### 19.6 Checks
+
+JVM tests: the genres of merged values before and after the read (split at ";" with each part trimmed, never at "/",
+blanks and placeholders dropped per part, one per key, the tags' order, nothing from the index after the read); the key
+of a name and the key `!none` never given by a name; the list `genre` in queue requests (round trip, keys of every kind
+of character, the key `!none`, no empty key, the default sort) and a saved genre that follows its song; the order of the
+Genres list with "Unknown genre" last in both directions, its section, and none while searching; the defaults of the
+orders `genres` and `genre_page` and the fallback of a stored field they do not offer.
+
+Instrumented tests on the API 30 emulator:
+
+- On a library database filled from a test index: genres from the index's values before the read and from the tags
+  after; a song of two genres in both, counted once in each; two byte-identical files counted twice; spellings of one
+  key as one genre; hidden files left out of the genres, their counts and the songs; "Unknown genre" with its count and
+  songs, next to a real genre named "Unknown genre"; both orders and their reverse; the search; a genre page's songs in
+  every order with its search; the outline of a genre's list equal to its songs; a key that names nothing found as gone.
+- The sync and the tag pass: `display_genre` written by the first sync (with its index in place after it), by a later
+  sync and by the tag pass; a file read again with fewer genres keeps no stale row; a file removed by a later sync
+  leaves no row, and its genre leaves the list; genres follow the text decoded again with another legacy encoding; a
+  rebuild of the library database gives the same genres.
+- Through the service: a genre's request plays it from the tapped song; a saved queue of a genre whose key is gone
+  follows its song.
+- On the screen: the tabs in their order, the tab kept after the activity is recreated; the Genres tab with counts,
+  "Unknown genre" last, the sort by songs and the search; the tab updated after the hidden files change; a genre page
+  that plays from a row, "Play", "Shuffle", the menu of a genre row; a genre page found as gone.

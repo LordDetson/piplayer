@@ -101,10 +101,11 @@ class FakeMediaIndex : MediaIndex {
             year: Int? = 2_000,
             trackNumber: Int? = 1,
             dateAdded: Long = 1_600_000_000 + id,
+            genre: String? = null,
         ) = IndexRow(
             mediaStoreId = id, volume = volume, relativePath = path, displayName = name, size = 1_000 + id,
             modifiedSeconds = 1_700_000_000 + id, generationModified = generation, mimeType = "audio/mpeg", kinds = kinds,
-            title = title, artist = artist, album = album, albumArtist = albumArtist, composer = null, genre = null,
+            title = title, artist = artist, album = album, albumArtist = albumArtist, composer = null, genre = genre,
             year = year, trackNumber = trackNumber, durationMs = durationMs, dateAddedSeconds = dateAdded,
         )
     }

@@ -1003,6 +1003,8 @@ made live in the user database.
   a search walk the titles in order and stop at the first page of 50.
   `missing_info_reasons` is the set of §1 reasons, written by
   the precedence resolver; `missing_info_decision` is none, keep_as_is or skipped.
+- `display_genre(file_id, position, genre_key, name, search_text, sort_key)` (M2b): each genre of a file as lists group
+  it, from the merged values, beside `display_artist` (library.md §19.1, §19.5).
 - `fingerprint(content_key, fingerprint, format, acoustid_id, decoder_path, computed_at)`: a cache for identification
   and re-attachment, kept by content key, so the fingerprint of a file that left the media index stays available for
   re-attachment (§3.1); rows that no file or identity refers to are dropped after 30 days. M2a creates it without

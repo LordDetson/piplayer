@@ -68,7 +68,7 @@ import io.github.lorddetson.piplayer.ui.library.LibraryHost
 import io.github.lorddetson.piplayer.ui.player.QueueTarget
 import io.github.lorddetson.piplayer.userdata.PlaylistSummary
 import io.github.lorddetson.piplayer.userdata.UserData
-import java.text.Collator
+import io.github.lorddetson.piplayer.userdata.byName
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -316,10 +316,9 @@ class PlaylistsViewModel(application: Application) : AndroidViewModel(applicatio
 
     private fun shown(playlists: List<PlaylistSummary>, query: String): List<PlaylistSummary> {
         val terms = SearchTerms.of(query)
-        val collator = Collator.getInstance().apply { strength = Collator.SECONDARY }
         return playlists
             .filter { playlist -> terms.isEmpty() || SearchText.of(playlist.name).let { text -> terms.all { it in text } } }
-            .sortedWith(compareBy<PlaylistSummary, String>(collator) { it.name }.thenBy { it.id })
+            .byName()
     }
 
     private companion object {

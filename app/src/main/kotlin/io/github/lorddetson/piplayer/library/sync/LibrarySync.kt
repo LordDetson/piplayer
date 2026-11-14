@@ -338,6 +338,7 @@ class LibrarySync(
             dao.deleteTracks(chunk)
             dao.deleteDisplays(chunk)
             dao.deleteDisplayArtists(chunk)
+            dao.deleteDisplayGenres(chunk)
             dao.deleteEntries(chunk)
             dao.deleteFiles(chunk)
         }
@@ -392,7 +393,7 @@ class LibrarySync(
         const val DELETE_CHUNK = 500
 
         /** The tables a sync writes in bulk that have indexes of their own. */
-        val INDEXED_TABLES = listOf("audio_file", "track_display", "display_artist")
+        val INDEXED_TABLES = listOf("audio_file", "track_display", "display_artist", "display_genre")
 
         // The columns of the entities in LibraryDatabase.kt, in the order the writers above give their values.
         val FILE_COLUMNS = listOf(

@@ -409,4 +409,9 @@
     <string name="details_cover_none">Нет</string>
     <string name="details_pixels">%1$d × %2$d пикс.</string>
     <string name="details_pixels_bytes">%1$d × %2$d пикс., %3$s</string>
+    <string name="tab_genres">Жанры</string>
+    <string name="genre_unknown">Неизвестный жанр</string>
+    <string name="genre_not_found">Этого жанра больше нет в библиотеке.</string>
+    <string name="open_genre">Открыть жанр</string>
+    <string name="tree_more">Ещё</string>
 </resources>

@@ -110,6 +110,7 @@ class TrackDisplayWriter(private val database: LibraryDatabase) {
             "album_search", "title_sort", "artist_sort", "album_sort", "album_artist_sort", "file_sort",
         )
         private val ARTIST_COLUMNS = listOf("file_id", "position", "artist_key", "name", "search_text", "sort_key")
+        private val GENRE_COLUMNS = listOf("file_id", "position", "genre_key", "name", "search_text", "sort_key")
 
         /**
          * Normalizing 20 000 titles and search texts takes about a second on one core, so the cores share it. Each chunk
@@ -144,11 +145,13 @@ class TrackDisplayWriter(private val database: LibraryDatabase) {
             replaceInChunks("track_display", COLUMNS, idChunks.indices.map { c -> suspend { rows(c) } }) { (id, values) ->
                 display(id, values)
             }
-            // A file may now have fewer artists than before.
-            for (chunk in fileIds.chunked(DELETE_CHUNK)) {
-                usePrepared("DELETE FROM display_artist WHERE file_id IN (SELECT value FROM json_each(?))") { statement ->
-                    statement.bindText(1, chunk.joinToString(",", "[", "]"))
-                    statement.step()
+            // A file may now have fewer artists and genres than before.
+            for (table in listOf("display_artist", "display_genre")) {
+                for (chunk in fileIds.chunked(DELETE_CHUNK)) {
+                    usePrepared("DELETE FROM $table WHERE file_id IN (SELECT value FROM json_each(?))") { statement ->
+                        statement.bindText(1, chunk.joinToString(",", "[", "]"))
+                        statement.step()
+                    }
                 }
             }
             // Resolved with the other values, off this transaction; all of them are by now.
@@ -166,6 +169,22 @@ class TrackDisplayWriter(private val database: LibraryDatabase) {
                 text(artist.name)
                 text(artist.searchText)
                 blob(artist.sortKey.bytes)
+            }
+            // The genres lists group by (docs/library.md §19.1), in the same chunks.
+            val genres = idChunks.indices.map { c ->
+                suspend {
+                    rows(c).flatMap { (fileId, values) ->
+                        values.displayGenres.mapIndexed { position, genre -> Triple(fileId, position, genre) }
+                    }
+                }
+            }
+            replaceInChunks("display_genre", GENRE_COLUMNS, genres) { (fileId, position, genre) ->
+                long(fileId)
+                long(position.toLong())
+                text(genre.key)
+                text(genre.name)
+                text(genre.searchText)
+                blob(genre.sortKey.bytes)
             }
         }
 

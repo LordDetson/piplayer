@@ -909,12 +909,13 @@ class PlaybackSessionCallback(
     }
 
     /**
-     * A saved album or artist whose key names nothing any more, because the tag pass has read its files since (a release
-     * ID, another album artist), follows the saved song to its album or artist now (docs/library.md §6.5).
+     * A saved album, artist or genre whose key names nothing any more, because the tag pass has read its files since (a
+     * release ID, another album artist, other genres), follows the saved song to its album, artist or first genre now
+     * (docs/library.md §6.5, §19.4).
      */
     private fun followed(request: QueueRequest, songId: Long?): QueueRequest {
         val kind = request.list.kind
-        if (songId == null || (kind != ListKind.ALBUM && kind != ListKind.ARTIST) || SongList.sourceOverride != null ||
+        if (songId == null || kind !in FOLLOWED || SongList.sourceOverride != null ||
             !Library.mayRead(context)
         ) {
             return request
@@ -924,8 +925,13 @@ class PlaybackSessionCallback(
             val hidden = LibrarySettings(context).readHiddenFiles()
             Library.read(context) { database ->
                 val lists = LibraryLists(database, hidden)
-                val exists = if (kind == ListKind.ALBUM) lists.album(request.list.key) != null else lists.artist(request.list.key) != null
-                QueueRequest.rekeyed(request, exists, if (exists) null else lists.links(songId))
+                val exists = when (kind) {
+                    ListKind.ALBUM -> lists.album(request.list.key) != null
+                    ListKind.ARTIST -> lists.artist(request.list.key) != null
+                    else -> lists.genre(request.list.key) != null
+                }
+                if (exists) return@read request
+                QueueRequest.rekeyed(request, keyExists = false, lists.links(songId), if (kind == ListKind.GENRE) lists.genreKeys(songId) else emptyList())
             }
         }.getOrElse { e ->
             Log.w(TAG, "Could not follow the saved list", e)
@@ -1312,5 +1318,8 @@ class PlaybackSessionCallback(
 
         /** As long as a list read waits for the first sync (docs/library.md §1.4). */
         private const val READY_TIMEOUT_MS = 30_000L
+
+        /** The lists whose saved key follows the saved song when it names nothing any more (docs/library.md §6.4, §19.4). */
+        private val FOLLOWED = setOf(ListKind.ALBUM, ListKind.ARTIST, ListKind.GENRE)
     }
 }

@@ -42,7 +42,10 @@ import io.github.lorddetson.piplayer.ui.player.MiniPlayer
 import io.github.lorddetson.piplayer.ui.player.QueueTarget
 import io.github.lorddetson.piplayer.ui.songs.PermissionCard
 import io.github.lorddetson.piplayer.ui.songs.SongsScreen
+import io.github.lorddetson.piplayer.ui.songs.SongsState
 import io.github.lorddetson.piplayer.ui.songs.SongsViewModel
+import io.github.lorddetson.piplayer.ui.playlists.PlayAndShuffle
+import androidx.compose.ui.text.font.FontStyle
 import io.github.lorddetson.piplayer.ui.songs.rememberAudioAccess
 import io.github.lorddetson.piplayer.covers.CoverRequest
 import io.github.lorddetson.piplayer.ui.covers.LibraryCover
@@ -229,6 +232,68 @@ fun ArtistPage(key: String, host: LibraryHost, onBack: () -> Unit) {
                     }
                 }
                 item(key = "songs heading") { SectionHeading(stringResource(R.string.artist_songs)) }
+            }
+        }
+    }
+}
+
+/**
+ * The page of the genre [key] (docs/library.md §19.3): its name, the number of songs, "Play" and "Shuffle", then its songs,
+ * each playing the page's list from itself.
+ */
+@Composable
+fun GenrePage(key: String, host: LibraryHost, onBack: () -> Unit) {
+    val app = LocalContext.current.applicationContext as Application
+    val access = rememberAudioAccess()
+    var searching by rememberSaveable { mutableStateOf(false) }
+    var search by rememberSaveable { mutableStateOf("") }
+    val header = viewModel(key = "genre") { GenrePageViewModel(app, key) }
+    val songs = viewModel(key = "songs") { SongsViewModel(app, SongQuery.genre(key), ListName.GENRE_PAGE) }
+    LaunchedEffect(search) { songs.setSearch(search) }
+    LifecycleStartEffect(header, access.granted) {
+        header.onStart(access.granted)
+        onStopOrDispose { header.onStop() }
+    }
+    val state = header.state.collectAsStateWithLifecycle().value
+    val genre = (state as? GroupsState.Loaded)?.value
+    val loaded = songs.state.collectAsStateWithLifecycle().value as? SongsState.Loaded
+    PageScaffold(
+        title = genre?.let { genreName(it) }.orEmpty(),
+        host = host,
+        onBack = onBack,
+        searching = searching,
+        search = search,
+        onSearch = { search = it },
+        onSearching = { open -> searching = open; if (!open) search = "" },
+        sort = { SortButton(ListName.GENRE_PAGE, songs.order.collectAsStateWithLifecycle().value, songs::setOrder) },
+        menu = genre?.let { queue(host, QueueTarget.Genre(key)) },
+    ) { modifier ->
+        when {
+            !access.granted -> PermissionCard(access.deniedForGood, access.request, access.openSettings, modifier)
+            state is GroupsState.Loading -> Loading(modifier)
+            genre == null -> Empty(stringResource(R.string.genre_not_found), modifier)
+            else -> SongsScreen(
+                access = access,
+                viewModel = songs,
+                onSongClick = { row, song, list -> host.play(row, song, list) },
+                modifier = modifier,
+                currentSongId = host.currentSongId,
+                menu = host.menu,
+                listTag = LibraryTags.LIST,
+                emptyText = stringResource(R.string.search_nothing_found),
+                headerItems = 1,
+            ) {
+                item(key = "genre header") {
+                    Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            genreName(genre),
+                            style = MaterialTheme.typography.headlineSmall,
+                            fontStyle = if (genre.unknown) FontStyle.Italic else null,
+                            modifier = Modifier.semantics { heading() },
+                        )
+                        PlayAndShuffle(loaded, host, GenreTags.PLAY, GenreTags.SHUFFLE)
+                    }
+                }
             }
         }
     }

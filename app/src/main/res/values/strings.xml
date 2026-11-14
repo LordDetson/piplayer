@@ -407,4 +407,11 @@
     <!-- A picture's size, as in "600 × 600 px". -->
     <string name="details_pixels">%1$d × %2$d px</string>
     <string name="details_pixels_bytes">%1$d × %2$d px, %3$s</string>
+    <!-- Genres and the Playlists category (docs/library.md §19). -->
+    <string name="tab_genres">Genres</string>
+    <string name="genre_unknown">Unknown genre</string>
+    <string name="genre_not_found">This genre is no longer in the library.</string>
+    <string name="open_genre">Open genre</string>
+    <!-- The controller tree's node that holds Playlists, Genres and Folders (docs/playback.md §10.1). -->
+    <string name="tree_more">More</string>
 </resources>

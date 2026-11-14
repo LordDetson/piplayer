@@ -366,16 +366,20 @@ sealed interface QueueTarget {
     /** A playlist's available entries in order (docs/library.md §16.3). */
     data class Playlist(val id: Long) : QueueTarget
 
+    /** A genre's songs by its key, `!none` for the songs without one (docs/library.md §19.2). */
+    data class Genre(val key: String) : QueueTarget
+
     companion object {
         /**
-         * The list of [target] without a search: an album by disc and track, an artist and a folder in the order kept for
-         * their kind, a playlist in its own order (docs/playback.md §9.1, docs/library.md §6.3, §16.3).
+         * The list of [target] without a search: an album by disc and track, an artist, a folder and a genre in the order
+         * kept for their kind, a playlist in its own order (docs/playback.md §9.1, docs/library.md §6.3, §16.3, §19.2).
          */
         suspend fun queryOf(context: android.content.Context, target: QueueTarget): SongQuery {
             val (query, list) = when (target) {
                 is Album -> return SongQuery.album(target.key)
                 is Artist -> SongQuery.artist(target.key) to ListName.ARTIST_PAGE
                 is Folder -> SongQuery.tree(target.volume, target.relativePath) to ListName.FOLDERS
+                is Genre -> SongQuery.genre(target.key) to ListName.GENRE_PAGE
                 is Playlist -> return SongQuery.playlist(target.id)
                 is Songs -> return SongQuery.SONGS
             }

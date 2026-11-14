@@ -12,6 +12,8 @@ import io.github.lorddetson.piplayer.library.lists.AlbumSort
 import io.github.lorddetson.piplayer.library.lists.ArtistGroup
 import io.github.lorddetson.piplayer.library.lists.ArtistSort
 import io.github.lorddetson.piplayer.library.lists.FolderEntry
+import io.github.lorddetson.piplayer.library.lists.GenreGroup
+import io.github.lorddetson.piplayer.library.lists.GenreSort
 import io.github.lorddetson.piplayer.library.lists.LibraryLists
 import io.github.lorddetson.piplayer.library.songs.SongList
 import io.github.lorddetson.piplayer.settings.LibrarySettings
@@ -155,6 +157,17 @@ class AlbumsViewModel(application: Application) : GroupsViewModel<List<AlbumGrou
 class ArtistsViewModel(application: Application) : GroupsViewModel<List<ArtistGroup>>(application, ListName.ARTISTS) {
     override fun read(lists: LibraryLists, order: ListOrder, search: String) =
         lists.artists(if (order.field == "songs") ArtistSort.SONGS else ArtistSort.NAME, order.reversed, search)
+}
+
+/** The Genres tab (docs/library.md §19.2), read as the Artists tab is (§6.5). */
+class GenresViewModel(application: Application) : GroupsViewModel<List<GenreGroup>>(application, ListName.GENRES) {
+    override fun read(lists: LibraryLists, order: ListOrder, search: String) =
+        lists.genres(if (order.field == "songs") GenreSort.SONGS else GenreSort.NAME, order.reversed, search)
+}
+
+/** The header of a genre page: the genre, or null once no visible song has it (docs/library.md §19.3). */
+class GenrePageViewModel(application: Application, private val key: String) : GroupsViewModel<GenreGroup?>(application, null) {
+    override fun read(lists: LibraryLists, order: ListOrder, search: String) = lists.genre(key)
 }
 
 /** The header of an album page: the album, or null once it is gone. */

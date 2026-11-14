@@ -14,6 +14,8 @@ import io.github.lorddetson.piplayer.library.lists.ArtistGroup
 import io.github.lorddetson.piplayer.library.lists.ArtistSort
 import io.github.lorddetson.piplayer.library.lists.FolderEntry
 import io.github.lorddetson.piplayer.library.lists.FolderLevels
+import io.github.lorddetson.piplayer.library.lists.GenreGroup
+import io.github.lorddetson.piplayer.library.lists.GenreSort
 import io.github.lorddetson.piplayer.library.lists.LibraryLists
 import io.github.lorddetson.piplayer.library.lists.ListKind
 import io.github.lorddetson.piplayer.library.lists.SongOutline
@@ -28,6 +30,10 @@ import io.github.lorddetson.piplayer.settings.ListOrder
 import io.github.lorddetson.piplayer.settings.ListSorts
 import io.github.lorddetson.piplayer.settings.LibrarySettings
 import io.github.lorddetson.piplayer.identification.text.TextNormalizer
+import io.github.lorddetson.piplayer.ui.playlists.smartListName
+import io.github.lorddetson.piplayer.ui.playlists.smartListOrder
+import io.github.lorddetson.piplayer.userdata.UserData
+import io.github.lorddetson.piplayer.userdata.byName
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 
@@ -135,17 +141,45 @@ class LibraryTree(context: Context, private val artwork: TreeArtwork = TreeArtwo
             val text = query.trim()
             if (TextNormalizer.normalize(text).isEmpty()) return QueueRequest(NO_SONG, 0, songsQuery())
             val songsQuery = songsQuery().copy(search = text)
+            val playlists = voicePlaylists(text)
             return read { lists ->
                 val songs = lists.songs(songsQuery)
-                when (val match = VoiceMatch.choose(text, lists.artists(artistSort(), order(ListName.ARTISTS).reversed, text), lists.albums(albumSort(), order(ListName.ALBUMS).reversed, text), songs)) {
+                val match = VoiceMatch.choose(
+                    text,
+                    lists.artists(artistSort(), order(ListName.ARTISTS).reversed, text),
+                    lists.albums(albumSort(), order(ListName.ALBUMS).reversed, text),
+                    songs,
+                    playlists,
+                    lists.genres(search = text),
+                )
+                when (match) {
                     VoiceMatch.AllSongs -> QueueRequest(NO_SONG, 0, songsQuery())
                     is VoiceMatch.Artist -> QueueRequest(NO_SONG, 0, artistQuery(match.key))
                     is VoiceMatch.Album -> QueueRequest(NO_SONG, 0, albumQuery(match.key))
                     is VoiceMatch.FoundSongs -> QueueRequest(match.fileId, songs.indexOfFirst { it.id == match.fileId }.coerceAtLeast(0), songsQuery)
+                    is VoiceMatch.Playlist -> QueueRequest(NO_SONG, 0, SongQuery.playlist(match.id))
+                    is VoiceMatch.SmartList -> QueueRequest(NO_SONG, 0, smartQuery(match.kind))
+                    is VoiceMatch.Genre -> QueueRequest(NO_SONG, 0, genreQuery(match.key))
                     null -> null
                 }
             }
         }
+    }
+
+    /**
+     * The playlists voice may name (§10.3): the user's by name, then the smart lists of the tree that hold a song, by their
+     * names in the app's language. Without access to music none.
+     */
+    private fun voicePlaylists(query: String): List<VoiceMatch.NamedList> {
+        if (!Library.mayRead(app)) return emptyList()
+        val own = runBlocking { UserData.playlists(app).playlists() }.byName().map { VoiceMatch.NamedList(it.name, VoiceMatch.Playlist(it.id)) }
+        // Only a smart list the query names is counted: the others cannot match.
+        val wanted = TextNormalizer.normalize(query)
+        val smart = TreeNode.TREE_SMART
+            .map { kind -> kind to app.getString(smartListName(kind)) }
+            .filter { (kind, name) -> TextNormalizer.normalize(name) == wanted && SongList.smartCount(app, SongQuery.smart(kind)) > 0 }
+            .map { (kind, name) -> VoiceMatch.NamedList(name, VoiceMatch.SmartList(kind)) }
+        return own + smart
     }
 
     /**
@@ -177,7 +211,7 @@ class LibraryTree(context: Context, private val artwork: TreeArtwork = TreeArtwo
     /** The children of [node] before paging: its entries, or the buckets they split into. */
     private fun listing(node: TreeNode): Listing? {
         if (node == TreeNode.Root) {
-            val tabs = listOf(TreeNode.Songs, TreeNode.Albums, TreeNode.Artists, TreeNode.Folders).map(::fixedItem)
+            val tabs = listOf(TreeNode.Songs, TreeNode.Albums, TreeNode.Artists, TreeNode.More).map(::fixedItem)
             return Listing(tabs.size) { rows -> rows.map(tabs::get) }
         }
         if (node is TreeNode.Bucket) {
@@ -195,7 +229,16 @@ class LibraryTree(context: Context, private val artwork: TreeArtwork = TreeArtwo
      * The entries of a list node in its order: [nodes] first (albums, artists, folders), then the songs of [query] as its
      * [outline] gives them: only the songs of the rows shown are read (§10.5). Null for a node that is gone or no list.
      */
-    private inner class Entries(val nodes: List<NodeEntry>, val outline: SongOutline, val query: SongQuery?) {
+    private inner class Entries(
+        val nodes: List<NodeEntry>,
+        val outline: SongOutline,
+        val query: SongQuery?,
+        /**
+         * Read anew for this request (playlists, smart lists, the Playlists node): its bucket layout is cut anew too and
+         * not kept, so that it never pushes the kept layouts out (§10.5).
+         */
+        val fresh: Boolean = false,
+    ) {
         val size: Int get() = nodes.size + outline.size
 
         /** The length of a song's media ID without its file ID and row, which differ by song. */
@@ -268,8 +311,40 @@ class LibraryTree(context: Context, private val artwork: TreeArtwork = TreeArtwo
             Entries(albums.map { NodeEntry(Sections.year(it.year), MediaMetadata.MEDIA_TYPE_ALBUM, albumItem(it)) }, outlineOf(query), query)
         }
         is TreeNode.Folder -> levels().let { levels -> if (levels.contains(node.folder.volume, node.folder.relativePath)) folderEntries(levels, node.folder) else null }
+        TreeNode.More -> Entries(
+            listOf(TreeNode.Playlists, TreeNode.Genres, TreeNode.Folders).map { NodeEntry(null, MediaMetadata.MEDIA_TYPE_FOLDER_MIXED, fixedItem(it)) },
+            SongOutline.EMPTY,
+            null,
+        )
+        TreeNode.Genres -> Entries(genres().map { NodeEntry(it.section, MediaMetadata.MEDIA_TYPE_GENRE, genreItem(it)) }, SongOutline.EMPTY, null)
+        is TreeNode.Genre -> if (read { it.genre(node.key) } == null) null else genreQuery(node.key).let { Entries(emptyList(), outlineOf(it), it) }
+        TreeNode.Playlists -> Entries(playlistNodes(), SongOutline.EMPTY, null, fresh = true)
+        is TreeNode.Playlist -> playlistName(node.id)?.let {
+            val query = SongQuery.playlist(node.id)
+            Entries(emptyList(), SongOutline.of(songsOf(query)), query, fresh = true)
+        }
+        is TreeNode.SmartList -> smartQuery(node.kind).let { Entries(emptyList(), SongOutline.of(songsOf(it)), it, fresh = true) }
         TreeNode.Root, is TreeNode.Bucket -> null
     }
+
+    /**
+     * The Playlists node's entries (§10.1), read anew: the smart lists of the tree that hold a song, then the playlists by
+     * name. Without access to music it is empty: a playlist's songs come from the library (§10.4).
+     */
+    private fun playlistNodes(): List<NodeEntry> {
+        if (!Library.mayRead(app)) return emptyList()
+        val smart = TreeNode.TREE_SMART.filter { SongList.smartCount(app, SongQuery.smart(it)) > 0 }.map { kind ->
+            NodeEntry(null, MediaMetadata.MEDIA_TYPE_PLAYLIST, smartItem(kind))
+        }
+        val playlists = runBlocking { UserData.playlists(app).playlists() }.byName().map { playlist ->
+            NodeEntry(null, MediaMetadata.MEDIA_TYPE_PLAYLIST, playlistItem(playlist.id, playlist.name))
+        }
+        return smart + playlists
+    }
+
+    /** The name of the playlist [id], or null when it is gone or there is no access to music. */
+    private fun playlistName(id: Long): String? =
+        if (Library.mayRead(app)) runBlocking { UserData.playlists(app).playlist(id) }?.name else null
 
     /** A folder's subfolders by name (reversed with the order), then its own songs in the folder order. */
     private fun folderEntries(levels: FolderLevels, folder: FolderKey): Entries {
@@ -283,6 +358,7 @@ class LibraryTree(context: Context, private val artwork: TreeArtwork = TreeArtwo
         NodeEntry(entry.section, MediaMetadata.MEDIA_TYPE_FOLDER_MIXED, folderItem(FolderKey(entry.volume, entry.relativePath)))
 
     private fun buckets(entries: Entries): List<TreeBucket> {
+        if (entries.fresh) return TreeBuckets.of(entries.size, entries::section, entries::weight, boundary = entries.nodes.size)
         val key = entries.bucketKey
         bucketLayouts[key]?.let { return it }
         return TreeBuckets.of(entries.size, entries::section, entries::weight, boundary = entries.nodes.size).also { bucketLayouts[key] = it }
@@ -302,15 +378,21 @@ class LibraryTree(context: Context, private val artwork: TreeArtwork = TreeArtwo
                 .copy(sort = SongSort.of(order.field) ?: SongSort.FILE_NAME, reversed = order.reversed)
                 .takeIf { levels().contains(node.folder.volume, node.folder.relativePath) }
         }
+        is TreeNode.Genre -> genreQuery(node.key).takeIf { read { lists -> lists.genre(node.key) } != null }
+        is TreeNode.Playlist -> SongQuery.playlist(node.id).takeIf { playlistName(node.id) != null }
+        is TreeNode.SmartList -> smartQuery(node.kind).takeIf { Library.mayRead(app) }
         else -> null
     }
 
     private fun nodeItem(node: TreeNode): MediaItem? = when (node) {
         TreeNode.Root -> root()
-        TreeNode.Songs, TreeNode.Albums, TreeNode.Artists, TreeNode.Folders -> fixedItem(node)
+        TreeNode.Songs, TreeNode.Albums, TreeNode.Artists, TreeNode.Folders, TreeNode.More, TreeNode.Playlists, TreeNode.Genres -> fixedItem(node)
         is TreeNode.Album -> read { it.album(node.key) }?.let(::albumItem)
         is TreeNode.Artist -> read { it.artist(node.key) }?.let(::artistItem)
         is TreeNode.Folder -> node.folder.takeIf { levels().contains(it.volume, it.relativePath) }?.let(::folderItem)
+        is TreeNode.Genre -> read { it.genre(node.key) }?.let(::genreItem)
+        is TreeNode.Playlist -> playlistName(node.id)?.let { playlistItem(node.id, it) }
+        is TreeNode.SmartList -> smartItem(node.kind)
         is TreeNode.Bucket -> entries(node.parent)?.let { entries -> find(entries, node)?.let { bucketItem(node.parent, entries, it) } }
     }
 
@@ -318,8 +400,24 @@ class LibraryTree(context: Context, private val artwork: TreeArtwork = TreeArtwo
         TreeNode.Songs -> folder(node, app.getString(R.string.tab_songs), MediaMetadata.MEDIA_TYPE_FOLDER_MIXED, playable = true)
         TreeNode.Albums -> folder(node, app.getString(R.string.tab_albums), MediaMetadata.MEDIA_TYPE_FOLDER_ALBUMS, playable = false)
         TreeNode.Artists -> folder(node, app.getString(R.string.tab_artists), MediaMetadata.MEDIA_TYPE_FOLDER_ARTISTS, playable = false)
+        TreeNode.More -> folder(node, app.getString(R.string.tree_more), MediaMetadata.MEDIA_TYPE_FOLDER_MIXED, playable = false)
+        TreeNode.Playlists -> folder(node, app.getString(R.string.tab_playlists), MediaMetadata.MEDIA_TYPE_FOLDER_PLAYLISTS, playable = false)
+        TreeNode.Genres -> folder(node, app.getString(R.string.tab_genres), MediaMetadata.MEDIA_TYPE_FOLDER_GENRES, playable = false)
         else -> folder(node, app.getString(R.string.tab_folders), MediaMetadata.MEDIA_TYPE_FOLDER_MIXED, playable = false)
     }
+
+    /** A genre, "Unknown genre" for the songs without one (§10.1); never artwork. */
+    private fun genreItem(genre: GenreGroup) = folder(
+        TreeNode.Genre(genre.key),
+        if (genre.unknown) app.getString(R.string.genre_unknown) else genre.name,
+        MediaMetadata.MEDIA_TYPE_GENRE,
+        playable = true,
+    )
+
+    private fun playlistItem(id: Long, name: String) = folder(TreeNode.Playlist(id), name, MediaMetadata.MEDIA_TYPE_PLAYLIST, playable = true)
+
+    private fun smartItem(kind: ListKind) =
+        folder(TreeNode.SmartList(kind), app.getString(smartListName(kind)), MediaMetadata.MEDIA_TYPE_PLAYLIST, playable = true)
 
     private fun bucketItem(parent: TreeNode, entries: Entries, bucket: TreeBucket): MediaItem {
         val songsOnly = bucket.from >= entries.nodes.size
@@ -329,6 +427,8 @@ class LibraryTree(context: Context, private val artwork: TreeArtwork = TreeArtwo
             bucket.to > entries.nodes.size || types.size != 1 -> MediaMetadata.MEDIA_TYPE_FOLDER_MIXED
             types.single() == MediaMetadata.MEDIA_TYPE_ALBUM -> MediaMetadata.MEDIA_TYPE_FOLDER_ALBUMS
             types.single() == MediaMetadata.MEDIA_TYPE_ARTIST -> MediaMetadata.MEDIA_TYPE_FOLDER_ARTISTS
+            types.single() == MediaMetadata.MEDIA_TYPE_GENRE -> MediaMetadata.MEDIA_TYPE_FOLDER_GENRES
+            types.single() == MediaMetadata.MEDIA_TYPE_PLAYLIST -> MediaMetadata.MEDIA_TYPE_FOLDER_PLAYLISTS
             else -> MediaMetadata.MEDIA_TYPE_FOLDER_MIXED
         }
         return folder(TreeNode.Bucket(parent, bucket.section, bucket.part), bucket.title, type, playable = songsOnly)
@@ -393,6 +493,15 @@ class LibraryTree(context: Context, private val artwork: TreeArtwork = TreeArtwo
 
     private fun artistQuery(key: String): SongQuery = order(ListName.ARTIST_PAGE).let { SongQuery.artist(key).copy(sort = SongSort.of(it.field) ?: SongSort.YEAR, reversed = it.reversed) }
 
+    private fun genreQuery(key: String): SongQuery = order(ListName.GENRE_PAGE).let { SongQuery.genre(key).copy(sort = SongSort.of(it.field) ?: SongSort.ARTIST, reversed = it.reversed) }
+
+    /** A smart list of the tree in the order kept for it (docs/library.md §17.1). */
+    private fun smartQuery(kind: ListKind): SongQuery = order(smartListOrder(kind)).let {
+        SongQuery.smart(kind).copy(sort = SongSort.of(it.field) ?: kind.defaultSort, reversed = it.reversed)
+    }
+
+    private fun genreSort() = if (order(ListName.GENRES).field == "songs") GenreSort.SONGS else GenreSort.NAME
+
     private fun albumSort() = AlbumSort.entries.firstOrNull { it.name.equals(order(ListName.ALBUMS).field, ignoreCase = true) } ?: AlbumSort.TITLE
 
     private fun artistSort() = if (order(ListName.ARTISTS).field == "songs") ArtistSort.SONGS else ArtistSort.NAME
@@ -439,6 +548,11 @@ class LibraryTree(context: Context, private val artwork: TreeArtwork = TreeArtwo
     private fun artists(): List<ArtistGroup> {
         val order = order(ListName.ARTISTS)
         return cached("artists", order, emptyList()) { lists -> lists.artists(artistSort(), order.reversed) }
+    }
+
+    private fun genres(): List<GenreGroup> {
+        val order = order(ListName.GENRES)
+        return cached("genres", order, emptyList()) { lists -> lists.genres(genreSort(), order.reversed) }
     }
 
     private fun levels(): FolderLevels = cached("folders", null, FolderLevels(emptyList())) { lists -> lists.folders() }

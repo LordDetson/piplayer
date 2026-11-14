@@ -1,6 +1,7 @@
 package io.github.lorddetson.piplayer.playback
 
 import io.github.lorddetson.piplayer.library.db.FolderKey
+import io.github.lorddetson.piplayer.library.lists.ListKind
 
 /**
  * A node of the library tree for controllers and its media ID (docs/playback.md §10.1, §10.2). IDs do not name a node's
@@ -27,6 +28,35 @@ sealed interface TreeNode {
 
     data object Folders : TreeNode {
         override val mediaId: String get() = "folders"
+    }
+
+    /** The fourth child of the root: Playlists, Genres and Folders (M2b, docs/playback.md §10.1). */
+    data object More : TreeNode {
+        override val mediaId: String get() = "more"
+    }
+
+    /** The smart lists that hold a song, then the playlists by name. */
+    data object Playlists : TreeNode {
+        override val mediaId: String get() = "playlists"
+    }
+
+    data object Genres : TreeNode {
+        override val mediaId: String get() = "genres"
+    }
+
+    /** A genre by its genre key, `!none` for the songs without one (docs/library.md §19.4). */
+    data class Genre(val key: String) : TreeNode {
+        override val mediaId: String get() = GENRE + MediaIdText.encode(key)
+    }
+
+    /** A playlist by its ID (docs/library.md §16.4). */
+    data class Playlist(val id: Long) : TreeNode {
+        override val mediaId: String get() = PLAYLIST + id
+    }
+
+    /** One of the smart lists of the tree by its kind (docs/library.md §17.3). */
+    data class SmartList(val kind: ListKind) : TreeNode {
+        override val mediaId: String get() = SMART + kind.token
     }
 
     /** An album by its album key (docs/library.md §6.5). */
@@ -62,11 +92,17 @@ sealed interface TreeNode {
         private const val ALBUM = "album/"
         private const val ARTIST = "artist/"
         private const val FOLDER = "folder/"
+        private const val GENRE = "genre/"
+        private const val PLAYLIST = "playlist/"
+        private const val SMART = "smart/"
+
+        /** The smart lists the tree shows, in the order of the Playlists tab (docs/library.md §17.3). */
+        val TREE_SMART: List<ListKind> = listOf(ListKind.FAVORITES, ListKind.RECENTLY_ADDED, ListKind.RECENTLY_PLAYED, ListKind.MOST_PLAYED)
 
         /** Not in the encoded form of any key or section. */
         private const val SEPARATOR = '!'
 
-        private val FIXED = listOf(Root, Songs, Albums, Artists, Folders).associateBy { it.mediaId }
+        private val FIXED = listOf(Root, Songs, Albums, Artists, Folders, More, Playlists, Genres).associateBy { it.mediaId }
 
         /** The node [mediaId] names, or null when it names none; only the form [TreeNode.mediaId] gives is read. */
         fun parse(mediaId: String): TreeNode? {
@@ -94,6 +130,10 @@ sealed interface TreeNode {
             key(ALBUM)?.let { return Album(it) }
             key(ARTIST)?.let { return Artist(it) }
             key(FOLDER)?.let { return FolderKey.parse(it)?.let(::Folder) }
+            key(GENRE)?.let { return Genre(it) }
+            // A playlist ID in decimal, as `Playlist.mediaId` writes it: no sign, no leading zero.
+            if (id.startsWith(PLAYLIST)) return id.substring(PLAYLIST.length).toLongOrNull()?.takeIf { it >= 0 }?.let(::Playlist)
+            if (id.startsWith(SMART)) return TREE_SMART.firstOrNull { it.token == id.substring(SMART.length) }?.let(::SmartList)
             return null
         }
     }
