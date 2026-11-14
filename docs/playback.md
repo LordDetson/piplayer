@@ -182,7 +182,8 @@ is heard as a click. The becoming-noisy broadcast is protected, so emulator test
   The UI never builds thousands of media items. M1 had one form, `q1/songs?sort=title&start=<ID>&index=<row>`, which is
   still read; since M2a step 6 a request names any list of the library with its sort, reverse and search
   (`q2/...`, library.md §6.4); since M2b also a playlist (library.md §16.4) and each smart list (library.md §17.3), whose
-  songs the service reads anew for every request.
+  songs the service reads anew for every request. Recently played and Most played, which their own plays reorder, become
+  a queue of added entries at once (§9.4), so that a restore keeps the order of the tap.
 - The playback service expands the request in `onSetMediaItems`, on a background thread: it takes the shared list of
   the request's list (or reads it, if the service runs without the screen or no longer keeps it), builds one media item per song (media ID, content URI, title,
   artist, album, length, music type; no artwork and no request metadata, which would be published to other apps) and

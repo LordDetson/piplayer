@@ -40,6 +40,12 @@ enum class ListKind(val token: String, val defaultSort: SongSort) {
     /** Whether this is one of the smart lists of at most [SmartLists.RANKED_LIMIT] songs in their own order. */
     val ranked: Boolean get() = this == RECENTLY_ADDED || this == RECENTLY_PLAYED || this == MOST_PLAYED
 
+    /**
+     * Whether a list of this kind is ranked by plays, so that playing it changes it: a queue of it keeps its songs as they
+     * were at the tap (docs/library.md §17.3).
+     */
+    val rankedByPlays: Boolean get() = this == RECENTLY_PLAYED || this == MOST_PLAYED
+
     companion object {
         fun of(token: String): ListKind? = entries.firstOrNull { it.token == token }
 

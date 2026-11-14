@@ -341,12 +341,20 @@ class PlaybackSessionCallback(
                 ?: node?.let { tree.playRequest(it) ?: throw UnsupportedOperationException("This node does not play") }
                 ?: tree.voiceRequest(voice.orEmpty())
                 ?: throw UnsupportedOperationException("Nothing in the library matches the search")
-            val libraryId = libraryIdNow()
+            val refs = trackRefs()
+            val libraryId = libraryIdNow(refs)
             val songs = songsFor(request)
             val start = QueueRequest.startIndex(songs, request)
             if (start < 0) throw UnsupportedOperationException("The song list is empty")
             if (token != restoreGeneration.get()) throw UnsupportedOperationException("The queue request was superseded")
-            val state = QueueState(request, emptyList(), libraryId)
+            // Its own plays reorder a list ranked by plays: its queue keeps the songs as they are now, as added entries
+            // (docs/library.md §17.3), so that a restore goes on with the songs not yet heard.
+            val frozen = request.list.kind.rankedByPlays
+            val state = if (frozen) {
+                QueueEditing.added(libraryId, songs.map { song -> refs.lookup { it.refOf(song.id) } ?: TrackRef(song.id, null, null, null, null) })
+            } else {
+                QueueState(request, emptyList(), libraryId)
+            }
             // On the main thread, where the edits run, after any edit already on its way and before Media3 sets the
             // items the future gives it (§9): an edit never mixes this queue's state with the old player.
             mainHandler.post {
@@ -357,7 +365,8 @@ class PlaybackSessionCallback(
                     report(state)
                 }
             }
-            MediaItemsWithStartPosition(songs.map(::mediaItem), start, startPositionMs)
+            val items = if (frozen) songs.mapIndexed { index, song -> mediaItem(song, index + 1L) } else songs.map(::mediaItem)
+            MediaItemsWithStartPosition(items, start, startPositionMs)
         }
     }
 

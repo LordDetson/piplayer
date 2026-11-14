@@ -1612,8 +1612,13 @@ Every smart list is a list of the library: it holds visible songs only (§3.5), 
   so that a queue of a smart list is saved and restored after the process dies as one request, like every list
   (playback.md §4). The first four have no key; `missing` has the chosen reasons as its key, a number from 1 to 31 (title
   1, artist 2, album 4, cover 8, MusicBrainz ID 16), so that a restored queue lists the same reasons.
-- A restored queue reads the list as it is then: a song played since has moved up in Recently played, a favorite removed
-  since is gone from Favorites.
+- Decision: Recently played and Most played change as their own queue plays: each counted play moves its song up. So
+  their queue keeps the songs and order of the tap: the service makes it a queue of added entries with their track
+  references (playback.md §9.4), saved in the queue file, rather than a request read again at a restore. A restore after
+  the process died goes on with the songs not yet heard, and "Previous" goes back to the songs heard before. A file gone
+  since is left out, as from any queue of added entries.
+- The other smart lists change only by the user's own actions or the library, not by playing them, and their queues stay
+  requests: a restored queue reads the list as it is then, so a favorite removed since is gone from Favorites.
 - Decision: smart lists are read anew for every request and for every change and never kept between reads (§6.4), as a
   playlist's list is (§16.4): plays and favorites change them without changing the library's revision.
 - Decision: the controller tree (playback.md §10) does not show them yet. Its root has exactly four children, which
@@ -1649,6 +1654,7 @@ Instrumented tests on the API 30 emulator:
   files left out, own covers of a song and of an album taking away "No cover", each row's reasons; the date added stored
   by the sync; the query plan of every list using its index.
 - Through the service: a request of each list plays it from the tapped song, and a saved queue of a smart list comes back
-  from its request after the process died.
+  from its request after the process died; a queue of Recently played and of Most played whose current song is counted
+  again before the process dies comes back with the order of the tap.
 - On the screen: the smart lists at the top of the Playlists tab with their numbers, a number that follows a new favorite;
   a page that plays from a row, "Play" and "Shuffle"; the chips of Songs missing information and the reasons of its rows.

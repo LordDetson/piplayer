@@ -69,10 +69,12 @@ class SmartListPlaybackTest {
     val rules: RuleChain = RuleChain.outerRule(GrantAudioPermission).around(LibraryRule { index })
 
     private lateinit var callback: PlaybackSessionCallback
+    private lateinit var saver: PlaybackStateSaver
     private lateinit var store: PlaybackStateStore
     private lateinit var storeScope: CoroutineScope
     private lateinit var session: MediaLibrarySession
     private val stateFile = File(context.cacheDir, "smart-state-${UUID.randomUUID()}.preferences_pb")
+    private val queueFile = File(context.cacheDir, "smart-queue-${UUID.randomUUID()}.bin")
 
     private val piPlayer = controller(context.packageName, Process.myUid())
     private val systemUi = controller("com.android.systemui", Process.SYSTEM_UID)
@@ -80,6 +82,8 @@ class SmartListPlaybackTest {
     private fun key(n: Long) = "%064x".format(n)
 
     private suspend fun fileId(mediaStoreId: Long) = Library.database(context).library().files().single { it.mediaStoreId == mediaStoreId }.id
+
+    private suspend fun identity(n: Long) = checkNotNull(UserData.database(context).identities().idOfKey(Hex.bytes(key(n))))
 
     /**
      * Every song has an identity; Bravo and Delta are favorites; Charlie was played twice and Alpha once, later; Delta is
@@ -91,8 +95,6 @@ class SmartListPlaybackTest {
         val dao = Library.database(context).library()
         for (n in 1L..4L) dao.setContent(fileId(n), key(n), 200_000, DurationSource.HEADER)
         Library.identities(context).attach()
-        val identities = UserData.database(context).identities()
-        suspend fun identity(n: Long) = checkNotNull(identities.idOfKey(Hex.bytes(key(n))))
         UserData.favorites(context).set(identity(2), favorite = true)
         UserData.favorites(context).set(identity(4), favorite = true)
         UserData.plays(context).record(identity(3), startedAt = 100, listenedMs = 1)
@@ -106,10 +108,14 @@ class SmartListPlaybackTest {
         Library.mirror(context).mirror()
 
         storeScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-        store = PlaybackStateStore(PreferenceDataStoreFactory.create(scope = storeScope, produceFile = { stateFile }))
-        callback = PlaybackSessionCallback(context, store) { }
+        store = PlaybackStateStore(PreferenceDataStoreFactory.create(scope = storeScope, produceFile = { stateFile }), queueFile)
+        val player = onMain { ExoPlayer.Builder(context).build() }
+        // The real saver, so that a test sees what a queue saves (docs/playback.md §4.8).
+        saver = PlaybackStateSaver(player, store)
+        callback = PlaybackSessionCallback(context, store) { saver.setQueue(it) }
         session = onMain {
-            MediaLibrarySession.Builder(context, ExoPlayer.Builder(context).build(), callback).setId("smart-test").build()
+            saver.start()
+            MediaLibrarySession.Builder(context, player, callback).setId("smart-test").build()
         }
     }
 
@@ -117,6 +123,7 @@ class SmartListPlaybackTest {
     fun releaseSession() {
         onMain {
             val player = session.player
+            saver.stop()
             session.release()
             player.release()
             callback.release()
@@ -124,6 +131,7 @@ class SmartListPlaybackTest {
         store.close()
         storeScope.cancel()
         stateFile.delete()
+        queueFile.delete()
     }
 
     private fun MediaItemsWithStartPosition.titles() = mediaItems.map { it.mediaMetadata.title.toString() }
@@ -169,6 +177,37 @@ class SmartListPlaybackTest {
 
             assertThat(result.titles()).describedAs("$query").isEqualTo(songs.map { it.title })
             assertThat(result.startIndex).describedAs("$query").isZero()
+        }
+    }
+
+    /**
+     * Recently played and Most played change as their own queue plays (docs/library.md §17.3): a restored queue keeps the
+     * songs and order it started with, so that it goes on with the songs not yet heard. Recently played is [Alpha, Charlie]
+     * and Most played [Charlie, Alpha]; the tapped song is counted again and moves up before the process dies.
+     */
+    @Test
+    fun aRestoredRecentlyPlayedOrMostPlayedQueueKeepsTheOrderItStartedWith() = runBlocking<Unit> {
+        for ((query, plays) in listOf(SongQuery.recentlyPlayed() to 1, SongQuery.mostPlayed() to 3)) {
+            val songs = Library.read(context) { LibraryLists(it).songs(query) }
+            val song = songs[1]
+            val item = PlaybackTesting.compactItem(QueueRequest(song.id, 1, query), song.title)
+            val set = onMain { callback.onSetMediaItems(session, piPlayer, listOf(item), C.INDEX_UNSET, C.TIME_UNSET) }
+                .get(30, TimeUnit.SECONDS)
+            SavedStates(store).use { saved ->
+                // As Media3 sets what the callback gives it; the saver writes the queue.
+                onMain { session.player.setMediaItems(set.mediaItems, set.startIndex, 0) }
+                saved.await("the queue of $query is saved") { it?.songId == song.id }
+            }
+            val identity = identity(song.title.let { title -> listOf("Alpha", "Bravo", "Charlie", "Delta").indexOf(title) + 1L })
+            repeat(plays) { UserData.plays(context).record(identity, startedAt = 1_000L + it, listenedMs = 1) }
+            Library.mirror(context).mirror()
+            assertThat(listed(query).first()).describedAs("$query after the play").isEqualTo(song.title)
+            onMain { session.player.clearMediaItems() }
+
+            val result = onMain { callback.onPlaybackResumption(session, systemUi, isForPlayback = true) }.get(30, TimeUnit.SECONDS)
+
+            assertThat(result.titles()).describedAs("$query").isEqualTo(songs.map { it.title })
+            assertThat(result.startIndex).describedAs("$query").isEqualTo(1)
         }
     }
 
