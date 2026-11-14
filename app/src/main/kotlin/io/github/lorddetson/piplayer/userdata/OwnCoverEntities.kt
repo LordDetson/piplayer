@@ -62,4 +62,11 @@ interface OwnCoverDao {
 
     @Query("SELECT identity_id FROM track_cover")
     suspend fun identitiesWithCovers(): List<Long>
+
+    /** The content keys of the identities with an own cover, for Songs missing information (docs/library.md §17.1). */
+    @Query("SELECT i.content_key FROM track_cover c JOIN track_identity i ON i.id = c.identity_id")
+    suspend fun coveredContentKeys(): List<ByteArray>
+
+    @Query("SELECT album_key FROM album_cover")
+    suspend fun coveredAlbumKeys(): List<String>
 }

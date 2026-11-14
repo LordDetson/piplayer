@@ -56,7 +56,7 @@ import kotlinx.coroutines.launch
 
 /** A page's frame: the top bar with back, search and sort, and the mini player (docs/library.md §6.1). */
 @Composable
-private fun PageScaffold(
+internal fun PageScaffold(
     title: String,
     host: LibraryHost,
     onBack: () -> Unit,

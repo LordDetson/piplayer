@@ -22,6 +22,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
@@ -58,6 +59,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.lorddetson.piplayer.R
+import io.github.lorddetson.piplayer.library.lists.ListKind
 import io.github.lorddetson.piplayer.library.lists.SongQuery
 import io.github.lorddetson.piplayer.library.playlists.M3u
 import io.github.lorddetson.piplayer.library.search.SearchTerms
@@ -95,6 +97,8 @@ object PlaylistTags {
  */
 class PlaylistActions(
     val open: (id: Long) -> Unit,
+    /** Opens a smart list's page (docs/library.md §17.2). */
+    val openSmart: (ListKind) -> Unit,
     val create: () -> Unit,
     val import: () -> Unit,
     val rename: (id: Long, name: String) -> Unit,
@@ -119,7 +123,7 @@ private sealed interface PlaylistDialog {
  * [snackbar] says how each change went; [open] opens a playlist's page.
  */
 @Composable
-fun rememberPlaylistActions(snackbar: SnackbarHostState, open: (Long) -> Unit): PlaylistActions {
+fun rememberPlaylistActions(snackbar: SnackbarHostState, open: (Long) -> Unit, openSmart: (ListKind) -> Unit = {}): PlaylistActions {
     val context = LocalContext.current
     val resources = LocalResources.current
     val scope = rememberCoroutineScope()
@@ -205,6 +209,7 @@ fun rememberPlaylistActions(snackbar: SnackbarHostState, open: (Long) -> Unit): 
     return remember(choices) {
         PlaylistActions(
             open = open,
+            openSmart = openSmart,
             create = { dialog = PlaylistDialog.Name() },
             import = { importer.launch(M3u.OPEN_TYPES) },
             rename = { id, name -> dialog = PlaylistDialog.Name(renaming = id, initial = name) },
@@ -323,8 +328,8 @@ class PlaylistsViewModel(application: Application) : AndroidViewModel(applicatio
 }
 
 /**
- * The Playlists tab (docs/library.md §16.3): "New playlist" and "Import", then the playlists by name. One composable,
- * so that the browse categories of PIM-64 can show it elsewhere.
+ * The Playlists tab (docs/library.md §16.3, §17.2): "New playlist" and "Import", the smart lists with their numbers, then
+ * the playlists by name. One composable, so that the browse categories of PIM-64 can show it elsewhere.
  */
 @Composable
 fun PlaylistsContent(host: LibraryHost, actions: PlaylistActions, search: String, modifier: Modifier = Modifier) {
@@ -332,6 +337,9 @@ fun PlaylistsContent(host: LibraryHost, actions: PlaylistActions, search: String
     val model = viewModel(key = "playlists") { PlaylistsViewModel(app) }
     LaunchedEffect(search) { model.setSearch(search) }
     val playlists by model.state.collectAsStateWithLifecycle()
+    val smart = viewModel(key = "smart lists") { SmartListsViewModel(app) }
+    val counts by smart.counts.collectAsStateWithLifecycle()
+    val smartRows = smartListRows(counts, search)
     Column(modifier) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
             Button(onClick = actions.create, modifier = Modifier.testTag(PlaylistTags.NEW)) {
@@ -343,15 +351,22 @@ fun PlaylistsContent(host: LibraryHost, actions: PlaylistActions, search: String
             }
         }
         val list = playlists
-        when {
-            list == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
-            list.isEmpty() -> Text(
-                stringResource(if (search.isBlank()) R.string.playlists_none else R.string.search_nothing_found),
-                style = MaterialTheme.typography.bodyLarge,
-                modifier = Modifier.padding(16.dp),
-            )
-            else -> LazyColumn(Modifier.fillMaxSize().testTag(PlaylistTags.LIST)) {
-                items(list, key = { it.id }) { playlist -> PlaylistRow(playlist, host, actions) }
+        LazyColumn(Modifier.fillMaxSize().testTag(PlaylistTags.LIST)) {
+            smartListItems(smartRows, actions.openSmart)
+            if (smartRows.isNotEmpty()) item(key = "smart lists end") { HorizontalDivider(Modifier.padding(vertical = 4.dp)) }
+            when {
+                list == null -> item(key = "loading") {
+                    Box(Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+                }
+                // With a search, the smart lists it found are enough of an answer.
+                list.isEmpty() && (search.isBlank() || smartRows.isEmpty()) -> item(key = "none") {
+                    Text(
+                        stringResource(if (search.isBlank()) R.string.playlists_none else R.string.search_nothing_found),
+                        style = MaterialTheme.typography.bodyLarge,
+                        modifier = Modifier.padding(16.dp),
+                    )
+                }
+                else -> items(list, key = { it.id }) { playlist -> PlaylistRow(playlist, host, actions) }
             }
         }
     }

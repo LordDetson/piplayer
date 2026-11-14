@@ -23,7 +23,8 @@ The data model it implements is sketched in track-identification.md §10 (TI bel
 - `audio_file`: one row per audio row of the media index, with PiPlayer's own row ID, the index's ID, the volume, the
   relative path, the display name, the size, the modification time, the index generation of the last change, the MIME
   type, and the kinds the index gives it: music, podcast, audiobook, ringtone, notification sound, alarm, recording.
-  Android 11 has no recording flag, so it is unknown there.
+  Android 11 has no recording flag, so it is unknown there. Since M2b also the date the index added the file
+  (`date_added`, for Recently added, §17.1).
 - `media_index_entry`: the index's values for the file (title, artist, album, album artist, composer, genre, year,
   track number, length), as the index gives them. Later steps use them only until the tag pass has read the file
   (TI §7.1).
@@ -585,7 +586,8 @@ keeps playing meanwhile, and the crash leaves a native crash report of `:tagger`
   and the search: `q2/<list>?key=<key>&sort=<field>&rev=<0|1>&q=<query>&start=<ID>&index=<row>`, the key and the query
   percent-encoded, the start the song's file ID (§8.4). The lists are `songs` (no key), `album` (its album key), `artist` (its artist key), `folder` (the
   volume, `/` and the relative path), `tree` (a folder with all its subfolders) and, since M2b, `playlist` (its
-  playlist ID, with the sort `position`, §16.4).
+  playlist ID, with the sort `position`, §16.4) and the smart lists `favorites`, `added`, `recent`, `most` (no key) and
+  `missing` (the chosen reasons, §17.3).
 - `tree` plays the folder's own songs first, in the folder page's sort, then each subfolder in name order, in turn with
   its own songs first. "Reverse order" reverses the whole list.
 - The service expands a request from the list the screen shows when it holds the start song, otherwise by reading the
@@ -1355,9 +1357,8 @@ The owner's decision of 14.11.2026: the album's references follow its tracks.
 - A partial run after each batch of the tag pass writes the rows of the batch's files from the values of the last full
   run, so that after a rebuild or a deletion of the library database favorites and counts come back as the tag pass
   brings the keys back, not only when its run ends.
-- Lists that need the fields join these tables: the Albums tab's filter (§15.2), and the smart lists Recently played and
-  Most played (PIM-37), for which `LibraryLists.recentlyPlayed` and `mostPlayed` already give the visible songs with
-  plays, the latest play or the most plays first.
+- Lists that need the fields join these tables: the Albums tab's filter (§15.2), and the smart lists Favorites, Recently
+  played and Most played (§17).
 
 ### 15.5 Play statistics
 
@@ -1546,3 +1547,108 @@ Instrumented tests on the API 30 emulator:
   playlist" and from an album's menu; the page plays from an entry, moves entries with the accessibility actions, removes
   one and puts it back with "Undo", and closes when its playlist is deleted from its menu; a playlist of 5 000 entries
   scrolls to its end and moves its last entry.
+
+## 17. Smart lists (M2b: PIM-37)
+
+Five lists that PiPlayer fills by itself: Favorites, Recently added, Recently played, Most played and Songs missing
+information. The reasons of the last one are in TI §1 ("Songs missing information and remembered decisions"), the
+mirrored user fields in §15.4. The owner left the open choices to the recommendations (14.11.2026); they are marked
+"decision".
+
+### 17.1 What each list holds
+
+Every smart list is a list of the library: it holds visible songs only (§3.5), each file once, and byte-identical copies
+(§8.1) each as its own row.
+
+- **Favorites**: the songs whose identity is a favorite (`track_mirror.favorite`, §15.2), all of them. It has the orders of
+  the Songs tab (title, artist, album, length; reversible), kept for it alone, and the page's search.
+- **Recently added**: decision: the newest 100 songs by the date the media index added them (`DATE_ADDED`, stored in
+  `audio_file.date_added`), ties by the higher file ID. The newest 100 rather than the last 30 days, so that the list does
+  not go empty in a library that has not changed for a month and never grows past a short scroll. A new media index gives
+  its files new dates, so after the system rebuilds its index the list shows the files it happened to scan last.
+- **Recently played**: decision: the 100 songs played last, by the latest start of a counted play (`last_played_at`), ties
+  by more plays, then by the lower file ID.
+- **Most played**: decision: the 100 songs with the most counted plays (`play_count`), ties by the later last play, then by
+  the lower file ID. Only counted plays exist in the user database (playback.md §11.2), so a play skipped early never
+  counts, here or in Recently played.
+- The three lists of 100 have their own order, the sort `position` (§6.4); "Reverse order" reverses the same 100 songs, it
+  does not pick the oldest or the least played. Their order is kept for each list on its own.
+- **Songs missing information**: the songs the tag pass has read whose reasons (TI §1, stored in
+  `track_display.missing_info_reasons`) hold one of the reasons chosen on the page. Unread files have no reasons yet and are
+  not listed. It has the orders of the Songs tab, kept for it alone, and the page's search.
+    - Decision: the page has one filter chip per reason: "Title from the file name", "No artist", "No album", "No cover" and
+      "No MusicBrainz ID". The first three are on by default; "No cover" and "No MusicBrainz ID" are off by default, as TI
+      says of the MusicBrainz reason. A song is listed when it has at least one reason that is on. The choice lasts while
+      the app runs and is not saved, as the Albums tab's Favorites chip (§15.2). With every chip off the list is empty and
+      says so.
+    - Each row shows, under its artist and length, those of its reasons that are on.
+    - The reasons are judged on the merged values, as TI §1 says: an artist guessed from the file name (§1.2) is an
+      artist, so it is no "No artist", while a title from the file name is a reason of its own.
+    - Decision: "No cover" means no picture embedded in the file (`embedded_cover_present` from the tag pass) and no own
+      cover of the song or of its album (§13.2). The probe of the album's system thumbnail that TI §1 adds (a folder image
+      such as `cover.jpg`) comes later, with the batch over this list (M4a): it is a new background job of one thumbnail
+      decode per album that would run after every tag pass. Until then folder images count as no cover, which is why the
+      chip is off by default.
+    - Keep as-is and Skip (TI §1) belong to identification: they come with M3 and M4a, together with the
+      `missing_info_decision` column. M2b has neither.
+
+### 17.2 Where they show
+
+- Decision: at the top of the Playlists tab (§16.3), under "New playlist" and "Import" and above the user's playlists, the
+  heading "Smart lists" and one row per smart list in the order of §17.1 with its number of songs; the top bar's search
+  filters them by name too. For
+  Songs missing information the number follows the chips. The rows are one composable, so that PIM-64 can show them where
+  it puts the playlists among the browse categories.
+- A tap opens the list's page: the top bar with back, the list's name, search and sort; under it the number of songs,
+  "Play" and "Shuffle" (and for Songs missing information the chips); then the songs. A tap on a song plays the list as
+  shown from that song. "Play" plays it from its first song, "Shuffle" turns shuffle on and plays it from a random song
+  (playback.md §3.6). With no songs both are off, and the list says why: no favorites yet, nothing played yet, or nothing
+  missing.
+- The song rows have the song menu of every list.
+
+### 17.3 Playing and the queue
+
+- Each smart list is a list kind of its own in queue requests (§6.4): `favorites`, `added`, `recent`, `most` and `missing`,
+  so that a queue of a smart list is saved and restored after the process dies as one request, like every list
+  (playback.md §4). The first four have no key; `missing` has the chosen reasons as its key, a number from 1 to 31 (title
+  1, artist 2, album 4, cover 8, MusicBrainz ID 16), so that a restored queue lists the same reasons.
+- A restored queue reads the list as it is then: a song played since has moved up in Recently played, a favorite removed
+  since is gone from Favorites.
+- Decision: smart lists are read anew for every request and for every change and never kept between reads (§6.4), as a
+  playlist's list is (§16.4): plays and favorites change them without changing the library's revision.
+- Decision: the controller tree (playback.md §10) does not show them yet. Its root has exactly four children, which
+  Android Auto shows at most; the node that holds genres and playlists is PIM-64's, and the smart lists go there, at the
+  top of the playlists as in the app. Their lists can already be read as an outline for the tree.
+
+### 17.4 Updates and the database
+
+- A page and the counts read again after every sync that changed the library, after a change of the hidden files and
+  after every run of the mirror (§15.4), which follows every change of favorites and plays, every attach pass (so after
+  each sync and each run of the tag pass) and every change of own covers. Reads run off the main thread.
+- The library database's version goes to 11 (a rebuild with a new first sync, as every version does, §1.1):
+  `audio_file.date_added` with an index on it, an index on `track_display.missing_info_reasons` and one on
+  `track_mirror.favorite`.
+- Each list's query walks an index (checked by `EXPLAIN QUERY PLAN`): Favorites starts from `track_mirror` by its
+  favorite index, Recently played and Most played from `track_mirror` in the order of its index on `last_played_at` or
+  `play_count`, Recently added from `audio_file` in the order of its index on `date_added`, and Songs missing information
+  looks up `track_display` by its index on the reasons, one lookup for each stored set of reasons that holds a chosen one.
+  The other tables are joined by their primary keys, so a list of 100 songs reads about its own rows, also in a library
+  of 20 000 songs.
+- The first sync reads and writes one more column (`date_added`) and builds the two new indexes of its tables after the
+  rows (§1.3).
+
+### 17.5 Checks
+
+JVM tests: the queue requests of the five lists (round trip, no key or a reasons key from 1 to 31, their default sorts);
+the sets of stored reasons that hold a chosen reason.
+
+Instrumented tests on the API 30 emulator:
+
+- On a library database filled from a test index with the real mirror: each list's songs and order, the limit of 100 and
+  its reverse, visible songs only, counts equal to the lists; the reasons of Songs missing information by chip, unread
+  files left out, own covers of a song and of an album taking away "No cover", each row's reasons; the date added stored
+  by the sync; the query plan of every list using its index.
+- Through the service: a request of each list plays it from the tapped song, and a saved queue of a smart list comes back
+  from its request after the process died.
+- On the screen: the smart lists at the top of the Playlists tab with their numbers, a number that follows a new favorite;
+  a page that plays from a row, "Play" and "Shuffle"; the chips of Songs missing information and the reasons of its rows.

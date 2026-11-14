@@ -6,6 +6,10 @@ import io.github.lorddetson.piplayer.library.Library
 import io.github.lorddetson.piplayer.library.db.SongRow
 import io.github.lorddetson.piplayer.library.lists.LibraryLists
 import io.github.lorddetson.piplayer.library.lists.ListKind
+import io.github.lorddetson.piplayer.library.lists.MissingReasons
+import io.github.lorddetson.piplayer.library.lists.OwnCoverKeys
+import io.github.lorddetson.piplayer.userdata.UserData
+import kotlinx.coroutines.runBlocking
 import io.github.lorddetson.piplayer.library.lists.SongQuery
 import io.github.lorddetson.piplayer.settings.HiddenFiles
 import io.github.lorddetson.piplayer.settings.LibrarySettings
@@ -70,6 +74,7 @@ object SongList {
      */
     fun load(context: Context, fresh: Boolean = false, query: SongQuery = SongQuery.SONGS): List<Song> {
         if (query.kind == ListKind.PLAYLIST) return playlistSongs(context, query)
+        if (query.kind.smart) return smartSongs(context, query, limit = null)
         sourceOverride?.let { return load(it, fresh = fresh, query = query) }
         val app = context.applicationContext
         // Without access the library is not listed, as the media index would list nothing (docs/playback.md §2.2).
@@ -95,6 +100,35 @@ object SongList {
     }
 
     /**
+     * A smart list's songs in order, the first [limit] when given, read anew every time and never kept: plays and
+     * favorites change it without changing the library's revision (docs/library.md §17.3). A test's own source has none.
+     */
+    private fun smartSongs(context: Context, query: SongQuery, limit: Int?): List<Song> {
+        val app = context.applicationContext
+        if (sourceOverride != null || !Library.mayRead(app)) return emptyList()
+        Library.awaitReady(app, READY_TIMEOUT_MS)
+        val hidden = LibrarySettings(app).readHiddenFiles()
+        val own = ownCovers(app, query)
+        return Library.read(app) { LibraryLists(it, hidden, own).songs(query, limit) }
+    }
+
+    /** The number of songs of the smart list [query] (docs/library.md §17.2). Blocks; call it off the main thread. */
+    fun smartCount(context: Context, query: SongQuery): Int {
+        val app = context.applicationContext
+        if (sourceOverride != null || !Library.mayRead(app)) return 0
+        val hidden = LibrarySettings(app).readHiddenFiles()
+        val own = ownCovers(app, query)
+        return Library.read(app) { LibraryLists(it, hidden, own).count(query) }
+    }
+
+    /** The own covers that matter to [query]: only Songs missing information with "No cover" chosen reads them. */
+    private fun ownCovers(app: Context, query: SongQuery): OwnCoverKeys {
+        val reasons = query.missingReasons ?: return OwnCoverKeys.NONE
+        if (reasons and MissingReasons.COVER == 0) return OwnCoverKeys.NONE
+        return runBlocking { OwnCoverKeys.read(UserData.database(app)) }
+    }
+
+    /**
      * The songs of the files [ids] by their file ID, read without being kept (docs/playback.md §9.1, §9.4); with a test's
      * own source, those of its songs. Blocks; call it off the main thread.
      */
@@ -115,7 +149,7 @@ object SongList {
      * reads the whole list (docs/library.md §1.4).
      */
     fun firstPage(context: Context, count: Int, query: SongQuery = SongQuery.SONGS): List<Song> =
-        sourceOverride?.songs()?.take(count) ?: LibrarySettings(context).readHiddenFiles().let { hidden ->
+        if (query.kind.smart) smartSongs(context, query, count) else sourceOverride?.songs()?.take(count) ?: LibrarySettings(context).readHiddenFiles().let { hidden ->
             Library.read(context) { LibrarySongSource(it, hidden, query).firstSongs(count) }
         }
 
@@ -127,6 +161,13 @@ object SongList {
         .filter { it.ready || sourceOverride != null }
         .combine(LibrarySettings(context).hiddenFiles) { status, hidden -> status.revision to hidden }
         .distinctUntilChanged()
+
+    /**
+     * A new value whenever [query]'s list may be read: [changes], and for a smart list also after every run of the mirror,
+     * which follows every change of favorites, plays and own covers and every attach pass (docs/library.md §17.4).
+     */
+    fun changes(context: Context, query: SongQuery): Flow<Any> =
+        if (query.kind.smart) changes(context).combine(Library.mirrorVersion(context), ::Pair) else changes(context)
 
     /**
      * Reads [source], which gives its songs in list order, and keeps the list as [query], unless a read of it that

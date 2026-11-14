@@ -155,16 +155,32 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
      * "Play all" of a folder does.
      */
     fun play(row: Int, song: Song?, list: SongQuery = SongQuery.SONGS) {
-        val item = MediaItem.Builder()
-            .setMediaId(QueueRequest(song?.id ?: NO_SONG, row, list).mediaId)
-            .setMediaMetadata(MediaMetadata.Builder().setTitle(song?.title).setArtist(song?.artist).build())
-            .build()
+        val item = requestItem(row, song, list)
         connection.whenConnected {
             setMediaItem(item)
             prepare()
             play()
         }
     }
+
+    /**
+     * Turns shuffle on and plays [list] from [song] at [row], the others shuffled after it: a smart list's "Shuffle"
+     * (docs/library.md §17.2, docs/playback.md §3.6).
+     */
+    fun shuffle(row: Int, song: Song?, list: SongQuery) {
+        val item = requestItem(row, song, list)
+        connection.whenConnected {
+            shuffleModeEnabled = true
+            setMediaItem(item)
+            prepare()
+            play()
+        }
+    }
+
+    private fun requestItem(row: Int, song: Song?, list: SongQuery) = MediaItem.Builder()
+        .setMediaId(QueueRequest(song?.id ?: NO_SONG, row, list).mediaId)
+        .setMediaMetadata(MediaMetadata.Builder().setTitle(song?.title).setArtist(song?.artist).build())
+        .build()
 
     /**
      * Inserts files opened from another app right after the current song; the first becomes current and plays

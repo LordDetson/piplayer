@@ -2,6 +2,8 @@ package io.github.lorddetson.piplayer.playback
 
 import io.github.lorddetson.piplayer.library.db.FolderKey
 import io.github.lorddetson.piplayer.library.lists.ArtistLink
+import io.github.lorddetson.piplayer.library.lists.ListKind
+import io.github.lorddetson.piplayer.library.lists.MissingReasons
 import io.github.lorddetson.piplayer.library.lists.SongLinks
 import io.github.lorddetson.piplayer.library.lists.SongQuery
 import io.github.lorddetson.piplayer.library.lists.SongSort
@@ -127,6 +129,66 @@ class QueueRequestTest {
         // Only a number names a playlist.
         assertThat(QueueRequest.parse("q2/playlist?key=abc&sort=position&rev=0&q=&start=7&index=3")).isNull()
         assertThat(QueueRequest.parse("q2/playlist?key=&sort=position&rev=0&q=&start=7&index=3")).isNull()
+    }
+
+    @Test
+    fun `each smart list travels as a request of its own and comes back`() {
+        val lists = mapOf(
+            SongQuery.favorites() to "q2/favorites?key=&sort=title&rev=0&q=&start=7&index=3",
+            SongQuery.recentlyAdded() to "q2/added?key=&sort=position&rev=0&q=&start=7&index=3",
+            SongQuery.recentlyPlayed() to "q2/recent?key=&sort=position&rev=0&q=&start=7&index=3",
+            SongQuery.mostPlayed() to "q2/most?key=&sort=position&rev=0&q=&start=7&index=3",
+            SongQuery.missingInfo() to "q2/missing?key=7&sort=title&rev=0&q=&start=7&index=3",
+        )
+
+        for ((list, mediaId) in lists) {
+            val request = QueueRequest(startSongId = 7, startRow = 3, list = list)
+            assertThat(request.mediaId).isEqualTo(mediaId)
+            assertThat(QueueRequest.parse(mediaId)).describedAs(mediaId).isEqualTo(request)
+        }
+        val others = listOf(
+            SongQuery.favorites().copy(sort = SongSort.ARTIST, reversed = true, search = "ёж & co"),
+            SongQuery.recentlyPlayed().copy(reversed = true, search = "x"),
+            SongQuery.missingInfo(MissingReasons.ALL).copy(sort = SongSort.LENGTH),
+            SongQuery.missingInfo(MissingReasons.RECORDING_ID),
+        )
+        for (list in others) {
+            val request = QueueRequest(startSongId = -1, startRow = 0, list = list)
+            assertThat(QueueRequest.parse(request.mediaId)).describedAs(request.mediaId).isEqualTo(request)
+        }
+    }
+
+    @Test
+    fun `the smart lists start in their own default sorts and the three of 100 in their own order`() {
+        assertThat(SongQuery.favorites().sort).isEqualTo(SongSort.TITLE)
+        assertThat(SongQuery.recentlyAdded().sort).isEqualTo(SongSort.POSITION)
+        assertThat(SongQuery.recentlyPlayed().sort).isEqualTo(SongSort.POSITION)
+        assertThat(SongQuery.mostPlayed().sort).isEqualTo(SongSort.POSITION)
+        assertThat(SongQuery.missingInfo().sort).isEqualTo(SongSort.TITLE)
+        assertThat(SongQuery.missingInfo().missingReasons).isEqualTo(MissingReasons.DEFAULT)
+        assertThat(ListKind.SMART).containsExactly(
+            ListKind.FAVORITES, ListKind.RECENTLY_ADDED, ListKind.RECENTLY_PLAYED, ListKind.MOST_PLAYED, ListKind.MISSING_INFO,
+        )
+    }
+
+    @Test
+    fun `only Songs missing information has a key, its chosen reasons from 1 to 31`() {
+        val wrong = listOf(
+            "q2/favorites?key=x&sort=title&rev=0&q=&start=7&index=3",
+            "q2/added?key=1&sort=position&rev=0&q=&start=7&index=3",
+            "q2/recent?key=a&sort=position&rev=0&q=&start=7&index=3",
+            "q2/most?key=2&sort=position&rev=0&q=&start=7&index=3",
+            "q2/missing?key=&sort=title&rev=0&q=&start=7&index=3",
+            "q2/missing?key=0&sort=title&rev=0&q=&start=7&index=3",
+            "q2/missing?key=32&sort=title&rev=0&q=&start=7&index=3",
+            "q2/missing?key=07&sort=title&rev=0&q=&start=7&index=3",
+            "q2/missing?key=-1&sort=title&rev=0&q=&start=7&index=3",
+            "q2/missing?key=abc&sort=title&rev=0&q=&start=7&index=3",
+        )
+
+        for (mediaId in wrong) assertThat(QueueRequest.parse(mediaId)).describedAs(mediaId).isNull()
+        assertThat(QueueRequest.parse("q2/missing?key=31&sort=title&rev=0&q=&start=7&index=3")?.list?.missingReasons).isEqualTo(31)
+        assertThat(QueueRequest.parse("q2/missing?key=1&sort=title&rev=0&q=&start=7&index=3")?.list?.missingReasons).isEqualTo(1)
     }
 
     private val links = SongLinks(

@@ -46,7 +46,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.lorddetson.piplayer.R
+import io.github.lorddetson.piplayer.library.lists.MissingReasons
 import io.github.lorddetson.piplayer.library.lists.SongLinks
+import io.github.lorddetson.piplayer.ui.playlists.reasonLabel
 import io.github.lorddetson.piplayer.library.lists.SongQuery
 import io.github.lorddetson.piplayer.library.songs.Song
 import io.github.lorddetson.piplayer.library.tagpass.PassProgress
@@ -323,7 +325,20 @@ private fun SongRow(song: Song, playing: Boolean, menu: SongMenu?, onClick: () -
             )
         },
         supportingContent = {
-            Text("$artist · ${formatDuration(song.durationMs)}", maxLines = 1, overflow = TextOverflow.Ellipsis)
+            val reasons = song.reasons?.takeIf { it != 0 }
+            if (reasons == null) {
+                Text("$artist · ${formatDuration(song.durationMs)}", maxLines = 1, overflow = TextOverflow.Ellipsis)
+            } else {
+                Column {
+                    Text("$artist · ${formatDuration(song.durationMs)}", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    // In Songs missing information, the song's reasons that the chips choose (docs/library.md §17.1).
+                    Text(
+                        MissingReasons.ORDER.filter { reasons and it != 0 }.map { stringResource(reasonLabel(it)) }.joinToString(" · "),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.tertiary,
+                    )
+                }
+            }
         },
         leadingContent = {
             LibraryCover(CoverRequest.Track(song.id), song.album, size = 48.dp, shape = RoundedCornerShape(6.dp))

@@ -18,6 +18,13 @@ enum class ListName(val id: String, val fields: List<String>, val offersGrid: Bo
     FOLDERS("folders", listOf("file", "title")),
     ALBUM_PAGE("album_page", listOf("track")),
     ARTIST_PAGE("artist_page", listOf("year", "title")),
+
+    /** The smart lists (docs/library.md §17.1), each with its own order; the three lists of 100 in their own order only. */
+    FAVORITES("favorites", listOf("title", "artist", "album", "length")),
+    RECENTLY_ADDED("recently_added", listOf("position")),
+    RECENTLY_PLAYED("recently_played", listOf("position")),
+    MOST_PLAYED("most_played", listOf("position")),
+    MISSING_INFO("missing_info", listOf("title", "artist", "album", "length")),
     ;
 
     val defaultField: String get() = fields.first()

@@ -34,4 +34,6 @@ data class IndexRow(
     val year: Int?,
     val trackNumber: Int?,
     val durationMs: Long?,
+    /** When the index added the file, in seconds (`DATE_ADDED`), for Recently added (docs/library.md §17.1). */
+    val dateAddedSeconds: Long = 0,
 )

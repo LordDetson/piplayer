@@ -20,7 +20,8 @@ import kotlinx.coroutines.Dispatchers
 // has taken its new one.
 @Entity(
     tableName = "audio_file",
-    indices = [Index("media_store_id"), Index("volume_name", "relative_path"), Index("content_key")],
+    // date_added for Recently added (docs/library.md §17.4).
+    indices = [Index("media_store_id"), Index("volume_name", "relative_path"), Index("content_key"), Index("date_added")],
 )
 data class AudioFileEntity(
     @PrimaryKey val id: Long,
@@ -31,6 +32,8 @@ data class AudioFileEntity(
     val size: Long,
     val mtime: Long,
     @ColumnInfo(name = "generation_modified") val generationModified: Long,
+    /** When the media index added the file, in seconds, for Recently added (docs/library.md §17.1). */
+    @ColumnInfo(name = "date_added", defaultValue = "0") val dateAdded: Long = 0,
     @ColumnInfo(name = "mime_type") val mimeType: String?,
     @ColumnInfo(name = "is_music") val isMusic: Boolean,
     @ColumnInfo(name = "is_podcast") val isPodcast: Boolean,
@@ -121,7 +124,8 @@ data class MediaIndexEntryEntity(
 /** What lists show, sort and search by (docs/library.md §1.2). */
 // Covering the search text too: a search walks this index in title order and never reads the table for rows that do
 // not match (M0 spike).
-@Entity(tableName = "track_display", indices = [Index("title_sort", "search_text"), Index("album_key")])
+// The reasons for Songs missing information, looked up by each stored set (docs/library.md §17.4).
+@Entity(tableName = "track_display", indices = [Index("title_sort", "search_text"), Index("album_key"), Index("missing_info_reasons")])
 data class TrackDisplayEntity(
     @PrimaryKey @ColumnInfo(name = "file_id") val fileId: Long,
     val title: String,
@@ -206,8 +210,8 @@ data class VolumeSyncStateEntity(
         TrackMirrorEntity::class,
         AlbumMirrorEntity::class,
     ],
-    // 10: the mirror of favorites and plays (docs/library.md §15.4).
-    version = 10,
+    // 10: the mirror of favorites and plays (docs/library.md §15.4). 11: the smart lists' date added and indexes (§17.4).
+    version = 11,
     exportSchema = false,
 )
 abstract class LibraryDatabase : RoomDatabase() {

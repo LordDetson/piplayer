@@ -356,6 +356,7 @@ class LibrarySync(
         long(row.size)
         long(row.modifiedSeconds)
         long(row.generationModified)
+        long(row.dateAddedSeconds)
         text(row.mimeType)
         flag(row.kinds.music)
         flag(row.kinds.podcast)
@@ -392,7 +393,7 @@ class LibrarySync(
         // The columns of the entities in LibraryDatabase.kt, in the order the writers above give their values.
         val FILE_COLUMNS = listOf(
             "id", "media_store_id", "volume_name", "relative_path", "display_name", "size", "mtime", "generation_modified",
-            "mime_type", "is_music", "is_podcast", "is_audiobook", "is_ringtone", "is_notification", "is_alarm",
+            "date_added", "mime_type", "is_music", "is_podcast", "is_audiobook", "is_ringtone", "is_notification", "is_alarm",
             "is_recording", "recording", "folder_rule",
         )
         val ENTRY_COLUMNS = listOf(

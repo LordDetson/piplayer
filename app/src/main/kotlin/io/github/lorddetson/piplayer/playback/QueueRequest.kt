@@ -40,10 +40,12 @@ data class QueueRequest(val startSongId: Long, val startRow: Int, val list: Song
             val sort = SongSort.of(sortToken) ?: return null
             val key = MediaIdText.decode(rawKey) ?: return null
             val search = MediaIdText.decode(rawSearch) ?: return null
-            if ((kind == ListKind.SONGS) != key.isEmpty()) return null
+            // The Songs list and the smart lists but Songs missing information have no key (docs/library.md §17.3).
+            if (kind.keyed == key.isEmpty()) return null
             val list = SongQuery(kind, key, sort, reversed == "1", search)
             if ((kind == ListKind.FOLDER || kind == ListKind.TREE) && list.folder == null) return null
             if (kind == ListKind.PLAYLIST && list.playlistId == null) return null
+            if (kind == ListKind.MISSING_INFO && (list.missingReasons ?: 0) == 0) return null
             val id = start.toLongOrNull() ?: return null
             return QueueRequest(id, index.toInt(), list)
         }

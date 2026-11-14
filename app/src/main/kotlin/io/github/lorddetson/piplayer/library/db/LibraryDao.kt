@@ -257,6 +257,14 @@ interface LibraryDao {
     @RawQuery
     suspend fun outlineRows(query: RoomRawQuery): List<OutlineRow>
 
+    /** How many rows a list's query gives (docs/library.md §17.2). */
+    @RawQuery
+    suspend fun count(query: RoomRawQuery): Int
+
+    /** The steps of `EXPLAIN QUERY PLAN` for a list's query (docs/library.md §17.4). */
+    @RawQuery
+    suspend fun queryPlan(query: RoomRawQuery): List<QueryPlanRow>
+
     @RawQuery
     suspend fun artistGroups(query: RoomRawQuery): List<ArtistGroupRow>
 
@@ -472,6 +480,9 @@ data class CoverFileRow(
 )
 
 
+/** A step of a query's plan, as `EXPLAIN QUERY PLAN` describes it. */
+data class QueryPlanRow(val detail: String)
+
 /** A row of a song list's outline: what the controller tree splits the list by (docs/playback.md §10.5). */
 data class OutlineRow(
     val fileId: Long,
@@ -495,6 +506,8 @@ data class ListSongRow(
     /** What the row's section is found from, by the list's order (docs/library.md §11.2): a sort key or a number. */
     val sectionKey: ByteArray? = null,
     val sectionNumber: Long? = null,
+    /** In Songs missing information, the chosen reasons the song has (docs/library.md §17.1); other lists select none. */
+    val reasons: Int? = null,
 )
 
 /** An album key with what its visible songs say of it. */

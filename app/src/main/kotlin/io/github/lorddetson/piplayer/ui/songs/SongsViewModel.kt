@@ -72,6 +72,9 @@ class SongsViewModel(
     private val mutableOrder = MutableStateFlow(ListOrder(list.defaultField))
     private val search = MutableStateFlow("")
 
+    /** The list's key: for Songs missing information the chosen reasons, which the page changes (docs/library.md §17.1). */
+    private val key = MutableStateFlow(base.key)
+
     /** The song at the top of the list, for the sort after the tag pass. */
     var firstVisibleSong: Long? = null
 
@@ -128,6 +131,11 @@ class SongsViewModel(
         search.value = text
     }
 
+    /** Another key for the list of the same kind: the chosen reasons of Songs missing information. */
+    fun setKey(key: String) {
+        this.key.value = key
+    }
+
     private fun permission(granted: Boolean, deniedForGood: Boolean) {
         val newlyGranted = granted && !this.granted
         this.granted = granted
@@ -142,8 +150,8 @@ class SongsViewModel(
         }
     }
 
-    private fun queryOf(order: ListOrder, search: String) =
-        base.copy(sort = SongSort.of(order.field) ?: base.sort, reversed = order.reversed, search = search.trim())
+    private fun queryOf(order: ListOrder, search: String, key: String) =
+        base.copy(key = key, sort = SongSort.of(order.field) ?: base.sort, reversed = order.reversed, search = search.trim())
 
     private fun watch() {
         if (watching?.isActive == true) return
@@ -165,8 +173,8 @@ class SongsViewModel(
             }
             // A search is read once typing pauses, not for every letter (docs/library.md §6.3).
             val typed = search.debounce { if (it.isEmpty()) 0L else SEARCH_PAUSE_MS }
-            val queries = combine(mutableOrder, typed, ::queryOf).distinctUntilChanged()
-            combine(SongList.changes(app), queries, ::Pair).collectLatest { (key, query) ->
+            val queries = combine(mutableOrder, typed, key, ::queryOf).distinctUntilChanged()
+            combine(SongList.changes(app, base), queries, ::Pair).collectLatest { (key, query) ->
                 val newList = query != shown
                 val resort = SongList.resortDue(query)
                 val kept = if (!newList && !resort) SongList.keptFor(key, query) else null

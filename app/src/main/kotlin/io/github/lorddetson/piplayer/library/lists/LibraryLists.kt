@@ -17,6 +17,8 @@ import io.github.lorddetson.piplayer.library.sort.Sections
 import io.github.lorddetson.piplayer.identification.text.TextNormalizer
 import io.github.lorddetson.piplayer.settings.HiddenFiles
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.add
+import kotlinx.serialization.json.buildJsonArray
 
 /**
  * A song list without its songs (docs/playback.md §10.5): row i is the file [ids] i in the list's order, with its
@@ -125,7 +127,12 @@ object DisplayArtists {
  * The lists of the library tabs and pages on the library database, without the hidden files (docs/library.md §6). The
  * calls block; make them off the main thread.
  */
-class LibraryLists(private val database: LibraryDatabase, private val hidden: HiddenFiles = HiddenFiles()) {
+class LibraryLists(
+    private val database: LibraryDatabase,
+    private val hidden: HiddenFiles = HiddenFiles(),
+    /** The own covers that take "No cover" away in Songs missing information (docs/library.md §17.1). */
+    private val ownCovers: OwnCoverKeys = OwnCoverKeys.NONE,
+) {
 
     private val dao get() = database.library()
 
@@ -141,7 +148,8 @@ class LibraryLists(private val database: LibraryDatabase, private val hidden: Hi
      * more; the tree reads them for the rows it shows.
      */
     fun outline(query: SongQuery): SongOutline {
-        if (query.kind == ListKind.TREE) return SongOutline.of(songs(query))
+        // A smart list holds at most a few thousand songs, which the tree can read whole (docs/library.md §17.3).
+        if (query.kind == ListKind.TREE || query.kind.smart) return SongOutline.of(songs(query))
         val sql = Sql(hidden)
         sql.where(filterOf(query) ?: return SongOutline.EMPTY)
         sql.search("d.search_text", query.search)
@@ -167,6 +175,7 @@ class LibraryLists(private val database: LibraryDatabase, private val hidden: Hi
             discNumber = row.discNumber,
             mediaStoreId = row.mediaStoreId,
             section = section,
+            reasons = row.reasons,
         )
 
     /** A song read by its ID, in no list's order, so without a section. */
@@ -188,6 +197,7 @@ class LibraryLists(private val database: LibraryDatabase, private val hidden: Hi
             val songs = treeSongs(query)
             return if (limit == null) songs else songs.take(limit)
         }
+        if (query.kind.smart) return run(smart(query, limit, counting = false).query())
         val sql = Sql(hidden)
         sql.where(filterOf(query) ?: return emptyList())
         sql.search("d.search_text", query.search)
@@ -311,23 +321,11 @@ class LibraryLists(private val database: LibraryDatabase, private val hidden: Hi
         run(RoomRawQuery(sql) { statement -> chunk.forEachIndexed { i, id -> statement.bindLong(i + 1, id) } })
     }.associate { it.fileId to songOf(it) }
 
-    /** The visible songs with plays, the latest play first (docs/library.md §15.4): the smart list Recently played. */
-    fun recentlyPlayed(limit: Int): List<Song> = played("m.last_played_at DESC, m.play_count DESC, f.id", limit)
+    /** The first [limit] songs of the smart list Recently played (docs/library.md §17.1). */
+    fun recentlyPlayed(limit: Int): List<Song> = songs(SongQuery.recentlyPlayed(), limit)
 
-    /** The visible songs with plays, the most plays first (docs/library.md §15.4): the smart list Most played. */
-    fun mostPlayed(limit: Int): List<Song> = played("m.play_count DESC, m.last_played_at DESC, f.id", limit)
-
-    private fun played(order: String, limit: Int): List<Song> {
-        val sql = Sql(hidden)
-        val conditions = sql.conditions()
-        val query = sql.raw(
-            "SELECT f.id AS fileId, f.media_store_id AS mediaStoreId, d.title, d.artist, d.album, d.duration_ms AS durationMs, " +
-                "d.disc_number AS discNumber, f.relative_path AS relativePath, NULL AS sectionKey, NULL AS sectionNumber " +
-                "FROM track_mirror m JOIN track_display d ON d.file_id = m.file_id JOIN audio_file f ON f.id = m.file_id " +
-                "WHERE m.play_count > 0 AND $conditions ORDER BY $order LIMIT $limit",
-        )
-        return run(query).map(::songOf)
-    }
+    /** The first [limit] songs of the smart list Most played (docs/library.md §17.1). */
+    fun mostPlayed(limit: Int): List<Song> = songs(SongQuery.mostPlayed(), limit)
 
     private fun filterOf(query: SongQuery): Pair<String, List<Any>>? = when (query.kind) {
         ListKind.SONGS -> "1" to emptyList()
@@ -336,6 +334,131 @@ class LibraryLists(private val database: LibraryDatabase, private val hidden: Hi
         ListKind.FOLDER -> query.folder?.let { "f.volume_name = ? AND f.relative_path = ?" to listOf(it.volume, it.relativePath) }
         // A playlist's songs come from the user database too (docs/library.md §16.4): `PlaylistSongs`, not these lists.
         ListKind.TREE, ListKind.PLAYLIST -> null
+        // The smart lists have queries of their own (docs/library.md §17.4): `smart`.
+        ListKind.FAVORITES, ListKind.RECENTLY_ADDED, ListKind.RECENTLY_PLAYED, ListKind.MOST_PLAYED, ListKind.MISSING_INFO -> null
+    }
+
+    /** How many songs [query]'s list holds; a smart list counts them without reading them (docs/library.md §17.2). */
+    fun count(query: SongQuery): Int =
+        if (query.kind.smart) runBlocking { dao.count(smart(query, limit = null, counting = true).query()) } else songs(query).size
+
+    /** What SQLite plans for the smart list [query], one line of `EXPLAIN QUERY PLAN` per step (docs/library.md §17.4). */
+    fun plan(query: SongQuery): List<String> =
+        runBlocking { dao.queryPlan(smart(query, limit = null, counting = false).query(explain = true)) }.map { it.detail }
+
+    /** A query's text and its arguments, in the order of their places. */
+    private class Statement {
+        private val text = StringBuilder()
+        private val args = mutableListOf<Any>()
+
+        fun add(sql: String, vararg values: Any) = apply {
+            text.append(sql)
+            args.addAll(values)
+        }
+
+        fun query(explain: Boolean = false): RoomRawQuery {
+            val values = args.toList()
+            return RoomRawQuery((if (explain) "EXPLAIN QUERY PLAN " else "") + text) { statement ->
+                values.forEachIndexed { i, arg ->
+                    when (arg) {
+                        is String -> statement.bindText(i + 1, arg)
+                        is Boolean -> statement.bindLong(i + 1, if (arg) 1 else 0)
+                        is Number -> statement.bindLong(i + 1, arg.toLong())
+                        else -> error("Cannot bind $arg")
+                    }
+                }
+            }
+        }
+    }
+
+    /** The parts of the query of a list of 100 in its own order (docs/library.md §17.1): where it starts, how it sorts. */
+    private class Ranked(val from: String, val condition: String, val columns: String, val inner: String, val outer: List<String>)
+
+    private fun ranked(kind: ListKind): Ranked = when (kind) {
+        ListKind.RECENTLY_ADDED -> Ranked(
+            "audio_file f INDEXED BY index_audio_file_date_added CROSS JOIN track_display d ON d.file_id = f.id", "1",
+            "f.date_added AS r1, f.id AS r2",
+            "f.date_added DESC, f.id DESC", listOf("r.r1 DESC", "r.r2 DESC"),
+        )
+        // The index of the order walks the songs; `+` keeps the condition from making that a search.
+        ListKind.RECENTLY_PLAYED -> Ranked(
+            mirrored("last_played_at"), "+m.play_count > 0", "m.last_played_at AS r1, m.play_count AS r2",
+            "m.last_played_at DESC, m.play_count DESC, m.file_id", listOf("r.r1 DESC", "r.r2 DESC", "r.rid"),
+        )
+        else -> Ranked(
+            mirrored("play_count"), "+m.play_count > 0", "m.play_count AS r1, m.last_played_at AS r2",
+            "m.play_count DESC, m.last_played_at DESC, m.file_id", listOf("r.r1 DESC", "r.r2 DESC", "r.rid"),
+        )
+    }
+
+    /**
+     * The query of the smart list [query] (docs/library.md §17.1, §17.4): its songs in order, the first [limit] when given,
+     * or their number when [counting]. Each starts from the table and index that pick its songs and joins the others by
+     * their primary keys (`CROSS JOIN` keeps that order); its arguments are bound in the order they appear.
+     */
+    private fun smart(query: SongQuery, limit: Int?, counting: Boolean): Statement {
+        val visibleArgs = arrayOf<Any>(hidden.showSystemSounds, hidden.showRecordings, hidden.minLengthMs)
+        val terms = SearchTerms.of(query.search).toTypedArray<Any>()
+        val search = terms.joinToString("") { " AND instr(d.search_text, ?) > 0" }
+        val sql = Statement()
+        if (query.kind.ranked) {
+            // The list's 100 songs first, then the search within them, in the list's own order.
+            val ranked = ranked(query.kind)
+            val inner = "SELECT f.id AS rid, ${ranked.columns} FROM ${ranked.from} WHERE ${ranked.condition} AND ${visible("f", "d")} " +
+                "ORDER BY ${ranked.inner} LIMIT ${SmartLists.RANKED_LIMIT}"
+            if (counting) {
+                sql.add("SELECT COUNT(*) FROM ($inner) r", *visibleArgs)
+                sql.add(" CROSS JOIN track_display d ON d.file_id = r.rid WHERE 1$search", *terms)
+            } else {
+                sql.add("SELECT $SONG_COLUMNS, NULL AS sectionKey, NULL AS sectionNumber FROM ($inner) r", *visibleArgs)
+                sql.add(" CROSS JOIN track_display d ON d.file_id = r.rid CROSS JOIN audio_file f ON f.id = r.rid WHERE 1$search", *terms)
+                sql.add(" ORDER BY " + ranked.outer.joinToString(", ") { if (query.reversed) reverse(it) else it })
+                limit?.let { sql.add(" LIMIT $it") }
+            }
+            return sql
+        }
+        val chosen = query.missingReasons ?: 0
+        val missing = query.kind == ListKind.MISSING_INFO
+        // An own cover takes "No cover" away (§17.1); without own covers, or without that reason chosen, nothing is checked.
+        val checkCovers = missing && chosen and MissingReasons.COVER != 0 && !ownCovers.isEmpty
+        val coverArgs = if (checkCovers) {
+            arrayOf<Any>(
+                buildJsonArray { ownCovers.albumKeys.forEach { add(it) } }.toString(),
+                buildJsonArray { ownCovers.contentKeys.forEach { add(it) } }.toString(),
+            )
+        } else {
+            emptyArray()
+        }
+        // A song without an album or a key has no own cover of that kind: IFNULL, since `NULL IN (...)` is NULL.
+        val own = "(IFNULL(d.album_key IN (SELECT value FROM json_each(?)), 0) OR IFNULL(f.content_key IN (SELECT value FROM json_each(?)), 0))"
+        val sets = MissingReasons.storedSets(chosen)
+        if (missing && sets.isEmpty()) return Statement().add(if (counting) "SELECT 0" else EMPTY_LIST)
+        when {
+            counting -> sql.add("SELECT COUNT(*)")
+            !missing -> sql.add("SELECT $SONG_COLUMNS, ${SECTIONS.getValue(query.sort)}")
+            checkCovers -> sql.add(
+                "SELECT $SONG_COLUMNS, ${SECTIONS.getValue(query.sort)}, (CASE WHEN $own THEN d.missing_info_reasons & " +
+                    "${MissingReasons.ALL and MissingReasons.COVER.inv()} ELSE d.missing_info_reasons END) & $chosen AS reasons",
+                *coverArgs,
+            )
+            else -> sql.add("SELECT $SONG_COLUMNS, ${SECTIONS.getValue(query.sort)}, d.missing_info_reasons & $chosen AS reasons")
+        }
+        if (missing) {
+            sql.add(
+                " FROM track_display d INDEXED BY index_track_display_missing_info_reasons CROSS JOIN audio_file f ON f.id = d.file_id " +
+                    "WHERE d.missing_info_reasons IN (${sets.joinToString(",")})",
+            )
+            if (checkCovers) sql.add(" AND ((d.missing_info_reasons & ${chosen and MissingReasons.COVER.inv()}) != 0 OR NOT $own)", *coverArgs)
+        } else {
+            sql.add(" FROM ${mirrored("favorite")} WHERE m.favorite = 1")
+        }
+        sql.add(" AND ${visible("f", "d")}", *visibleArgs)
+        sql.add(search, *terms)
+        if (!counting) {
+            sql.add(" ORDER BY ${orderOf(query.sort, query.reversed)}")
+            limit?.let { sql.add(" LIMIT $it") }
+        }
+        return sql
     }
 
     private fun run(query: RoomRawQuery): List<ListSongRow> = runBlocking { dao.listSongs(query) }
@@ -446,6 +569,25 @@ class LibraryLists(private val database: LibraryDatabase, private val hidden: Hi
     }
 
     companion object {
+        /** What a list selects of a song, from `track_display d` and `audio_file f`. */
+        private const val SONG_COLUMNS = "f.id AS fileId, f.media_store_id AS mediaStoreId, d.title, d.artist, d.album, " +
+            "d.duration_ms AS durationMs, d.disc_number AS discNumber, f.relative_path AS relativePath"
+
+        /**
+         * The mirrored songs by the index of `track_mirror` on [column], with their display rows and files, in that order
+         * (docs/library.md §17.4). The index is named, so that the plan does not hang on what SQLite guesses of the
+         * tables' sizes.
+         */
+        private fun mirrored(column: String) = "track_mirror m INDEXED BY index_track_mirror_$column " +
+            "CROSS JOIN track_display d ON d.file_id = m.file_id CROSS JOIN audio_file f ON f.id = m.file_id"
+
+        /** A list of no songs, for Songs missing information with no reason chosen. */
+        private const val EMPTY_LIST = "SELECT $SONG_COLUMNS, NULL AS sectionKey, NULL AS sectionNumber " +
+            "FROM track_display d CROSS JOIN audio_file f ON f.id = d.file_id WHERE 0"
+
+        /** [term] of an order the other way round. */
+        private fun reverse(term: String) = if (term.endsWith(" DESC")) term.removeSuffix(" DESC") else "$term DESC"
+
         // Excluded folders never; included folders whole; elsewhere every file but the hidden kinds and short files. A file
         // whose length is unknown is never short (docs/library.md §3.5).
         // Its arguments: whether system sounds and recordings show, and the shortest length shown.

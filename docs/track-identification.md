@@ -110,6 +110,11 @@ in PiPlayer's database by default, and optionally into the file's tags with undo
   key for the file; the decision stores the size and modification time it was made with (§10.2).
 - Both decisions are stored by track identity in the user database (§10.2) and mirrored into `track_display`
   (§10.3), so they survive moves, library rebuilds and restores, and both can be undone (§7.1).
+- What M2b builds of this (PIM-37, library.md §17.1): the list, its five reasons as filter chips (title, artist and album
+  on by default, cover and MusicBrainz ID off), each row with its reasons, and the list as a queue request. Decision: **No
+  cover** in M2b means no embedded cover and no own cover of the track or its album; the album thumbnail probe comes
+  with the batch over the list (M4a), and until then the cover reason is off by default, since a folder image counts as no
+  cover. Keep as-is, Skip and `missing_info_decision` come with M3 and M4a.
 
 ## 2. User stories
 
@@ -955,7 +960,7 @@ the user database; user data is not touched. A rebuild cancels running batch pha
 made live in the user database.
 
 - `audio_file(id, media_store_id, volume_name, relative_path, display_name, document_uri, size, mtime,
-  generation_modified, mime_type, <media kinds>, format, codec, sample_rate, bit_depth, channels, bitrate, duration_ms, duration_source,
+  generation_modified, date_added, mime_type, <media kinds>, format, codec, sample_rate, bit_depth, channels, bitrate, duration_ms, duration_source,
   content_key, tag_encoding, embedded_cover_present, embedded_cover_width, embedded_cover_height,
   embedded_cover_bytes, embedded_cover_hash, unsafe_count, tag_pass_at, reader_version, tag_failure, tag_length_ms)`:
   `tag_length_ms` is TagLib's length, an estimate for a VBR MP3 without a header, used only while no better one is known
@@ -1124,7 +1129,7 @@ tests, and a high-band error rate within the threshold of §11.4.
 | M2a | IPC from `:tagger` for the tag pass: each result stays under 128 KB; a larger result or a value over 16 KB travels through a file; no cover bytes cross the process boundary |
 | M2b | Legacy encodings, per file: "Кино", "Ёжик" and "Би-2" stored as Windows-1251 are decoded as such in automatic mode; "Beyoncé", "Motörhead", "Sigur Rós" and "ÉTÉ" stay ISO-8859-1; ID3v1, encoding-0 ID3v2 frames and RIFF INFO |
 | M2b | Manual legacy encoding: every code page of the list decodes its own sample (also a Shift_JIS second byte in the ASCII range and a broken two-byte sequence); the choice ignores the language condition and the word rule but keeps valid UTF-8; KOI8-R text in automatic mode reads as Windows-1251, which is why the choice exists; an unknown or unsupported stored name is Automatic |
-| M2b | "Songs missing information": the reasons of §1 on merged values, including a title from the file name (level 5, or level 4 equal to the display name), the cover rule (embedded, saved, album thumbnail) and the MusicBrainz filter being off by default |
+| M2b | "Songs missing information": the reasons of §1 on merged values, including a title from the file name (level 5, or level 4 equal to the display name), the cover rule (embedded and saved in M2b, the album thumbnail in M4a) and the cover and MusicBrainz filters being off by default |
 | M3 | Keep as-is and Skip are remembered by identity and mirrored; a Skip lapses when the tag pass records a new size, modification time or content key; undoing either restores the earlier list state |
 | M0 | Filename parser: a table of real-world names → (artist, title, track number) or "unknown" |
 | M0 | AcoustID request builder: `meta` is space-separated, `duration` is an integer string rounded to the nearest second, body is gzip-compressed, the key stays out of the URL; answers: error 4 stops at once, error 14, 429, 500, 502, 503 and 504 are retried, other errors and non-JSON pages are final; recordings with an ID only and results without recordings are kept |

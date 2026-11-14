@@ -309,4 +309,23 @@
     <string name="playlist_not_found">Этого плейлиста больше нет</string>
     <string name="playlist_unknown_title">Неизвестная песня</string>
     <string name="playlist_default_name">Плейлист</string>
+    <!-- Smart lists (docs/library.md §17). -->
+    <string name="smart_lists">Умные списки</string>
+    <string name="smart_favorites">Избранное</string>
+    <string name="smart_recently_added">Недавно добавленные</string>
+    <string name="smart_recently_played">Недавно прослушанные</string>
+    <string name="smart_most_played">Часто слушаемые</string>
+    <string name="smart_missing_info">Песни с неполными сведениями</string>
+    <string name="open_smart_list">Открыть список</string>
+    <string name="smart_shuffle">Перемешать</string>
+    <string name="smart_favorites_none">Избранных песен пока нет</string>
+    <string name="smart_added_none">Песен пока нет</string>
+    <string name="smart_played_none">Прослушанных песен пока нет</string>
+    <string name="smart_missing_none">Песен без этих сведений нет</string>
+    <string name="smart_missing_choose">Выберите хотя бы одну причину</string>
+    <string name="reason_title">Название из имени файла</string>
+    <string name="reason_artist">Нет исполнителя</string>
+    <string name="reason_album">Нет альбома</string>
+    <string name="reason_cover">Нет обложки</string>
+    <string name="reason_recording_id">Нет MusicBrainz ID</string>
 </resources>

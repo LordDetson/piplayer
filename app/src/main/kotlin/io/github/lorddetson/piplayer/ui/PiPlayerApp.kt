@@ -16,7 +16,9 @@ import io.github.lorddetson.piplayer.ui.library.ArtistPage
 import io.github.lorddetson.piplayer.ui.library.FolderPage
 import io.github.lorddetson.piplayer.ui.library.LibraryHost
 import io.github.lorddetson.piplayer.ui.library.LibraryScreen
+import io.github.lorddetson.piplayer.library.lists.ListKind
 import io.github.lorddetson.piplayer.ui.playlists.PlaylistPage
+import io.github.lorddetson.piplayer.ui.playlists.SmartListPage
 import io.github.lorddetson.piplayer.ui.playlists.rememberPlaylistActions
 import io.github.lorddetson.piplayer.ui.onboarding.OnboardingGate
 import io.github.lorddetson.piplayer.ui.onboarding.rememberOnboarding
@@ -122,6 +124,10 @@ data class LibraryFolderRoute(val volume: String, val relativePath: String) : Na
 @Serializable
 data class PlaylistRoute(val id: Long) : NavKey
 
+/** A smart list's page, found by the token of its list kind (docs/library.md §17.2). */
+@Serializable
+data class SmartListRoute(val kind: String) : NavKey
+
 @Serializable
 data object NowPlayingRoute : NavKey
 
@@ -193,7 +199,11 @@ fun PiPlayerApp(viewModel: PlayerViewModel = viewModel()) {
     val covers = rememberCoverActions(snackbar)
     val favorites = remember(context) { FavoriteChoices(context) }
     val favoriteActions = rememberFavoriteActions(favorites, snackbar)
-    val playlists = rememberPlaylistActions(snackbar, open = { id -> open(PlaylistRoute(id)) })
+    val playlists = rememberPlaylistActions(
+        snackbar,
+        open = { id -> open(PlaylistRoute(id)) },
+        openSmart = { kind -> open(SmartListRoute(kind.token)) },
+    )
     val menu = remember {
         SongMenu(
             links = { song -> linksOf(context, song.id) },
@@ -215,6 +225,7 @@ fun PiPlayerApp(viewModel: PlayerViewModel = viewModel()) {
         currentSongId = currentSongId,
         menu = menu,
         play = viewModel::play,
+        shuffle = viewModel::shuffle,
         addToQueue = viewModel::addToQueue,
         openNowPlaying = { if (backStack.lastOrNull() != NowPlayingRoute) backStack.add(NowPlayingRoute) },
         openAlbum = menu.openAlbum,
@@ -252,6 +263,9 @@ fun PiPlayerApp(viewModel: PlayerViewModel = viewModel()) {
                 FolderPage(route.volume, route.relativePath, host, onBack = { close() })
             }
             entry<PlaylistRoute>(metadata = FROM_THE_SIDE) { route -> PlaylistPage(route.id, host, playlists, onBack = { close() }) }
+            entry<SmartListRoute>(metadata = FROM_THE_SIDE) { route ->
+                ListKind.of(route.kind)?.takeIf { it.smart }?.let { SmartListPage(it, host, onBack = { close() }) }
+            }
             entry<QueueRoute>(metadata = FROM_THE_SIDE) {
                 QueueScreen(
                     player = player,

@@ -11,7 +11,8 @@ import androidx.room3.Query
  * The mirrored user fields of a file (TI §10.1, docs/library.md §15.4): a row only for a file whose identity is a
  * favorite or has plays. Kept beside `track_display`, which other writers replace whole.
  */
-@Entity(tableName = "track_mirror", indices = [Index("last_played_at"), Index("play_count")])
+// favorite for the smart list Favorites (docs/library.md §17.4).
+@Entity(tableName = "track_mirror", indices = [Index("last_played_at"), Index("play_count"), Index("favorite")])
 data class TrackMirrorEntity(
     @PrimaryKey @ColumnInfo(name = "file_id") val fileId: Long,
     val favorite: Boolean,

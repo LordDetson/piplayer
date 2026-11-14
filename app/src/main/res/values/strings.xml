@@ -304,4 +304,23 @@
     <string name="playlist_not_found">This playlist is gone</string>
     <string name="playlist_unknown_title">Unknown song</string>
     <string name="playlist_default_name">Playlist</string>
+    <!-- Smart lists (docs/library.md §17). -->
+    <string name="smart_lists">Smart lists</string>
+    <string name="smart_favorites">Favorites</string>
+    <string name="smart_recently_added">Recently added</string>
+    <string name="smart_recently_played">Recently played</string>
+    <string name="smart_most_played">Most played</string>
+    <string name="smart_missing_info">Songs missing information</string>
+    <string name="open_smart_list">Open list</string>
+    <string name="smart_shuffle">Shuffle</string>
+    <string name="smart_favorites_none">No favorite songs yet</string>
+    <string name="smart_added_none">No songs added yet</string>
+    <string name="smart_played_none">No songs played yet</string>
+    <string name="smart_missing_none">No songs are missing this information</string>
+    <string name="smart_missing_choose">Choose at least one reason</string>
+    <string name="reason_title">Title from the file name</string>
+    <string name="reason_artist">No artist</string>
+    <string name="reason_album">No album</string>
+    <string name="reason_cover">No cover</string>
+    <string name="reason_recording_id">No MusicBrainz ID</string>
 </resources>

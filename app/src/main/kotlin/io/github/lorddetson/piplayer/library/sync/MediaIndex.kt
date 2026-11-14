@@ -73,6 +73,7 @@ class MediaStoreIndex(private val context: Context) : MediaIndex {
         private val size = index(MediaStore.MediaColumns.SIZE)
         private val modified = index(MediaStore.MediaColumns.DATE_MODIFIED)
         private val generation = index(MediaStore.MediaColumns.GENERATION_MODIFIED)
+        private val added = index(MediaStore.MediaColumns.DATE_ADDED)
         private val mimeType = index(MediaStore.MediaColumns.MIME_TYPE)
         private val title = index(MediaStore.Audio.AudioColumns.TITLE)
         private val artist = index(MediaStore.Audio.AudioColumns.ARTIST)
@@ -118,6 +119,7 @@ class MediaStoreIndex(private val context: Context) : MediaIndex {
             year = cursor.intOrNull(year),
             trackNumber = cursor.intOrNull(track),
             durationMs = if (cursor.isNull(duration)) null else cursor.getLong(duration),
+            dateAddedSeconds = cursor.getLong(added),
         )
 
         private fun Cursor.flag(column: Int) = !isNull(column) && getInt(column) != 0
@@ -137,6 +139,7 @@ class MediaStoreIndex(private val context: Context) : MediaIndex {
             MediaStore.MediaColumns.SIZE,
             MediaStore.MediaColumns.DATE_MODIFIED,
             MediaStore.MediaColumns.GENERATION_MODIFIED,
+            MediaStore.MediaColumns.DATE_ADDED,
             MediaStore.MediaColumns.MIME_TYPE,
             MediaStore.Audio.AudioColumns.TITLE,
             MediaStore.Audio.AudioColumns.ARTIST,

@@ -138,6 +138,8 @@ class LibraryHost(
     val covers: CoverActions? = null,
     /** Playlists: their tab, their pages and "Add to playlist" (docs/library.md §16.3). */
     val playlists: PlaylistActions? = null,
+    /** Turns shuffle on and plays a list from a song: a smart list's "Shuffle" (docs/library.md §17.2). */
+    val shuffle: (row: Int, song: Song?, list: SongQuery) -> Unit = { _, _, _ -> },
 )
 
 private enum class LibraryTab(val label: Int) {

@@ -17,6 +17,8 @@ data class Song(
     val discNumber: Int? = null,
     /** The section of the scroll thumb's bubble at this row, by the list's order (docs/library.md §11.2). */
     val section: String? = null,
+    /** In Songs missing information, the song's reasons that the list's chips choose (docs/library.md §17.1). */
+    val reasons: Int? = null,
 )
 
 /** Where the songs of the list come from: the library, or a test's own list. */
