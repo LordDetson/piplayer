@@ -83,6 +83,18 @@ class PlaybackSnapshotPreferencesTest {
     }
 
     @Test
+    fun `the current item's place in the shuffle order survives the preferences round trip`() {
+        val placed = snapshot.copy(playPosition = 5)
+        val preferences = mutablePreferencesOf()
+
+        preferences.putSnapshot(placed)
+
+        assertThat(preferences.toSnapshot()).isEqualTo(placed)
+        preferences.putSnapshot(snapshot)
+        assertThat(preferences.toSnapshot()?.playPosition).isEqualTo(-1)
+    }
+
+    @Test
     fun `a queue of opened files survives the preferences round trip`() {
         val preferences = mutablePreferencesOf()
 

@@ -127,6 +127,7 @@ class PlaybackStateSaver(
             queueRevision = queueRevision,
             libraryId = state.libraryId,
             listen = if (ended) null else listen(),
+            playPosition = playPosition(row),
         )
         if (snapshot == last) return
         last = snapshot
@@ -174,6 +175,15 @@ class PlaybackStateSaver(
             ),
         )
         return true
+    }
+
+    /**
+     * The place of [row] in the shuffle order the queue file holds, which tells copies of a song that stands twice apart
+     * at a restore (docs/playback.md §4.8); -1 while shuffle is off.
+     */
+    private fun playPosition(row: Int): Int {
+        val order = savedOrder?.takeIf { player.shuffleModeEnabled } as? StartFirstShuffleOrder ?: return -1
+        return if (row < order.length) order.positionOf(row) else -1
     }
 
     /** The entries of the player's queue by their keys, or null while the player and [state] disagree. */

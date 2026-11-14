@@ -880,7 +880,7 @@ class PlaybackSessionCallback(
                 is QueueSlot.Open -> EntryKey.Opened(snapshot.openItems.indexOf(slot.item))
             }
         }
-        return QueueOrder.restore(saved, keys, current, Random(), upNext)
+        return QueueOrder.restore(saved, keys, current, Random(), upNext, snapshot.playPosition)
     }
 
     /** Tells the saver the queue's state, and keeps the list it plays while it plays (docs/library.md §6.4). */

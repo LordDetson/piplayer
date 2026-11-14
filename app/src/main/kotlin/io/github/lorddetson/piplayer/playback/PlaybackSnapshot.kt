@@ -30,6 +30,11 @@ data class PlaybackSnapshot(
     val mediaIndexIds: Boolean = false,
     /** How far the current playback got toward a play (docs/playback.md §11.3); null when nothing is known. */
     val listen: ListenProgress? = null,
+    /**
+     * The current item's place in the shuffle order of the queue file (docs/playback.md §4.8), which tells which copy of
+     * a song that stands twice was playing; -1 when shuffle is off or it is not known.
+     */
+    val playPosition: Int = -1,
 ) {
 
     init {

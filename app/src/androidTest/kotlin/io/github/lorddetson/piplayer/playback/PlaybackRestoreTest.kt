@@ -157,6 +157,63 @@ class PlaybackRestoreTest {
         }
     }
 
+    @Test
+    fun aShuffledQueueWithASongTwiceComesBackAtTheLaterCopyThatPlayed() = restoresTheCopyThatPlayed(current = 1)
+
+    @Test
+    fun aShuffledQueueWithASongTwiceComesBackAtTheEarlierCopyThatPlayed() = restoresTheCopyThatPlayed(current = 0)
+
+    /**
+     * A playlist may hold a song twice (library.md §16.4): here song 1 at rows 0 and 1. Its second copy is tapped and
+     * shuffle put on, so that it plays first; [current] is the copy playing when the process goes, after skipping in the
+     * order to the first copy if it is 0. The restored order is the saved one by rows, the playing copy at its place
+     * (§4.8), so that nothing of the order is skipped or heard again.
+     */
+    private fun restoresTheCopyThatPlayed(current: Int) {
+        songs.songs = listOf(1L, 1L, 2L, 3L, 4L, 5L).map { SongSourceRule.song(it, "Song $it", LONG_FIXTURE) }
+        controller.tap(QueueRequest(startSongId = 1, startRow = 1), "Song 1")
+        controller.waitUntil("the second copy of song 1 plays") { isPlaying && mediaItemCount == 6 && currentMediaItemIndex == 1 }
+        onMain { controller.shuffleModeEnabled = true }
+        controller.waitUntil("shuffle is on") { shuffleModeEnabled }
+        if (current == 0) {
+            val order = onMain { shuffledRows() }
+            onMain { controller.seekTo(0, 0) }
+            controller.waitUntil("the first copy of song 1 plays at its place in the order") { currentMediaItemIndex == 0 }
+            assertThat(order.indexOf(0)).isGreaterThan(0)
+        }
+        val order = onMain { shuffledRows() }
+        onMain { controller.pause() }
+        eventually("the shuffled queue is saved at the copy that plays") {
+            val saved = store.readBlocking()
+            saved != null && saved.shuffle && saved.row == current && saved.queueRevision > 0
+        }
+
+        onMain {
+            controller.stop()
+            controller.clearMediaItems()
+            controller.shuffleModeEnabled = false
+        }
+        controller.waitUntil("the player is empty") { mediaItemCount == 0 && !shuffleModeEnabled }
+
+        // A system play request: the app's screen would list the test's songs, which hold one file ID twice, as the library.
+        onMain { controller.play() }
+        controller.waitUntil("the saved queue is back") { mediaItemCount == 6 && shuffleModeEnabled && isPlaying }
+        assertThat(onMain { controller.currentMediaItemIndex }).isEqualTo(current)
+        assertThat(onMain { shuffledRows() }).isEqualTo(order)
+    }
+
+    /** The rows of the queue in its shuffled play order. */
+    private fun shuffledRows(): List<Int> {
+        val timeline = controller.currentTimeline
+        val rows = mutableListOf<Int>()
+        var index = timeline.getFirstWindowIndex(true)
+        while (index != androidx.media3.common.C.INDEX_UNSET) {
+            rows += index
+            index = timeline.getNextWindowIndex(index, Player.REPEAT_MODE_OFF, true)
+        }
+        return rows
+    }
+
     /** The media IDs of the queue in list order. */
     private fun mediaIds(): List<String> = (0 until controller.mediaItemCount).map { controller.getMediaItemAt(it).mediaId }
 

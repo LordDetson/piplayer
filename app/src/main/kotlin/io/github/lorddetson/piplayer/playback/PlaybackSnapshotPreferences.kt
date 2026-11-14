@@ -43,6 +43,9 @@ internal object PlaybackKeys {
     val listened = longPreferencesKey("listened_ms")
     val listenCounted = booleanPreferencesKey("listen_counted")
     val listenStartedAt = longPreferencesKey("listen_started_at")
+
+    // The current item's place in the saved shuffle order (docs/playback.md §4.8).
+    val playPosition = intPreferencesKey("play_position")
 }
 
 private val openItemsJson = Json {
@@ -86,6 +89,7 @@ internal fun MutablePreferences.putSnapshot(snapshot: PlaybackSnapshot) {
         this[PlaybackKeys.listenCounted] = listen.counted
         this[PlaybackKeys.listenStartedAt] = listen.startedAt
     }
+    if (snapshot.playPosition >= 0) this[PlaybackKeys.playPosition] = snapshot.playPosition
 }
 
 /** The saved snapshot, or null when there is none or it cannot be understood. */
@@ -99,6 +103,7 @@ internal fun Preferences.toSnapshot(): PlaybackSnapshot? = when (this[PlaybackKe
         current = currentRef(),
         libraryId = this[PlaybackKeys.libraryId],
         listen = listen(),
+        playPosition = (this[PlaybackKeys.playPosition] ?: -1).coerceAtLeast(-1),
     )
     else -> null
 }

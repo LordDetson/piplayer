@@ -634,6 +634,14 @@ Schema 3 replaces what §4.1 to §4.3 say about media index IDs, the saved shuff
   the order is generated again with the current item first, as before. A current song that moved and has another file
   ID now keeps its place in the order. The library ID saved is the one the songs of the queue were read under, so a queue
   that outlived a rebuild with new IDs is not taken for a queue of the new library.
+  A song that a playlist holds twice stands in the saved order under one key twice, so the keys alone do not tell
+  which copy was playing. `playback_state` therefore also keeps the current item's place in the play order (key
+  `play_position`, M2b, PIM-31; schema 3 stays, a snapshot without it restores as before): at a restore the current
+  copy takes that place, and the other copies take the remaining places of their key in row order. So the songs before
+  it stay played and those after it are still to come, and the move off the end of a song (§4.3.1) follows the same
+  order. A place that names another song now (the list changed) is not trusted, and the copies take their places in
+  row order. The copies other than the current one play the same file, so which of them takes which place changes
+  nothing that is heard.
 - **The edit journal** (filled since step 9, §9) lists the edits in the order they were made: insert entries after an entry,
   remove an entry, move an entry after another. Each edit names entries by their keys, not by rows, and keeps the row
   it was made at as a fallback, so it still applies when the compact request reads a changed list: an insert whose
@@ -655,10 +663,12 @@ Schema 3 replaces what §4.1 to §4.3 say about media index IDs, the saved shuff
   revision; a queue file of another revision (the process died between the two writes), a damaged one or one of a
   format it does not know is ignored, and the queue starts from the snapshot's request and opened files as in schema 2.
 - **Checks.** JVM tests: the queue file round trip and a damaged or unknown file; the track reference resolution in
-  its order; the shuffle order restored exactly, with gone entries left out and new ones only after the current item;
+  its order; the shuffle order restored exactly, with gone entries left out and new ones only after the current item, and
+with a song twice in the queue the playing copy at its saved place, the later copy and the earlier one;
   a library ID that differs; the journal: inserts, removals and moves on an unchanged and on a changed list, a missing
   anchor falling back to the row, folding after 200 edits; schema 2 to 3. Instrumented tests on the API 30 emulator,
-  through the service: a shuffled queue is restored in the same order after the process is gone; the current song is
+  through the service: a shuffled queue is restored in the same order after the process is gone, also with a song twice
+in it, by rows, whichever copy was playing; the current song is
   restored after its file moved to another folder, after an index rebuild with new IDs and after a library rebuild; a
   20 000-song queue still starts within 1 s on the phone (§2.3).
 

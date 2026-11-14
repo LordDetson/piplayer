@@ -11,7 +11,9 @@ object QueueOrder {
     /**
      * The play order of the restored [entries], as indices: the saved [order] for the entries that are still there, and
      * new entries at random places after [current] and the up-next run that follows it ([upNext], docs/playback.md §9.3);
-     * null when the current entry is not in the saved order, so that the caller generates a new one.
+     * null when the current entry is not in the saved order, so that the caller generates a new one. [currentPosition] is
+     * the current entry's place in [saved], when known: of a song that stands more than once, the current copy takes
+     * that place, so that the copies before it stay played and those after it still to come.
      */
     fun restore(
         saved: List<EntryKey>,
@@ -19,14 +21,18 @@ object QueueOrder {
         current: Int,
         random: Random,
         upNext: Set<EntryKey> = emptySet(),
+        currentPosition: Int = -1,
     ): IntArray? {
         // Each key may stand more than once in a queue; its places are taken in order.
         val places = HashMap<EntryKey, ArrayDeque<Int>>()
         entries.forEachIndexed { index, key -> places.getOrPut(key) { ArrayDeque() }.addLast(index) }
+        // The current copy keeps its own place; a place that names another song now (a changed list) is not trusted.
+        val currentPlace = currentPosition.takeIf { it in saved.indices && current in entries.indices && saved[it] == entries[current] }
+        if (currentPlace != null) places[entries[current]]?.remove(current)
         val order = ArrayList<Int>(entries.size)
         val used = BooleanArray(entries.size)
-        for (key in saved) {
-            val index = places[key]?.removeFirstOrNull() ?: continue
+        for ((place, key) in saved.withIndex()) {
+            val index = (if (place == currentPlace) current else places[key]?.removeFirstOrNull()) ?: continue
             order += index
             used[index] = true
         }

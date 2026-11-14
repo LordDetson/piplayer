@@ -84,4 +84,31 @@ class QueueOrderTest {
             assertThat(keys.drop(4)).containsExactlyInAnyOrder(Song(20), Song(40), Song(50))
         }
     }
+
+    @Test
+    fun theLaterCopyOfASongTwiceInTheQueueStaysCurrentAtItsSavedPlace() {
+        // A playlist of A, B, C, A played in the order rows 3, 1, 0, 2, with the second A (row 3) playing first.
+        val entries = listOf(Song(1), Song(2), Song(3), Song(1))
+        val saved = listOf(Song(1), Song(2), Song(1), Song(3))
+
+        assertThat(QueueOrder.restore(saved, entries, current = 3, Random(1), currentPosition = 0)).containsExactly(3, 1, 0, 2)
+    }
+
+    @Test
+    fun theEarlierCopyOfASongTwiceInTheQueueStaysCurrentAtItsSavedPlace() {
+        // The same order with the first A (row 0) playing third: the second A and B are played.
+        val entries = listOf(Song(1), Song(2), Song(3), Song(1))
+        val saved = listOf(Song(1), Song(2), Song(1), Song(3))
+
+        assertThat(QueueOrder.restore(saved, entries, current = 0, Random(1), currentPosition = 2)).containsExactly(3, 1, 0, 2)
+    }
+
+    @Test
+    fun aSavedPlaceOfAnotherSongLeavesTheCopiesInTheirOrder() {
+        // The saved place names another song than the current one (the library changed): it is not trusted.
+        val entries = listOf(Song(1), Song(2), Song(1))
+        val saved = listOf(Song(1), Song(2), Song(1))
+
+        assertThat(QueueOrder.restore(saved, entries, current = 2, Random(3), currentPosition = 1)).containsExactly(0, 1, 2)
+    }
 }
