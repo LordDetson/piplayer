@@ -40,7 +40,7 @@ class OpenedFileDetailsTest {
 
     private fun copy(asset: String) = TestFiles.copy(asset).also { copies += it }
 
-    private fun read(file: File) = checkNotNull(runBlocking { details.read(Uri.fromFile(file).toString()) })
+    private fun read(file: File) = runBlocking { details.read(Uri.fromFile(file).toString()) }
 
     private fun TrackDetails.text(field: DetailField) = (value(field) as? DetailValue.Text)?.text
 
@@ -92,9 +92,27 @@ class OpenedFileDetailsTest {
     }
 
     @Test
-    fun aFileThatCannotBeOpenedHasNoDetails() {
+    fun aFileThatCanNoLongerBeOpenedShowsWhatThereIsAndThatItCouldNotBeRead() {
         val gone = File(context.cacheDir, "gone.mp3").apply { delete() }
 
-        assertThat(runBlocking { details.read(Uri.fromFile(gone).toString()) }).isNull()
+        val details = read(gone)
+
+        assertThat(details.fileId).isNull()
+        assertThat(details.text(TITLE)).isEqualTo("gone")
+        assertThat(details.text(FILE_NAME)).isEqualTo("gone.mp3")
+        // A file that is not there has no size, rather than 0 bytes.
+        assertThat(details.value(SIZE)).isNull()
+        assertThat(details.value(TAGS)).isEqualTo(DetailValue.Tags(TagState.CANNOT_READ))
+        assertThat(details.value(COVER_SOURCE)).isEqualTo(DetailValue.Cover(CoverSource.NONE))
+    }
+
+    @Test
+    fun aDocumentNoProviderServesAnyMoreIsNamedByTheLastSegmentOfItsUri() {
+        val uri = "content://io.github.lorddetson.piplayer.test.nothing/document/Lost%20Song.mp3"
+
+        val details = runBlocking { details.read(uri) }
+
+        assertThat(details.text(FILE_NAME)).isEqualTo("Lost Song.mp3")
+        assertThat(details.value(TAGS)).isEqualTo(DetailValue.Tags(TagState.CANNOT_READ))
     }
 }

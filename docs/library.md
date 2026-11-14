@@ -1778,7 +1778,10 @@ are in playback.md §9.1. The owner left the open choices to the recommendations
   the picture embedded in the file. The section of plays, the folder, date added, modified and the media index's length
   are left out; the length is TagLib's.
 - When the read fails (`:tagger` crashed, timed out, the file is unsafe or can no longer be opened) the screen shows what
-  the provider gives and says that the file could not be read. A read costs at most one `:tagger` call per opening of the
+  the provider gives and says that the file could not be read. Decision: a file that can no longer be opened (deleted,
+  its grant ended, its provider gone) costs no `:tagger` call; it is named by its provider, or by the last segment of its
+  URI when the provider says nothing, has no size unless the provider gives one, and its cover is "None". It never says
+  that the song is no longer in the library: it never was. A read costs at most one `:tagger` call per opening of the
   screen: the screen keeps what it read for as long as it is open, also when the app goes to the background and comes
   back, and never reads the file again. Nothing is stored, and the file is never added to the library.
 

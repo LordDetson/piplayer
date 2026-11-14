@@ -40,19 +40,24 @@ class OpenedFileDetails(
     /** What the provider says of the file. */
     private class Provided(val name: String?, val size: Long?)
 
-    /** The details of the file at [uri], or null when it cannot be opened at all. */
-    suspend fun read(uri: String): TrackDetails? = withContext(Dispatchers.IO) {
+    /**
+     * The details of the file at [uri]. A file that can no longer be opened (gone, its grant ended, its provider no longer
+     * serves it) still has what its provider gives, named by the last segment of [uri] without one, and says that it
+     * could not be read; it costs no `:tagger` call.
+     */
+    suspend fun read(uri: String): TrackDetails = withContext(Dispatchers.IO) {
         val parsed = uri.toUri()
-        val descriptor = open(parsed) ?: return@withContext null
+        val descriptor = open(parsed)
         val provided = provided(parsed)
-        val name = provided.name ?: parsed.lastPathSegment ?: uri
-        val (report, size) = descriptor.use { file ->
+        val name = provided.name ?: parsed.lastPathSegment?.trim()?.ifEmpty { null } ?: uri
+        val (report, size) = descriptor?.use { file ->
             readTags(uri, file, name) to (provided.size ?: file.statSize.takeIf { it >= 0 })
-        }
+        } ?: (null to provided.size)
         val tags = report?.let { TrackTags.from(LegacyText.decode(it.properties, cyrillicLanguage(), legacyEncoding()).properties) }
         val pictures = report?.pictures.orEmpty()
-        // The probe reads the picture as the player does; without a read it is still worth a look.
-        val picture = if (report == null || pictures.isNotEmpty()) probe.embedded(uri) else null
+        // The probe reads the picture as the player does; without a read it is still worth a look, unless the file
+        // cannot be opened at all.
+        val picture = if (descriptor != null && (report == null || pictures.isNotEmpty())) probe.embedded(uri) else null
         val cover = when {
             picture != null -> CoverDetail(
                 CoverSource.EMBEDDED,
@@ -117,7 +122,7 @@ class OpenedFileDetails(
                         if (cursor.isNull(1)) null else cursor.getLong(1).takeIf { it >= 0 },
                     )
                 }
-            ContentResolver.SCHEME_FILE -> uri.path?.let { File(it) }?.let { Provided(it.name, it.length()) }
+            ContentResolver.SCHEME_FILE -> uri.path?.let { File(it) }?.let { Provided(it.name, if (it.isFile) it.length() else null) }
             else -> null
         }
     }.getOrNull() ?: Provided(null, null)
