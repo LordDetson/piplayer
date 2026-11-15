@@ -68,7 +68,7 @@ class ExactDurationDeviceTest {
     private fun decodedMs(file: File, paddingBack: Boolean = false): Long = TestFiles.open(file).use { descriptor ->
         var frames = 0L
         var rate = 0
-        MediaCodecPcmSource(context, descriptor.fileDescriptor).decode { pcm, format ->
+        MediaCodecPcmSource(context, descriptor.fileDescriptor, checkError = descriptor::checkError).decode { pcm, format ->
             frames += pcm.remaining() / format.bytesPerFrame
             rate = format.sampleRate
             true

@@ -18,7 +18,9 @@ class DecodingEdgeCasesTest {
     private fun <T> withSource(name: String, block: (PcmSource) -> T): T {
         val file = TestFiles.copy("decoding/$name")
         return try {
-            TestFiles.open(file).use { pfd -> block(MediaCodecPcmSource(TestFiles.targetContext, pfd.fileDescriptor)) }
+            TestFiles.open(file).use { pfd ->
+                block(MediaCodecPcmSource(TestFiles.targetContext, pfd.fileDescriptor, checkError = pfd::checkError))
+            }
         } finally {
             file.delete()
         }

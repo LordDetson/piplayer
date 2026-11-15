@@ -55,14 +55,14 @@ class DescriptorCopy(
      * Runs [block] with a descriptor of [fd]'s bytes that can be read at random positions: [fd] itself when it is a
      * regular file, otherwise a copy. The caller keeps owning [fd]; the copy's descriptor is closed when [block] ends.
      * [checkError] is asked at the end of a copy whether [fd]'s writer closed it with an error
-     * (`ParcelFileDescriptor.checkError`), and throws if so. Throws [CopyRefused] past a bound,
-     * [DecodingException.Failed] when the copy cannot be read or written or its writer failed, and
-     * [CancellationException] once [cancelled] says so.
+     * (`ParcelFileDescriptor.checkError`), and throws if so; it has no default, so that no caller leaves it out by
+     * omission. Throws [CopyRefused] past a bound, [DecodingException.Failed] when the copy cannot be read or written
+     * or its writer failed, and [CancellationException] once [cancelled] says so.
      */
     fun <T> readable(
         fd: FileDescriptor,
         cancelled: () -> Boolean = { false },
-        checkError: () -> Unit = {},
+        checkError: () -> Unit,
         block: (FileDescriptor) -> T,
     ): T {
         if (isRegularFile(fd)) return block(fd)

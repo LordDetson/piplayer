@@ -48,14 +48,15 @@ sealed class DecodingException(message: String, cause: Throwable? = null) : IOEx
  * it reports is accepted. The caller owns [fd]: it must stay open until [decode] returns, is read through but not
  * closed, and must not be used by another extractor at the same time. A descriptor that is not a regular file (a pipe)
  * is first copied by [copies]; [cancelled] stops that copy, and [checkError] says at its end whether the writer
- * failed (`ParcelFileDescriptor.checkError` of [fd]'s descriptor), which makes the copy, and so decoding, fail.
+ * failed (`ParcelFileDescriptor.checkError` of [fd]'s descriptor), which makes the copy, and so decoding, fail. It has
+ * no default, so that no caller leaves out the check by omission: a truncated pipe would decode, shorter.
  */
 class MediaCodecPcmSource(
     private val context: Context,
     private val fd: FileDescriptor,
     private val cancelled: () -> Boolean = { false },
     private val copies: DescriptorCopy = DescriptorCopy.of(context),
-    private val checkError: () -> Unit = {},
+    private val checkError: () -> Unit,
 ) : PcmSource {
 
     override fun decode(consumer: (pcm: ByteBuffer, format: PcmFormat) -> Boolean): SourceInfo =

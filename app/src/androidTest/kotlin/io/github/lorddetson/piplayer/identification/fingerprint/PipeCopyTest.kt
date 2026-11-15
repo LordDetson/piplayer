@@ -83,7 +83,8 @@ class PipeCopyTest {
         return read
     }
 
-    private fun fingerprint(fd: FileDescriptor): FingerprintResult = fingerprint(MediaCodecPcmSource(context, fd))
+    private fun fingerprint(descriptor: ParcelFileDescriptor): FingerprintResult =
+        fingerprint(MediaCodecPcmSource(context, descriptor.fileDescriptor, checkError = descriptor::checkError))
 
     private fun fingerprint(source: PcmSource): FingerprintResult =
         runBlocking { NativeFingerprinting.calculator().fingerprint(source) }
@@ -136,9 +137,9 @@ class PipeCopyTest {
     }
 
     private fun assertThroughAPipeAsFromTheFile(file: File) {
-        val fromFile = TestFiles.open(file).use { fingerprint(it.fileDescriptor) }
+        val fromFile = TestFiles.open(file).use { fingerprint(it) }
 
-        val fromPipe = fingerprint(pipe(file.readBytes()).fileDescriptor)
+        val fromPipe = fingerprint(pipe(file.readBytes()))
 
         assertThat(fromPipe.source).isEqualTo(fromFile.source)
         assertThat(fromPipe.fedSamples).isEqualTo(fromFile.fedSamples)
@@ -162,7 +163,7 @@ class PipeCopyTest {
         val file = tuneWav()
 
         assertThroughAPipeAsFromTheFile(file)
-        assertThat(TestFiles.open(file).use { fingerprint(it.fileDescriptor) }.fingerprint.raw).isNotEmpty()
+        assertThat(TestFiles.open(file).use { fingerprint(it) }.fingerprint.raw).isNotEmpty()
     }
 
     @Test
@@ -171,7 +172,9 @@ class PipeCopyTest {
         TestFiles.open(file).use { descriptor ->
             var handed: FileDescriptor? = null
 
-            DescriptorCopy(testCopies).readable(descriptor.fileDescriptor) { handed = it }
+            DescriptorCopy(testCopies).readable(descriptor.fileDescriptor, checkError = descriptor::checkError) {
+                handed = it
+            }
 
             assertThat(handed).isSameAs(descriptor.fileDescriptor)
         }
@@ -185,7 +188,7 @@ class PipeCopyTest {
         var handed: FileDescriptor? = null
         var copied: ByteArray? = null
 
-        DescriptorCopy(testCopies).readable(read.fileDescriptor) { fd ->
+        DescriptorCopy(testCopies).readable(read.fileDescriptor, checkError = read::checkError) { fd ->
             handed = fd
             copied = ParcelFileDescriptor.dup(fd).use { ParcelFileDescriptor.AutoCloseInputStream(it).readBytes() }
         }
@@ -202,7 +205,7 @@ class PipeCopyTest {
 
         val copies = DescriptorCopy(testCopies, maxBytes = 10_000)
 
-        assertThatThrownBy { copies.readable(read.fileDescriptor) { called = true } }
+        assertThatThrownBy { copies.readable(read.fileDescriptor, checkError = read::checkError) { called = true } }
             .isInstanceOfSatisfying(DecodingException.CopyRefused::class.java) {
                 assertThat(it.reason).isEqualTo(Reason.TOO_LARGE)
             }
@@ -215,7 +218,9 @@ class PipeCopyTest {
     fun aPipeWhoseWriterStallsIsRefusedAtTheDeadlineWithoutACopyLeft() {
         val read = pipe(ByteArray(1_000), keepOpen = true)
 
-        assertThatThrownBy { DescriptorCopy(testCopies, maxMillis = 1_000).readable(read.fileDescriptor) { } }
+        val copies = DescriptorCopy(testCopies, maxMillis = 1_000)
+
+        assertThatThrownBy { copies.readable(read.fileDescriptor, checkError = read::checkError) { } }
             .isInstanceOfSatisfying(DecodingException.CopyRefused::class.java) {
                 assertThat(it.reason).isEqualTo(Reason.TOO_SLOW)
             }
@@ -228,7 +233,9 @@ class PipeCopyTest {
         val asked = AtomicInteger()
 
         assertThatThrownBy {
-            DescriptorCopy(testCopies).readable(read.fileDescriptor, cancelled = { asked.incrementAndGet() > 3 }) { }
+            DescriptorCopy(testCopies).readable(
+                read.fileDescriptor, cancelled = { asked.incrementAndGet() > 3 }, checkError = read::checkError,
+            ) { }
         }.isInstanceOf(CancellationException::class.java)
         assertThat(leftovers(testCopies)).isEmpty()
     }
@@ -269,7 +276,8 @@ class PipeCopyTest {
         old.setLastModified(System.currentTimeMillis() - DescriptorCopy.STALE_MILLIS - 60_000)
         val recent = File(testCopies, "copy-recent").apply { writeBytes(ByteArray(10)) }
 
-        DescriptorCopy(testCopies).readable(pipe(ByteArray(10)).fileDescriptor) { }
+        val read = pipe(ByteArray(10))
+        DescriptorCopy(testCopies).readable(read.fileDescriptor, checkError = read::checkError) { }
 
         assertThat(leftovers(testCopies)).containsExactly(recent.name)
     }

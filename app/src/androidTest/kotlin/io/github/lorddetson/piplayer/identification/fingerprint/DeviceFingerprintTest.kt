@@ -95,7 +95,7 @@ class DeviceFingerprintTest(private val sample: String) {
         val file: File = TestFiles.copy("recordings/${entry.getString("file")}")
         try {
             TestFiles.open(file).use { pfd ->
-                val source = MediaCodecPcmSource(TestFiles.targetContext, pfd.fileDescriptor)
+                val source = MediaCodecPcmSource(TestFiles.targetContext, pfd.fileDescriptor, checkError = pfd::checkError)
                 val (result, time) = measureTimedValue {
                     runBlocking { NativeFingerprinting.calculator().fingerprint(source) }
                 }

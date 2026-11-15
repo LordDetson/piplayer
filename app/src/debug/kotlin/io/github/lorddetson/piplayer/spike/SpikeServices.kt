@@ -116,7 +116,7 @@ class OpenedFile private constructor(
     /** Through `:tagger`, counted against the file like every read (docs/library.md §4.5). */
     override suspend fun readTags(): TagReadResult = Tagger.client(context).read(target, pfd, displayName).tagsOrThrow()
 
-    override fun pcmSource(): PcmSource = MediaCodecPcmSource(context, pfd.fileDescriptor)
+    override fun pcmSource(): PcmSource = MediaCodecPcmSource(context, pfd.fileDescriptor, checkError = pfd::checkError)
 
     override fun close() {
         try {

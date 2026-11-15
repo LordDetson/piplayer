@@ -100,7 +100,7 @@ class DecodingTableTest(private val row: Row) {
         val file = TestFiles.copy("decoding/${row.fixture}")
         return try {
             TestFiles.open(file).use { pfd ->
-                val source = MediaCodecPcmSource(TestFiles.targetContext, pfd.fileDescriptor)
+                val source = MediaCodecPcmSource(TestFiles.targetContext, pfd.fileDescriptor, checkError = pfd::checkError)
                 runBlocking { NativeFingerprinting.calculator().fingerprint(source) }
             }
         } finally {

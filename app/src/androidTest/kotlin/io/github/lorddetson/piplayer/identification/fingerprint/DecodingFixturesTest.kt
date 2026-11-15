@@ -86,7 +86,9 @@ class DecodingFixturesTest(private val fixture: Fixture) {
     private fun <T> withSource(block: (PcmSource) -> T): T {
         val file = TestFiles.copy("decoding/${fixture.name}")
         return try {
-            TestFiles.open(file).use { pfd -> block(MediaCodecPcmSource(TestFiles.targetContext, pfd.fileDescriptor)) }
+            TestFiles.open(file).use { pfd ->
+                block(MediaCodecPcmSource(TestFiles.targetContext, pfd.fileDescriptor, checkError = pfd::checkError))
+            }
         } finally {
             file.delete()
         }
