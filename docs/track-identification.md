@@ -965,7 +965,7 @@ Phases (a) to (c) land in M4a, with accepted results saved in PiPlayer only; pha
 | Service | Use | Notes |
 |---------|-----|-------|
 | AcoustID + Chromaprint | 1.0 (core, M3) | free Open Source plan: AcoustID confirmed in writing on 2026-11-05 that a free GPL app without ads or paid features qualifies, with donations through an external link; one registered application key for every build until M5, then one per build flavor |
-| MusicBrainz ws/2 | 1.0 (core, M3) | no key; 1 req/s per IP; mandatory User-Agent; core data CC0, genres/tags CC BY-NC-SA; register PiPlayer at metabrainz.org (non-profit tier) and confirm before the Play release (M5); until then the free web service with a User-Agent that names a contact is enough (MetaBrainz in writing, 2026-10-30) |
+| MusicBrainz ws/2 | 1.0 (core, M3) | no key; 1 req/s per IP; mandatory User-Agent; core data CC0, genres/tags CC BY-NC-SA; register PiPlayer at metabrainz.org (non-profit tier) and confirm before the Play release (M5); until then the free web service with a User-Agent that names a contact is enough (MetaBrainz in writing, 2026-10-30); if donations exceed $500 a year, contact MetaBrainz again about commercial terms (same reply) |
 | Cover Art Archive | 1.0 (core, M3) | images remain copyrighted by rights holders ("use at your own risk"); depends on Internet Archive uptime |
 | GitHub Releases API | 1.0 (M5), opt-in update check, GitHub build only | sends no library data; disclosed like the services above |
 | Radio Browser | v1.x, user-triggered (internet radio) | free community directory of radio stations, no key; receives search terms; the streams come from the stations themselves; send a User-Agent and pick a server from its DNS list |
@@ -981,7 +981,9 @@ Rules:
   when the property is not set. It must be one token of printable ASCII without spaces, quotes, backslashes or
   parentheses (a parenthesis would end the comment of the header early); the build and the User-Agent code refuse
   anything else, and an empty value fails the build instead of falling back to the default. A fork puts its own
-  repository URL or e-mail address there (README, "Forks"). Shipped code always sends the build's User-Agent.
+  repository URL or e-mail address there (README, "Forks"). The version name is the product version and must be one
+  RFC 9110 token (letters, digits and ``!#$%&'*+-.^_`|~``, no separators such as `( ) / ;`). Shipped code always
+  sends the build's User-Agent.
 - One AcoustID application key goes into every build type (debug, release, benchmark) through `BuildConfig`: from
   `acoustid.apiKey` in `local.properties`, which git ignores, or from `-Pacoustid.apiKey`. A build without a key gets
   an empty field. Its fingerprint stage then reports itself unavailable (no key) and sends nothing to AcoustID, while
@@ -990,7 +992,10 @@ Rules:
 - The key is not a secret (below), but it stays out of everything PiPlayer prints or shares: the build never echoes
   it, not even when it refuses a malformed one, and it never appears in a log line, a crash or problem report, the
   debug screens or a `toString`. A JVM test keeps the code that reads it to the app's wiring and the AcoustID client,
-  and another keeps the crash report to the version and build type of `BuildConfig`.
+  and another keeps the crash report to the version and build type of `BuildConfig`. The key enters only through the
+  identification services; shipped code, the debug spike included, takes its AcoustID client from their fingerprint
+  stage and never makes one with a key of its own, so every caller agrees on whether stage 3 can run (a JVM test
+  checks this too).
 - Rate limits, in detail for MusicBrainz (§8 lists all providers): one limiter per host for the whole process;
   requests start at least 1.1 s apart, in arrival order. Busy answers (503, 429, 502, 504) and network errors are
   retried with waits that double from 1 s up to 32 s, each taken at random between half and all of its step, and

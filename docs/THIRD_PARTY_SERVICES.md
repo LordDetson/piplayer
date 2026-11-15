@@ -32,7 +32,7 @@ again before the first Google Play release.
   through an external link, qualifies for the free Open Source plan; that the rate limit counts per IP address, not
   per application key; and that batches of 10 to 20 fingerprints per request are fine.
 - **Builds:** every build carries one key until M5, when the GitHub and the Google Play builds get one each. A build
-  without a key skips this service and identifies by text search instead.
+  without a key skips this service and identifies tracks by the other stages (known IDs, ISRC, text search).
 
 ### MusicBrainz
 
@@ -48,7 +48,8 @@ again before the first Google Play release.
     requests): https://musicbrainz.org/doc/MusicBrainz_Database
   - Supporter tiers, including the free non-profit tier: https://metabrainz.org/supporters/account-type
 - **In writing:** on 2026-10-30 MetaBrainz confirmed that public pre-releases may use the free web service with a
-  User-Agent that names a contact. PiPlayer registers at metabrainz.org (non-profit tier) before the Google Play
+  User-Agent that names a contact. The same reply asked PiPlayer to contact MetaBrainz again about commercial terms
+  if donations exceed $500 a year. PiPlayer registers at metabrainz.org (non-profit tier) before the Google Play
   release (M5).
 
 ### Cover Art Archive and the Internet Archive

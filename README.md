@@ -34,7 +34,7 @@ PiPlayer's builds name themselves to these services. A fork you publish should s
    Gradle's `-Pacoustid.apiKey=YourKey` works too, but Gradle lists command-line properties in its `properties`
    report, so `local.properties` is the better place. The key may contain only letters and digits, and every build
    type uses it. Without a key the app still builds and works: it skips fingerprint lookups and identifies tracks by
-   text search only.
+   the other stages (known IDs, ISRC, text search).
 2. Set your own contact for the User-Agent, a URL or an e-mail address, in `gradle.properties` or with
    `-Ppiplayer.contactUrl=...`:
 
