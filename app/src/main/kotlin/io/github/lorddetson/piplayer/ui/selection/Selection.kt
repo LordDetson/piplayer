@@ -82,8 +82,11 @@ fun <K : Any> SavedSelection<K>.selection(): Selection<K> =
 fun <K : Any> Selection<K>.restoredOn(list: String): Selection<K>? =
     if (this is Selection.AllExcept && this.list != list) null else this
 
-/** What the selection bar shows: the [selection], how many rows it counts, and whether every row shown is selected. */
-data class SelectionUi<K : Any>(val selection: Selection<K>, val count: Int, val everything: Boolean)
+/**
+ * What the selection bar shows: the [selection], how many rows it counts (null while that waits for the first loaded list,
+ * §20.2, 8), and whether every row shown is selected.
+ */
+data class SelectionUi<K : Any>(val selection: Selection<K>, val count: Int?, val everything: Boolean)
 
 /**
  * A list's selection as its state holder keeps it (docs/library.md §20.2, §20.5): it starts from the [initial] saved
@@ -92,9 +95,10 @@ data class SelectionUi<K : Any>(val selection: Selection<K>, val count: Int, val
  */
 class SelectionHolder<K : Any>(initial: SavedSelection<K>?, private val save: (SavedSelection<K>?) -> Unit = {}) {
 
-    private val mutable = MutableStateFlow(
-        initial?.selection()?.let { restored -> SelectionUi(restored, (restored as? Selection.Only)?.keys?.size ?: 0, everything = false) },
-    )
+    /** Whether a loaded list was given yet: before it nothing can be judged against the list (§20.2, 8). */
+    private var judged = false
+
+    private val mutable = MutableStateFlow(initial?.selection()?.let(::ui))
 
     /** The selection with its count, or null while nothing is selected. */
     val state: StateFlow<SelectionUi<K>?> = mutable.asStateFlow()
@@ -111,8 +115,20 @@ class SelectionHolder<K : Any>(initial: SavedSelection<K>?, private val save: (S
     private var shownSet: Set<K> = emptySet()
     private var list: String = ""
 
-    /** Selects or deselects [key]; the first long press starts selection with it. */
-    fun toggle(key: K) = set(selection.toggled(key, shownSet))
+    /**
+     * Selects or deselects [key]; the first long press starts selection with it. Before the first loaded list an "all
+     * except" cannot tell whether anything is left selected, so a tap there never ends it.
+     */
+    fun toggle(key: K) {
+        val current = selection
+        set(
+            if (!judged && current is Selection.AllExcept) {
+                current.copy(excluded = if (key in current.excluded) current.excluded - key else current.excluded + key)
+            } else {
+                current.toggled(key, shownSet)
+            },
+        )
+    }
 
     fun selectAll() = set(selectAll(list))
 
@@ -124,6 +140,7 @@ class SelectionHolder<K : Any>(initial: SavedSelection<K>?, private val save: (S
         this.shown = shown
         shownSet = shown.toHashSet()
         this.list = list
+        judged = true
         var current = selection ?: return
         if (restored) {
             restored = false
@@ -141,9 +158,19 @@ class SelectionHolder<K : Any>(initial: SavedSelection<K>?, private val save: (S
         set(change(current))
     }
 
+    /**
+     * The bar's state of [selection]: counted against the last loaded list; before the first one an "only these" counts
+     * its keys and an "all except" waits (null).
+     */
+    private fun ui(selection: Selection<K>): SelectionUi<K> = when {
+        judged -> SelectionUi(selection, selection.count(shownSet), selection.isEverything(shownSet))
+        selection is Selection.Only -> SelectionUi(selection, selection.keys.size, everything = false)
+        else -> SelectionUi(selection, null, everything = false)
+    }
+
     private fun set(selection: Selection<K>?) {
         val before = mutable.value?.selection
-        mutable.value = selection?.let { SelectionUi(it, it.count(shownSet), it.isEverything(shownSet)) }
+        mutable.value = selection?.let(::ui)
         if (selection == null) restored = false
         if (before != selection) save(selection?.saved())
     }

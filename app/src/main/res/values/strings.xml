@@ -419,6 +419,7 @@
         <item quantity="one">%1$d selected</item>
         <item quantity="other">%1$d selected</item>
     </plurals>
+    <string name="selection_count_waiting">Selected</string>
     <string name="selection_close">Cancel selection</string>
     <string name="selection_select_all">Select all</string>
     <string name="selection_deselect_all">Deselect all</string>

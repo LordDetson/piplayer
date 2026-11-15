@@ -1994,7 +1994,10 @@ open choices to the recommendations (14.11.2026); they are marked "decision".
 8. This is judged only against a loaded list: while a list is loading, asks for the permission, shows its first page
    ahead of the whole list (§1.4), or still shows the result of an older search or other chips than the ones now chosen,
    selected songs are kept and the count waits. On the queue screen it is judged only once the saved queue is restored
-   (playback.md §4.4).
+   (playback.md §4.4). Decision: before the first loaded list (after a restore, §20.5, or a long press on a first page),
+   an "only these" selection counts its keys, an "all except" one has no count yet and the title reads "Selected", and a
+   tap on a row of an "all except" selection deselects it without ending selection, since what is left cannot be told
+   yet; the first loaded list judges it as above.
 9. On the library screen a switch of tabs ends selection: the selection belongs to the list it was made in. The mini
    player and the header items of a page (an album on an artist page, a subfolder, "Play", "Shuffle", the chips) work as
    usual; a page opened from there and closed again finds its selection as it was (decision).
@@ -2101,20 +2104,21 @@ with "Play" first, then the entries of the place:
 
 ### 20.8 Checks
 
-JVM tests: the selection model (toggle, "Select all" as all except, the count against the shown keys, keys that leave the
-list, deselected keys that leave the list making it the whole list again, the order of the selected songs in the list's
-order, whole-list and everything-shown detection, the saved form with its list and its 1 000-key limit, a restore that
-drops missing keys and an "all except" made on other chips); the queue's keys of media IDs held more than once dropped
-after a change of the queue; the entries of the selection menu in each place and for one or several songs, favorites
-shown as "Add" while one counted song is not a favorite, the message's counts of changed and still unread songs, "Remove" while all counted ones are, disabled while read or with
-none counted, Details only for one, the song entries left out without a library song; the queue removal of a set of rows
+JVM tests: the selection model (toggle, "Select all" as all except, the count against the shown keys, keys that leave
+the list, deselected keys that leave the list making it the whole list again, the order of the selected songs in the
+list's order, the count and taps before the first loaded list, whole-list and everything-shown detection, the saved form
+with its list and its 1 000-key limit, a restore that drops missing keys and an "all except" made on other chips); the
+queue's keys of media IDs held more than once dropped after a change of the queue; the entries of the selection menu in
+each place and for one or several songs, favorites shown as "Add" while one counted song is not a favorite, "Remove"
+while all counted ones are, disabled while read or with none counted, the message's counts of changed and still unread
+songs, Details only for one, the song entries left out without a library song; the queue removal of a set of rows
 (playback.md §9.6).
 
 Instrumented tests on the emulators:
 
 - On a song row: a long press starts selection, a tap toggles, the check box, the menu button hidden, the semantics of a
   selected row and the "Select" accessibility action; disc headers and header items not selectable; the selection bar
-  with its count, "Select all" and "Deselect all" and the live region.
+  with its count, "Select all" and "Deselect all" and the live region, and "Selected" while the count waits.
 - On the screen: the Songs tab selection with the bar, its count and "Select all"; back ends selection and stays on an
   album page and on the library screen, the next back leaves the page or the app; the close button; a tab switch ends
   selection; the search text comes back after selection; "Play", "Play next" and "Add to queue" of a selection in the

@@ -420,6 +420,7 @@
         <item quantity="many">Выбрано %1$d</item>
         <item quantity="other">Выбрано %1$d</item>
     </plurals>
+    <string name="selection_count_waiting">Выбрано</string>
     <string name="selection_close">Отменить выбор</string>
     <string name="selection_select_all">Выбрать все</string>
     <string name="selection_deselect_all">Снять выбор со всех</string>

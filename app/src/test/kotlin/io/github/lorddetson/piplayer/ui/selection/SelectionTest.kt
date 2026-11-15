@@ -171,4 +171,32 @@ class SelectionTest {
         same.onList(shown + 6L, "chips 3")
         assertThat(same.state.value!!.count).isEqualTo(5)
     }
+
+    @Test
+    fun `before the first loaded list a restored all except waits for its count and a tap does not end it`() {
+        val holder = SelectionHolder(SavedSelection(true, listOf(2L, 3L), "q"))
+        // No list judged yet: the count of an "all except" is not known, and it is not "everything".
+        assertThat(holder.state.value).isEqualTo(SelectionUi(Selection.AllExcept(setOf(2L, 3L), "q"), count = null, everything = false))
+
+        // A tap on a row of the first page, before the whole list is loaded, deselects it and keeps the selection.
+        holder.toggle(1L)
+        assertThat(holder.state.value).isEqualTo(SelectionUi(Selection.AllExcept(setOf(2L, 3L, 1L), "q"), count = null, everything = false))
+
+        holder.onList(shown, "q")
+        assertThat(holder.state.value).isEqualTo(SelectionUi(Selection.AllExcept(setOf(2L, 3L, 1L), "q"), count = 2, everything = false))
+    }
+
+    @Test
+    fun `before the first loaded list only these counts its keys`() {
+        val restored = SelectionHolder(SavedSelection(false, listOf(2L, 9L), ""))
+        restored.toggle(4L)
+        assertThat(restored.state.value).isEqualTo(SelectionUi(Selection.Only(setOf(2L, 9L, 4L)), count = 3, everything = false))
+
+        // A long press on the first page of a list not loaded yet.
+        val fresh = SelectionHolder<Long>(null)
+        fresh.toggle(4L)
+        assertThat(fresh.state.value).isEqualTo(SelectionUi(Selection.Only(setOf(4L)), count = 1, everything = false))
+        fresh.onList(shown, "q")
+        assertThat(fresh.state.value).isEqualTo(SelectionUi(Selection.Only(setOf(4L)), count = 1, everything = false))
+    }
 }

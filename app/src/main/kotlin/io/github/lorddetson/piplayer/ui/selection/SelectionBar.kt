@@ -61,7 +61,8 @@ fun SelectionBar(
     TopAppBar(
         title = {
             Text(
-                pluralStringResource(R.plurals.selection_count, state.count, state.count),
+                // Before the first loaded list an "all except" has no count yet (docs/library.md §20.2, 8).
+                state.count?.let { pluralStringResource(R.plurals.selection_count, it, it) } ?: stringResource(R.string.selection_count_waiting),
                 modifier = Modifier.testTag(SelectionTags.TITLE).semantics {
                     heading()
                     liveRegion = LiveRegionMode.Polite

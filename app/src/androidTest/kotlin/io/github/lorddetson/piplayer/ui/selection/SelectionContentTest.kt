@@ -174,6 +174,10 @@ class SelectionContentTest {
         compose.onNode(hasText(text(R.string.selection_select_all))).performClick()
         assertThat(all).isEqualTo(1)
 
+        // A restored "all except" before its list is loaded: the count waits, without a number (library.md §20.2, 8).
+        state = SelectionUi(Selection.AllExcept(setOf(2L), "q"), count = null, everything = false)
+        compose.onNode(hasText(text(R.string.selection_count_waiting))).assertIsDisplayed()
+
         state = SelectionUi(selectAll<Long>(""), count = 3, everything = true)
         compose.onNode(hasText(count(3))).assertIsDisplayed()
         compose.onNode(hasText(text(R.string.selection_deselect_all))).performClick()
