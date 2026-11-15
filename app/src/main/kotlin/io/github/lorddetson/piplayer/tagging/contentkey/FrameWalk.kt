@@ -41,9 +41,10 @@ object FrameWalk {
     }
 
     /**
-     * Past FLAC's last frame the extractor hands out that frame again and again, with the same time, while advance()
-     * keeps returning true (Media3 1.11.1, see MediaCodecPcmSource). Other formats may repeat a time, so only FLAC
-     * ends there; walking does not read the samples, so a repeat of a large frame does no harm.
+     * Past FLAC's last frame the extractor may hand out that frame again and again, with the same time, while advance()
+     * keeps returning true (seen on Media3 1.11.1; the guard stays on 1.12, see MediaCodecPcmSource). Other formats may
+     * repeat a time, so only FLAC ends there; walking does not read the samples, so a repeat of a large frame does no
+     * harm.
      */
     private fun walkToEnd(extractor: MediaExtractorCompat, track: Int): Long? {
         val endsAtRepeat = extractor.getTrackFormat(track).getString(MediaFormat.KEY_MIME) == MIME_FLAC
