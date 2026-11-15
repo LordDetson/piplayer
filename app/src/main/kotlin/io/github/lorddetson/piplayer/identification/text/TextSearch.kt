@@ -5,6 +5,7 @@ import io.github.lorddetson.piplayer.identification.score.TextCandidate
 import io.github.lorddetson.piplayer.identification.score.TextCandidateScorer
 import io.github.lorddetson.piplayer.identification.score.TextScore
 import io.github.lorddetson.piplayer.identification.score.TrackHint
+import io.github.lorddetson.piplayer.net.SendBlockedException
 import java.io.IOException
 
 /** Runs one recording search query. */
@@ -30,7 +31,8 @@ data class TextSearchResult(
 /**
  * Stage 4 of identification (TI §3.3): sends the query variants in order and stops at the first one that yields a
  * candidate scoring at least [STOP_SCORE]. When a later variant fails, the candidates found so far are kept; a failure
- * of the first variant, or a rejected User-Agent at any point, is thrown.
+ * of the first variant, a rejected User-Agent or a call that may not be sent ([SendBlockedException]) at any point is
+ * thrown.
  */
 class TextSearch(
     private val search: RecordingSearch,
@@ -45,6 +47,10 @@ class TextSearch(
             val found = try {
                 search.search(query)
             } catch (e: MusicBrainzException.UserAgentRejected) {
+                throw e
+            } catch (e: SendBlockedException) {
+                // Nothing may be sent any more (online lookups off, MusicBrainz stopped, no usable network): the
+                // search ends, rather than looking like a partial answer.
                 throw e
             } catch (e: IOException) {
                 if (attempts.isEmpty()) throw e

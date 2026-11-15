@@ -1,6 +1,12 @@
 package io.github.lorddetson.piplayer.identification.text
 
 import io.github.lorddetson.piplayer.identification.musicbrainz.MusicBrainzException
+import io.github.lorddetson.piplayer.identification.provider.ProviderId
+import io.github.lorddetson.piplayer.identification.provider.ProviderStoppedException
+import io.github.lorddetson.piplayer.identification.provider.StopReason
+import io.github.lorddetson.piplayer.net.CaptivePortalException
+import io.github.lorddetson.piplayer.net.GateClosedException
+import io.github.lorddetson.piplayer.net.NoNetworkException
 import io.github.lorddetson.piplayer.identification.score.TextCandidate
 import io.github.lorddetson.piplayer.identification.score.TrackHint
 import kotlinx.coroutines.test.runTest
@@ -121,6 +127,27 @@ class TextSearchTest {
             }).search(hint)
         }.exceptionOrNull()
         assertThat(error).isSameAs(rejected)
+    }
+
+    @Test
+    fun `a closed gate, a stopped provider or a lost network ends the search even after an answered variant`() = runTest {
+        val blocks = listOf(
+            GateClosedException(),
+            ProviderStoppedException(ProviderId.MUSICBRAINZ, StopReason.USER_AGENT_REJECTED),
+            NoNetworkException(),
+            CaptivePortalException(),
+        )
+        for (blocked in blocks) {
+            val error = runCatching {
+                TextSearch({ query ->
+                    when (query.variant) {
+                        QueryVariant.TITLE_ARTIST_DURATION -> listOf(candidate("weak", title = "Something Else", artist = "X"))
+                        else -> throw blocked
+                    }
+                }).search(hint)
+            }.exceptionOrNull()
+            assertThat(error).isSameAs(blocked)
+        }
     }
 
     @Test
