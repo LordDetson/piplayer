@@ -392,6 +392,83 @@ class CoverArtArchiveClientTest {
     }
 
     @Test
+    fun `a release index thumbnail missing without a redirect still falls back to the image's own original`() = runTest {
+        fake { withImages(RELEASE) }
+        val image = CaaImage(
+            id = "1234567890",
+            front = false,
+            types = listOf("Back"),
+            comment = "",
+            approved = true,
+            original = server.url("/release/$RELEASE/front"),
+            thumbnails = mapOf(250 to server.url("/release/$UNKNOWN/front-250")),
+        )
+
+        val found = client().image(image, 250).found()
+
+        // The front rule (no front image, so no original) is about front addresses only; this image's original exists.
+        assertThat(found.original).isTrue()
+        assertThat(found.size).isEqualTo(PictureSize(1500, 1400))
+        assertThat(failures.get(image.original.toString())).isNull()
+    }
+
+    @Test
+    fun `a 404 after a redirect that stays on CAA counts as CAA's own and does not ask for the original`() = runTest {
+        fake()
+        // The release group's thumbnail sends the client to a release on CAA itself, which has no front image.
+        caa.enqueue(MockResponse.Builder().code(307).addHeader("Location", server.url("/release/$UNKNOWN/front-500")).build())
+
+        val answer = client().cover(CoverSource(CoverEntity.RELEASE_GROUP, GROUP), CoverSize.DISPLAY)
+
+        assertThat(answer).isEqualTo(CaaResult.NotFound)
+        assertThat(log.entries.map { it.path }).containsExactly("/release-group/$GROUP/front-500", "/release/$UNKNOWN/front-500")
+        assertThat(failures.get(key(GROUP, CoverSize.ORIGINAL, CoverEntity.RELEASE_GROUP))).isEqualTo(policy.notFound())
+    }
+
+    @Test
+    fun `429, 502 and 504 are retried after a pause, as for the other providers, and recorded as nothing`() = runTest {
+        fake { withImages(RELEASE) }
+        val client = client()
+
+        for (code in listOf(429, 502, 504)) {
+            caa.enqueue(MockResponse.Builder().code(code).body("busy").build())
+            val before = log.to(caaHost).size
+
+            assertThat(client.cover(release(RELEASE), CoverSize.LIST).found().size).isEqualTo(PictureSize(250, 250))
+
+            val tries = log.to(caaHost).drop(before)
+            assertThat(tries).hasSize(2)
+            // The first retry of TI §9 waits 0.5 to 1 s.
+            assertThat(tries[1].timeMs - tries[0].timeMs).isGreaterThanOrEqualTo(500)
+        }
+        assertThat(failures.get(key(RELEASE, CoverSize.LIST))).isNull()
+    }
+
+    @Test
+    fun `a 502 that stays through every retry is reported unavailable and recorded as nothing`() = runTest {
+        fake { withImages(RELEASE) }
+        val bad = MockResponse.Builder().code(502).body("Bad Gateway").build()
+        caa.enqueue(bad, bad)
+
+        val error = runCatching { client(maxRetries = 1).cover(release(RELEASE), CoverSize.LIST) }.exceptionOrNull()
+
+        assertThat(error).isInstanceOf(CaaException.Unavailable::class.java)
+        assertThat(failures.get(key(RELEASE, CoverSize.LIST))).isNull()
+    }
+
+    @Test
+    fun `other error statuses fail at once`() = runTest {
+        fake { withImages(RELEASE) }
+        caa.enqueue(MockResponse.Builder().code(500).body("Internal Server Error").build())
+
+        val error = runCatching { client().cover(release(RELEASE), CoverSize.LIST) }.exceptionOrNull()
+
+        assertThat(error).isInstanceOf(CaaException.Http::class.java)
+        assertThat((error as CaaException.Http).code).isEqualTo(500)
+        assertThat(server.requestCount).isEqualTo(1)
+    }
+
+    @Test
     fun `a text page with status 200 is retried as a broken answer`() = runTest {
         fake { withImages(RELEASE) }
         caa.enqueue(MockResponse.Builder().setHeader("Content-Type", "text/html; charset=utf-8").body("<html>Sign in</html>").build())
@@ -423,14 +500,16 @@ class CoverArtArchiveClientTest {
     }
 
     @Test
-    fun `the client of the services uses their HTTP client and the CAA limiter of 1 s`() = runTest {
+    fun `the services hold one client with their HTTP client and the CAA limiter of 1 s`() = runTest {
         fake { withImages(RELEASE).withImages(OTHER) }
         val services = TestServices.services(
             baseUrls = TestServices.baseUrls(acoustId = server.url("/v2/"), musicBrainz = server.url("/ws/2/"), coverArtArchive = base),
             clock = clock,
             timeSource = testTimeSource,
         )
-        val client = CoverArtArchiveClient.of(services, failures)
+        val client = services.coverArtArchive
+        // One per process, so the 503s in a row and the failure entries are the provider's, not a caller's.
+        assertThat(services.coverArtArchive).isSameAs(client)
 
         client.cover(release(RELEASE), CoverSize.LIST).found()
         client.cover(release(OTHER), CoverSize.LIST).found()

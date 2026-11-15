@@ -4,6 +4,8 @@ import android.content.Context
 import androidx.annotation.VisibleForTesting
 import io.github.lorddetson.piplayer.PiPlayerApplication
 import io.github.lorddetson.piplayer.identification.acoustid.AcoustIdClient
+import io.github.lorddetson.piplayer.identification.caa.CoverArtArchiveClient
+import io.github.lorddetson.piplayer.identification.caa.InMemoryFailureCache
 import io.github.lorddetson.piplayer.identification.musicbrainz.MusicBrainzClient
 import io.github.lorddetson.piplayer.identification.provider.CoverArtArchiveProvider
 import io.github.lorddetson.piplayer.identification.provider.ProviderAccess
@@ -94,6 +96,24 @@ class IdentificationServices(
             retryPolicy = retryPolicy,
             access = access(ProviderId.MUSICBRAINZ),
             baseUrl = baseUrls.musicBrainz,
+            clock = clock,
+            ioDispatcher = ioDispatcher,
+        )
+    }
+
+    /**
+     * The Cover Art Archive client (TI §5.2), one per services instance like the other clients, so the 503s in a row
+     * and the failure entries belong to the provider. The entries stay in memory until the library database holds them
+     * (`api_cache`, M3 step 9).
+     */
+    val coverArtArchive: CoverArtArchiveClient by lazy {
+        CoverArtArchiveClient(
+            http = http,
+            limiter = limiter(ProviderId.COVER_ART_ARCHIVE),
+            retryPolicy = retryPolicy,
+            access = access(ProviderId.COVER_ART_ARCHIVE),
+            failures = InMemoryFailureCache(),
+            baseUrl = baseUrls.coverArtArchive,
             clock = clock,
             ioDispatcher = ioDispatcher,
         )

@@ -2,7 +2,6 @@ package io.github.lorddetson.piplayer.identification.caa
 
 import io.github.lorddetson.piplayer.identification.IdentificationServices
 import io.github.lorddetson.piplayer.identification.provider.ProviderAccess
-import io.github.lorddetson.piplayer.identification.provider.ProviderId
 import io.github.lorddetson.piplayer.library.details.PictureSize
 import io.github.lorddetson.piplayer.net.CallOutcome
 import io.github.lorddetson.piplayer.net.RateLimiter
@@ -82,8 +81,9 @@ sealed class CaaException(message: String, cause: Throwable? = null) : IOExcepti
  * host belongs to the same call and takes no slot of its own. [access] is checked before every attempt. Failed
  * addresses are recorded in [failures] with the TTLs of [FailureTtlPolicy] (time from [clock]); a live entry answers
  * without a request, and a blocked call records nothing. A 503 is not retried: it pauses the limiter by [backoff]
- * (doubling on each 503 in a row, never shorter than Retry-After) and is recorded. Network errors and text pages are
- * retried by [retryPolicy] as for the other providers.
+ * (doubling on each 503 in a row, never shorter than Retry-After) and is recorded. Network errors, text pages and the
+ * answers 429, 502 and 504 are retried by [retryPolicy] as for the other providers. The app holds one client per
+ * process ([IdentificationServices.coverArtArchive]).
  */
 class CoverArtArchiveClient(
     http: OkHttpClient,
@@ -108,8 +108,8 @@ class CoverArtArchiveClient(
     private sealed interface Answer<out T> {
         data class Got<T>(val value: T, val url: HttpUrl) : Answer<T>
 
-        /** 404; [redirected] when it came from the image host after CAA's redirect. */
-        data class Missing(val redirected: Boolean) : Answer<Nothing>
+        /** 404; [fromImageHost] when CAA redirected to another host (the image host) and that host answered it. */
+        data class Missing(val fromImageHost: Boolean) : Answer<Nothing>
 
         data class Busy(val until: Instant) : Answer<Nothing>
     }
@@ -122,11 +122,15 @@ class CoverArtArchiveClient(
     suspend fun cover(source: CoverSource, size: CoverSize): CaaResult<CoverImage> {
         val original = CoverUrls.image(baseUrl, source, CoverSize.ORIGINAL)
         val thumbnail = if (size == CoverSize.ORIGINAL) null else CoverUrls.image(baseUrl, source, size)
-        return fetch(thumbnail, original)
+        return fetch(thumbnail, original, frontAddresses = true)
     }
 
-    /** One image of a release index: its thumbnail of [px] pixels when it has one (else the original), as [cover]. */
-    suspend fun image(image: CaaImage, px: Int?): CaaResult<CoverImage> = fetch(px?.let(image::thumbnail), image.original)
+    /**
+     * One image of a release index: its thumbnail of [px] pixels when it has one, else its original. Any 404 of the
+     * thumbnail falls back to the image's own original, which the index listed.
+     */
+    suspend fun image(image: CaaImage, px: Int?): CaaResult<CoverImage> =
+        fetch(px?.let(image::thumbnail), image.original, frontAddresses = false)
 
     /** The images of a release (TI §5.2); [CaaResult.NotFound] for a release without images or an ID that is no MBID. */
     suspend fun releaseIndex(releaseId: String): CaaResult<CaaReleaseIndex> {
@@ -139,8 +143,11 @@ class CoverArtArchiveClient(
         }
     }
 
-    /** [thumbnail] (null: none wanted or none known), falling back to [original] as [cover] describes. */
-    private suspend fun fetch(thumbnail: HttpUrl?, original: HttpUrl): CaaResult<CoverImage> {
+    /**
+     * [thumbnail] (null: none wanted or none known), falling back to [original]. For [frontAddresses] (`front-*`), a 404
+     * from CAA itself means the entity has no front image, so the original is recorded instead of asked for.
+     */
+    private suspend fun fetch(thumbnail: HttpUrl?, original: HttpUrl, frontAddresses: Boolean): CaaResult<CoverImage> {
         if (thumbnail != null) {
             val entry = recorded(thumbnail)
             when (entry?.kind) {
@@ -150,7 +157,7 @@ class CoverArtArchiveClient(
                 null -> when (val answer = send(thumbnail, ::readImage)) {
                     is Answer.Got -> return CaaResult.Found(answer.toCover(thumbnail, original = false))
                     is Answer.Busy -> return CaaResult.Busy(answer.until)
-                    is Answer.Missing -> if (!answer.redirected) {
+                    is Answer.Missing -> if (frontAddresses && !answer.fromImageHost) {
                         // CAA itself has no front image, so its original is missing too.
                         failures.put(original.toString(), ttl.notFound())
                         return CaaResult.NotFound
@@ -189,10 +196,11 @@ class CoverArtArchiveClient(
             request = Request.Builder().url(url).get().build(),
             giveUp = { attempts, cause -> CaaException.Unavailable(attempts, cause) },
             paused = { remaining -> CaaException.Paused(remaining) },
-        ) { response -> classify(key, response, read) }
+        ) { response -> classify(url, response, read) }
     }
 
-    private fun <T> classify(key: String, response: Response, read: (Response) -> CallOutcome<T>): CallOutcome<Answer<T>> {
+    private fun <T> classify(asked: HttpUrl, response: Response, read: (Response) -> CallOutcome<T>): CallOutcome<Answer<T>> {
+        val key = asked.toString()
         if (response.code == 503) {
             pauseAfterBusy(response)
             val entry = ttl.busy(failures.get(key))
@@ -203,7 +211,11 @@ class CoverArtArchiveClient(
         return when {
             response.code == 404 -> {
                 failures.put(key, ttl.notFound())
-                CallOutcome.Success(Answer.Missing(redirected = response.priorResponse != null))
+                // A redirect that stays on CAA (a release group sent on to one of its releases) is CAA's own answer.
+                val answeredBy = response.request.url
+                val fromImageHost = response.priorResponse != null &&
+                    (answeredBy.host != asked.host || answeredBy.port != asked.port)
+                CallOutcome.Success(Answer.Missing(fromImageHost))
             }
             response.isSuccessful -> when (val outcome = read(response)) {
                 is CallOutcome.Success -> {
@@ -212,6 +224,10 @@ class CoverArtArchiveClient(
                 }
                 is CallOutcome.Retry -> outcome
                 is CallOutcome.Fail -> outcome
+            }
+            response.code in RETRIED_STATUSES -> {
+                val serverNow = response.headers.getInstant("Date") ?: clock.instant()
+                CallOutcome.Retry(CaaException.Http(response.code), RetryAfter.parse(response.header("Retry-After"), serverNow))
             }
             else -> CallOutcome.Fail(CaaException.Http(response.code))
         }
@@ -260,15 +276,7 @@ class CoverArtArchiveClient(
         /** The longest a 503's Retry-After holds every CAA request back, as RetryingCaller's give-up pause. */
         private val MAX_BUSY_PAUSE = 1.hours
 
-        /** A client of [services]: their HTTP client, CAA limiter, access, retry policy, clock and base address. */
-        fun of(services: IdentificationServices, failures: FailureCache): CoverArtArchiveClient = CoverArtArchiveClient(
-            http = services.http,
-            limiter = services.limiter(ProviderId.COVER_ART_ARCHIVE),
-            retryPolicy = services.retryPolicy,
-            access = services.access(ProviderId.COVER_ART_ARCHIVE),
-            failures = failures,
-            baseUrl = services.baseUrls.coverArtArchive,
-            clock = services.clock,
-        )
+        /** Busy answers retried within the call as for MusicBrainz (TI §8, §9); a 503 is handled on its own. */
+        private val RETRIED_STATUSES = setOf(429, 502, 504)
     }
 }
