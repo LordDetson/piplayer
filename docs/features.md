@@ -28,7 +28,8 @@ out. Track identification is specified in [track-identification.md](track-identi
 - A custom native audio engine, own output drivers, own USB audio drivers (direct USB host access), an app volume
   that replaces the system volume, native DSD output (DoP or raw DSD) or PCM-to-DSD conversion.
 - Tracker module formats (MOD, XM, S3M, IT).
-- Third-party skins or theme packages, visualization preset engines, downloadable native plugins.
+- Skins or theme packages that carry code (APKs, scripts), visualization preset engines, downloadable native plugins.
+  User-made themes and layouts as declarative files, checked against a schema, come after 1.0 (After 1.0, item 2).
 - An own lock screen, screen overlays, changes to system settings, privileged-permission workarounds, vendor hooks.
 - An exported library database or settings provider for other apps; other apps use the standard media session.
 - All-files storage access (TI §7.3).
@@ -373,6 +374,9 @@ Size: M (about 6 weeks, plus at least 14 days of closed testing).
 - Re-check thresholds on the full corpus (TI §11), privacy policy, store data-safety and foreground-service
   declarations, a fresh check of third-party terms (TI §9), a check that Google Play's payments policy allows the
   donation link in the Play build (TI §12 D2).
+- An architecture decision record for the v1.x customization (After 1.0, item 2): Now Playing, the player controls
+  and the list rows are drawn from a model rather than fixed in code, so that a schema can later drive them without a
+  rewrite. No user-facing customization in 1.0.
 - Developer identity verification (also needed for APKs installed outside Google Play); a Play closed test with
   the required number of testers and days (12 testers for 14 days under the 2025 rules; check the current rule),
   recruited from GitHub pre-release testers; store listing.
@@ -395,23 +399,38 @@ v1.x, in planned order (items moved by the cut line come first):
 
 1. Internet radio: station directory, own stream URLs, favorites, the current title (owner's decision of
    2026-11-07: right after 1.0).
-2. Car displays (Android Auto), voice requests and configurable notification buttons.
-3. Lyrics (TI §9) with timing offsets, together with folder grants: their health check and per-folder write
+2. User customization, sharing and an MCP server (owner's decision of 2026-11-15: after 1.0, right after internet
+   radio), in this order:
+   - a declarative, versioned schema of the UI: theme (colors, type, shapes), the Now Playing layout, the player
+     buttons and their order, gestures and list rows; the app draws the screens from it with checked building
+     blocks only, never code, and falls back to the default when a file fails the schema check;
+   - an in-app editor, and export and import of a theme as one file (schema plus its images) through the system
+     share sheet;
+   - an MCP server on the local network, off by default: pairing by QR code, tokens with scopes (read only,
+     playback control, customization), a list of connected clients, no relay outside the local network; tools for
+     playback and the queue, library search, playlists and favorites, and reading and applying the UI schema; plus
+     Android AppFunctions for assistants on the phone itself;
+   - customization by an AI agent through the MCP server: the agent writes schema JSON on the user's request, the app
+     checks and applies it, with undo;
+   - a catalog of shared themes (for example a moderated GitHub repository), without an own server.
+   To check in its specification: Android's local-network access rules on current versions, Google Play policy for a
+   local server, the licence of shared themes and their images.
+3. Car displays (Android Auto), voice requests and configurable notification buttons.
+4. Lyrics (TI §9) with timing offsets, together with folder grants: their health check and per-folder write
    status, background tag writing, .lrc files and cover.jpg in the album folder.
-4. ReplayGain from tags, speed and pitch, silence skipping, then fades.
-5. Own equalizer with bass and treble, presets, text import and limiter.
-6. Home screen widget, configurable player buttons, launcher shortcuts, share target.
-7. User data export and import, storage screen, diagnostics with the command log.
-8. Bundled lossless decoders, loudness analysis, batch tag editing, Unicode conversion of legacy tags, derived
+5. ReplayGain from tags, speed and pitch, silence skipping, then fades.
+6. Own equalizer with bass and treble, presets, text import and limiter.
+7. Home screen widget, configurable player buttons (covered by item 2 once it lands), launcher shortcuts, share target.
+8. User data export and import, storage screen, diagnostics with the command log.
+9. Bundled lossless decoders, loudness analysis, batch tag editing, Unicode conversion of legacy tags, derived
    images, theme additions, command filters, resume on connect and the remaining library additions.
 
-Open decision for the owner: move the own equalizer up to item 3, or accept that devices without an effect panel
+Open decision for the owner: move the own equalizer up to item 4, or accept that devices without an effect panel
 have only the basic platform equalizer in 1.0 (and none if it falls below the cut line).
 
 Later: own radio on the home network (after the radio receiver), crossfade, CUE sheets, casting (only if a GPL-compatible way is found), more lossless and
 niche formats, parametric EQ and headphone presets, bit-perfect USB output, rule-based smart playlists, duplicate
-finder, rating tags, status broadcasts, ListenBrainz scrobbling, waveform seek bar, spectrum view, additional
-player layouts.
+finder, rating tags, status broadcasts, ListenBrainz scrobbling, waveform seek bar, spectrum view.
 
 ## Changes made to the identification spec
 
