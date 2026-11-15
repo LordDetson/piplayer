@@ -24,10 +24,17 @@ class MetadataProviderTest {
     }
 
     @Test
+    fun `no provider of identification needs a secret, which could not ship in the APK`() {
+        assertThat(identificationProviders.filter { it.requiresSecret }).isEmpty()
+    }
+
+    @Test
     fun `AcoustID needs a key, may be kept but not written into files, and is free for non-commercial use only`() {
         with(AcoustIdProvider) {
             assertThat(host).isEqualTo("api.acoustid.org")
-            assertThat(requiresSecret).isTrue()
+            assertThat(requiresApiKey).isTrue()
+            // Its application key ships in the APK, so it is not a secret (TI §9).
+            assertThat(requiresSecret).isFalse()
             assertThat(mayPersist).isTrue()
             assertThat(mayWriteToFile).isFalse()
             assertThat(commercialAllowed).isFalse()
@@ -41,6 +48,7 @@ class MetadataProviderTest {
     fun `MusicBrainz core data is CC0 and needs no key`() {
         with(MusicBrainzProvider) {
             assertThat(host).isEqualTo("musicbrainz.org")
+            assertThat(requiresApiKey).isFalse()
             assertThat(requiresSecret).isFalse()
             assertThat(mayPersist).isTrue()
             assertThat(mayWriteToFile).isTrue()
@@ -58,6 +66,7 @@ class MetadataProviderTest {
     fun `Cover Art Archive images stay the rights holders' and are linked through MusicBrainz`() {
         with(CoverArtArchiveProvider) {
             assertThat(host).isEqualTo("coverartarchive.org")
+            assertThat(requiresApiKey).isFalse()
             assertThat(requiresSecret).isFalse()
             assertThat(commercialAllowed).isFalse()
             assertThat(mayPersist).isTrue()

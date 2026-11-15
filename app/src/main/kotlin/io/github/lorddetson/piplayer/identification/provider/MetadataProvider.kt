@@ -30,6 +30,12 @@ interface MetadataProvider {
     val maxDisplayAge: Duration?
 
     /** Whether requests need an application key. Keys shipped in the APK are not secrets (TI §9). */
+    val requiresApiKey: Boolean
+
+    /**
+     * Whether requests need a real secret, such as an OAuth consumer secret, which may not ship in the APK (TI §9) and
+     * so must come from the user or a server. An application key is not one ([requiresApiKey]).
+     */
     val requiresSecret: Boolean
 
     /** The attribution line for About (M5) and the details screen. */
@@ -54,7 +60,10 @@ object AcoustIdProvider : MetadataProvider {
     /** Nothing of AcoustID's own goes into files; its track ID stays in the user database (TI §10.2). */
     override val mayWriteToFile = false
     override val maxDisplayAge: Duration? = null
-    override val requiresSecret = true
+
+    /** The build's application key (TI §9); it ships in the APK and is not a secret. */
+    override val requiresApiKey = true
+    override val requiresSecret = false
     override val attribution = "Identification: AcoustID / Chromaprint"
 
     override fun itemLink(kind: ItemKind, id: String): String? =
@@ -73,6 +82,7 @@ object MusicBrainzProvider : MetadataProvider {
     override val mayPersist = true
     override val mayWriteToFile = true
     override val maxDisplayAge: Duration? = null
+    override val requiresApiKey = false
     override val requiresSecret = false
     override val attribution = "Metadata: MusicBrainz (CC0)"
 
@@ -102,6 +112,7 @@ object CoverArtArchiveProvider : MetadataProvider {
     /** Accepted covers are embedded as TI §5.2 describes. */
     override val mayWriteToFile = true
     override val maxDisplayAge: Duration? = null
+    override val requiresApiKey = false
     override val requiresSecret = false
     override val attribution = "Covers: Cover Art Archive"
 
