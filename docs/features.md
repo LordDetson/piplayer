@@ -317,9 +317,9 @@ Size: L (about 10 weeks).
 
 Size: M (about 5 weeks).
 
-- Starts with what M2a handed over: a week in which the owner uses PiPlayer as the daily player with real music on
-  the phone, with no open blocker, and M1's check C2 with a real phone call (`m1-acceptance.md`); what the week finds is
-  fixed first.
+- Ends with what M2a handed over (owner's decision of 14.11.2026, moved from the start of M2b): a week in which the
+  owner uses PiPlayer as the daily player with real music on the phone, with no open blocker, and M1's check C2 with a
+  real phone call (`m1-acceptance.md`); what the week finds is fixed before M2b closes (`m2b-acceptance.md`).
 - Also handed over by M2a: the first sync of 20 000 files has no headroom (2.7 to 3.0 s on the phone against 3 s, about
   4.6 s on the API 30 emulator against 5 s; `m2a-acceptance.md`, L1), so it is made faster before M2b adds work to it,
   and the opened-file tests that time out on slow CI runners wait for events instead of a fixed 10 s.
