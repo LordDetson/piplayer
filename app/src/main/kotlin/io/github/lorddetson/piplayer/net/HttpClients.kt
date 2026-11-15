@@ -79,8 +79,11 @@ internal class GateInterceptor(val gate: OnlineGate) : Interceptor {
 }
 
 /**
- * The same gate for the requests OkHttp repeats on its own; a refused repeat ends the call without writing its
- * request, also on a reused connection (HttpClientsTest).
+ * The same gate for the requests OkHttp repeats on its own on the same host (408, 421, a 503 with Retry-After 0),
+ * below [GateInterceptor]. A refused repeat ends the call with [GateClosedException]: its request is not written, and
+ * OkHttp opens no other connection or route for it, because it recovers only from a failure of the exchange itself,
+ * which an interceptor's exception is not. HttpClientsTest pins this on a fresh, a reused, an HTTP/2 and a two-address
+ * connection, so an OkHttp update that changes it fails there.
  */
 internal class HopGate(val gate: OnlineGate) : Interceptor {
     override fun intercept(chain: Interceptor.Chain): Response {

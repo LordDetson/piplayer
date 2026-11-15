@@ -4,7 +4,10 @@ import io.github.lorddetson.piplayer.fakes.FakeCaa
 import io.github.lorddetson.piplayer.fakes.RecordingRequestLog
 import io.github.lorddetson.piplayer.fakes.TestServices
 import java.net.InetAddress
+import java.net.InetSocketAddress
 import java.net.ProtocolException
+import java.net.Proxy
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.test.runTest
@@ -13,7 +16,11 @@ import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
 import mockwebserver3.RecordedRequest
 import mockwebserver3.junit5.StartStop
+import okhttp3.Call
 import okhttp3.Dns
+import okhttp3.EventListener
+import okhttp3.OkHttpClient
+import okhttp3.Protocol
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.assertj.core.api.Assertions.assertThat
@@ -113,6 +120,105 @@ class HttpClientsTest {
             .exceptionOrNull()
         assertThat(error).isInstanceOf(GateClosedException::class.java)
         assertThat(server.requestCount).isEqualTo(2)
+    }
+
+    /** Records, in order, the connections the client starts and the times the gate said no. */
+    private class Watch(private val gate: InMemoryOnlineGate) : EventListener(), OnlineGate {
+        val events = CopyOnWriteArrayList<String>()
+
+        override fun isOpen(): Boolean = gate.isOpen().also { if (!it) events += REFUSED }
+
+        override fun connectStart(call: Call, inetSocketAddress: InetSocketAddress, proxy: Proxy) {
+            events += "connect $inetSocketAddress"
+        }
+
+        fun refusals(): Int = events.count { it == REFUSED }
+
+        fun afterFirstRefusal(): List<String> = events.drop(events.indexOf(REFUSED) + 1)
+
+        companion object {
+            const val REFUSED = "refused"
+        }
+    }
+
+    /**
+     * Closes [gate] while the first answer is made and answers [answer], which OkHttp repeats on the same host by
+     * itself, below the application interceptors.
+     */
+    private fun closeAndAsk(server: MockWebServer, gate: InMemoryOnlineGate, answer: MockResponse) {
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                if (request.target == "/warm") return MockResponse.Builder().body("warm").build()
+                gate.set(OnlineConsent.NONE)
+                return answer
+            }
+        }
+    }
+
+    /** The repeat is refused by the hop check: the call ends with no request written and no connection opened. */
+    private fun assertRepeatRefused(client: OkHttpClient, watch: Watch, warm: Boolean, server: MockWebServer = this.server) {
+        if (warm) client.newCall(Request.Builder().url(server.url("/warm")).build()).execute().use { it.body.string() }
+        val requestsBefore = server.requestCount
+
+        val error = runCatching { client.newCall(Request.Builder().url(server.url("/first")).build()).execute() }
+            .exceptionOrNull()
+
+        assertThat(error).isInstanceOf(GateClosedException::class.java)
+        assertThat(server.requestCount - requestsBefore).isEqualTo(1)
+        assertThat(watch.refusals()).isEqualTo(1)
+        assertThat(watch.afterFirstRefusal()).isEmpty()
+    }
+
+    private fun watched(gate: InMemoryOnlineGate): Pair<Watch, OkHttpClient> {
+        val watch = Watch(gate)
+        return watch to client(watch).newBuilder().eventListener(watch).build()
+    }
+
+    @Test
+    @Timeout(value = 20, unit = TimeUnit.SECONDS)
+    fun `a 408 repeat refused by the gate opens no connection and is not tried again`() {
+        val gate = TestServices.openGate()
+        val (watch, client) = watched(gate)
+        closeAndAsk(server, gate, MockResponse.Builder().code(408).build())
+        assertRepeatRefused(client, watch, warm = false)
+    }
+
+    @Test
+    @Timeout(value = 20, unit = TimeUnit.SECONDS)
+    fun `a 503 repeat with Retry-After 0 refused on a reused connection is not tried again`() {
+        val gate = TestServices.openGate()
+        val (watch, client) = watched(gate)
+        closeAndAsk(server, gate, MockResponse.Builder().code(503).addHeader("Retry-After", "0").build())
+        assertRepeatRefused(client, watch, warm = true)
+    }
+
+    @Test
+    @Timeout(value = 20, unit = TimeUnit.SECONDS)
+    fun `a repeat refused on a pooled HTTP 2 connection is not tried again`() {
+        val gate = TestServices.openGate()
+        val watch = Watch(gate)
+        val h2 = MockWebServer().apply { protocols = listOf(Protocol.H2_PRIOR_KNOWLEDGE) }
+        h2.start()
+        try {
+            val client = client(watch).newBuilder().eventListener(watch)
+                .protocols(listOf(Protocol.H2_PRIOR_KNOWLEDGE)).build()
+            closeAndAsk(h2, gate, MockResponse.Builder().code(408).build())
+            assertRepeatRefused(client, watch, warm = true, server = h2)
+        } finally {
+            h2.close()
+        }
+    }
+
+    @Test
+    @Timeout(value = 20, unit = TimeUnit.SECONDS)
+    fun `a refused repeat does not move on to the host's next address`() {
+        val gate = TestServices.openGate()
+        val watch = Watch(gate)
+        // The host has a second address, as musicbrainz.org has an A and an AAAA record; nothing listens there.
+        val dns = Dns { listOf(InetAddress.getLoopbackAddress(), InetAddress.getByName("127.0.0.2")) }
+        val client = client(watch).newBuilder().eventListener(watch).dns(dns).build()
+        closeAndAsk(server, gate, MockResponse.Builder().code(408).build())
+        assertRepeatRefused(client, watch, warm = false)
     }
 
     @Test
