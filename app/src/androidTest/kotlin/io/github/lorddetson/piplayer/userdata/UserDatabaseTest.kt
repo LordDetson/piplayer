@@ -238,21 +238,23 @@ class UserDatabaseTest {
         favorites.set(2, favorite = true)
         val before = dao.changeCounter()
 
-        // Identity 9 does not exist and has no key that leads anywhere: it is left out.
-        val written = favorites.setAll(listOf(1L to null, 2L to null, 3L to null, 9L to null), favorite = true)
+        // Identity 9 does not exist and has no key that leads anywhere: it is gone. Song 2 is a favorite already and does not
+        // count as changed; song 3 stands twice (a playlist may hold it twice) and changes once.
+        val written = favorites.setAll(listOf(1L to null, 2L to null, 3L to null, 9L to null, 3L to null), favorite = true)
 
-        assertThat(written).isEqualTo(3)
+        assertThat(written).isEqualTo(Favorites.Written(changed = 2, gone = 1))
         assertThat(dao.changeCounter()).isEqualTo(before + 1)
         assertThat(dao.rulesCounter()).isZero()
         assertThat(favorites.favoriteIdentities(listOf(1L, 2L, 3L, 4L, 9L))).containsExactlyInAnyOrder(1L, 2L, 3L)
 
-        // An identity deleted since the read goes to the identity that holds its key now (§8.1).
-        assertThat(favorites.setAll(listOf(1L to null, 3L to null, 7L to ByteArray(32) { 4 }), favorite = false)).isEqualTo(3)
+        // An identity deleted since the read goes to the identity that holds its key now (§8.1): 7 is 4, not a favorite.
+        assertThat(favorites.setAll(listOf(1L to null, 3L to null, 7L to ByteArray(32) { 4 }), favorite = false))
+            .isEqualTo(Favorites.Written(changed = 2, gone = 0))
         assertThat(favorites.favoriteIdentities(listOf(1L, 2L, 3L, 4L))).containsExactly(2L)
         assertThat(dao.changeCounter()).isEqualTo(before + 2)
 
-        // Nothing written raises nothing.
-        assertThat(favorites.setAll(listOf(9L to null), favorite = true)).isZero()
+        // Nothing changed raises nothing: a gone identity, and a favorite made one again.
+        assertThat(favorites.setAll(listOf(9L to null, 2L to null), favorite = true)).isEqualTo(Favorites.Written(changed = 0, gone = 1))
         assertThat(dao.changeCounter()).isEqualTo(before + 2)
     }
 

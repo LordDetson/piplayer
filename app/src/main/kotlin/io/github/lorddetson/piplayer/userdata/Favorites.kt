@@ -33,20 +33,27 @@ class Favorites(private val database: UserDatabase, private val clock: () -> Lon
 
     /**
      * Makes the songs of [songs] (each an identity with the content key it was read by) favorites, or not, in one
-     * transaction that checks each identity as [set] does and raises the change counter once; how many songs were
-     * written, leaving out those whose identity is gone (docs/library.md §20.3).
+     * transaction that checks each identity as [set] does and raises the change counter once when anything changed: how
+     * many songs changed (a favorite made one again does not, nor a song given twice) and how many were left out since
+     * their identity is gone (docs/library.md §20.3).
      */
-    suspend fun setAll(songs: List<Pair<Long, ByteArray?>>, favorite: Boolean): Int = database.withWriteTransaction {
-        val now = clock()
-        var written = 0
+    suspend fun setAll(songs: List<Pair<Long, ByteArray?>>, favorite: Boolean): Written = database.withWriteTransaction {
+        var gone = 0
+        val identities = LinkedHashSet<Long>()
         for ((identityId, contentKey) in songs) {
-            val identity = database.identities().current(identityId, contentKey) ?: continue
-            if (favorite) dao.add(identity, now) else dao.remove(identity)
-            written++
+            val identity = database.identities().current(identityId, contentKey)
+            if (identity == null) gone++ else identities += identity
         }
-        if (written > 0) database.user().countChange()
-        written
+        val already = identities.chunked(CHUNK).flatMapTo(HashSet()) { dao.favoritesAmong(it) }
+        val changing = identities.filter { (it in already) != favorite }
+        val now = clock()
+        for (identity in changing) if (favorite) dao.add(identity, now) else dao.remove(identity)
+        if (changing.isNotEmpty()) database.user().countChange()
+        Written(changing.size, gone)
     }
+
+    /** What [setAll] did: how many songs [changed] and how many were left out since their identity is [gone]. */
+    data class Written(val changed: Int, val gone: Int)
 
     suspend fun isFavoriteAlbum(albumKey: String): Boolean = dao.isFavoriteAlbum(albumKey)
 

@@ -2035,8 +2035,11 @@ with "Play" first, then the entries of the place:
   tags are not read yet has no identity and does not count. The entry is "Add to favorites" when at least one counted
   song is not a favorite, otherwise "Remove from favorites"; when no selected song has an identity, it is disabled and
   says that the tags are still being read. The write is one transaction of the user database that checks each identity
-  again (§8.1) and raises the change counter once (§3.1, §15.2); songs without an identity are skipped, and the message
-  says how many changed and how many are still being read.
+  again (§8.1) and raises the change counter once when anything changed (§3.1, §15.2); songs without an identity are
+  skipped, and the message says how many changed and how many are still being read. Decision: a song that already was
+  what the entry makes it (a favorite added again) did not change and is not counted; a song selected twice (a playlist
+  or the queue may hold it twice) counts once; a song whose identity went between the read and the write is counted as
+  still being read, as the song menu says of one (§15.2).
 - **Details** (§18) opens the details of the one selected song (on the queue screen also of a file opened from another
   app, §18.5). Decision: it is not offered for more than one song, and "Go to album", "Go to artist", "Go to folder",
   "Choose cover" and "Remove own cover" are not in the selection menu at all: each names one song's place or picture,
@@ -2101,7 +2104,7 @@ list, deselected keys that leave the list making it the whole list again, the or
 order, whole-list and everything-shown detection, the saved form with its list and its 1 000-key limit, a restore that
 drops missing keys and an "all except" made on other chips); the queue's keys of media IDs held more than once dropped
 after a change of the queue; the entries of the selection menu in each place and for one or several songs, favorites
-shown as "Add" while one counted song is not a favorite, "Remove" while all counted ones are, disabled while read or with
+shown as "Add" while one counted song is not a favorite, the message's counts of changed and still unread songs, "Remove" while all counted ones are, disabled while read or with
 none counted, Details only for one, the song entries left out without a library song; the queue removal of a set of rows
 (playback.md §9.6).
 
@@ -2120,6 +2123,6 @@ Instrumented tests on the emulators:
 - Process death: a list holder built again from its saved state brings the selection back; more than 1 000 keys are not
   saved; an "all except" made on another list (other chips or another search, which name the list alike) is dropped.
 - The user database: several favorites in one transaction that raises the change counter once, unread and gone
-  identities skipped; playlist entries removed and put back in one transaction each; track references read in chunks
+  identities skipped, favorites already set and songs given twice not counted as changed; playlist entries removed and put back in one transaction each; track references read in chunks
   equal to the one-by-one read.
 - Through the service: playback.md §9.6.

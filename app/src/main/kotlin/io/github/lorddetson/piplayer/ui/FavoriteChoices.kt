@@ -7,6 +7,7 @@ import io.github.lorddetson.piplayer.library.identity.Hex
 import io.github.lorddetson.piplayer.library.identity.IdentityAttacher
 import io.github.lorddetson.piplayer.library.identity.TrackRef
 import io.github.lorddetson.piplayer.ui.songs.FavoriteBatch
+import io.github.lorddetson.piplayer.userdata.Favorites
 import io.github.lorddetson.piplayer.userdata.UserData
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -80,9 +81,10 @@ class FavoriteChoices(context: Context) {
     /** Makes the selected songs [fileIds] favorites, or not, in one transaction; null when it failed. */
     suspend fun setSongs(fileIds: List<Long>, favorite: Boolean): BatchResult? = safely(null) {
         val refs = refsOf(fileIds)
-        val songs = fileIds.mapNotNull { id -> refs[id]?.let { ref -> ref.identityId?.let { it to ref.contentKey?.let(Hex::bytes) } } }
+        // Each song once: a playlist or the queue may hold one twice.
+        val songs = fileIds.distinct().mapNotNull { id -> refs[id]?.let { ref -> ref.identityId?.let { it to ref.contentKey?.let(Hex::bytes) } } }
         val written = withContext(Dispatchers.IO) { favorites.setAll(songs, favorite) }
-        BatchResult(changed = written, notRead = fileIds.size - written)
+        favoriteBatchResult(fileIds, { refs[it]?.identityId }, written)
     }
 
     fun albumFlow(albumKey: String): Flow<Boolean> = favorites.isFavoriteAlbumFlow(albumKey).catch { emit(false) }
@@ -109,3 +111,11 @@ class FavoriteChoices(context: Context) {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     }
 }
+
+/**
+ * The message's counts for the selected songs [fileIds] after [written] (docs/library.md §20.3): the songs that changed, and
+ * as still being read each song without an identity ([identityOf]) and each whose identity went before the write, as the
+ * song menu says of one (§15.2).
+ */
+internal fun favoriteBatchResult(fileIds: List<Long>, identityOf: (Long) -> Long?, written: Favorites.Written): FavoriteChoices.BatchResult =
+    FavoriteChoices.BatchResult(changed = written.changed, notRead = fileIds.distinct().count { identityOf(it) == null } + written.gone)
