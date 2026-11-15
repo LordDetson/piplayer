@@ -47,17 +47,19 @@ sealed class DecodingException(message: String, cause: Throwable? = null) : IOEx
  * Android 13+ a float request would break the platform's trimming of MP3 and AAC encoder delay), but every PCM encoding
  * it reports is accepted. The caller owns [fd]: it must stay open until [decode] returns, is read through but not
  * closed, and must not be used by another extractor at the same time. A descriptor that is not a regular file (a pipe)
- * is first copied by [copies]; [cancelled] stops that copy.
+ * is first copied by [copies]; [cancelled] stops that copy, and [checkError] says at its end whether the writer
+ * failed (`ParcelFileDescriptor.checkError` of [fd]'s descriptor), which makes the copy, and so decoding, fail.
  */
 class MediaCodecPcmSource(
     private val context: Context,
     private val fd: FileDescriptor,
     private val cancelled: () -> Boolean = { false },
     private val copies: DescriptorCopy = DescriptorCopy.of(context),
+    private val checkError: () -> Unit = {},
 ) : PcmSource {
 
     override fun decode(consumer: (pcm: ByteBuffer, format: PcmFormat) -> Boolean): SourceInfo =
-        copies.readable(fd, cancelled) { readable -> decode(readable, consumer) }
+        copies.readable(fd, cancelled, checkError) { readable -> decode(readable, consumer) }
 
     /** Decodes [readable], which can be read at random positions: [fd] itself or its copy. */
     @OptIn(UnstableApi::class)

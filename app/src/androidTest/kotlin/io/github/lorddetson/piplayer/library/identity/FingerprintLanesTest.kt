@@ -9,6 +9,7 @@ import io.github.lorddetson.piplayer.identification.fingerprint.PcmEncoding
 import io.github.lorddetson.piplayer.identification.fingerprint.PcmFormat
 import io.github.lorddetson.piplayer.identification.fingerprint.PcmSource
 import io.github.lorddetson.piplayer.identification.fingerprint.SourceInfo
+import io.github.lorddetson.piplayer.library.db.FingerprintEntity
 import io.github.lorddetson.piplayer.library.db.LibraryDatabase
 import io.github.lorddetson.piplayer.nativelib.chromaprint.Chromaprint
 import java.io.File
@@ -95,8 +96,8 @@ class FingerprintLanesTest {
     fun aUserRequestCompletesBeforeReattachmentWorkQueuedEarlier() = runBlocking<Unit> {
         val gate = CountDownLatch(1)
         val firstStarted = CountDownLatch(1)
-        val fingerprints = LibraryFingerprints(context, library, uriOf = { error("not used") }, sources = { fd, _ ->
-            when (val name = nameIn(fd)) {
+        val fingerprints = LibraryFingerprints(context, library, uriOf = { error("not used") }, sources = { descriptor, _ ->
+            when (val name = nameIn(descriptor.fileDescriptor)) {
                 "user" -> GatedSource(name, gate = null, started = null)
                 "r1" -> GatedSource(name, gate, firstStarted)
                 else -> GatedSource(name, gate, started = null)
@@ -144,6 +145,85 @@ class FingerprintLanesTest {
         assertThat(userRuns.single().priority).isEqualTo(Process.THREAD_PRIORITY_DEFAULT)
         for (name in listOf("r1", "r2", "r3", "r4")) {
             assertThat(library.library().fingerprint("key-$name")?.decoderPath).isEqualTo("test:$name")
+        }
+    }
+
+    /**
+     * A request holds its lane only while it decodes (TI §3.2 "Threads"): of two user requests in a row, the first
+     * completes, cached, while the second still decodes, instead of waiting for the lane's thread to come back to it.
+     */
+    @Test
+    fun aUserRequestThatHasDecodedCompletesWhileTheNextOneInItsLaneDecodes() = runBlocking<Unit> {
+        val firstGate = CountDownLatch(1)
+        val firstStarted = CountDownLatch(1)
+        val secondGate = CountDownLatch(1)
+        val secondStarted = CountDownLatch(1)
+        val fingerprints = LibraryFingerprints(context, library, uriOf = { error("not used") }, sources = { descriptor, _ ->
+            when (val name = nameIn(descriptor.fileDescriptor)) {
+                "u1" -> GatedSource(name, firstGate, firstStarted)
+                else -> GatedSource(name, secondGate, secondStarted)
+            }
+        })
+
+        fun user(name: String) = file(name).let { uri ->
+            async(start = CoroutineStart.UNDISPATCHED) {
+                fingerprints.compute(uri, "key-$name", "test", LibraryFingerprints.Lane.USER)
+            }
+        }
+
+        val first = user("u1")
+        try {
+            assertThat(firstStarted.await(GUARD_SECONDS, TimeUnit.SECONDS)).isTrue()
+            // Queued behind the first on the user's lane; the first decodes once its gate opens.
+            val second = user("u2")
+            firstGate.countDown()
+            assertThat(secondStarted.await(GUARD_SECONDS, TimeUnit.SECONDS)).isTrue()
+
+            val result = withTimeout(TimeUnit.SECONDS.toMillis(GUARD_SECONDS)) { first.await() }
+
+            assertThat(result.fingerprint.raw).isNotEmpty()
+            assertThat(second.isCompleted).isFalse()
+            assertThat(library.library().fingerprint("key-u1")?.decoderPath).isEqualTo("test:u1")
+
+            secondGate.countDown()
+            withTimeout(TimeUnit.SECONDS.toMillis(GUARD_SECONDS)) { second.await() }
+        } finally {
+            firstGate.countDown()
+            secondGate.countDown()
+        }
+        assertThat(runs.map { it.name }).containsExactly("u1", "u2")
+        assertThat(library.library().fingerprint("key-u2")?.decoderPath).isEqualTo("test:u2")
+    }
+
+    /**
+     * The AcoustID track ID cached for a content key (TI §3.2, §10.1) survives a new computation on either lane, which
+     * replaces the rest of the row: a slower re-attachment decode that ends after the user's lookup must not drop it.
+     */
+    @Test
+    fun aRecomputedFingerprintKeepsTheCachedAcoustIdTrack() = runBlocking<Unit> {
+        val fingerprints = LibraryFingerprints(
+            context, library, uriOf = { error("not used") }, clock = { 2_000 },
+            sources = { descriptor, _ -> GatedSource(nameIn(descriptor.fileDescriptor), gate = null, started = null) },
+        )
+
+        for (lane in LibraryFingerprints.Lane.entries) {
+            val key = "key-again-$lane"
+            library.library().saveFingerprint(
+                FingerprintEntity(
+                    key, byteArrayOf(0, 0, 0, 1), "old", 1_000, acoustIdId = "acoustid-$lane", decoderPath = "test:old",
+                ),
+            )
+
+            val result = withTimeout(TimeUnit.SECONDS.toMillis(GUARD_SECONDS)) {
+                fingerprints.compute(file("again-$lane"), key, "test", lane)
+            }
+
+            val row = library.library().fingerprint(key)!!
+            assertThat(row.acoustIdId).isEqualTo("acoustid-$lane")
+            assertThat(LibraryFingerprints.items(row.fingerprint)).isEqualTo(result.fingerprint.raw).isNotEmpty()
+            assertThat(row.format).isEqualTo("test")
+            assertThat(row.computedAt).isEqualTo(2_000)
+            assertThat(row.decoderPath).isEqualTo("test:again-$lane")
         }
     }
 

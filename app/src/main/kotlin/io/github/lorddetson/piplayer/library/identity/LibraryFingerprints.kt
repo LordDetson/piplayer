@@ -2,6 +2,7 @@ package io.github.lorddetson.piplayer.library.identity
 
 import android.content.Context
 import android.net.Uri
+import android.os.ParcelFileDescriptor
 import android.os.Process
 import android.util.Log
 import io.github.lorddetson.piplayer.identification.fingerprint.DecodingException
@@ -11,7 +12,6 @@ import io.github.lorddetson.piplayer.identification.fingerprint.NativeFingerprin
 import io.github.lorddetson.piplayer.identification.fingerprint.PcmSource
 import io.github.lorddetson.piplayer.library.db.FingerprintEntity
 import io.github.lorddetson.piplayer.library.db.LibraryDatabase
-import java.io.FileDescriptor
 import java.io.FileNotFoundException
 import java.nio.ByteBuffer
 import java.util.concurrent.Executors
@@ -24,18 +24,20 @@ import kotlinx.coroutines.withContext
 /**
  * The fingerprint cache of the library database (docs/library.md §8.3), filled by fingerprints of at most 120 s of
  * audio, made with the decoders of identification. One entry, [compute], serves two lanes (TI §3.2 "Threads"):
- * re-attachment's computations run one after another on a thread of background priority, and user-triggered
- * identification has a thread of its own at normal priority, so it never waits behind them. [sources] makes the
- * decoding source of an open file; the lane's thread decodes too.
+ * re-attachment's computations run one after another on a thread of background priority, and single-file
+ * identification that the user waits for has a thread of its own at normal priority, so it never waits behind them.
+ * Batches (M4a) never take the user's lane. [sources] makes the decoding source of an open file; the lane's thread
+ * decodes too.
  */
 class LibraryFingerprints(
     private val context: Context,
     private val library: LibraryDatabase,
     private val uriOf: (KeyedFile) -> Uri,
     private val clock: () -> Long = System::currentTimeMillis,
-    private val sources: (fd: FileDescriptor, cancelled: () -> Boolean) -> PcmSource = { fd, cancelled ->
-        MediaCodecPcmSource(context, fd, cancelled)
-    },
+    private val sources: (descriptor: ParcelFileDescriptor, cancelled: () -> Boolean) -> PcmSource =
+        { descriptor, cancelled ->
+            MediaCodecPcmSource(context, descriptor.fileDescriptor, cancelled, checkError = descriptor::checkError)
+        },
 ) : FingerprintSource {
 
     /** The thread a computation waits for. */
@@ -43,7 +45,10 @@ class LibraryFingerprints(
         /** Re-attachment (TI §3.1 step 4): one thread at background priority. */
         REATTACHMENT(lane("fingerprints", Process.THREAD_PRIORITY_BACKGROUND)),
 
-        /** A fingerprint the user is waiting for: one thread at normal priority, apart from re-attachment's. */
+        /**
+         * Single-file identification that the user waits for: one thread at normal priority, apart from
+         * re-attachment's. Batches are started by the user but not waited for, so they never take it (TI §8).
+         */
         USER(lane("fingerprints-user", Process.THREAD_PRIORITY_DEFAULT)),
     }
 
@@ -65,26 +70,30 @@ class LibraryFingerprints(
 
     /**
      * The fingerprint of the file at [uri], decoded on [lane]'s thread and cached under [contentKey] with the file's
-     * [format] and the decoder path. Throws when the file cannot be opened or decoded (a [DecodingException] says why,
-     * an unsupported format among others); a cancelled caller stops the copy or the decoder soon.
+     * [format] and the decoder path, keeping the AcoustID track ID cached for that key. Throws when the file cannot be
+     * opened or decoded (a [DecodingException] says why, an unsupported format among others); a cancelled caller stops
+     * the copy or the decoder soon.
      */
-    suspend fun compute(uri: Uri, contentKey: String, format: String?, lane: Lane): FingerprintResult =
-        withContext(lane.dispatcher) {
+    suspend fun compute(uri: Uri, contentKey: String, format: String?, lane: Lane): FingerprintResult {
+        val result = withContext(lane.dispatcher) {
             val job = coroutineContext.job
             val descriptor = context.contentResolver.openFileDescriptor(uri, "r")
                 ?: throw FileNotFoundException("No descriptor for $uri")
             // The calculator keeps to the lane's thread, so the lane is busy until the fingerprint is made.
-            val result = descriptor.use {
+            descriptor.use {
                 NativeFingerprinting.calculator(dispatcher = lane.dispatcher)
-                    .fingerprint(sources(it.fileDescriptor) { !job.isActive })
+                    .fingerprint(sources(it) { !job.isActive })
             }
-            library.library().saveFingerprint(
-                FingerprintEntity(
-                    contentKey, bytes(result.fingerprint.raw), format, clock(), decoderPath = result.source.decoderPath,
-                ),
-            )
-            result
         }
+        // Cached after leaving the lane: Room suspends to its own threads, and coming back to the lane's single thread
+        // would queue the end of this request behind the next request's whole decode.
+        library.library().saveComputedFingerprint(
+            FingerprintEntity(
+                contentKey, bytes(result.fingerprint.raw), format, clock(), decoderPath = result.source.decoderPath,
+            ),
+        )
+        return result
+    }
 
     companion object {
         private const val TAG = "LibraryFingerprints"

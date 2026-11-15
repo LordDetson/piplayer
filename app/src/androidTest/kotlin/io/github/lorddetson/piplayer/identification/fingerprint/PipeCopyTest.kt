@@ -6,6 +6,7 @@ import io.github.lorddetson.piplayer.TestFiles
 import io.github.lorddetson.piplayer.identification.fingerprint.DecodingException.CopyRefused.Reason
 import java.io.File
 import java.io.FileDescriptor
+import java.io.FileOutputStream
 import java.io.IOException
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -82,8 +83,33 @@ class PipeCopyTest {
         return read
     }
 
-    private fun fingerprint(fd: FileDescriptor): FingerprintResult =
-        runBlocking { NativeFingerprinting.calculator().fingerprint(MediaCodecPcmSource(context, fd)) }
+    private fun fingerprint(fd: FileDescriptor): FingerprintResult = fingerprint(MediaCodecPcmSource(context, fd))
+
+    private fun fingerprint(source: PcmSource): FingerprintResult =
+        runBlocking { NativeFingerprinting.calculator().fingerprint(source) }
+
+    /**
+     * The read end of a new reliable pipe, as some document providers hand out (USB or MTP storage): its own thread
+     * writes [bytes] into the other end and then closes it with [error], as a provider whose device went away does.
+     */
+    private fun failingReliablePipe(bytes: ByteArray, error: String): ParcelFileDescriptor {
+        val (read, writeEnd) = ParcelFileDescriptor.createReliablePipe()
+        open += read
+        open += writeEnd
+        writers += Thread({
+            try {
+                // Not owning the descriptor, the stream leaves it to closeWithError.
+                FileOutputStream(writeEnd.fileDescriptor).apply {
+                    write(bytes)
+                    flush()
+                }
+                writeEnd.closeWithError(error)
+            } catch (_: IOException) {
+                // The reader gave up and closed its end.
+            }
+        }, "pipe-writer").apply { isDaemon = true; start() }
+        return read
+    }
 
     private fun fixture(name: String): File = TestFiles.copy("decoding/$name").also { made += it }
 
@@ -205,6 +231,35 @@ class PipeCopyTest {
             DescriptorCopy(testCopies).readable(read.fileDescriptor, cancelled = { asked.incrementAndGet() > 3 }) { }
         }.isInstanceOf(CancellationException::class.java)
         assertThat(leftovers(testCopies)).isEmpty()
+    }
+
+    /** Its end reads like a normal one; only the descriptor can tell that the writer failed (TI §3.2). */
+    @Test
+    fun aReliablePipeWhoseWriterFailsIsRefusedWithoutACopyLeft() {
+        val read = failingReliablePipe(ByteArray(50_000) { it.toByte() }, "The device was unplugged")
+        var called = false
+
+        assertThatThrownBy {
+            DescriptorCopy(testCopies).readable(read.fileDescriptor, checkError = read::checkError) { called = true }
+        }.isInstanceOfSatisfying(DecodingException.Failed::class.java) {
+            assertThat(it).hasMessageContaining("The device was unplugged")
+        }
+        assertThat(called).isFalse()
+        assertThat(leftovers(testCopies)).isEmpty()
+    }
+
+    /** Half a WAV file would decode, shorter: the decoding source refuses it, so no shortened fingerprint is made. */
+    @Test
+    fun aReliablePipeWhoseWriterFailsIsNotDecoded() {
+        val wav = tuneWav().readBytes()
+        val read = failingReliablePipe(wav.copyOf(wav.size / 2), "The device was unplugged")
+
+        assertThatThrownBy {
+            fingerprint(MediaCodecPcmSource(context, read.fileDescriptor, checkError = read::checkError))
+        }.isInstanceOfSatisfying(DecodingException.Failed::class.java) {
+            assertThat(it).hasMessageContaining("The device was unplugged")
+        }
+        assertThat(leftovers(copies)).isEmpty()
     }
 
     @Test

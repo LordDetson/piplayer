@@ -173,6 +173,69 @@ class DescriptorCopyTest {
         assertThat(leftovers()).isEmpty()
     }
 
+    /** A reader whose reads come from [source] and whose end check runs [check]. */
+    private fun ending(source: TimedReader, check: () -> Unit) = object : TimedReader {
+        override fun read(buffer: ByteArray, timeoutMillis: Long): Int = source.read(buffer, timeoutMillis)
+
+        override fun checkEnd() = check()
+    }
+
+    /** The writer of a reliable pipe that fails (TI §3.2) ends it as a writer that is done would: the end check tells. */
+    @Test
+    fun aWriterErrorReportedAtTheEndLeavesNoPartialCopy() {
+        var checks = 0
+        val failing = ending(reader(bytes(300, 1), bytes(300, 2))) {
+            checks++
+            throw IOException("The device was unplugged")
+        }
+
+        assertThatThrownBy { copies().copy(failing) }
+            .isInstanceOf(IOException::class.java)
+            .hasMessage("The device was unplugged")
+        assertThat(checks).isEqualTo(1)
+        assertThat(leftovers()).isEmpty()
+    }
+
+    @Test
+    fun theEndIsCheckedOnceAfterTheLastRead() {
+        val source = reader(bytes(3, 1), null, bytes(3, 2))
+        val readsAtCheck = mutableListOf<Int>()
+
+        val copy = copies().copy(ending(source) { readsAtCheck += source.timeouts.size })
+
+        // Three reads gave data or waited and the fourth gave the end; the check came after it, once.
+        assertThat(readsAtCheck).containsExactly(4)
+        assertThat(copy.readBytes()).isEqualTo(bytes(3, 1) + bytes(3, 2))
+    }
+
+    /**
+     * Another copy sweeps while this one is written (the other lane, TI §3.2) after the wall clock jumped ahead by more
+     * than an hour, so this copy's file looks an hour old: it is still not deleted. (Linux deletes a file that is open
+     * for writing, as Android does; Windows refuses, so there this test cannot fail.)
+     */
+    @Test
+    fun aCopyStillBeingWrittenIsNotSweptWhenTheWallClockJumps() {
+        val jumped = DescriptorCopy(
+            directory, maxBytes = 1_000, maxMillis = 10_000, reserveBytes = 100, clock = { now },
+            wallClock = { System.currentTimeMillis() + 2 * DescriptorCopy.STALE_MILLIS }, freeSpace = { 1_000_000 },
+        )
+        val source = reader(bytes(300, 1), bytes(300, 2))
+        var during: List<String>? = null
+        val slow = TimedReader { buffer, timeout ->
+            if (source.reads == 1 && during == null) {
+                jumped.copy(reader(bytes(3, 3)))
+                during = leftovers()
+            }
+            source.read(buffer, timeout)
+        }
+
+        val copy = copies().copy(slow)
+
+        assertThat(during).contains(copy.name)
+        assertThat(copy).exists()
+        assertThat(copy.readBytes()).isEqualTo(bytes(300, 1) + bytes(300, 2))
+    }
+
     @Test
     fun aCopyDeletesOnlyCopiesAnHourOld() {
         directory.mkdirs()

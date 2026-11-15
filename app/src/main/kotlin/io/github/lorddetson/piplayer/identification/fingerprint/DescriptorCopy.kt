@@ -19,6 +19,12 @@ fun interface TimedReader {
 
     /** Reads into [buffer]: the number of bytes read, 0 when none came within [timeoutMillis], -1 at the end. */
     fun read(buffer: ByteArray, timeoutMillis: Long): Int
+
+    /**
+     * Called once, after [read] gave the end: throws an [IOException] when that end was not the source's own, as when
+     * the writer of a reliable pipe closed it with an error.
+     */
+    fun checkEnd() {}
 }
 
 /**
@@ -26,10 +32,13 @@ fun interface TimedReader {
  * is, anything else (a pipe from a document provider) is first copied into [directory]. The copy is bounded: at most
  * [maxBytes], never leaving less than [reserveBytes] free on [directory]'s storage (looked at again every
  * [spaceCheckBytes], since the other lane or another app may write too), and [maxMillis] for the whole copy. It waits
- * for data only until that deadline, so a writer that stalls without closing its end cannot hang it. Past a bound,
- * after a failed read or when the caller cancels, the partial copy is deleted. A copy is deleted as soon as it is open
- * for reading, so even a process that dies while decoding leaves nothing; a copy that a process left behind in the
- * middle of copying is deleted by a later copy once it is [STALE_MILLIS] old.
+ * for data only until that deadline, so a writer that stalls without closing its end cannot hang it. At the end the
+ * reader is asked whether its writer failed ([TimedReader.checkEnd]), since a reliable pipe closed with an error ends
+ * like any other. Past a bound, after a failed read, a writer's error or when the caller cancels, the partial copy is
+ * deleted. A copy is deleted as soon as it is open for reading, so even a process that dies while decoding leaves
+ * nothing; a copy that a process left behind in the middle of copying is deleted by a later copy once it is
+ * [STALE_MILLIS] old. Copies that this process is still writing or opening are never swept, whatever the wall clock
+ * says: both lanes copy into the same directory, and the clock may jump ahead (a corrected time) while one copies.
  */
 class DescriptorCopy(
     val directory: File,
@@ -45,13 +54,20 @@ class DescriptorCopy(
     /**
      * Runs [block] with a descriptor of [fd]'s bytes that can be read at random positions: [fd] itself when it is a
      * regular file, otherwise a copy. The caller keeps owning [fd]; the copy's descriptor is closed when [block] ends.
-     * Throws [CopyRefused] past a bound, [DecodingException.Failed] when the copy cannot be read or written, and
+     * [checkError] is asked at the end of a copy whether [fd]'s writer closed it with an error
+     * (`ParcelFileDescriptor.checkError`), and throws if so. Throws [CopyRefused] past a bound,
+     * [DecodingException.Failed] when the copy cannot be read or written or its writer failed, and
      * [CancellationException] once [cancelled] says so.
      */
-    fun <T> readable(fd: FileDescriptor, cancelled: () -> Boolean = { false }, block: (FileDescriptor) -> T): T {
+    fun <T> readable(
+        fd: FileDescriptor,
+        cancelled: () -> Boolean = { false },
+        checkError: () -> Unit = {},
+        block: (FileDescriptor) -> T,
+    ): T {
         if (isRegularFile(fd)) return block(fd)
         val copy = try {
-            copy(PipeReader(fd), cancelled)
+            copyInUse(PipeReader(fd, checkError), cancelled)
         } catch (e: DecodingException) {
             throw e
         } catch (e: IOException) {
@@ -64,19 +80,26 @@ class DescriptorCopy(
         } finally {
             // Unlinked while open, it lives on until the descriptor is closed.
             copy.delete()
+            release(copy)
         }
         return descriptor.use { block(it.fileDescriptor) }
     }
 
     /** Copies everything [reader] gives into a new file of [directory], within the bounds; see [readable]. */
-    fun copy(reader: TimedReader, cancelled: () -> Boolean = { false }): File {
+    fun copy(reader: TimedReader, cancelled: () -> Boolean = { false }): File =
+        copyInUse(reader, cancelled).also(::release)
+
+    /** [copy], leaving the copy marked as in use, so that no sweep deletes it before the caller [release]s it. */
+    private fun copyInUse(reader: TimedReader, cancelled: () -> Boolean): File {
         sweep()
         val free = freeSpace(directory.existingAncestor()) - reserveBytes
         if (free <= 0) throw CopyRefused(CopyRefused.Reason.NO_SPACE)
         val limit = minOf(maxBytes, free)
         val pastLimit = if (free < maxBytes) CopyRefused.Reason.NO_SPACE else CopyRefused.Reason.TOO_LARGE
         directory.mkdirs()
-        val file = File.createTempFile(PREFIX, null, directory)
+        val file = synchronized(IN_USE) {
+            File.createTempFile(PREFIX, null, directory).also { IN_USE += it.absolutePath }
+        }
         try {
             val deadline = clock() + maxMillis
             FileOutputStream(file).use { out ->
@@ -88,7 +111,10 @@ class DescriptorCopy(
                     val left = deadline - clock()
                     if (left <= 0) throw CopyRefused(CopyRefused.Reason.TOO_SLOW)
                     val count = reader.read(buffer, minOf(left, POLL_MILLIS))
-                    if (count < 0) break
+                    if (count < 0) {
+                        reader.checkEnd()
+                        break
+                    }
                     total += count
                     if (total > limit) throw CopyRefused(pastLimit)
                     out.write(buffer, 0, count)
@@ -102,14 +128,26 @@ class DescriptorCopy(
             return file
         } catch (e: Throwable) {
             file.delete()
+            release(file)
             throw e
         }
     }
 
-    /** Deletes the copies that a process left behind when it died, once they are [STALE_MILLIS] old. */
+    private fun release(file: File) {
+        synchronized(IN_USE) { IN_USE -= file.absolutePath }
+    }
+
+    /**
+     * Deletes the copies that a process left behind when it died, once they are [STALE_MILLIS] old by the file's time;
+     * never one that this process is still writing or opening.
+     */
     private fun sweep() {
         val before = wallClock() - STALE_MILLIS
-        directory.listFiles()?.forEach { file -> if (file.lastModified() < before) file.delete() }
+        synchronized(IN_USE) {
+            directory.listFiles()?.forEach { file ->
+                if (file.absolutePath !in IN_USE && file.lastModified() < before) file.delete()
+            }
+        }
     }
 
     /** The free space of a directory not made yet is that of its nearest existing parent. */
@@ -120,7 +158,7 @@ class DescriptorCopy(
      * Reads a descriptor that may not be ready (a pipe or a socket), waiting for data with `poll` so that a read never
      * blocks past its timeout.
      */
-    private class PipeReader(private val fd: FileDescriptor) : TimedReader {
+    private class PipeReader(private val fd: FileDescriptor, private val checkError: () -> Unit) : TimedReader {
         private val poll = StructPollfd().apply {
             this.fd = this@PipeReader.fd
             events = OsConstants.POLLIN.toShort()
@@ -137,6 +175,8 @@ class DescriptorCopy(
         } catch (e: ErrnoException) {
             if (e.errno == OsConstants.EINTR || e.errno == OsConstants.EAGAIN) 0 else throw IOException(e.message, e)
         }
+
+        override fun checkEnd() = checkError()
     }
 
     companion object {
@@ -157,6 +197,9 @@ class DescriptorCopy(
 
         private const val BUFFER_SIZE = 64 * 1024
         private const val PREFIX = "copy"
+
+        /** The absolute paths of the copies this process is writing or opening, in any directory; guards itself. */
+        private val IN_USE = HashSet<String>()
 
         fun of(context: Context) = DescriptorCopy(File(context.cacheDir, DIRECTORY))
 

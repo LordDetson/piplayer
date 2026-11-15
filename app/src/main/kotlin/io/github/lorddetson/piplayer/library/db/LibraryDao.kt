@@ -5,6 +5,7 @@ import androidx.room3.Insert
 import androidx.room3.Query
 import androidx.room3.RawQuery
 import androidx.room3.RoomRawQuery
+import androidx.room3.Transaction
 import androidx.room3.Upsert
 import io.github.lorddetson.piplayer.library.sync.StoredFile
 import io.github.lorddetson.piplayer.library.tagpass.DurationSource
@@ -406,6 +407,16 @@ interface LibraryDao {
 
     @Upsert
     suspend fun saveFingerprint(fingerprint: FingerprintEntity)
+
+    /**
+     * Caches a newly [computed] fingerprint, keeping the AcoustID track ID that its content key already has (TI §3.2):
+     * the key names the same audio, and a computation (re-attachment's, or one after a decoder update) does not look
+     * the fingerprint up again.
+     */
+    @Transaction
+    suspend fun saveComputedFingerprint(computed: FingerprintEntity) {
+        saveFingerprint(computed.copy(acoustIdId = fingerprint(computed.contentKey)?.acoustIdId))
+    }
 
     @Query("SELECT content_key FROM fingerprint")
     suspend fun fingerprintKeys(): List<String>
