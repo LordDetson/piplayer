@@ -2046,7 +2046,9 @@ with "Play" first, then the entries of the place:
   and the row's own menu has them.
 - **Remove from playlist** removes the selected entries (only those entries: another copy of the same song stays) in one
   transaction that closes the gaps (§16.1), and says "Removed <N> songs from the playlist" with "Undo", which puts each
-  entry back at its position. An entry not in the library can be removed.
+  entry back at its position. An entry not in the library can be removed. Both close and open the gaps in one pass over
+  each playlist: every entry that stays moves once, not once per entry removed or put back, so that 1 000 entries of a
+  20 000-entry playlist go back within a second (decision).
 - **Remove from queue**: playback.md §9.6.
 - Unavailable entries of a playlist and files opened from another app in the queue are skipped by the actions that need a
   library song (play, add, playlist, favorites); decision: when the selection holds no library song, those entries are
@@ -2123,6 +2125,9 @@ Instrumented tests on the emulators:
 - Process death: a list holder built again from its saved state brings the selection back; more than 1 000 keys are not
   saved; an "all except" made on another list (other chips or another search, which name the list alike) is dropped.
 - The user database: several favorites in one transaction that raises the change counter once, unread and gone
-  identities skipped, favorites already set and songs given twice not counted as changed; playlist entries removed and put back in one transaction each; track references read in chunks
-  equal to the one-by-one read.
+  identities skipped, favorites already set and songs given twice not counted as changed; playlist entries removed and
+  put back in one transaction each, put back where one at a time would put them (JVM: the plan of shifts, each entry
+  that stays moved once); track references read in chunks equal to the one-by-one read.
 - Through the service: playback.md §9.6.
+- Timing (`@TimingTest`, median of 5, local emulator): 1 000 scattered entries put back into a 20 000-entry playlist
+  within 1 s.

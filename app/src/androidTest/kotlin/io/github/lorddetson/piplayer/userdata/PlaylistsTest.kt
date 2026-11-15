@@ -1,7 +1,10 @@
 package io.github.lorddetson.piplayer.userdata
 
+import android.os.SystemClock
+import android.util.Log
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.github.lorddetson.piplayer.TestFiles
+import io.github.lorddetson.piplayer.TimingTest
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -199,5 +202,26 @@ class PlaylistsTest {
         assertThat(names(id)).containsExactly("2.mp3", "3.mp3", "4.mp3")
         assertThat(positions(id)).containsExactly(0, 1, 2)
         assertThat(playlists.entries(id).last().identityId).isNull()
+    }
+
+    @Test
+    @TimingTest
+    fun thousandScatteredEntriesGoBackIntoATwentyThousandEntryPlaylistWithinASecond() = runBlocking<Unit> {
+        // An imported M3U8 of the whole library, and an undo of 1 000 entries removed from all over it (library.md §20.3).
+        val id = playlists.create("Library")
+        playlists.add(id, List(20_000) { entry(it % 9 + 1) })
+        val before = playlists.entries(id).map { it.id }
+        val chosen = before.filterIndexed { index, _ -> index % 20 == 7 }
+
+        val times = List(5) {
+            val removed = playlists.removeAll(chosen)
+            val start = SystemClock.elapsedRealtime()
+            playlists.restoreAll(removed)
+            (SystemClock.elapsedRealtime() - start).also { assertThat(playlists.entries(id).map { entry -> entry.id }).isEqualTo(before) }
+        }
+
+        assertThat(positions(id)).isEqualTo((0 until 20_000).toList())
+        Log.i("PlaylistsTest", "1 000 of 20 000 entries put back: $times ms")
+        assertThat(times.sorted()[2]).describedAs("median of $times ms").isLessThan(1_000)
     }
 }

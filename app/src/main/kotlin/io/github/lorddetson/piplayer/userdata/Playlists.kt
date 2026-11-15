@@ -135,17 +135,26 @@ class Playlists(private val database: UserDatabase, private val clock: () -> Lon
         removed
     }
 
-    /** Puts removed [entries] back at their positions in one transaction, each as [restore] does. */
+    /**
+     * Puts removed [entries] back at their positions in one transaction, where putting them back one at a time as [restore]
+     * does would put them, identities checked as there. Each playlist makes room in one pass ([restorePlan]): every entry
+     * that stays moves once, not once per entry put back before it (docs/library.md §20.3).
+     */
     suspend fun restoreAll(entries: List<PlaylistEntryEntity>) {
         database.withWriteTransaction {
-            // In ascending positions, so that each goes where it stood before the ones after it come back.
-            for (entry in entries.sortedWith(compareBy({ it.playlistId }, { it.position }))) {
-                if (dao.playlist(entry.playlistId) == null || dao.entry(entry.id) != null) continue
-                val position = entry.position.coerceIn(0, dao.count(entry.playlistId))
-                val identity = entry.identityId?.let { database.identities().current(it, entry.hintContentKey) }
-                dao.shift(entry.playlistId, position, Int.MAX_VALUE, 1)
-                dao.addEntries(listOf(entry.copy(position = position, identityId = identity)))
-                dao.touch(entry.playlistId, clock())
+            for ((playlistId, group) in entries.groupBy { it.playlistId }) {
+                if (dao.playlist(playlistId) == null) continue
+                val back = group.filter { dao.entry(it.id) == null }.sortedBy { it.position }
+                if (back.isEmpty()) continue
+                val plan = restorePlan(dao.count(playlistId), back.map { it.position })
+                for (shift in plan.shifts) dao.shift(playlistId, shift.from, shift.to, shift.by)
+                dao.addEntries(
+                    back.mapIndexed { index, entry ->
+                        val identity = entry.identityId?.let { database.identities().current(it, entry.hintContentKey) }
+                        entry.copy(position = plan.positions[index], identityId = identity)
+                    },
+                )
+                dao.touch(playlistId, clock())
             }
         }
     }
@@ -179,5 +188,31 @@ class Playlists(private val database: UserDatabase, private val clock: () -> Lon
     companion object {
         /** [name] as a playlist keeps it, or null when it is blank. */
         fun cleanName(name: String): String? = name.trim().ifEmpty { null }
+
+        /** Entries from position [from] up to, not including, [to] moved by [by]. */
+        data class Shift(val from: Int, val to: Int, val by: Int)
+
+        /** Where entries put back go ([positions], in the order given) and the [shifts] that make room, run in their order. */
+        class RestorePlan(val positions: IntArray, val shifts: List<Shift>)
+
+        /**
+         * How entries that stood at [positions] (ascending) go back into a gapless playlist of [count] entries, where
+         * putting them back one at a time would put them: the j-th (from 0) at its old position, or at the end when the
+         * playlist is shorter now. An entry that stays at position q moves by the number of entries put back whose new
+         * position, less the ones put back before them, is at most q; so the entries that stay fall into ranges, each moved
+         * by one shift, from the top range down so that no entry is moved twice. At most one shift per entry put back, and
+         * every entry that stays is touched once.
+         */
+        fun restorePlan(count: Int, positions: List<Int>): RestorePlan {
+            val final = IntArray(positions.size)
+            for (j in positions.indices) final[j] = positions[j].coerceIn(maxOf(0, if (j > 0) final[j - 1] + 1 else 0), count + j)
+            val shifts = ArrayList<Shift>()
+            for (j in positions.indices.reversed()) {
+                val from = final[j] - j
+                val to = if (j + 1 < positions.size) final[j + 1] - (j + 1) else Int.MAX_VALUE
+                if (from < to && from < count) shifts += Shift(from, to, j + 1)
+            }
+            return RestorePlan(final, shifts)
+        }
     }
 }
