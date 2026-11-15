@@ -238,9 +238,9 @@ class UserDatabaseTest {
         favorites.set(2, favorite = true)
         val before = dao.changeCounter()
 
-        // Identity 9 does not exist and has no key that leads anywhere: it is gone. Song 2 is a favorite already and does not
-        // count as changed; song 3 stands twice (a playlist may hold it twice) and changes once.
-        val written = favorites.setAll(listOf(1L to null, 2L to null, 3L to null, 9L to null, 3L to null), favorite = true)
+        // Song 109 has identity 9, which does not exist and has no key that leads anywhere: it is gone. Song 102 is a
+        // favorite already and does not count as changed; song 103 stands twice (a playlist may hold it twice) and changes once.
+        val written = favorites.setAll(listOf(song(101, 1), song(102, 2), song(103, 3), song(109, 9), song(103, 3)), favorite = true)
 
         assertThat(written).isEqualTo(Favorites.Written(changed = 2, gone = 1))
         assertThat(dao.changeCounter()).isEqualTo(before + 1)
@@ -248,15 +248,35 @@ class UserDatabaseTest {
         assertThat(favorites.favoriteIdentities(listOf(1L, 2L, 3L, 4L, 9L))).containsExactlyInAnyOrder(1L, 2L, 3L)
 
         // An identity deleted since the read goes to the identity that holds its key now (§8.1): 7 is 4, not a favorite.
-        assertThat(favorites.setAll(listOf(1L to null, 3L to null, 7L to ByteArray(32) { 4 }), favorite = false))
+        assertThat(favorites.setAll(listOf(song(101, 1), song(103, 3), song(104, 7, ByteArray(32) { 4 })), favorite = false))
             .isEqualTo(Favorites.Written(changed = 2, gone = 0))
         assertThat(favorites.favoriteIdentities(listOf(1L, 2L, 3L, 4L))).containsExactly(2L)
         assertThat(dao.changeCounter()).isEqualTo(before + 2)
 
         // Nothing changed raises nothing: a gone identity, and a favorite made one again.
-        assertThat(favorites.setAll(listOf(9L to null, 2L to null), favorite = true)).isEqualTo(Favorites.Written(changed = 0, gone = 1))
+        assertThat(favorites.setAll(listOf(song(109, 9), song(102, 2)), favorite = true)).isEqualTo(Favorites.Written(changed = 0, gone = 1))
         assertThat(dao.changeCounter()).isEqualTo(before + 2)
     }
+
+    @Test
+    fun copiesThatShareOneIdentityCountAsTheSongsSelected() = runBlocking<Unit> {
+        // Songs 105 and 106 are byte-identical copies, so they share identity 4 (docs/library.md §8.1); both were selected.
+        val favorites = Favorites(database)
+        for (id in 1L..4L) database.identities().add(identity(id))
+
+        assertThat(favorites.setAll(listOf(song(105, 4), song(106, 4)), favorite = true)).isEqualTo(Favorites.Written(changed = 2, gone = 0))
+        assertThat(favorites.favoriteIdentities(listOf(4L))).containsExactly(4L)
+
+        // Counted the same way when the identity they were read by went: both copies are still being read.
+        assertThat(favorites.setAll(listOf(song(105, 9), song(106, 9)), favorite = false)).isEqualTo(Favorites.Written(changed = 0, gone = 2))
+
+        // An identity deleted since the read that now leads to 4, as the other copy's identity does: both changed.
+        assertThat(favorites.setAll(listOf(song(105, 4), song(106, 8, ByteArray(32) { 4 })), favorite = false))
+            .isEqualTo(Favorites.Written(changed = 2, gone = 0))
+        assertThat(favorites.favoriteIdentities(listOf(4L))).isEmpty()
+    }
+
+    private fun song(fileId: Long, identityId: Long, contentKey: ByteArray? = null) = Favorites.Song(fileId, identityId, contentKey)
 
     @Test
     fun favoritesAreReadInChunksOfAnyLength() = runBlocking<Unit> {
@@ -264,7 +284,7 @@ class UserDatabaseTest {
         database.identities().addAll(
             (1L..1_200L).map { id -> identity(id).copy(contentKey = ByteArray(32).also { java.nio.ByteBuffer.wrap(it).putLong(id) }) },
         )
-        favorites.setAll((1L..1_200L step 2).map { it to null }, favorite = true)
+        favorites.setAll((1L..1_200L step 2).map { song(it, it) }, favorite = true)
 
         val read = favorites.favoriteIdentities((1L..1_200L).toList())
 

@@ -32,25 +32,30 @@ class Favorites(private val database: UserDatabase, private val clock: () -> Lon
         identityIds.distinct().chunked(CHUNK).flatMapTo(HashSet()) { dao.favoritesAmong(it) }
 
     /**
-     * Makes the songs of [songs] (each an identity with the content key it was read by) favorites, or not, in one
-     * transaction that checks each identity as [set] does and raises the change counter once when anything changed: how
-     * many songs changed (a favorite made one again does not, nor a song given twice) and how many were left out since
-     * their identity is gone (docs/library.md §20.3).
+     * Makes the [songs] favorites, or not, in one transaction that checks each identity as [set] does and raises the change
+     * counter once when anything changed. Both counts are of selected files (docs/library.md §20.3): how many changed (a
+     * favorite made one again does not; a file given twice counts once, while two copies sharing one identity count as the
+     * two files selected) and how many were left out since their identity is gone.
      */
-    suspend fun setAll(songs: List<Pair<Long, ByteArray?>>, favorite: Boolean): Written = database.withWriteTransaction {
+    suspend fun setAll(songs: List<Song>, favorite: Boolean): Written = database.withWriteTransaction {
         var gone = 0
-        val identities = LinkedHashSet<Long>()
-        for ((identityId, contentKey) in songs) {
-            val identity = database.identities().current(identityId, contentKey)
-            if (identity == null) gone++ else identities += identity
+        // Each file once, with the identity it has now.
+        val identityOfFile = LinkedHashMap<Long, Long>()
+        for (song in songs.distinctBy { it.fileId }) {
+            val identity = database.identities().current(song.identityId, song.contentKey)
+            if (identity == null) gone++ else identityOfFile[song.fileId] = identity
         }
+        val identities = identityOfFile.values.toSet()
         val already = identities.chunked(CHUNK).flatMapTo(HashSet()) { dao.favoritesAmong(it) }
-        val changing = identities.filter { (it in already) != favorite }
+        val changing = identities.filterTo(HashSet()) { (it in already) != favorite }
         val now = clock()
         for (identity in changing) if (favorite) dao.add(identity, now) else dao.remove(identity)
         if (changing.isNotEmpty()) database.user().countChange()
-        Written(changing.size, gone)
+        Written(identityOfFile.values.count { it in changing }, gone)
     }
+
+    /** One selected song for [setAll]: its file [fileId], its identity and the content key it was read by. */
+    class Song(val fileId: Long, val identityId: Long, val contentKey: ByteArray? = null)
 
     /** What [setAll] did: how many songs [changed] and how many were left out since their identity is [gone]. */
     data class Written(val changed: Int, val gone: Int)

@@ -82,7 +82,9 @@ class FavoriteChoices(context: Context) {
     suspend fun setSongs(fileIds: List<Long>, favorite: Boolean): BatchResult? = safely(null) {
         val refs = refsOf(fileIds)
         // Each song once: a playlist or the queue may hold one twice.
-        val songs = fileIds.distinct().mapNotNull { id -> refs[id]?.let { ref -> ref.identityId?.let { it to ref.contentKey?.let(Hex::bytes) } } }
+        val songs = fileIds.distinct().mapNotNull { id ->
+            refs[id]?.let { ref -> ref.identityId?.let { Favorites.Song(id, it, ref.contentKey?.let(Hex::bytes)) } }
+        }
         val written = withContext(Dispatchers.IO) { favorites.setAll(songs, favorite) }
         favoriteBatchResult(fileIds, { refs[it]?.identityId }, written)
     }

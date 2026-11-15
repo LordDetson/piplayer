@@ -2044,7 +2044,8 @@ with "Play" first, then the entries of the place:
   skipped, and the message says how many changed and how many are still being read. Decision: a song that already was
   what the entry makes it (a favorite added again) did not change and is not counted; a song selected twice (a playlist
   or the queue may hold it twice) counts once; a song whose identity went between the read and the write is counted as
-  still being read, as the song menu says of one (§15.2).
+  still being read, as the song menu says of one (§15.2). Both counts are of the selected files, not of identities: two
+  selected byte-identical copies share one identity (§8.1), and when it changes the message counts two songs.
 - **Details** (§18) opens the details of the one selected song (on the queue screen also of a file opened from another
   app, §18.5). Decision: it is not offered for more than one song, and "Go to album", "Go to artist", "Go to folder",
   "Choose cover" and "Remove own cover" are not in the selection menu at all: each names one song's place or picture,
