@@ -6,7 +6,7 @@ import androidx.room3.withWriteTransaction
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.github.lorddetson.piplayer.TestFiles
 import io.github.lorddetson.piplayer.TimingTest
-import io.github.lorddetson.piplayer.library.songs.SongList
+import io.github.lorddetson.piplayer.library.db.AudioFileEntity
 import io.github.lorddetson.piplayer.library.sync.TrackDisplayWriter
 import io.github.lorddetson.piplayer.library.tagpass.DurationSource
 import io.github.lorddetson.piplayer.library.values.DecisionResolver
@@ -15,6 +15,10 @@ import io.github.lorddetson.piplayer.userdata.DecisionFixtures
 import io.github.lorddetson.piplayer.userdata.UserData
 import kotlin.time.Duration
 import kotlin.time.measureTime
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.Assume.assumeTrue
@@ -25,18 +29,21 @@ import org.junit.rules.RuleChain
 import org.junit.runner.RunWith
 
 /**
- * The cost of the decided values (TI §7.1, §10.3; §11.2 M3 "Timing") on the generated library of [GeneratedLibraryTest]:
- * a fifth of its 20 000 files identified. Skipped on devices without the library.
+ * The cost of the decided values (TI §7.1, §10.3; §11.2 M3 "Timing") on the generated library of [GeneratedLibraryTest].
+ * Skipped on devices without the library.
  *
- * The budgets come from the quiet pass on the local API 36 emulator (Pixel_8, host AMD Ryzen 7 5800HS, the host at 31 to
- * 35 % CPU) before M3 step 12, on the same library without decisions: first sync 2.31, 1.99 and 2.07 s; full refresh (a
- * new display version) 2.23, 2.52 and 2.31 s; refresh of every file through the writer 2.23, 1.93 and 2.10 s. With the
- * decisions each may take half as long again as the slowest of its runs. The start-up mirror of all 4 000 decisions,
- * which has no baseline, may take as long as the slowest full refresh, and a start-up mirror that finds every value
- * mirrored already, as after a session that only played and liked songs, half of that.
+ * The budgets are relative to runs of the same test, so that the host's load cancels out: each write path that joins
+ * the decided values (a sync that stores every file again under a new index version, a full refresh of every display
+ * row, a refresh through the writer) runs twice without and twice with the decided values mirrored, alternately, and
+ * the faster of each pair counts. With a decision on a fifth of the 20 000 files, the decided values may add at most
+ * [JOIN_MS_PER_FILE] for each decided file. The start-up mirror of all 4 000 decisions may take as long as the faster
+ * full refresh without them, and half of that when it finds every value mirrored. With a decision on every file, a whole
+ * run that finds every value mirrored may take as long as a full refresh of the same run, and it holds off the sync for
+ * at most half of that.
  *
- * Measured with the decisions in M3 (host at 20 to 22 %): first sync 1.46 to 1.50 s, start-up mirror 1.48 to 1.51 s,
- * start-up mirror with nothing to change 0.75 to 0.78 s, full refresh 1.68 to 1.75 s, writer refresh 1.96 to 2.53 s.
+ * A first sync on an empty library database joins no decided value (no file has a content key yet), so it is not
+ * measured here. Measured before M3 step 12 on the API 36 emulator (Pixel_8, host AMD Ryzen 7 5800HS): first sync at most
+ * 2.31 s, full refresh at most 2.52 s.
  */
 @RunWith(AndroidJUnit4::class)
 class GeneratedLibraryDecisionsTest {
@@ -61,62 +68,127 @@ class GeneratedLibraryDecisionsTest {
 
     private fun key(n: Int) = "%064x".format(n.toLong())
 
-    @Test
-    @TimingTest
-    fun theFirstSyncAndAFullRefreshWithDecisionsOnAFifthOfTheFiles() = runBlocking<Unit> {
-        // The rule's own first sync, then a new empty library database for the measured one, with the decisions in the
-        // user database as after an update that rebuilds the library.
-        Library.sync(context).awaitIdle()
-        Library.reopen(context, empty = true)
-        SongList.forget()
-        DecisionFixtures.identifyInBulk(UserData.database(context), List(DECIDED) { key(it + 1) })
+    private val database get() = Library.database(context)
+    private val dao get() = database.library()
+    private val mirror get() = Library.decisionMirror(context)
 
-        val firstSync = measureTime {
-            LibraryRule.startAsANewProcess()
-            Library.sync(context).awaitIdle()
-        }
-        val database = Library.database(context)
-        val dao = database.library()
+    /** The generated files with the first [decided] of every [step]th one keyed and identified, as the tag pass would key them. */
+    private suspend fun decide(decided: Int, step: Int): List<AudioFileEntity> {
+        Library.sync(context).awaitIdle()
+        DecisionFixtures.identifyInBulk(UserData.database(context), List(decided) { key(it + 1) })
         val files = dao.files().filter { it.relativePath.startsWith(ROOT) }.sortedBy { it.id }
-        // Every fifth file gets a content key, as the tag pass would give it: the keys of the decisions.
-        val keyed = files.filterIndexed { i, _ -> i % 5 == 0 }.take(DECIDED)
+        val keyed = files.filterIndexed { i, _ -> i % step == 0 }.take(decided)
         database.withWriteTransaction {
             for ((i, file) in keyed.withIndex()) dao.setContent(file.id, key(i + 1), 200_000, DurationSource.HEADER)
         }
-        Library.identities(context).awaitIdle()
-        Library.decisionMirror(context).awaitIdle()
-        // As the start of the next process finds them: the decided values not mirrored yet.
-        database.withWriteTransaction { database.decided().clear() }
+        settle()
+        return keyed
+    }
 
-        val startUpMirror = measureTime { Library.decisionMirror(context).mirrorAll() }
+    /** Waits until the background work that a sync asks for has ended, so that it measures nothing of it. */
+    private suspend fun settle() {
+        Library.sync(context).awaitIdle()
+        Library.identities(context).awaitIdle()
+        mirror.awaitIdle()
+    }
+
+    /** Without the decided values mirrored, as before M3, or with them. */
+    private suspend fun decided(mirrored: Boolean) {
+        if (!mirrored) database.withWriteTransaction { database.decided().clear() }
+        if (mirrored) mirror.mirrorAll()
+        settle()
+    }
+
+    /** A sync that stores every file again: the index version it has stored is gone. */
+    private suspend fun restore(): Duration {
+        for (volume in dao.volumes()) dao.saveVolume(volume.copy(version = "before"))
+        return measureTime { Library.sync(context).sync() }.also { settle() }
+    }
+
+    /** A new display version: every display row is derived again, as after an update. */
+    private suspend fun fullRefresh(): Duration {
+        dao.setDisplayVersion(0)
+        return measureTime { Library.sync(context).sync() }.also { settle() }
+    }
+
+    private suspend fun writerRefresh(): Duration {
+        val ids = dao.files().map { it.id }
+        return measureTime { TrackDisplayWriter(database).refresh(ids) }.also { settle() }
+    }
+
+    /** One pass of every write path. */
+    private suspend fun paths(): List<Duration> = listOf(restore(), fullRefresh(), writerRefresh())
+
+    @Test
+    @TimingTest
+    fun theWritePathsWithDecisionsOnAFifthOfTheFiles() = runBlocking<Unit> {
+        val keyed = decide(DECIDED, step = 5)
+        decided(mirrored = false)
+
+        val without1 = paths()
+        assertThat(database.decided().all()).describedAs("decided values while measuring without them").isEmpty()
+        // As the start of the next process finds them: the decided values not mirrored yet.
+        val startUpMirror = measureTime { mirror.mirrorAll() }
         assertThat(dao.displays().single { it.fileId == keyed[7].id }.title).isEqualTo("Decided 7")
         // The common start: a favorite or a play raised the counter, and every decided value is mirrored already.
-        val quietMirror = measureTime { assertThat(Library.decisionMirror(context).mirrorAll()).isFalse() }
-
-        // A new display version: every display row is derived again, as after an update.
-        dao.setDisplayVersion(0)
-        val fullRefresh = measureTime { Library.sync(context).sync() }
-        val writerRefresh = measureTime { TrackDisplayWriter(database).refresh(dao.files().map { it.id }) }
+        val quietMirror = measureTime { assertThat(mirror.mirrorAll()).isFalse() }
+        settle()
+        val with1 = paths()
+        decided(mirrored = false)
+        val without2 = paths()
+        assertThat(database.decided().all()).describedAs("decided values while measuring without them").isEmpty()
+        decided(mirrored = true)
+        val with2 = paths()
 
         val displays = dao.displays().associateBy { it.fileId }
         assertThat(keyed).allSatisfy { assertThat(displays.getValue(it.id).badgeState).isEqualTo(DecisionResolver.BADGE_IDENTIFIED) }
         assertThat(displays.getValue(keyed[1234].id).title).isEqualTo("Decided 1234")
-        log(firstSync, startUpMirror, quietMirror, fullRefresh, writerRefresh, keyed.size)
-
-        assertThat(firstSync.inWholeMilliseconds).describedAs("first sync").isLessThanOrEqualTo(FIRST_SYNC_MS)
-        assertThat(fullRefresh.inWholeMilliseconds).describedAs("full refresh").isLessThanOrEqualTo(FULL_REFRESH_MS)
-        assertThat(writerRefresh.inWholeMilliseconds).describedAs("writer refresh").isLessThanOrEqualTo(WRITER_REFRESH_MS)
-        assertThat(startUpMirror.inWholeMilliseconds).describedAs("start-up mirror").isLessThanOrEqualTo(START_UP_MIRROR_MS)
-        assertThat(quietMirror.inWholeMilliseconds).describedAs("start-up mirror with nothing to change")
-            .isLessThanOrEqualTo(QUIET_MIRROR_MS)
-    }
-
-    private fun log(firstSync: Duration, mirror: Duration, quiet: Duration, fullRefresh: Duration, writerRefresh: Duration, keyed: Int) {
+        val without = without1.zip(without2) { a, b -> minOf(a, b) }
+        val with = with1.zip(with2) { a, b -> minOf(a, b) }
         Log.i(
             TAG,
-            "Decisions on $keyed files: first sync $firstSync, start-up mirror $mirror, start-up mirror with nothing to " +
-                "change $quiet, full refresh $fullRefresh, writer refresh $writerRefresh",
+            "Decisions on ${keyed.size} files, without and with them: store again ${without1[0]} ${without2[0]} / ${with1[0]} " +
+                "${with2[0]}, full refresh ${without1[1]} ${without2[1]} / ${with1[1]} ${with2[1]}, writer refresh ${without1[2]} " +
+                "${without2[2]} / ${with1[2]} ${with2[2]}; start-up mirror $startUpMirror, with nothing to change $quietMirror",
         )
+
+        val join = (JOIN_MS_PER_FILE * keyed.size).toLong()
+        for ((i, path) in listOf("store again", "full refresh", "writer refresh").withIndex()) {
+            assertThat(with[i].inWholeMilliseconds - without[i].inWholeMilliseconds).describedAs("$path: cost of the decided values")
+                .isLessThanOrEqualTo(join)
+        }
+        assertThat(startUpMirror).describedAs("start-up mirror").isLessThanOrEqualTo(without[1])
+        assertThat(quietMirror).describedAs("start-up mirror with nothing to change").isLessThanOrEqualTo(without[1] / 2)
+    }
+
+    @Test
+    @TimingTest
+    fun aWholeRunThatFindsEveryValueMirroredOnADecisionForEveryFile() = runBlocking<Unit> {
+        decide(FILES, step = 1)
+        decided(mirrored = true)
+        val fullRefresh = minOf(fullRefresh(), fullRefresh())
+
+        val sync = Library.sync(context)
+        var quiet = Duration.ZERO
+        var longestHold = Duration.ZERO
+        coroutineScope {
+            val run = async(Dispatchers.IO) { measureTime { assertThat(mirror.mirrorAll()).isFalse() } }
+            // A sync asked for meanwhile waits for the part of the run that holds the library database.
+            while (run.isActive) {
+                val waited = measureTime { sync.exclusive { } }
+                if (waited > longestHold) longestHold = waited
+                delay(5)
+            }
+            quiet = run.await()
+        }
+        Log.i(
+            TAG,
+            "Decisions on $FILES files: full refresh $fullRefresh, whole run with nothing to change $quiet, holding off the sync " +
+                "$longestHold",
+        )
+
+        assertThat(quiet).describedAs("whole run with nothing to change").isLessThanOrEqualTo(fullRefresh)
+        assertThat(longestHold).describedAs("the sync held off by it").isLessThanOrEqualTo(fullRefresh / 2)
     }
 
     private companion object {
@@ -125,19 +197,7 @@ class GeneratedLibraryDecisionsTest {
         const val FILES = 20_000
         const val DECIDED = 4_000
 
-        /** Half as long again as the slowest first sync of the baseline, 2.31 s. */
-        const val FIRST_SYNC_MS = 3_500L
-
-        /** Half as long again as the slowest full refresh of the baseline, 2.52 s. */
-        const val FULL_REFRESH_MS = 3_800L
-
-        /** Half as long again as the slowest refresh through the writer of the baseline, 2.23 s. */
-        const val WRITER_REFRESH_MS = 3_350L
-
-        /** As long as the slowest full refresh of the baseline. */
-        const val START_UP_MIRROR_MS = 2_500L
-
-        /** Half of [START_UP_MIRROR_MS]. */
-        const val QUIET_MIRROR_MS = 1_250L
+        /** What the decided values may add to a write path for each decided file: 600 ms at 4 000 (TI §11.2). */
+        const val JOIN_MS_PER_FILE = 0.15
     }
 }

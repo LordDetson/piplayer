@@ -19,6 +19,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -48,21 +49,36 @@ class DecisionMirror(
     /** Raised after every run that changed decided values, so that lists, Now Playing and the session read again. */
     val version: StateFlow<Long> = mutableVersion.asStateFlow()
 
+    /** The whole runs this mirror has made, also those that wrote nothing; a start makes one (TI §10.3). */
+    @Volatile
+    var wholeRuns = 0
+        private set
+
     private val running = Mutex()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val requests = Channel<Unit>(Channel.CONFLATED)
     private val idle = MutableStateFlow(true)
     private val lock = Any()
     private var pendingAll = false
+    private var pendingUnlessRan = false
     private var pendingIfChanged = false
     private val pendingFiles = LinkedHashSet<Long>()
+
+    /** Whether the background loop is making a run, and how many runs after a commit are under way. */
+    private var working = false
+    private var committing = 0
+
+    /** What the background loop takes at once. */
+    private class Asked(val all: Boolean, val unlessRan: Boolean, val ifChanged: Boolean, val files: List<Long>)
 
     init {
         scope.launch {
             for (request in requests) {
-                val (all, ifChanged, files) = synchronized(lock) {
-                    Triple(pendingAll, pendingIfChanged, pendingFiles.toList()).also {
+                val asked = synchronized(lock) {
+                    working = true
+                    Asked(pendingAll, pendingUnlessRan, pendingIfChanged, pendingFiles.toList()).also {
                         pendingAll = false
+                        pendingUnlessRan = false
                         pendingIfChanged = false
                         pendingFiles.clear()
                     }
@@ -70,10 +86,11 @@ class DecisionMirror(
                 try {
                     // A whole run covers the files too.
                     when {
-                        all -> mirrorAll()
+                        asked.all -> mirrorAll()
                         else -> {
-                            if (ifChanged) mirrorIfChanged()
-                            if (files.isNotEmpty()) mirrorFiles(files)
+                            if (asked.unlessRan) mirrorUnlessRan()
+                            if (asked.ifChanged) mirrorIfChanged()
+                            if (asked.files.isNotEmpty()) mirrorFiles(asked.files)
                         }
                     }
                 } catch (e: CancellationException) {
@@ -81,13 +98,30 @@ class DecisionMirror(
                 } catch (e: Exception) {
                     Log.w(TAG, "The mirror of decisions failed", e)
                 }
-                synchronized(lock) { if (!pendingAll && !pendingIfChanged && pendingFiles.isEmpty()) idle.value = true }
+                synchronized(lock) {
+                    working = false
+                    settle()
+                }
             }
+        }
+    }
+
+    /** Idle once nothing runs and nothing is asked for; called under [lock]. */
+    private fun settle() {
+        if (!working && committing == 0 && !pendingAll && !pendingUnlessRan && !pendingIfChanged && pendingFiles.isEmpty()) {
+            idle.value = true
         }
     }
 
     /** A whole run: every decision, compared with what is mirrored; stores the change counter it read. Whether values changed. */
     suspend fun mirrorAll(): Boolean = running.withLock { allRun() }
+
+    /** A whole run unless this mirror has made one (TI §10.3, after the first attach pass of a process); whether it ran. */
+    private suspend fun mirrorUnlessRan(): Boolean = running.withLock {
+        if (!ready() || wholeRuns > 0) return@withLock false
+        allRun()
+        true
+    }
 
     /** A whole run when the user database's change counter differs from the mirrored one (TI §10.3, at start-up); whether it ran. */
     suspend fun mirrorIfChanged(): Boolean = running.withLock {
@@ -104,9 +138,10 @@ class DecisionMirror(
      */
     suspend fun mirrorIdentities(identityIds: Collection<Long>, counter: Long): Boolean = running.withLock {
         if (!ready()) return@withLock false
+        // The user database first, under the lock; the sync waits only for the library database's part.
+        val keys = decisions.keysOf(identityIds)
+        val decided = decisions.decidedOf(identityIds)
         val changed = sync.exclusive {
-            val keys = decisions.keysOf(identityIds)
-            val decided = decisions.decidedOf(identityIds)
             val identityOfKey = keys.entries.associate { (identity, key) -> key to identity }
             val files = keys.values.toList().chunked(DecidedMirrorDao.CHUNK).flatMap { library.decided().filesWithKeys(it) }
             val desired = files.associate { file ->
@@ -141,10 +176,42 @@ class DecisionMirror(
         changed.also { if (it) mutableVersion.value++ }
     }
 
+    /**
+     * Mirrors [committed] in this mirror's own scope (TI §10.3): the caller waits for the run, but its cancellation does
+     * not stop it. When the run fails, the decision stays committed and a whole run is asked for, so the library database
+     * catches up within the session. Whether values changed.
+     */
+    suspend fun mirrorCommitted(committed: Decisions.Committed): Boolean {
+        val run = synchronized(lock) {
+            committing++
+            idle.value = false
+            scope.async {
+                try {
+                    mirrorIdentities(listOf(committed.identityId), committed.counter)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    Log.w(TAG, "The mirror of a decision failed; a whole run follows", e)
+                    request()
+                    false
+                }
+            }
+        }
+        run.invokeOnCompletion {
+            synchronized(lock) {
+                committing--
+                settle()
+            }
+        }
+        return run.await()
+    }
+
     private suspend fun allRun(): Boolean {
         if (!ready()) return false
+        wholeRuns++
+        // Every decision is read before the sync is held off, which waits only for the comparison and the write (TI §10.3).
+        val snapshot = decisions.snapshot()
         val changed = sync.exclusive {
-            val snapshot = decisions.snapshot()
             val desired = HashMap<Long, List<DecidedMirrorEntity>>()
             if (snapshot.byKey.isNotEmpty()) {
                 for (file in library.decided().keyedFiles()) {
@@ -197,6 +264,12 @@ class DecisionMirror(
 
     /** Asks for a whole run in the background; requests during a run collapse into one more run. */
     fun request() = ask { pendingAll = true }
+
+    /**
+     * Asks for a whole run in the background unless this mirror has made one (TI §10.3): the first attach pass of a
+     * process, which wrote no identities, needs none after the start-up run.
+     */
+    fun requestUnlessRan() = ask { pendingUnlessRan = true }
 
     /** Asks for a whole run in the background when the counters differ (TI §10.3). */
     fun requestIfChanged() = ask { pendingIfChanged = true }

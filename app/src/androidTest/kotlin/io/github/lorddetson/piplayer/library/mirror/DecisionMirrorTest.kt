@@ -32,8 +32,15 @@ import io.github.lorddetson.piplayer.userdata.DecisionFixtures.details
 import io.github.lorddetson.piplayer.userdata.DecisionFixtures.request
 import io.github.lorddetson.piplayer.userdata.Decisions
 import io.github.lorddetson.piplayer.userdata.UserDatabase
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.time.Duration.Companion.milliseconds
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.After
 import org.junit.Test
@@ -294,6 +301,92 @@ class DecisionMirrorTest {
             assertThat(next.version.value).isEqualTo(version)
         } finally {
             next.close()
+        }
+    }
+
+    @Test
+    fun aCallerCancelledWhileTheRunAfterItsDecisionWaitsStillGetsItsDecisionMirrored() = runBlocking<Unit> {
+        library(listOf(row(1)))
+        val identity = identityOf(1)
+        // A sync holds the library database, as a first sync or the start-up run does.
+        val holding = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val holder = launch(Dispatchers.IO) { sync.exclusive { holding.complete(Unit); release.await() } }
+        holding.await()
+
+        // The review screen applies from its own scope, and the user leaves it once the decision is stored.
+        val caller = launch(Dispatchers.IO) { decisions.apply(request(key(1))) }
+        withTimeout(10_000) { while (repository.decidedOf(listOf(identity)).isEmpty()) delay(10) }
+        caller.cancelAndJoin()
+        release.complete(Unit)
+        holder.join()
+        mirror.awaitIdle()
+
+        assertThat(display(1).title).isEqualTo("Song")
+        assertThat(display(1).badgeState).isEqualTo(DecisionResolver.BADGE_IDENTIFIED)
+        assertThat(library.library().mirroredChangeCounter()).isEqualTo(user.user().changeCounter())
+    }
+
+    @Test
+    fun aRunThatFailsAfterTheCommitReturnsTheDecisionAndAsksForAWholeRun() = runBlocking<Unit> {
+        library(listOf(row(1)))
+        // The first look of the mirror fails, as a full disk or a closed database would make its transaction fail.
+        val failures = AtomicInteger(1)
+        val flaky = DecisionMirror(library, user, sync, ready = {
+            if (failures.getAndDecrement() > 0) throw IllegalStateException("The library database cannot be written") else true
+        })
+        try {
+            val committed = LibraryDecisions(repository) { flaky }.apply(request(key(1)))
+
+            assertThat(committed).isNotNull()
+            assertThat(repository.decidedOf(listOf(identityOf(1)))).isNotEmpty()
+            // The session repairs itself: the whole run it asked for brings the library level.
+            flaky.awaitIdle()
+            assertThat(display(1).title).isEqualTo("Song")
+            assertThat(library.library().mirroredChangeCounter()).isEqualTo(user.user().changeCounter())
+        } finally {
+            flaky.close()
+        }
+    }
+
+    @Test
+    fun aStartMakesOneWholeRunWhetherTheCountersDifferOrAgree() = runBlocking<Unit> {
+        library(listOf(row(1)))
+        mirror.mirrorAll()
+        // The counters differ: a decision committed without its run, as when the process died in between.
+        repository.apply(request(key(1)))
+        val apart = DecisionMirror(library, user, sync)
+        try {
+            // The start-up run, then the first attach pass of the process, which wrote no identities.
+            apart.requestIfChanged()
+            apart.awaitIdle()
+            apart.requestUnlessRan()
+            apart.awaitIdle()
+
+            assertThat(apart.wholeRuns).isEqualTo(1)
+            assertThat(display(1).title).isEqualTo("Song")
+        } finally {
+            apart.close()
+        }
+
+        // The counters agree: the run after the first attach pass is the start's one whole run.
+        val level = DecisionMirror(library, user, sync)
+        try {
+            level.requestIfChanged()
+            level.awaitIdle()
+            assertThat(level.wholeRuns).isEqualTo(0)
+            level.requestUnlessRan()
+            level.awaitIdle()
+            assertThat(level.wholeRuns).isEqualTo(1)
+            level.requestUnlessRan()
+            level.awaitIdle()
+            assertThat(level.wholeRuns).isEqualTo(1)
+            // A pass that wrote identities asks for a whole run whatever ran before.
+            level.request()
+            level.awaitIdle()
+            assertThat(level.wholeRuns).isEqualTo(2)
+        } finally {
+            level.close()
         }
     }
 

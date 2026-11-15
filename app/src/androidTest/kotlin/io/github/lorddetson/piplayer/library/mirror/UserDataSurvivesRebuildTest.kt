@@ -162,5 +162,10 @@ class UserDataSurvivesRebuildTest {
         }
 
         assertThat(display(2).title).isEqualTo("Decided")
+        // One whole run for the start: the start-up run found the counters apart, so the first attach pass of the
+        // process, which wrote no identities, asks for none.
+        Library.identities(context).awaitIdle()
+        Library.decisionMirror(context).awaitIdle()
+        assertThat(Library.decisionMirror(context).wholeRuns).isEqualTo(1)
     }
 }

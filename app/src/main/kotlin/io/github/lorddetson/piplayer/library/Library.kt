@@ -416,8 +416,9 @@ object Library {
         )
         // Before the first sync no file is known, and nothing could be matched.
         val decisions = DecisionMirror(database, user, sync, ready = { sync.status.value.known })
-        // The identity writes the decision mirror last followed; none yet, so the first pass asks for a whole run.
-        val identitiesSeen = java.util.concurrent.atomic.AtomicLong(-1)
+        // The identity writes the decision mirror last followed, and whether the attach pass has run in this process.
+        val identitiesSeen = java.util.concurrent.atomic.AtomicLong(IdentityAttacher.changes.value)
+        val firstPass = java.util.concurrent.atomic.AtomicBoolean(true)
         val fingerprints = LibraryFingerprints(context, database, uriOf = { file ->
             val id = runBlocking { database.library().mediaStoreIdOf(file.fileId) } ?: -1L
             ContentUris.withAppendedId(MediaStore.Audio.Media.getContentUri(file.place.volume), id)
@@ -435,10 +436,14 @@ object Library {
             // a takeover moves a key to another identity (TI §10.3).
             afterPass = {
                 mirror.request()
-                // A whole run costs about a second with thousands of decisions: after the first pass, and after passes
-                // that wrote identities.
+                // A whole run costs about a second with thousands of decisions: after passes that wrote identities, and
+                // after the first pass of the process unless the start-up run has run, so a start makes one (TI §10.3).
                 val written = IdentityAttacher.changes.value
-                if (identitiesSeen.getAndSet(written) != written) decisions.request()
+                val first = firstPass.getAndSet(false)
+                when {
+                    identitiesSeen.getAndSet(written) != written -> decisions.request()
+                    first -> decisions.requestUnlessRan()
+                }
             },
             // Playlist hints (docs/library.md §16.2); the pass reads the library database itself while no sync writes.
             playlists = PlaylistLibrary(
