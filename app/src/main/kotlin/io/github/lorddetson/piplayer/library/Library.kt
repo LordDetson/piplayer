@@ -21,6 +21,8 @@ import io.github.lorddetson.piplayer.library.identity.FingerprintStep
 import io.github.lorddetson.piplayer.library.identity.IdentityAttacher
 import io.github.lorddetson.piplayer.library.identity.LibraryFingerprints
 import io.github.lorddetson.piplayer.library.identity.LibraryTrackRefs
+import io.github.lorddetson.piplayer.library.mirror.DecisionMirror
+import io.github.lorddetson.piplayer.library.mirror.LibraryDecisions
 import io.github.lorddetson.piplayer.library.mirror.UserMirror
 import io.github.lorddetson.piplayer.library.playlists.PlaylistLibrary
 import io.github.lorddetson.piplayer.library.rules.FolderRule
@@ -73,6 +75,7 @@ object Library {
         val identities: IdentityAttacher,
         val trackRefs: LibraryTrackRefs,
         val mirror: UserMirror,
+        val decisions: DecisionMirror,
     ) {
         @Volatile
         var pass: TagPassRunner? = null
@@ -114,6 +117,28 @@ object Library {
 
     /** The mirror of favorites and plays into the library database (docs/library.md §15.4). */
     fun mirror(context: Context): UserMirror = opened(context).mirror
+
+    /** The mirror of the decided values into the library database (TI §7.1, §10.3). */
+    fun decisionMirror(context: Context): DecisionMirror = opened(context).decisions
+
+    /**
+     * The decisions of identification as the app makes them: each is committed to the user database, then mirrored into
+     * the library database (TI §7.1, §10.3).
+     */
+    fun decisions(context: Context): LibraryDecisions {
+        val app = context.applicationContext
+        return LibraryDecisions(UserData.decisions(app)) { opened(app).decisions }
+    }
+
+    /**
+     * Raised after every run of the decision mirror that changed decided values; it follows the library across [reopen]
+     * and a rebuild. Lists, Now Playing and the media session read again on it (TI §7.1).
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    fun decisionVersion(context: Context): Flow<Long> {
+        opened(context)
+        return opened.filterNotNull().flatMapLatest { it.decisions.version }
+    }
 
     /** Raised after every run of the mirror; it follows the library across [reopen] and a rebuild. */
     @OptIn(ExperimentalCoroutinesApi::class)
@@ -174,6 +199,13 @@ object Library {
         startTagPass(app)
         identities(app).request()
         mirror(app).request()
+        // Decisions committed after the last mirror, as when the process died between the two commits (TI §10.3), once
+        // the library knows its files: a sync that changes none asks for no attach pass, whose run would follow.
+        val decisions = decisionMirror(app)
+        scope.launch {
+            sync.status.first { it.known }
+            decisions.requestIfChanged()
+        }
         synchronized(lock) {
             if (observer != null) return
             // Every change of the index's audio rows, on every volume; a burst brings one sync a second later.
@@ -235,8 +267,9 @@ object Library {
             gate = passGate::awaitOpen,
             onBatch = { rows ->
                 SongList.applyInPlace(rows)
-                // Favorites and play counts come back with the keys (docs/library.md §15.4).
+                // Favorites and play counts come back with the keys (docs/library.md §15.4), and so do decided values (TI §7.1).
                 library.mirror.requestFiles(rows.map { it.fileId })
+                library.decisions.requestFiles(rows.map { it.fileId })
             },
         )
         val walks = DurationWalks(library.database, library.sync, reader, passGate, onBatch = SongList::applyLengths)
@@ -296,6 +329,7 @@ object Library {
             startTagPass(app)
             identities(app).request()
             mirror(app).request()
+            decisionMirror(app).requestIfChanged()
             sync(app).request()
         }
     }
@@ -309,6 +343,7 @@ object Library {
         library.sync.closeAndJoin()
         library.identities.closeAndJoin()
         library.mirror.closeAndJoin()
+        library.decisions.closeAndJoin()
     }
 
     /** Waits, off the main thread, until the library is ready, or [timeoutMs] has passed (docs/library.md §1.4). */
@@ -379,6 +414,10 @@ object Library {
             // Before the first sync no file is known, and a run would write an empty mirror for nothing.
             ready = { sync.status.value.known },
         )
+        // Before the first sync no file is known, and nothing could be matched.
+        val decisions = DecisionMirror(database, user, sync, ready = { sync.status.value.known })
+        // The identity writes the decision mirror last followed; none yet, so the first pass asks for a whole run.
+        val identitiesSeen = java.util.concurrent.atomic.AtomicLong(-1)
         val fingerprints = LibraryFingerprints(context, database, uriOf = { file ->
             val id = runBlocking { database.library().mediaStoreIdOf(file.fileId) } ?: -1L
             ContentUris.withAppendedId(MediaStore.Audio.Media.getContentUri(file.place.volume), id)
@@ -392,8 +431,15 @@ object Library {
             fingerprints = FingerprintStep(fingerprints),
             // Before the first sync every identity would look missing.
             ready = { sync.status.value.known },
-            // Favorites and plays follow the keys the pass attaches (docs/library.md §8.1, §15.4).
-            afterPass = mirror::request,
+            // Favorites and plays follow the keys the pass attaches (docs/library.md §8.1, §15.4), and decided values too:
+            // a takeover moves a key to another identity (TI §10.3).
+            afterPass = {
+                mirror.request()
+                // A whole run costs about a second with thousands of decisions: after the first pass, and after passes
+                // that wrote identities.
+                val written = IdentityAttacher.changes.value
+                if (identitiesSeen.getAndSet(written) != written) decisions.request()
+            },
             // Playlist hints (docs/library.md §16.2); the pass reads the library database itself while no sync writes.
             playlists = PlaylistLibrary(
                 object : LibraryTrackRefs.Access {
@@ -403,7 +449,7 @@ object Library {
             ),
         )
         identities.follow(sync.status)
-        return Opened(database, sync, identities, newTrackRefs(context), mirror)
+        return Opened(database, sync, identities, newTrackRefs(context), mirror, decisions)
     }
 
     /** The folder rules of the user database (docs/library.md §3.4). */

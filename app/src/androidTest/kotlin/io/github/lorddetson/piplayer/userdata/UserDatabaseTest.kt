@@ -174,6 +174,61 @@ class UserDatabaseTest {
     }
 
     @Test
+    fun versionFiveMigratesToSixKeepingAllItsDataAndAddingEmptyDecisionTables() = runBlocking<Unit> {
+        migrations.createDatabase(5).use { connection ->
+            for (sql in listOf(
+                "INSERT INTO library_folder_rule (volume_name, relative_path, mode) VALUES ('external_primary', 'Music/', 1)",
+                "INSERT INTO track_identity (id, content_key, start_ms, duration_ms, recording_mbid, hint_volume_name, " +
+                    "hint_relative_path, hint_display_name, hint_size, created_at) VALUES (7, x'0102', 0, 1000, x'0a0b', " +
+                    "'external_primary', 'Music/', 'a.mp3', 10, 1)",
+                "INSERT INTO track_cover (identity_id, file_name, width, height, set_at) VALUES (7, 't.jpg', 1, 2, 3)",
+                "INSERT INTO album_cover (album_key, file_name, width, height, set_at) VALUES ('k', 'a.jpg', 1, 2, 3)",
+                "INSERT INTO favorite (identity_id, added_at) VALUES (7, 2)",
+                "INSERT INTO favorite_album (album_key, release_mbid, added_at) VALUES ('k', NULL, 3)",
+                "INSERT INTO album_member (album_key, identity_id) VALUES ('k', 7)",
+                "INSERT INTO play_event (identity_id, started_at, listened_ms) VALUES (7, 4, 5)",
+                "INSERT INTO play_stats (identity_id, play_count, listened_ms, last_played_at) VALUES (7, 6, 7, 8)",
+                "INSERT INTO playlist (id, name, created_at, updated_at) VALUES (3, 'Road trip', 1, 2)",
+                "INSERT INTO playlist_entry (id, playlist_id, position, identity_id, hint_volume_name, hint_relative_path, " +
+                    "hint_display_name, hint_duration_ms) VALUES (1, 3, 0, 7, 'external_primary', 'Music/', 'a.mp3', 1000)",
+                "INSERT INTO user_meta (id, change_counter, rules_counter) VALUES (1, 11, 4)",
+            )) {
+                connection.prepare(sql).use { it.step() }
+            }
+        }
+
+        // Checks the migrated schema against the committed app/schemas/.../6.json.
+        migrations.runMigrationsAndValidate(6).close()
+
+        val opened = UserDatabase.open(context, file.name)
+        try {
+            assertThat(opened.user().folderRules()).containsExactly(FolderRuleEntity("external_primary", "Music/", FolderRuleEntity.INCLUDE))
+            assertThat(opened.identities().identities().single().hintDisplayName).isEqualTo("a.mp3")
+            assertThat(opened.covers().trackCover(7)?.fileName).isEqualTo("t.jpg")
+            assertThat(opened.covers().albumCover("k")?.fileName).isEqualTo("a.jpg")
+            assertThat(opened.favorites().favorites()).containsExactly(FavoriteEntity(7, 2))
+            assertThat(opened.favorites().favoriteAlbums().single().albumKey).isEqualTo("k")
+            assertThat(opened.favorites().members()).containsExactly(AlbumMemberEntity("k", 7))
+            assertThat(opened.plays().events()).containsExactly(PlayEventEntity(7, 4, 5))
+            assertThat(Playlists(opened).entries(3).map { it.identityId }).containsExactly(7L)
+            assertThat(opened.user().changeCounter()).isEqualTo(11)
+            assertThat(opened.user().rulesCounter()).isEqualTo(4)
+            // The new tables start empty, and work.
+            val decisions = opened.decisions()
+            assertThat(decisions.liveValueDecisions()).isEmpty()
+            assertThat(decisions.releaseChoiceCount()).isZero()
+            assertThat(decisions.fileStates(7)).isEmpty()
+            assertThat(decisions.savedCover(1)).isNull()
+            opened.identities().add(identity(8).copy(contentKey = io.github.lorddetson.piplayer.library.identity.Hex.bytes("%064x".format(8))))
+            val applied = checkNotNull(Decisions(opened).apply(DecisionFixtures.request("%064x".format(8))))
+            assertThat(applied.counter).isEqualTo(12)
+            assertThat(opened.user().identitiesHoldingData()).containsExactlyInAnyOrder(7L, 8L)
+        } finally {
+            opened.close()
+        }
+    }
+
+    @Test
     fun favoritesAndPlaysRaiseTheChangeCounterButNotTheRulesCounter() = runBlocking<Unit> {
         val dao = database.user()
         val favorites = Favorites(database)

@@ -35,6 +35,8 @@ data class DisplayValues(
     val fileSort: SortKey = SortKey.EMPTY,
     /** The genres lists group the file by (docs/library.md §19.1). */
     val displayGenres: List<DisplayGenre> = emptyList(),
+    /** The metadata badge from the decided values that win (TI §6, §10.1; `DecisionResolver.badgeOf`). */
+    val badgeState: Int = 0,
 ) {
     /** The names of [displayArtists]. */
     val artists: List<String> get() = displayArtists.map { it.name }

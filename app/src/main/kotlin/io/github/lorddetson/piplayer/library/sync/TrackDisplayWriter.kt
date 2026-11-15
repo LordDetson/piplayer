@@ -2,6 +2,7 @@ package io.github.lorddetson.piplayer.library.sync
 
 import androidx.room3.PooledConnection
 import androidx.room3.withWriteTransaction
+import io.github.lorddetson.piplayer.library.db.DecidedMirrorEntity
 import io.github.lorddetson.piplayer.library.db.IndexInputRow
 import io.github.lorddetson.piplayer.library.db.SqlRows
 import io.github.lorddetson.piplayer.library.db.LibraryDao
@@ -11,6 +12,9 @@ import io.github.lorddetson.piplayer.library.db.TrackEntity
 import io.github.lorddetson.piplayer.library.db.replaceInChunks
 import io.github.lorddetson.piplayer.library.sort.Collation
 import io.github.lorddetson.piplayer.library.sort.SortKeys
+import io.github.lorddetson.piplayer.library.values.Decided
+import io.github.lorddetson.piplayer.library.values.DecidedField
+import io.github.lorddetson.piplayer.library.values.FieldOverrides
 import io.github.lorddetson.piplayer.library.values.IndexValues
 import io.github.lorddetson.piplayer.library.values.MergedValues
 import io.github.lorddetson.piplayer.library.values.TextForms
@@ -33,6 +37,8 @@ internal class DisplayInput(
     private val relativePath: String = "",
     /** The tag pass tried the file and could not read it (`tag_failure`); counts only while it is unread. */
     private val failed: Boolean = false,
+    /** The decided values of the file from `decided_mirror` (TI §7.1, §10.1). */
+    private val decided: FieldOverrides = FieldOverrides.NONE,
 ) {
     /** Normalizes, so not on a thread that playback or a list waits for; [forms] are shared by a batch. */
     fun resolve(forms: TextForms = TextForms()): DisplayValues = MergedValues.of(
@@ -43,6 +49,7 @@ internal class DisplayInput(
         exactDurationMs = exactDurationMs,
         tagLengthMs = read?.tagLengthMs,
         embeddedCover = read?.embeddedCover == true,
+        overrides = decided,
         volume = volume,
         relativePath = relativePath,
         forms = forms,
@@ -52,7 +59,8 @@ internal class DisplayInput(
 
 /**
  * The only writer of `track_display` (TI §7.1): the sync, the tag pass and a new [VERSION] all come through here, so
- * that the merged values, the search columns and the reasons are always derived the same way.
+ * that the merged values, the search columns, the reasons and the badge are always derived the same way. Every write
+ * joins the decided values of `decided_mirror`, so none of these writers loses them (TI §10.1, §10.3).
  */
 class TrackDisplayWriter(private val database: LibraryDatabase) {
 
@@ -68,16 +76,18 @@ class TrackDisplayWriter(private val database: LibraryDatabase) {
     /** The inputs of [fileIds]. */
     internal suspend fun inputsOf(fileIds: List<Long>): List<DisplayInput> = fileIds.chunked(CHUNK).flatMap { chunk ->
         val reads = dao.readFilesOf(chunk).associateBy { it.fileId }
-        dao.indexInputsOf(chunk).map { it.toInput(reads[it.fileId]) }
+        val decided = overridesOf(database.decided().valuesOf(chunk))
+        dao.indexInputsOf(chunk).map { it.toInput(reads[it.fileId], decided[it.fileId]) }
     }
 
     /** The inputs of every file. */
     internal suspend fun allInputs(): List<DisplayInput> {
         val reads = dao.readFiles().associateBy { it.fileId }
-        return dao.indexInputs().map { it.toInput(reads[it.fileId]) }
+        val decided = overridesOf(database.decided().all())
+        return dao.indexInputs().map { it.toInput(reads[it.fileId], decided[it.fileId]) }
     }
 
-    private fun IndexInputRow.toInput(read: ReadFileRow?) = DisplayInput(
+    private fun IndexInputRow.toInput(read: ReadFileRow?, decided: FieldOverrides?) = DisplayInput(
         fileId,
         displayName,
         IndexValues(title, artist, album, composer, genre, durationMs, albumArtist, year, trackNumber),
@@ -86,6 +96,7 @@ class TrackDisplayWriter(private val database: LibraryDatabase) {
         volume = volume,
         relativePath = relativePath,
         failed = failed,
+        decided = decided ?: FieldOverrides.NONE,
     )
 
     companion object {
@@ -94,6 +105,22 @@ class TrackDisplayWriter(private val database: LibraryDatabase) {
 
         private const val CHUNK = 500
         private const val DELETE_CHUNK = 2_000
+
+        /** Above this many files the decided values of all are read at once, rather than in chunks. */
+        private const val READ_ALL_DECIDED = 5_000
+
+        /** The decided values of `decided_mirror` [rows] by file; a field this build does not know is left out. */
+        fun overridesOf(rows: List<DecidedMirrorEntity>): Map<Long, FieldOverrides> = rows.groupBy { it.fileId }.mapValues { (_, own) ->
+            FieldOverrides(own.mapNotNull { row -> DecidedField.ofName(row.field)?.let { it to Decided(row.value, row.level, row.decisionId) } }.toMap())
+        }
+
+        /** The decided values of [fileIds], as the sync joins them for the files it stores again (TI §10.3). */
+        internal suspend fun decidedOf(database: LibraryDatabase, fileIds: List<Long>): Map<Long, FieldOverrides> =
+            if (fileIds.size > READ_ALL_DECIDED) {
+                overridesOf(database.decided().all())
+            } else {
+                fileIds.chunked(CHUNK).fold(HashMap()) { all, chunk -> all.apply { putAll(overridesOf(database.decided().valuesOf(chunk))) } }
+            }
 
         /**
          * All cores but one, which stays for the thread that writes the database and the one that builds what it writes
@@ -107,7 +134,7 @@ class TrackDisplayWriter(private val database: LibraryDatabase) {
         private val COLUMNS = listOf(
             "file_id", "title", "artist", "album", "duration_ms", "search_text", "missing_info_reasons",
             "album_key", "album_artist", "compilation", "year", "disc_number", "track_number", "artist_key",
-            "album_search", "title_sort", "artist_sort", "album_sort", "album_artist_sort", "file_sort",
+            "album_search", "title_sort", "artist_sort", "album_sort", "album_artist_sort", "file_sort", "badge_state",
         )
         private val ARTIST_COLUMNS = listOf("file_id", "position", "artist_key", "name", "search_text", "sort_key")
         private val GENRE_COLUMNS = listOf("file_id", "position", "genre_key", "name", "search_text", "sort_key")
@@ -209,6 +236,7 @@ class TrackDisplayWriter(private val database: LibraryDatabase) {
             blob(values.albumSort?.bytes)
             blob(values.albumArtistSort?.bytes)
             blob(values.fileSort.bytes)
+            long(values.badgeState.toLong())
         }
     }
 }

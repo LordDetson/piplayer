@@ -14,6 +14,7 @@ import io.github.lorddetson.piplayer.library.db.SqlRows
 import io.github.lorddetson.piplayer.library.db.replaceAll
 import io.github.lorddetson.piplayer.library.db.rowValue
 import io.github.lorddetson.piplayer.library.db.withIndexesBuiltAfter
+import io.github.lorddetson.piplayer.library.values.FieldOverrides
 import io.github.lorddetson.piplayer.library.values.IndexValues
 import io.github.lorddetson.piplayer.library.rules.FolderRuleMatcher
 import io.github.lorddetson.piplayer.library.rules.Recordings
@@ -285,16 +286,18 @@ class LibrarySync(
         val movedFiles = changes.updated.filter { update ->
             reads[update.fileId]?.let { it.holdsFor(update.row) && it.relativePath != update.row.relativePath } == true
         }.map { it.fileId }
+        // A file stored again keeps its decided values: they belong to its identity, not to what the index says (TI §7.1).
+        val decided = if (changes.updated.isEmpty()) emptyMap() else TrackDisplayWriter.decidedOf(database, changes.updated.map { it.fileId })
         val inputs = changes.updated.map { update ->
             val stillFailed = failed[update.fileId]?.let { it.size == update.row.size && it.mtime == update.row.modifiedSeconds } == true
-            input(update.fileId, update.row, reads[update.fileId]?.takeIf { it.holdsFor(update.row) }, stillFailed)
+            input(update.fileId, update.row, reads[update.fileId]?.takeIf { it.holdsFor(update.row) }, stillFailed, decided[update.fileId])
         } + changes.added.map { input(fileId = 0, it, read = null) }
         return VolumePlan(state, stateChanged = state != stored, changes, rows, inputs, changedFiles, movedFiles)
     }
 
     private fun ReadFileRow.holdsFor(row: IndexRow) = size == row.size && mtime == row.modifiedSeconds
 
-    private fun input(fileId: Long, row: IndexRow, read: ReadFileRow?, failed: Boolean = false) = DisplayInput(
+    private fun input(fileId: Long, row: IndexRow, read: ReadFileRow?, failed: Boolean = false, decided: FieldOverrides? = null) = DisplayInput(
         fileId,
         row.displayName,
         IndexValues(row.title, row.artist, row.album, row.composer, row.genre, row.durationMs, row.albumArtist, row.year, row.trackNumber),
@@ -302,6 +305,7 @@ class LibrarySync(
         volume = row.volume,
         relativePath = row.relativePath,
         failed = failed,
+        decided = decided ?: FieldOverrides.NONE,
     )
 
     /** Updated files keep their row IDs and added ones take the next free IDs; each table is written in bulk. */
@@ -341,6 +345,8 @@ class LibrarySync(
             dao.deleteDisplayGenres(chunk)
             dao.deleteEntries(chunk)
             dao.deleteFiles(chunk)
+            // A file that is gone keeps no decided values; its identity keeps the decisions (TI §10.2).
+            database.decided().deleteFiles(chunk)
         }
     }
 

@@ -9,7 +9,9 @@ import io.github.lorddetson.piplayer.library.LibraryRule
 import io.github.lorddetson.piplayer.library.identity.Hex
 import io.github.lorddetson.piplayer.library.lists.LibraryLists
 import io.github.lorddetson.piplayer.library.tagpass.DurationSource
+import io.github.lorddetson.piplayer.library.values.DecisionResolver
 import io.github.lorddetson.piplayer.ui.GrantAudioPermission
+import io.github.lorddetson.piplayer.userdata.DecisionFixtures
 import io.github.lorddetson.piplayer.userdata.UserData
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
@@ -21,8 +23,9 @@ import org.junit.rules.RuleChain
 import org.junit.runner.RunWith
 
 /**
- * Favorites, favorite albums and play counts survive a rebuild of the media index and a deletion of the library
- * database, coming back as the keys come back (docs/library.md §15.4, features.md M2b).
+ * Favorites, favorite albums, play counts and (from M3) decisions survive a rebuild of the media index and a deletion of
+ * the library database, coming back as the keys come back (docs/library.md §15.4, features.md M2b; TI §11.2 M2b
+ * "Deleting library.db").
  */
 @RunWith(AndroidJUnit4::class)
 class UserDataSurvivesRebuildTest {
@@ -50,9 +53,12 @@ class UserDataSurvivesRebuildTest {
         val dao = Library.database(context).library()
         for (file in dao.files()) dao.setContent(file.id, key(file.mediaStoreId % 100), 200_000, DurationSource.HEADER)
         Library.identities(context).attach()
-        // The attach pass asks the mirror for a run.
+        // The attach pass asks the mirrors for a run.
         Library.mirror(context).awaitIdle()
+        Library.decisionMirror(context).awaitIdle()
     }
+
+    private suspend fun display(n: Long) = Library.database(context).library().displays().single { it.fileId == fileOf(n) }
 
     private fun lists() = Library.read(context) { LibraryLists(it) }
 
@@ -75,6 +81,8 @@ class UserDataSurvivesRebuildTest {
         val three = checkNotNull(user.identities().idOfKey(Hex.bytes(key(3))))
         UserData.plays(context).record(three, startedAt = 10, listenedMs = 100_000)
         UserData.plays(context).record(three, startedAt = 20, listenedMs = 100_000)
+        // Song 2 identified (TI §7.1).
+        checkNotNull(Library.decisions(context).apply(DecisionFixtures.request(key(2), DecisionFixtures.details(title = "Decided"))))
         // The raised change counter asks the mirror for a run as well; this one is the test's own.
         Library.mirror(context).mirror()
         assertMirrored(albumA)
@@ -82,6 +90,8 @@ class UserDataSurvivesRebuildTest {
     }
 
     private suspend fun assertMirrored(albumA: String) {
+        assertThat(display(2).title).isEqualTo("Decided")
+        assertThat(display(2).badgeState).isEqualTo(DecisionResolver.BADGE_IDENTIFIED)
         assertThat(favoriteSongs()).containsExactly(fileOf(1))
         assertThat(lists().albums(favoritesOnly = true).map { it.key }).containsExactly(albumA)
         assertThat(lists().mostPlayed(limit = 10).map { it.id }).containsExactly(fileOf(3))
@@ -96,7 +106,9 @@ class UserDataSurvivesRebuildTest {
         index.volume().version = "2"
         index.volume().rows = rows.map { it.copy(mediaStoreId = it.mediaStoreId + 100, generationModified = 1) }
         Library.sync(context).sync()
+        Library.identities(context).awaitIdle()
         Library.mirror(context).awaitIdle()
+        Library.decisionMirror(context).awaitIdle()
 
         assertMirrored(albumA)
     }
@@ -110,6 +122,7 @@ class UserDataSurvivesRebuildTest {
         Library.mirror(context).awaitIdle()
         // No keys yet: nothing to show.
         assertThat(favoriteSongs()).isEmpty()
+        assertThat(display(2).title).isEqualTo("Song 2")
 
         keysComeBack()
         assertMirrored(albumA)
@@ -125,5 +138,26 @@ class UserDataSurvivesRebuildTest {
         keysComeBack()
 
         assertMirrored(albumA)
+    }
+
+    @Test
+    fun aDecisionCommittedBeforeTheProcessDiedShowsAfterTheNextStart() = runBlocking<Unit> {
+        ready()
+        keysComeBack()
+        val two = checkNotNull(UserData.database(context).identities().idOfKey(Hex.bytes(key(2))))
+        // Written to the user database alone, as when the process dies before the library database's commit.
+        checkNotNull(UserData.decisions(context).apply(DecisionFixtures.request(key(2), DecisionFixtures.details(title = "Decided"))))
+        assertThat(display(2).title).isEqualTo("Song 2")
+        assertThat(UserData.database(context).decisions().decisionsOf(two)).hasSize(1)
+
+        Library.reopen(context, index)
+        LibraryRule.startAsANewProcess()
+        ready()
+        Library.identities(context).awaitIdle()
+        Library.decisionMirror(context).awaitIdle()
+
+        assertThat(display(2).title).isEqualTo("Decided")
+        assertThat(Library.database(context).library().mirroredChangeCounter())
+            .isEqualTo(UserData.database(context).user().changeCounter())
     }
 }
