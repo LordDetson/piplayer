@@ -34,8 +34,13 @@ jobs:
     name: New commits
     runs-on: ubuntu-24.04
     timeout-minutes: 5
+    permissions:
+      contents: read
+      # The runner choice reads the jobs of other runs, to see whether tuf is busy.
+      actions: read
     outputs:
       run: ${{ steps.check.outputs.run }}
+      api36-runner: ${{ steps.runner.outputs.runner }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -52,11 +57,21 @@ jobs:
           echo "Last commit $((age / 3600)) h ago, run=$run"
           echo "run=$run" >> "$GITHUB_OUTPUT"
 
+      # API 36 goes to the owner's self-hosted runner on tuf while it is alive and free; anything else, including the
+      # repository variable TUF_RUNNER=off, keeps it on a hosted runner. API 30 always runs on a hosted runner.
+      - name: Pick the runner for API 36
+        id: runner
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          TUF_RUNNER: ${{ vars.TUF_RUNNER }}
+          TUF_RUNNER_SEEN: ${{ vars.TUF_RUNNER_SEEN }}
+        run: python3 -I scripts/ci_pick_runner.py >> "$GITHUB_OUTPUT"
+
   instrumented:
     name: API ${{ matrix.api-level }}
     needs: changes
     if: needs.changes.outputs.run == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: ${{ matrix.api-level == 36 && fromJSON(needs.changes.outputs.api36-runner) || 'ubuntu-24.04' }}
     timeout-minutes: 90
     strategy:
       fail-fast: false
@@ -69,24 +84,30 @@ jobs:
           submodules: recursive
           persist-credentials: false
 
+      # The self-hosted runner on tuf is a container with the SDK, JDK 17 and /dev/kvm already in place, and its Gradle
+      # cache on a local volume, so it skips the setup steps marked github-hosted.
       - name: Enable KVM
+        if: runner.environment == 'github-hosted'
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
 
       - name: Set up JDK 17
+        if: runner.environment == 'github-hosted'
         uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: '17'
 
       - name: Set up Gradle
+        if: runner.environment == 'github-hosted'
         uses: gradle/actions/setup-gradle@v6
         with:
           cache-provider: basic
 
       - name: Install Android SDK packages
+        if: runner.environment == 'github-hosted'
         run: |
           SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
           (yes || true) | "$SDKMANAGER" --licenses > /dev/null
@@ -137,7 +158,7 @@ jobs:
           target: google_apis
           arch: x86_64
           profile: pixel_6
-          cores: 3
+          cores: ${{ runner.environment == 'self-hosted' && 4 || 3 }}
           ram-size: 4096M
           disk-size: 6144M
           emulator-options: -no-window -no-snapshot -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
