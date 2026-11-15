@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Online identification: the disclosure and Settings, "Identification and privacy" (TI §9). -->
+<resources>
+    <!-- Service names, the same in every language. -->
+    <string name="identification_name_acoustid" translatable="false">AcoustID</string>
+    <string name="identification_name_musicbrainz" translatable="false">MusicBrainz</string>
+    <string name="identification_name_caa" translatable="false">Cover Art Archive</string>
+
+    <!-- The disclosure before the first online lookup. -->
+    <string name="identification_disclosure_title">Online identification</string>
+    <string name="identification_disclosure_intro">To identify your tracks, PiPlayer can look them up in online music databases. Nothing is sent until you choose Enable. This is what each service gets:</string>
+    <string name="identification_sends_acoustid">AcoustID gets audio fingerprints and track lengths. The audio itself never leaves your device.</string>
+    <string name="identification_sends_musicbrainz">MusicBrainz gets the tags already in your files, words from their file names, track lengths and MusicBrainz IDs.</string>
+    <string name="identification_sends_caa">Cover Art Archive gets release and release group IDs, and so does archive.org, where it keeps the images. This also happens in the background: while albums without a cover of their own are shown in lists, PiPlayer asks for their covers.</string>
+    <string name="identification_sends_all">Every service sees your IP address and PiPlayer\'s user agent: the app\'s name, its version and the project\'s address.</string>
+    <string name="identification_disclosure_local">With Not now, identification stays on this device and uses only what your files already hold. You can change this at any time in Settings, Identification and privacy.</string>
+    <string name="identification_enable">Enable</string>
+    <string name="identification_not_now">Not now</string>
+    <string name="identification_privacy_policy">Privacy policy</string>
+    <string name="identification_third_party_services">Third-party services</string>
+    <string name="identification_terms_acoustid">AcoustID terms</string>
+    <string name="identification_terms_musicbrainz">MusicBrainz terms</string>
+    <string name="identification_terms_caa">Cover Art Archive terms</string>
+
+    <!-- Settings, "Identification and privacy". -->
+    <string name="identification_settings_section">Identification and privacy</string>
+    <string name="identification_online_lookups">Online lookups</string>
+    <string name="identification_online_lookups_summary">Look tracks up in online music databases when identifying them</string>
+    <string name="identification_what_is_sent">What is sent</string>
+    <string name="identification_protected_fields">Protected fields</string>
+    <string name="identification_protected_fields_none">None</string>
+    <string name="identification_protected_fields_explained">Identification never proposes to change these fields.</string>
+    <string name="identification_done">Done</string>
+    <string name="identification_field_title">Title</string>
+    <string name="identification_field_artist">Artist</string>
+    <string name="identification_field_album">Album</string>
+    <string name="identification_field_album_artist">Album artist</string>
+    <string name="identification_field_date">Release date</string>
+    <string name="identification_field_original_date">Original release date</string>
+    <string name="identification_field_track_number">Track number</string>
+    <string name="identification_field_disc_number">Disc number</string>
+    <string name="identification_field_disc_subtitle">Disc subtitle</string>
+    <string name="identification_field_compilation">Compilation</string>
+    <string name="identification_field_label">Label</string>
+    <string name="identification_field_catalog_number">Catalog number</string>
+    <string name="identification_field_barcode">Barcode</string>
+    <string name="identification_field_isrc">ISRC</string>
+    <string name="identification_field_musicbrainz_ids">MusicBrainz IDs</string>
+    <string name="identification_field_cover">Cover</string>
+    <string name="identification_status_section">Service status</string>
+    <!-- %1$s is a service name. -->
+    <string name="identification_status_ready">%1$s: ready</string>
+    <string name="identification_status_stopped_user_agent">%1$s: stopped until PiPlayer restarts, because the service refused the app\'s user agent</string>
+    <string name="identification_status_stopped_key">%1$s: stopped until PiPlayer restarts, because the service refused the app\'s key</string>
+    <string name="identification_status_no_key">%1$s: not available in this build, which has no AcoustID key</string>
+</resources>

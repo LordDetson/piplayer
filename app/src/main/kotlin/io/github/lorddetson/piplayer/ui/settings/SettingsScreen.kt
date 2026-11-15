@@ -43,7 +43,7 @@ import io.github.lorddetson.piplayer.settings.ThemeMode
 
 /**
  * The Settings screen (docs/library.md §3.6, §14.3): sections fill in as their milestones land; M2a has Library,
- * Appearance and About.
+ * Appearance and About, M3 adds Identification and privacy (TI §9).
  */
 @Composable
 fun SettingsScreen(
@@ -55,6 +55,7 @@ fun SettingsScreen(
     val theme by viewModel.theme.collectAsStateWithLifecycle()
     val hidden by viewModel.hiddenFiles.collectAsStateWithLifecycle()
     val legacyEncoding by viewModel.legacyEncoding.collectAsStateWithLifecycle()
+    val identificationPrivacy by viewModel.identificationPrivacy.collectAsStateWithLifecycle()
     SettingsScaffold(stringResource(R.string.settings_title), onBack) { padding ->
         Column(
             Modifier
@@ -113,6 +114,13 @@ fun SettingsScreen(
                     },
                 )
             }
+            IdentificationSection(
+                state = identificationPrivacy,
+                onEnable = viewModel::enableOnlineLookups,
+                onNotNow = viewModel::notNow,
+                onTurnOff = viewModel::turnOffOnlineLookups,
+                onProtect = viewModel::setProtected,
+            )
             SectionTitle(stringResource(R.string.settings_appearance))
             ThemeChoice(theme, viewModel::setTheme)
             SectionTitle(stringResource(R.string.settings_about))

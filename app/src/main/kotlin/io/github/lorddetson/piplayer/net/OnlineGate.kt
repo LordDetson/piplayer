@@ -34,8 +34,8 @@ data class OnlineConsent(val enabled: Boolean, val disclosureVersion: Int) {
 }
 
 /**
- * A gate that keeps the consent in memory, closed until something opens it. It stands in for the DataStore-backed
- * gate (M3 step 11) and is what the production services use until then, so dormant code sends nothing.
+ * A gate that keeps the consent in memory, closed until something opens it, for tests. The app's services use the
+ * user's persisted choice instead ([io.github.lorddetson.piplayer.settings.DataStoreOnlineGate]).
  */
 class InMemoryOnlineGate(
     initial: OnlineConsent = OnlineConsent.NONE,

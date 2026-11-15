@@ -12,8 +12,13 @@ import io.github.lorddetson.piplayer.library.Library
 import io.github.lorddetson.piplayer.library.sort.SortKeys
 import io.github.lorddetson.piplayer.net.AndroidConnectivity
 import io.github.lorddetson.piplayer.net.UserAgent
+import io.github.lorddetson.piplayer.settings.DataStoreOnlineGate
+import io.github.lorddetson.piplayer.settings.IdentificationSettings
 import kotlin.concurrent.thread
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.withTimeoutOrNull
 
 /** Tells the tag pass when the app shows (docs/library.md §5.5). */
@@ -43,8 +48,8 @@ class PiPlayerApplication : Application() {
     val crashReports: CrashReports by lazy { CrashReports.forApp(this) }
 
     /**
-     * The identification network services of the main process (TI §8, §9), or the ones a test installed. They are
-     * dormant until M3 wires them in, and their online gate stays closed until the opt-in exists.
+     * The identification network services of the main process (TI §8, §9), or the ones a test installed. Their online
+     * gate is [onlineGate], closed until the user enables online lookups.
      */
     val identificationServices: IdentificationServices
         get() = installedIdentificationServices ?: ownIdentificationServices
@@ -56,7 +61,17 @@ class PiPlayerApplication : Application() {
             userAgent = UserAgent.forBuild(),
             connectivity = AndroidConnectivity(this),
             acoustIdApiKey = BuildConfig.ACOUSTID_API_KEY,
+            gate = onlineGate,
         )
+    }
+
+    /**
+     * The online gate of the main process (TI §9): the user's opt-in in the `settings` file. It starts reading the file
+     * when the process starts, so that it knows the choice before the first lookup; until then it is closed.
+     */
+    val onlineGate: DataStoreOnlineGate by lazy {
+        ProcessRole.current(this).requireMain("The online gate")
+        DataStoreOnlineGate(IdentificationSettings(this), CoroutineScope(SupervisorJob() + Dispatchers.Default))
     }
 
     override fun attachBaseContext(base: Context) {
@@ -72,6 +87,8 @@ class PiPlayerApplication : Application() {
         if (ProcessRole.current(this) == ProcessRole.MAIN) {
             thread(name = "crash-reports", priority = Thread.MIN_PRIORITY) { crashReports.refresh() }
             registerActivityLifecycleCallbacks(PassGateActivities)
+            // Starts reading the online-lookup choice, off the main thread, so that it is known before the first lookup.
+            onlineGate
             // Lists sort in the app's language (docs/library.md §11.1); the first sync stores its collation.
             SortKeys.use(languages(resources.configuration))
             warmLetters()

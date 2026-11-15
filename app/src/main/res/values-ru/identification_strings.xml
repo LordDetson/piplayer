@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Online identification: the disclosure and Settings, "Identification and privacy" (TI §9). -->
+<resources>
+    <!-- The disclosure before the first online lookup. -->
+    <string name="identification_disclosure_title">Распознавание через интернет</string>
+    <string name="identification_disclosure_intro">Чтобы распознать треки, PiPlayer может искать их в музыкальных базах в интернете. Пока вы не выберете «Включить», ничего не отправляется. Вот что получит каждый сервис:</string>
+    <string name="identification_sends_acoustid">AcoustID получает аудиоотпечатки и длительность треков. Сам звук не покидает устройство.</string>
+    <string name="identification_sends_musicbrainz">MusicBrainz получает теги, которые уже есть в файлах, слова из имён файлов, длительность треков и идентификаторы MusicBrainz.</string>
+    <string name="identification_sends_caa">Cover Art Archive получает идентификаторы релизов и групп релизов, их же получает archive.org, где хранятся изображения. Это происходит и в фоне: когда в списках показаны альбомы без собственной обложки, PiPlayer запрашивает их обложки.</string>
+    <string name="identification_sends_all">Каждый сервис видит ваш IP-адрес и user agent PiPlayer: название приложения, его версию и адрес проекта.</string>
+    <string name="identification_disclosure_local">Если выбрать «Не сейчас», распознавание остаётся на устройстве и использует только то, что уже есть в файлах. Это можно изменить в любой момент в разделе «Настройки», «Распознавание и конфиденциальность».</string>
+    <string name="identification_enable">Включить</string>
+    <string name="identification_not_now">Не сейчас</string>
+    <string name="identification_privacy_policy">Политика конфиденциальности</string>
+    <string name="identification_third_party_services">Сторонние сервисы</string>
+    <string name="identification_terms_acoustid">Условия AcoustID</string>
+    <string name="identification_terms_musicbrainz">Условия MusicBrainz</string>
+    <string name="identification_terms_caa">Условия Cover Art Archive</string>
+
+    <!-- Settings, "Identification and privacy". -->
+    <string name="identification_settings_section">Распознавание и конфиденциальность</string>
+    <string name="identification_online_lookups">Поиск в интернете</string>
+    <string name="identification_online_lookups_summary">Искать треки в музыкальных базах в интернете при распознавании</string>
+    <string name="identification_what_is_sent">Что отправляется</string>
+    <string name="identification_protected_fields">Защищённые поля</string>
+    <string name="identification_protected_fields_none">Нет</string>
+    <string name="identification_protected_fields_explained">Распознавание никогда не предлагает изменить эти поля.</string>
+    <string name="identification_done">Готово</string>
+    <string name="identification_field_title">Название</string>
+    <string name="identification_field_artist">Исполнитель</string>
+    <string name="identification_field_album">Альбом</string>
+    <string name="identification_field_album_artist">Исполнитель альбома</string>
+    <string name="identification_field_date">Дата выпуска</string>
+    <string name="identification_field_original_date">Дата первого выпуска</string>
+    <string name="identification_field_track_number">Номер трека</string>
+    <string name="identification_field_disc_number">Номер диска</string>
+    <string name="identification_field_disc_subtitle">Подзаголовок диска</string>
+    <string name="identification_field_compilation">Сборник</string>
+    <string name="identification_field_label">Лейбл</string>
+    <string name="identification_field_catalog_number">Каталожный номер</string>
+    <string name="identification_field_barcode">Штрихкод</string>
+    <string name="identification_field_isrc">ISRC</string>
+    <string name="identification_field_musicbrainz_ids">Идентификаторы MusicBrainz</string>
+    <string name="identification_field_cover">Обложка</string>
+    <string name="identification_status_section">Состояние сервисов</string>
+    <!-- %1$s is a service name. -->
+    <string name="identification_status_ready">%1$s: готов</string>
+    <string name="identification_status_stopped_user_agent">%1$s: остановлен до перезапуска PiPlayer, потому что сервис отклонил user agent приложения</string>
+    <string name="identification_status_stopped_key">%1$s: остановлен до перезапуска PiPlayer, потому что сервис отклонил ключ приложения</string>
+    <string name="identification_status_no_key">%1$s: недоступен в этой сборке, в ней нет ключа AcoustID</string>
+</resources>

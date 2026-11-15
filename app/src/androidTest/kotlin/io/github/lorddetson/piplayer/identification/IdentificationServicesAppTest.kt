@@ -9,7 +9,10 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.Test
 import org.junit.runner.RunWith
 
-/** The app's one set of identification services (M3 step 1): dormant, closed, and replaceable by a test. */
+/**
+ * The app's one set of identification services (M3 steps 1 and 11): behind the persisted opt-in, closed on a new install,
+ * and replaceable by a test.
+ */
 @RunWith(AndroidJUnit4::class)
 class IdentificationServicesAppTest {
 
@@ -20,6 +23,8 @@ class IdentificationServicesAppTest {
         val services = IdentificationServices.of(app)
         assertThat(IdentificationServices.of(app)).isSameAs(services)
         assertThat(services.gate.isOpen()).isFalse()
+        // The gate is the persisted opt-in of the settings file (TI §9), not one of its own.
+        assertThat(services.gate).isSameAs(app.onlineGate)
         assertThat(services.baseUrls).isEqualTo(ProviderBaseUrls.PRODUCTION)
     }
 

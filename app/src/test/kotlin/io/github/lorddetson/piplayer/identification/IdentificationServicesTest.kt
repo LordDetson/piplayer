@@ -17,8 +17,16 @@ import io.github.lorddetson.piplayer.net.HttpClients
 import io.github.lorddetson.piplayer.net.InMemoryOnlineGate
 import io.github.lorddetson.piplayer.net.NetworkState
 import io.github.lorddetson.piplayer.net.NoNetworkException
+import io.github.lorddetson.piplayer.settings.DataStoreOnlineGate
+import io.github.lorddetson.piplayer.settings.IdentificationSettings
+import io.github.lorddetson.piplayer.settings.MemoryDataStore
 import javax.net.SocketFactory
 import kotlin.time.Duration.Companion.milliseconds
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.testTimeSource
@@ -28,6 +36,7 @@ import okhttp3.Dns
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import org.assertj.core.api.Assertions.assertThat
+import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 
 class IdentificationServicesTest {
@@ -43,6 +52,14 @@ class IdentificationServicesTest {
     private val key = "testKey123"
     private val fingerprint = "AQAAT0mUaEkSRZEGAA"
     private val query = "recording:(paper lanterns)"
+
+    private val settingsScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+
+    @AfterEach
+    fun stopSettings() = settingsScope.cancel()
+
+    /** The gate of the app: the opt-in in a `settings` file, empty here as on a new install. */
+    private val persistedGate = DataStoreOnlineGate(IdentificationSettings(MemoryDataStore()), settingsScope)
 
     private fun TestScope.services(
         gate: io.github.lorddetson.piplayer.net.OnlineGate = TestServices.openGate(),
@@ -62,8 +79,16 @@ class IdentificationServicesTest {
     }
 
     @Test
-    fun `the app's services use the real hosts and send nothing until the opt-in exists`() {
-        val services = IdentificationServices.production(TestServices.USER_AGENT, TestServices.FakeConnectivity(), "")
+    fun `the app's services use the real hosts and the persisted opt-in, closed until the user enables it`() {
+        val services =
+            IdentificationServices.production(TestServices.USER_AGENT, TestServices.FakeConnectivity(), "", persistedGate)
+        assertThat(services.gate).isSameAs(persistedGate)
+        assertThat(services.gate.isOpen()).isFalse()
+        runBlocking { persistedGate.awaitLoaded() }
+        assertThat(services.gate.isOpen()).isFalse()
+        runBlocking { persistedGate.enable() }
+        assertThat(services.gate.isOpen()).isTrue()
+        runBlocking { persistedGate.turnOff() }
         assertThat(services.gate.isOpen()).isFalse()
         assertThat(services.baseUrls).isEqualTo(ProviderBaseUrls.PRODUCTION)
         assertThat(ProviderBaseUrls.PRODUCTION.acoustId).isEqualTo("https://api.acoustid.org/v2/".toHttpUrl())
@@ -272,9 +297,9 @@ class IdentificationServicesTest {
     @Test
     fun `the app's services take the build's key and treat an empty one as none`() {
         val connectivity = TestServices.FakeConnectivity()
-        assertThat(IdentificationServices.production(TestServices.USER_AGENT, connectivity, "").fingerprintStage)
+        assertThat(IdentificationServices.production(TestServices.USER_AGENT, connectivity, "", persistedGate).fingerprintStage)
             .isEqualTo(FingerprintStage.Unavailable(UnavailableReason.NoKey))
-        assertThat(IdentificationServices.production(TestServices.USER_AGENT, connectivity, key).fingerprintStage)
+        assertThat(IdentificationServices.production(TestServices.USER_AGENT, connectivity, key, persistedGate).fingerprintStage)
             .isInstanceOf(FingerprintStage.Available::class.java)
     }
 }

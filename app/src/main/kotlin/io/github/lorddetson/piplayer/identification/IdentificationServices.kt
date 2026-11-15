@@ -17,10 +17,10 @@ import io.github.lorddetson.piplayer.net.GatedDns
 import io.github.lorddetson.piplayer.net.GatedSocketFactory
 import io.github.lorddetson.piplayer.net.HopGate
 import io.github.lorddetson.piplayer.net.HttpClients
-import io.github.lorddetson.piplayer.net.InMemoryOnlineGate
 import io.github.lorddetson.piplayer.net.OnlineGate
 import io.github.lorddetson.piplayer.net.RateLimiter
 import io.github.lorddetson.piplayer.net.RetryPolicy
+import io.github.lorddetson.piplayer.settings.DataStoreOnlineGate
 import java.time.Clock
 import kotlin.time.TimeSource
 import kotlinx.coroutines.CoroutineDispatcher
@@ -162,11 +162,16 @@ class IdentificationServices(
         )
 
         /**
-         * The app's services: the real hosts, the build's [acoustIdApiKey] (empty for none), and a gate that stays closed
-         * until the online-lookup opt-in exists (M3 step 11), so nothing is sent while identification is dormant.
+         * The app's services: the real hosts, the build's [acoustIdApiKey] (empty for none), and the user's persisted
+         * opt-in as the gate (TI §9), closed until the user enables online lookups. The type keeps any other gate, such
+         * as an open one of a test, out of the app's services.
          */
-        fun production(userAgent: String, connectivity: Connectivity, acoustIdApiKey: String): IdentificationServices =
-            create(userAgent, InMemoryOnlineGate(), connectivity, acoustIdApiKey = acoustIdApiKey)
+        fun production(
+            userAgent: String,
+            connectivity: Connectivity,
+            acoustIdApiKey: String,
+            gate: DataStoreOnlineGate,
+        ): IdentificationServices = create(userAgent, gate, connectivity, acoustIdApiKey = acoustIdApiKey)
 
         /** The services of the app's main process. */
         fun of(context: Context): IdentificationServices =
