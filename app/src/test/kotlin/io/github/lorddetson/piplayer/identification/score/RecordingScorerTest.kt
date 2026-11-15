@@ -289,6 +289,27 @@ class RecordingScorerTest {
     }
 
     @Test
+    fun `a missing field is filled from the strongest stage that has it, whatever the order of the findings`() {
+        // The weaker text copy comes first; the ISRC copy's title, credit and length win. With the ISRC length the
+        // fingerprint keeps its 0.97 and beats the ISRC's 0.95; the text copy's 9 s would cut it to 0.97 * 0.75.
+        val match = rank(
+            StageFinding.Fingerprint(listOf(fingerprint(title = null, credit = null, lengthMs = null))),
+            StageFinding.TextSearch(
+                listOf(recording(title = "Paper Lantern", credit = "Quiet Harbors", lengthMs = 223_000)),
+            ),
+            StageFinding.Isrc(listOf(recording())),
+        ).matches.single()
+        assertThat(match.reason.source).isEqualTo(Source.FINGERPRINT)
+        assertThat(match.score).isCloseTo(0.97, tolerance)
+        assertThat(match.candidate.title).isEqualTo("Paper Lanterns")
+        assertThat(match.candidate.artistCredit).isEqualTo("The Quiet Harbors")
+        assertThat(match.candidate.artistNames).containsExactly("The Quiet Harbors")
+        assertThat(match.candidate.lengthMs).isEqualTo(214_000)
+        assertThat(match.reason.foundBy)
+            .containsExactlyInAnyOrder(Source.FINGERPRINT, Source.TEXT_SEARCH, Source.ISRC)
+    }
+
+    @Test
     fun `a stage's own title and credit are kept when another stage spells them differently`() {
         val match = rank(
             StageFinding.Fingerprint(listOf(fingerprint(title = "Paper Lantern", credit = "Quiet Harbors"))),
