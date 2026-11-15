@@ -13,13 +13,16 @@ import io.github.lorddetson.piplayer.net.HttpClients
 import io.github.lorddetson.piplayer.net.InMemoryOnlineGate
 import io.github.lorddetson.piplayer.net.NetworkState
 import io.github.lorddetson.piplayer.net.NoNetworkException
+import javax.net.SocketFactory
 import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.testTimeSource
 import mockwebserver3.MockWebServer
 import mockwebserver3.junit5.StartStop
+import okhttp3.Dns
 import okhttp3.HttpUrl.Companion.toHttpUrl
+import okhttp3.OkHttpClient
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 
@@ -99,6 +102,24 @@ class IdentificationServicesTest {
             )
         }.exceptionOrNull()
         assertThat(error).isInstanceOf(IllegalArgumentException::class.java)
+    }
+
+    @Test
+    fun `a client that looks up or connects without asking the gate is refused`() {
+        for (bypass in listOf<OkHttpClient.Builder.() -> Unit>(
+            { dns(Dns.SYSTEM) },
+            { socketFactory(SocketFactory.getDefault()) },
+        )) {
+            val error = runCatching {
+                IdentificationServices.create(
+                    userAgent = TestServices.USER_AGENT,
+                    gate = TestServices.openGate(),
+                    connectivity = TestServices.FakeConnectivity(),
+                    configureHttp = bypass,
+                )
+            }.exceptionOrNull()
+            assertThat(error).isInstanceOf(IllegalArgumentException::class.java)
+        }
     }
 
     @Test

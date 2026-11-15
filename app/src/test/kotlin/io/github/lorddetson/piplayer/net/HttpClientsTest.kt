@@ -15,6 +15,7 @@ import mockwebserver3.Dispatcher
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
 import mockwebserver3.RecordedRequest
+import mockwebserver3.SocketEffect
 import mockwebserver3.junit5.StartStop
 import okhttp3.Call
 import okhttp3.Dns
@@ -22,6 +23,7 @@ import okhttp3.EventListener
 import okhttp3.OkHttpClient
 import okhttp3.Protocol
 import okhttp3.Request
+import okhttp3.Response
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -39,7 +41,7 @@ class HttpClientsTest {
     private val userAgent = UserAgent.of("0.1.0")
     private val gate = TestServices.openGate()
 
-    private fun client(gate: OnlineGate = this.gate) = HttpClients.create(userAgent, gate)
+    private fun client(gate: OnlineGate = this.gate, dns: Dns = Dns.SYSTEM) = HttpClients.create(userAgent, gate, dns)
 
     @Test
     fun `every request carries the app's User-Agent`() {
@@ -122,7 +124,10 @@ class HttpClientsTest {
         assertThat(server.requestCount).isEqualTo(2)
     }
 
-    /** Records, in order, the connections the client starts and the times the gate said no. */
+    /**
+     * Records, in order, the connections the client starts, the lookups and connections that completed, the answers
+     * and the times the gate said no.
+     */
     private class Watch(private val gate: InMemoryOnlineGate) : EventListener(), OnlineGate {
         val events = CopyOnWriteArrayList<String>()
 
@@ -132,12 +137,33 @@ class HttpClientsTest {
             events += "connect $inetSocketAddress"
         }
 
+        override fun dnsEnd(call: Call, domainName: String, inetAddressList: List<InetAddress>) {
+            events += "$LOOKED_UP $domainName"
+        }
+
+        override fun connectEnd(call: Call, inetSocketAddress: InetSocketAddress, proxy: Proxy, protocol: Protocol?) {
+            events += "$CONNECTED $inetSocketAddress"
+        }
+
+        override fun responseHeadersEnd(call: Call, response: Response) {
+            events += "$ANSWERED ${response.code}"
+        }
+
         fun refusals(): Int = events.count { it == REFUSED }
+
+        fun connections(): Int = events.count { it.startsWith(CONNECTED) }
 
         fun afterFirstRefusal(): List<String> = events.drop(events.indexOf(REFUSED) + 1)
 
+        /** The lookups and connections completed after the first answer came back. */
+        fun openedAfterFirstAnswer(): List<String> = events.drop(events.indexOfFirst { it.startsWith(ANSWERED) } + 1)
+            .filter { it.startsWith(LOOKED_UP) || it.startsWith(CONNECTED) }
+
         companion object {
             const val REFUSED = "refused"
+            const val LOOKED_UP = "looked up"
+            const val CONNECTED = "connected"
+            const val ANSWERED = "answered"
         }
     }
 
@@ -167,6 +193,7 @@ class HttpClientsTest {
         assertThat(server.requestCount - requestsBefore).isEqualTo(1)
         assertThat(watch.refusals()).isEqualTo(1)
         assertThat(watch.afterFirstRefusal()).isEmpty()
+        assertThat(watch.openedAfterFirstAnswer()).isEmpty()
     }
 
     private fun watched(gate: InMemoryOnlineGate): Pair<Watch, OkHttpClient> {
@@ -216,9 +243,50 @@ class HttpClientsTest {
         val watch = Watch(gate)
         // The host has a second address, as musicbrainz.org has an A and an AAAA record; nothing listens there.
         val dns = Dns { listOf(InetAddress.getLoopbackAddress(), InetAddress.getByName("127.0.0.2")) }
-        val client = client(watch).newBuilder().eventListener(watch).dns(dns).build()
+        val client = client(watch, dns).newBuilder().eventListener(watch).build()
         closeAndAsk(server, gate, MockResponse.Builder().code(408).build())
         assertRepeatRefused(client, watch, warm = false)
+    }
+
+    @Test
+    @Timeout(value = 20, unit = TimeUnit.SECONDS)
+    fun `a 408 repeat after Connection close is refused before its host is looked up or connected`() {
+        val gate = TestServices.openGate()
+        val (watch, client) = watched(gate)
+        // RFC 9110 asks a server to close the connection after a 408, so OkHttp repeats it on a new connection.
+        closeAndAsk(server, gate, MockResponse.Builder().code(408).addHeader("Connection", "close").build())
+        assertRepeatRefused(client, watch, warm = false)
+    }
+
+    @Test
+    @Timeout(value = 20, unit = TimeUnit.SECONDS)
+    fun `a 503 repeat with Retry-After 0 after Connection close is refused before a new connection`() {
+        val gate = TestServices.openGate()
+        val (watch, client) = watched(gate)
+        closeAndAsk(
+            server,
+            gate,
+            MockResponse.Builder().code(503).addHeader("Retry-After", "0").addHeader("Connection", "close").build(),
+        )
+        assertRepeatRefused(client, watch, warm = true)
+    }
+
+    @Test
+    @Timeout(value = 20, unit = TimeUnit.SECONDS)
+    fun `a dropped connection is not replaced while the gate is closed`() {
+        val gate = TestServices.openGate()
+        val (watch, client) = watched(gate)
+        // The pooled connection dies under the request after the gate closed; OkHttp would try again on a new one.
+        closeAndAsk(server, gate, MockResponse.Builder().onResponseStart(SocketEffect.CloseSocket()).build())
+        client.newCall(Request.Builder().url(server.url("/warm")).build()).execute().use { it.body.string() }
+        val connectionsBefore = watch.connections()
+
+        val error = runCatching { client.newCall(Request.Builder().url(server.url("/first")).build()).execute() }
+            .exceptionOrNull()
+
+        assertThat(error).isInstanceOf(GateClosedException::class.java)
+        assertThat(watch.connections()).isEqualTo(connectionsBefore)
+        assertThat(server.requestCount).isEqualTo(2)
     }
 
     @Test
@@ -278,7 +346,7 @@ class HttpClientsTest {
         val dns = ArchiveDns()
         redirectToArchive(gate, closeOnRedirect = false)
 
-        val response = client(gate).newBuilder().dns(dns).build()
+        val response = client(gate, dns)
             .newCall(Request.Builder().url(server.url("/front")).build()).execute()
 
         response.use { assertThat(it.body.string()).isEqualTo("image") }
@@ -295,7 +363,7 @@ class HttpClientsTest {
         redirectToArchive(gate, closeOnRedirect = true)
 
         val error = runCatching {
-            client(gate).newBuilder().dns(dns).build().newCall(Request.Builder().url(server.url("/front")).build()).execute()
+            client(gate, dns).newCall(Request.Builder().url(server.url("/front")).build()).execute()
         }.exceptionOrNull()
 
         assertThat(error).isInstanceOf(GateClosedException::class.java)

@@ -12,6 +12,8 @@ import io.github.lorddetson.piplayer.identification.provider.ProviderStatusStore
 import io.github.lorddetson.piplayer.identification.provider.identificationProviders
 import io.github.lorddetson.piplayer.net.Connectivity
 import io.github.lorddetson.piplayer.net.GateInterceptor
+import io.github.lorddetson.piplayer.net.GatedDns
+import io.github.lorddetson.piplayer.net.GatedSocketFactory
 import io.github.lorddetson.piplayer.net.HopGate
 import io.github.lorddetson.piplayer.net.HttpClients
 import io.github.lorddetson.piplayer.net.InMemoryOnlineGate
@@ -57,14 +59,17 @@ class IdentificationServices(
 ) {
 
     init {
-        // OkHttp's own redirects would run below GateInterceptor, so a hop's host would be looked up before the gate.
+        // OkHttp's own redirects would run below GateInterceptor, so a hop's host would be looked up before the gate;
+        // an ungated resolver or socket factory would let OkHttp's own repeats look up and connect while it is closed.
         require(
             http.interceptors.any { it is GateInterceptor && it.gate === gate } &&
                 http.networkInterceptors.any { it is HopGate && it.gate === gate } &&
+                (http.dns as? GatedDns)?.gate === gate &&
+                (http.socketFactory as? GatedSocketFactory)?.gate === gate &&
                 !http.followRedirects,
         ) {
-            "The HTTP client must check the services' own online gate on every hop and follow redirects only through " +
-                "it (HttpClients.create)"
+            "The HTTP client must check the services' own online gate on every hop, lookup and connection and follow " +
+                "redirects only through it (HttpClients.create)"
         }
     }
 
@@ -107,7 +112,8 @@ class IdentificationServices(
 
         /**
          * Services whose HTTP client checks the same [gate]. [configureHttp] adjusts the client, for example to trust a
-         * test server's certificate; it may not take out the gate checks or turn on OkHttp's own redirects.
+         * test server's certificate; it may not take out the gate checks, replace the resolver or the socket factory,
+         * or turn on OkHttp's own redirects.
          */
         fun create(
             userAgent: String,
