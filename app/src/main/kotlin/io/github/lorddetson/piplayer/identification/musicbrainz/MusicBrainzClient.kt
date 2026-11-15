@@ -31,14 +31,19 @@ sealed class MusicBrainzException(message: String, cause: Throwable? = null) : I
     class Paused(val remaining: Duration) :
         MusicBrainzException("MusicBrainz asked to wait another ${remaining.wholeSecondsUp()} s; no request was sent")
 
+    /** A successful status with a body that is not MusicBrainz's JSON, such as a captive portal's sign-in page. */
+    class Unreadable(val code: Int, cause: Throwable) :
+        MusicBrainzException("MusicBrainz answered HTTP $code with a body that is not its JSON", cause)
+
     /** Any other error status, which a retry would not change. */
     class Http(val code: Int) : MusicBrainzException("MusicBrainz answered HTTP $code")
 }
 
 /**
  * MusicBrainz ws/2 client. All requests go through one [limiter] for musicbrainz.org; busy answers (503, 429, 502,
- * 504) and network errors are retried by [retryPolicy] as pauses of that limiter (see [RetryingCaller]). Answers are
- * read and parsed on [ioDispatcher], so the client can be called from any thread.
+ * 504), successful answers whose body is not MusicBrainz's JSON and network errors are retried by [retryPolicy] as
+ * pauses of that limiter (see [RetryingCaller]). Answers are read and parsed on [ioDispatcher], so the client can be
+ * called from any thread.
  */
 class MusicBrainzClient(
     http: OkHttpClient,
@@ -68,7 +73,15 @@ class MusicBrainzClient(
     ) { response -> classify(response, parse) }
 
     private fun <T> classify(response: Response, parse: (String) -> T): CallOutcome<T> {
-        if (response.isSuccessful) return CallOutcome.Success(parse(response.body.string()))
+        if (response.isSuccessful) {
+            return try {
+                CallOutcome.Success(parse(response.body.string()))
+            } catch (e: IllegalArgumentException) {
+                // Not MusicBrainz's JSON (SerializationException is an IllegalArgumentException): a captive portal's
+                // or a proxy's page, which a later attempt may get past.
+                CallOutcome.Retry(MusicBrainzException.Unreadable(response.code, e))
+            }
+        }
         val who = response.header("X-RateLimit-Who")
         return when {
             response.code == 403 && who?.startsWith("ua-") == true ->

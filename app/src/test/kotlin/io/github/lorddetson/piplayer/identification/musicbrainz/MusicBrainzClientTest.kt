@@ -213,4 +213,28 @@ class MusicBrainzClientTest {
         client.searchRecordings(query, 25)
         assertThat(testScheduler.currentTime).isGreaterThanOrEqualTo(1_100)
     }
+
+    private fun signInPage() = MockResponse.Builder()
+        .addHeader("Content-Type", "text/html; charset=utf-8")
+        .body("<!DOCTYPE html><html><head><title>Sign in to the network</title></head><body></body></html>")
+        .build()
+
+    @Test
+    fun `an HTML page with a successful status is retried and then reported as unavailable`() = runTest {
+        repeat(4) { server.enqueue(signInPage()) }
+        val error = runCatching { client(maxRetries = 3).searchRecordings(query, 25) }.exceptionOrNull()
+
+        assertThat(error).isInstanceOf(MusicBrainzException.Unavailable::class.java)
+        assertThat((error as MusicBrainzException.Unavailable).attempts).isEqualTo(4)
+        assertThat(error.cause).isInstanceOf(MusicBrainzException.Unreadable::class.java)
+        assertThat(server.requestCount).isEqualTo(4)
+    }
+
+    @Test
+    fun `a sign-in page once, then the real answer, succeeds`() = runTest {
+        server.enqueue(signInPage())
+        server.enqueue(ok())
+        assertThat(client().searchRecordings(query, 25).recordings).hasSize(2)
+        assertThat(server.requestCount).isEqualTo(2)
+    }
 }
