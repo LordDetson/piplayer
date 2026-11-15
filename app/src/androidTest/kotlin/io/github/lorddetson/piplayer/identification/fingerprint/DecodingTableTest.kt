@@ -32,7 +32,17 @@ class DecodingTableTest(private val row: Row) {
         NOT_FINGERPRINTABLE,
     }
 
-    data class Row(val format: String, val fixture: String, val mimeType: String, val path: Path) {
+    data class Row(
+        val format: String,
+        val fixture: String,
+        val mimeType: String,
+        val path: Path,
+        /**
+         * The length a decoder must give, for a fixture that is no decoding fixture because the platform cannot decode
+         * it (DecodingFixturesTest would fail on it); every other row takes its length from DecodingFixturesTest.
+         */
+        val ownLength: DecodingFixturesTest.Fixture? = null,
+    ) {
         override fun toString() = format
     }
 
@@ -58,7 +68,14 @@ class DecodingTableTest(private val row: Row) {
             Row("FLAC", "flac-96000-24bit-stereo.flac", "audio/flac", Path.PLATFORM_DECODER),
             Row("FLAC in 5.1", "flac-48000-16bit-5.1.flac", "audio/flac", Path.PLATFORM_DECODER),
             Row("WAV", "wav-44100-16bit-stereo.wav", "audio/raw", Path.CONTAINER_PCM),
-            Row("ALAC in MP4", "alac-44100-stereo.m4a", "audio/alac", Path.NOT_FINGERPRINTABLE),
+            // The file holds exactly 2 s (its last frame is short); a maker's decoder may give at most one 4096-sample
+            // ALAC frame more.
+            Row(
+                "ALAC in MP4", "alac-44100-stereo.m4a", "audio/alac", Path.NOT_FINGERPRINTABLE,
+                ownLength = DecodingFixturesTest.Fixture(
+                    "alac-44100-stereo.m4a", "audio/alac", 44_100, 2, endPaddingSeconds = 0.093,
+                ),
+            ),
         )
 
         @JvmStatic
@@ -71,6 +88,12 @@ class DecodingTableTest(private val row: Row) {
             decoders.any { info -> info.supportedTypes.any { it.equals(mimeType, ignoreCase = true) } }
     }
 
+    /** The fixture whose length bounds the row's audio; a row without one fails instead of skipping the check. */
+    private fun expectedLength(): DecodingFixturesTest.Fixture =
+        row.ownLength
+            ?: DecodingFixturesTest.FIXTURES.singleOrNull { it.name == row.fixture }
+            ?: throw AssertionError("${row.fixture} has no length: add it to DecodingFixturesTest.FIXTURES")
+
     private fun fingerprint(): FingerprintResult {
         val file = TestFiles.copy("decoding/${row.fixture}")
         return try {
@@ -81,6 +104,15 @@ class DecodingTableTest(private val row: Row) {
         } finally {
             file.delete()
         }
+    }
+
+    /** Also for a row whose path ends before the length is checked on this device (ALAC without a decoder). */
+    @Test
+    fun knowsTheLengthItsAudioMustHave() {
+        val fixture = expectedLength()
+
+        assertThat(fixture.name).isEqualTo(row.fixture)
+        assertThat(fixture.mimeType).isEqualTo(row.mimeType)
     }
 
     @Test
@@ -105,12 +137,11 @@ class DecodingTableTest(private val row: Row) {
         }
         assertThat(result.source.endedEarly).isNull()
         assertThat(result.reachedEnd).isTrue()
-        DecodingFixturesTest.FIXTURES.singleOrNull { it.name == row.fixture }?.let { fixture ->
-            assertThat(result.fedSeconds).isBetween(
-                SECONDS - fixture.shortBySeconds - SLACK_SECONDS,
-                SECONDS + fixture.endPaddingSeconds + SLACK_SECONDS,
-            )
-        }
+        val fixture = expectedLength()
+        assertThat(result.fedSeconds).isBetween(
+            SECONDS - fixture.shortBySeconds - SLACK_SECONDS,
+            SECONDS + fixture.endPaddingSeconds + SLACK_SECONDS,
+        )
         // Too short for an item, but Chromaprint took all of it and finished.
         assertThat(result.fingerprint.raw).isEmpty()
     }

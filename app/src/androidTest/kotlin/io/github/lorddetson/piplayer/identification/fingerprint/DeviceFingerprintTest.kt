@@ -60,7 +60,12 @@ class DeviceFingerprintTest(private val sample: String) {
 
         @JvmStatic
         @Parameterized.Parameters(name = "{0}")
-        fun samples(): List<Array<Any>> = (index.keys + REQUIRED).sorted().map { arrayOf(it) }
+        fun samples(): List<Array<Any>> {
+            check(REQUIRED.containsAll(CHANNELS.keys)) {
+                "Channel counts of unknown recordings: ${CHANNELS.keys - REQUIRED}"
+            }
+            return (index.keys + REQUIRED).sorted().map { arrayOf(it) }
+        }
 
         /**
          * The recordings TI §3.2 and §11.2 ask for, so that none drops out of the manifest unnoticed: the five CC
@@ -71,6 +76,12 @@ class DeviceFingerprintTest(private val sample: String) {
             "goldberg-aria-da-capo", "grieg-morning-mood", "figaro-overture", "art-of-fugue-contrapunctus-1",
             "radetzky-march", "figaro-overture-5.1-aac", "art-of-fugue-aac", "grieg-morning-mood-mp3-no-header",
         )
+
+        /**
+         * Channel counts the decoder must hand on: the 5.1 recording is there for the downmix of all six channels
+         * (TI §3.2), which a decoder that downmixes to stereo itself would leave untested while fpcalc still matches.
+         */
+        private val CHANNELS = mapOf("figaro-overture-5.1-aac" to 6)
 
         @JvmStatic
         @AfterClass
@@ -110,6 +121,14 @@ class DeviceFingerprintTest(private val sample: String) {
         assertThat(ours.size).isCloseTo(reference.size, within(2))
         assertThat(match.offset).isBetween(-1, 1)
         assertThat(match.bitErrorRate).isLessThanOrEqualTo(MAX_BIT_ERROR_RATE)
+    }
+
+    @Test
+    fun reachesTheDownmixWithAllItsChannels() {
+        val channels = CHANNELS[sample]
+        assumeTrue("$sample: no channel count pinned", channels != null)
+
+        assertThat(fingerprint().inputFormat?.channelCount).isEqualTo(channels)
     }
 
     @Test
