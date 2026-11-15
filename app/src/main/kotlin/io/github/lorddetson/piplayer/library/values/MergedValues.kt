@@ -106,9 +106,9 @@ object MergedValues {
         val disc = if (DecidedField.DISC_NUMBER in decided) decided[DecidedField.DISC_NUMBER]?.value?.toIntOrNull() else fileDisc
         val track = if (DecidedField.TRACK_NUMBER in decided) decided[DecidedField.TRACK_NUMBER]?.value?.toIntOrNull() else fileTrack
         val dateDecided = DecidedField.DATE in decided || DecidedField.ORIGINAL_DATE in decided
+        // A decided date hides the index's year as the tags' date does, also when it is empty.
         val year = if (read || dateDecided) {
             yearOf(pick(DecidedField.DATE) { tagValues?.date }) ?: yearOf(pick(DecidedField.ORIGINAL_DATE) { tagValues?.originalDate })
-                ?: if (!read) indexValues?.year?.takeIf { it > 0 } else null
         } else {
             indexValues?.year?.takeIf { it > 0 }
         }

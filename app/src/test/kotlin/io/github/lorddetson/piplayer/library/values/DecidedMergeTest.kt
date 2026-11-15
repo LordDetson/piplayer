@@ -106,6 +106,13 @@ class DecidedMergeTest {
     }
 
     @Test
+    fun `a cleared date hides the index's year of an unread file`() {
+        val values = merge(tags = null, read = false, overrides = decided(LEVEL_USER_EDIT, DATE to null))
+
+        assertThat(values.year).isNull()
+    }
+
+    @Test
     fun `a decided original date gives the year when no date is decided or tagged`() {
         val values = merge(tags = emptyTags, overrides = identified(DATE to null, ORIGINAL_DATE to "1977"))
 
