@@ -112,7 +112,9 @@ internal class HopGate(val gate: OnlineGate) : Interceptor {
  * then throws it again on the dispatcher's thread, uncaught, which on Android ends the app. The clamped value is
  * still longer than any pause (RetryAfter, RetryPolicy), so the retries end and the limiter pause keeps its cap; any
  * other value, an HTTP date included, is left as the server sent it, which OkHttp reads as "not 0" without throwing.
- * A digit is any Unicode decimal digit, as Android's regex and Integer.valueOf take them.
+ * A digit is any Unicode decimal digit, by code point, as Android's regex (ICU) matches them. Integer.valueOf reads
+ * them one UTF-16 unit at a time, so a digit outside the BMP, whose two halves are not digits, throws there at any
+ * length and is clamped too; toIntOrNull reads the same way.
  */
 internal object RetryAfterClamp : Interceptor {
 
@@ -131,7 +133,7 @@ internal object RetryAfterClamp : Interceptor {
     private val LONGEST = Int.MAX_VALUE.toString()
 
     private fun tooLarge(value: String): Boolean =
-        value.isNotEmpty() && value.all(Char::isDigit) && value.toIntOrNull() == null
+        value.isNotEmpty() && value.codePoints().allMatch(Character::isDigit) && value.toIntOrNull() == null
 }
 
 /** Looks a host up through [delegate] only while [gate] is open; a closed gate fails the lookup and so the call. */

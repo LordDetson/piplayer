@@ -26,6 +26,7 @@ import mockwebserver3.junit5.StartStop
 import okhttp3.Call
 import okhttp3.Dns
 import okhttp3.EventListener
+import okhttp3.Headers
 import okhttp3.OkHttpClient
 import okhttp3.Protocol
 import okhttp3.Request
@@ -496,20 +497,52 @@ class HttpClientsTest {
 
     @Test
     @Timeout(value = 20, unit = TimeUnit.SECONDS)
-    fun `a long run of digits of another script, which Android's regex counts as digits, kills no thread`() = runTest {
-        // Arabic-Indic digits: Android's regex (ICU) matches them with \d, as OkHttp's Retry-After check does, and
-        // Integer.valueOf reads them, so a long run of them throws there as a long run of ASCII digits does.
+    fun `a long run of another script's digits reaches the caller as longer than any pause`() {
+        // Arabic-Indic digits. On the JVM, OkHttp's \d is ASCII only, so it never parses them and no thread could die
+        // here; the direct RetryAfterClamp tests pin the rewrite that keeps Android's thread alive.
         val digits = "\u0669".repeat(20)
         server.enqueue(MockResponse.Builder().code(503).addHeaderLenient("Retry-After", digits).build())
-        val threads = DispatcherThreads()
 
-        val result = answerOnDispatcher(threads)
-
-        assertThat(threads.escaped + threads.uncaught).isEmpty()
-        result.getOrThrow().use { response ->
+        client().newCall(Request.Builder().url(server.url("/")).build()).execute().use { response ->
             assertThat(response.code).isEqualTo(503)
             assertLongerThanAnyPause(response.header("Retry-After"))
         }
+    }
+
+    /**
+     * Runs [RetryAfterClamp] alone on a canned 503 with [retryAfters] and hands back the Retry-After values it passes
+     * on. No server is asked and OkHttp's own Retry-After handling never sees the answer, so what is checked does not
+     * depend on how the JVM's regex reads digits.
+     */
+    private fun clamped(vararg retryAfters: String): List<String> {
+        val headers = Headers.Builder().apply { retryAfters.forEach { addUnsafeNonAscii("Retry-After", it) } }.build()
+        val canned = OkHttpClient.Builder()
+            .addInterceptor(RetryAfterClamp)
+            .addInterceptor { chain ->
+                Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1).code(503).message("busy")
+                    .headers(headers).build()
+            }
+            .build()
+        return canned.newCall(Request.Builder().url("http://piplayer.test/").build()).execute()
+            .use { it.headers.values("Retry-After") }
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("unreadableByAndroid")
+    fun `a Retry-After of digits Android's Integer valueOf cannot read is passed on as the longest it reads`(
+        @Suppress("UNUSED_PARAMETER") case: String,
+        retryAfter: String,
+    ) {
+        assertThat(clamped(retryAfter)).containsExactly(Int.MAX_VALUE.toString())
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("readableByAndroid")
+    fun `a Retry-After Android reads without throwing is passed on as the server sent it`(
+        @Suppress("UNUSED_PARAMETER") case: String,
+        retryAfter: String,
+    ) {
+        assertThat(clamped(retryAfter)).containsExactly(retryAfter)
     }
 
     @ParameterizedTest(name = "{0} with Retry-After \"{1}\"")
@@ -566,6 +599,36 @@ class HttpClientsTest {
         fun tooLongForOkHttp(): List<Arguments> =
             listOf("2147483648", "9223372036854775808", "99999999999999999999", "000000000002147483648")
                 .flatMap { value -> BUSY_CODES.map { code -> Arguments.of(code, value) } }
+
+        /** MATHEMATICAL BOLD DIGIT NINE, a decimal digit outside the BMP: two UTF-16 units, neither of them a digit. */
+        val BOLD_NINE = String(Character.toChars(0x1D7D7))
+
+        /** ADLAM DIGIT NINE, another decimal digit outside the BMP. */
+        val ADLAM_NINE = String(Character.toChars(0x1E959))
+
+        /**
+         * Android's regex (ICU) counts each of these as a run of digits, so OkHttp hands them to Integer.valueOf, which
+         * throws: past Int.MAX_VALUE, or for a digit outside the BMP, whose UTF-16 halves it cannot read, at any length.
+         */
+        @JvmStatic
+        fun unreadableByAndroid(): List<Arguments> = listOf(
+            Arguments.of("ASCII digits past Long.MAX_VALUE", "99999999999999999999"),
+            Arguments.of("20 Arabic-Indic digits", "\u0669".repeat(20)),
+            Arguments.of("one bold digit nine (U+1D7D7)", BOLD_NINE),
+            Arguments.of("a run of bold digit nines", BOLD_NINE.repeat(3)),
+            Arguments.of("one Adlam digit nine (U+1E959)", ADLAM_NINE),
+            Arguments.of("an ASCII digit before a bold digit nine", "1$BOLD_NINE"),
+        )
+
+        /** Values Android's OkHttp reads as a number it can hold, or does not take for digits at all. */
+        @JvmStatic
+        fun readableByAndroid(): List<Arguments> = listOf(
+            Arguments.of("Int.MAX_VALUE", "2147483647"),
+            Arguments.of("one Arabic-Indic digit nine", "\u0669"),
+            Arguments.of("a lone high surrogate", BOLD_NINE.substring(0, 1)),
+            Arguments.of("a bold digit nine after a letter", "x$BOLD_NINE"),
+            Arguments.of("empty", ""),
+        )
 
         /** Values OkHttp reads as not a number or as a number it can hold; none of them makes it repeat the request. */
         @JvmStatic
