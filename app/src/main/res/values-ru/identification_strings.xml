@@ -20,7 +20,7 @@
     <!-- Settings, "Identification and privacy". -->
     <string name="identification_settings_section">Распознавание и конфиденциальность</string>
     <string name="identification_online_lookups">Поиск в интернете</string>
-    <string name="identification_online_lookups_summary">Искать треки в музыкальных базах в интернете при распознавании</string>
+    <string name="identification_online_lookups_summary">Распознавать треки и загружать недостающие обложки альбомов из музыкальных баз в интернете</string>
     <string name="identification_what_is_sent">Что отправляется</string>
     <string name="identification_protected_fields">Защищённые поля</string>
     <string name="identification_protected_fields_none">Нет</string>

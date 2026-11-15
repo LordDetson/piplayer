@@ -25,7 +25,7 @@
     <!-- Settings, "Identification and privacy". -->
     <string name="identification_settings_section">Identification and privacy</string>
     <string name="identification_online_lookups">Online lookups</string>
-    <string name="identification_online_lookups_summary">Look tracks up in online music databases when identifying them</string>
+    <string name="identification_online_lookups_summary">Identify tracks and load missing album covers from online music databases</string>
     <string name="identification_what_is_sent">What is sent</string>
     <string name="identification_protected_fields">Protected fields</string>
     <string name="identification_protected_fields_none">None</string>
