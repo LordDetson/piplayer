@@ -102,6 +102,19 @@ class IdentificationServicesTest {
     }
 
     @Test
+    fun `a client that follows redirects below the gate is refused`() {
+        val error = runCatching {
+            IdentificationServices.create(
+                userAgent = TestServices.USER_AGENT,
+                gate = TestServices.openGate(),
+                connectivity = TestServices.FakeConnectivity(),
+                configureHttp = { followRedirects(true) },
+            )
+        }.exceptionOrNull()
+        assertThat(error).isInstanceOf(IllegalArgumentException::class.java)
+    }
+
+    @Test
     fun `no client sends anything while the gate is closed`() = runTest {
         val services = services(gate = InMemoryOnlineGate())
         assertThat(runCatching { services.musicBrainz.searchRecordings(query, 25) }.exceptionOrNull())

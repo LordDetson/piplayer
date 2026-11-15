@@ -57,11 +57,14 @@ class IdentificationServices(
 ) {
 
     init {
+        // OkHttp's own redirects would run below GateInterceptor, so a hop's host would be looked up before the gate.
         require(
             http.interceptors.any { it is GateInterceptor && it.gate === gate } &&
-                http.networkInterceptors.any { it is HopGate && it.gate === gate },
+                http.networkInterceptors.any { it is HopGate && it.gate === gate } &&
+                !http.followRedirects,
         ) {
-            "The HTTP client must check the services' own online gate on every hop (HttpClients.create)"
+            "The HTTP client must check the services' own online gate on every hop and follow redirects only through " +
+                "it (HttpClients.create)"
         }
     }
 
@@ -104,7 +107,7 @@ class IdentificationServices(
 
         /**
          * Services whose HTTP client checks the same [gate]. [configureHttp] adjusts the client, for example to trust a
-         * test server's certificate.
+         * test server's certificate; it may not take out the gate checks or turn on OkHttp's own redirects.
          */
         fun create(
             userAgent: String,
