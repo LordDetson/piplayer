@@ -962,7 +962,14 @@ ends and the next begins.
   too many (the sum of its late samples), and the two new `SessionMetadataTest` tests passed. On beta01 the ffmpeg AAC
   album lines up, the new tests pass, and every other class passes as on alpha02, among them `GaplessTest`,
   `DecodingFixturesTest`, `DecodingEdgeCasesTest`, `SessionMetadataTest`, `PlayTrackerTest`, `RestoredEndCheckTest`,
-  `PlatformQueueTest` and the playback service tests. One test needed a correction: `ExactDurationDeviceTest`
+  `PlatformQueueTest` and the playback service tests. One beta01 run failed once, on API 36: `TaggerCrashTest`,
+  which CI runs alone with no retry, found Android's exit record of `:tagger` as `REASON_SIGNALED` instead of
+  `REASON_CRASH_NATIVE` (run 43710916659). PiPlayer's own part held in that run: the read came back as a crash and
+  the file was counted once as unsafe, and `CrashEndToEndTest` got its native crash report with the tombstone. The
+  exit reason is what the system records for the death of `:tagger`, a process with native tag calls only and no
+  Media3 in it, so the failure is counted as flaky and not as a Media3 regression. With the same tagger code and Media3,
+  the test passed on both API levels in the beta01 runs before and after it (43707467930 and 43713860938), and on every alpha02 run.
+  If it fails again, it is looked into on its own. One test needed a correction: `ExactDurationDeviceTest`
   compares the walk of an MP4 cut off in the middle with what the decoder makes of it, and that fixture is AAC as
   ffmpeg writes it. The decoder now also trims the padding Media3 reports (512 samples, 11 ms) from the cut end, where
   the file holds audio rather than padding: 32 ms against a tolerance of one AAC frame (24 ms). The walk did not
