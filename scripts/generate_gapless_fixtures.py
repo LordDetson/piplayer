@@ -8,11 +8,13 @@ One continuous 12 s piece, stereo, 16-bit, computed from a formula (GaplessSigna
 
 It is split at fixed times into 5 songs, one under a second, none a whole number of any encoder's frames, and encoded as
 albums: FLAC, MP3 (LAME, variable bitrate), AAC in M4A with iTunSMPB and no edit list, Opus in Ogg (the piece computed
-at 48 kHz), and AAC as ffmpeg writes it (an edit list ending on a short last frame), a known limitation of the player.
+at 48 kHz), and AAC as ffmpeg writes it (an edit list ending on a short last frame), which Media3 trims exactly since
+1.12.0-beta01 (androidx/media#3489).
 Each file's gapless information is checked against the true length of its song; a mismatch stops the script.
 
-fixture.json records each album's files and song lengths, the MD5 of the 44.1 kHz piece (the FLAC album must play
-back as exactly that) and, for the ffmpeg AAC album, how late each song ends.
+fixture.json records each album's files and song lengths and the MD5 of the 44.1 kHz piece (the FLAC album must play
+back as exactly that). An album may also list how many samples late each song ends, for a layout the player does not
+trim exactly; none does now.
 
 The sound is synthetic, so the files carry no third-party rights. Needs ffmpeg with libmp3lame and libopus, and
 AtomicParsley. Run from the repository root: python scripts/generate_gapless_fixtures.py
@@ -188,8 +190,9 @@ def write_itunsmpb(path, size):
 
 
 def check_ffmpeg_aac(path, size):
-    """How late the song ends: Media3 takes the padding as the frames' length minus the edit's end, which ffmpeg makes
-    equal by shortening the last frame in stts, so the rest of that frame plays (docs/playback.md §8.1)."""
+    """Checks ffmpeg's layout: an edit list of the song's length and a last frame shortened in stts, so that the frames'
+    length equals the edit's end. Media3 before 1.12.0-beta01 took the padding as their difference, nothing, and played
+    the rest of the last frame, which this returns (docs/playback.md §8.1)."""
     data = path.read_bytes()
     content, _ = find(data, "moov/trak/edts/elst")
     version = data[content]
@@ -235,7 +238,7 @@ def main():
             directory = OUT / name
             directory.mkdir(parents=True)
             album = {"rate": rate, "files": [], "frames": sizes}
-            late = []
+            rest = []
             for number, (wav, size) in enumerate(zip(songs, sizes), start=1):
                 target = directory / f"{number}.{extension}"
                 ffmpeg(["-i", str(wav), *COMMON, *encoder, str(target)])
@@ -248,14 +251,13 @@ def main():
                 elif name == "aac":
                     write_itunsmpb(target, size)
                 else:
-                    late.append(check_ffmpeg_aac(target, size))
+                    rest.append(check_ffmpeg_aac(target, size))
                 album["files"].append(f"gapless/{name}/{number}.{extension}")
             if name == "flac":
                 album["md5"] = hashlib.md5(pcm.tobytes()).hexdigest()
-            if late:
-                album["late"] = late
             manifest["albums"][name] = album
-            print(name, rate, sizes, f"late {late}" if late else "", sum(p.stat().st_size for p in directory.iterdir()))
+            print(name, rate, sizes, f"rest of the last frames {rest}" if rest else "",
+                  sum(p.stat().st_size for p in directory.iterdir()))
     (OUT / "fixture.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8", newline="\n")
 
 

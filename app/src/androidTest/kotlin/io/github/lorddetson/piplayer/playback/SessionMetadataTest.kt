@@ -1,11 +1,20 @@
 package io.github.lorddetson.piplayer.playback
 
 import android.net.Uri
+import androidx.annotation.OptIn
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.analytics.AnalyticsListener
+import androidx.media3.exoplayer.audio.AudioSink
+import androidx.media3.exoplayer.source.LoadEventInfo
+import androidx.media3.exoplayer.source.MediaLoadData
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import java.io.File
+import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.atomic.AtomicInteger
 import io.github.lorddetson.piplayer.TestFiles
 import io.github.lorddetson.piplayer.library.songs.Song
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.LONG_FIXTURE
@@ -398,5 +407,128 @@ class SessionMetadataTest {
             assertThat(exo.currentPosition).isGreaterThan(before)
             assertThat(session.mediaMetadata.title.toString()).isEqualTo("New")
         }
+    }
+
+    /** What the player does for the playing item while a replacement lands (docs/playback.md §8.1). */
+    @OptIn(UnstableApi::class)
+    private class Preparations : AnalyticsListener, Player.Listener {
+        val loads = AtomicInteger()
+        val decoders = AtomicInteger()
+        val outputs = AtomicInteger()
+        val states = CopyOnWriteArrayList<Int>()
+        val transitions = CopyOnWriteArrayList<Int>()
+        val discontinuities = CopyOnWriteArrayList<Int>()
+
+        override fun onLoadStarted(
+            eventTime: AnalyticsListener.EventTime,
+            loadEventInfo: LoadEventInfo,
+            mediaLoadData: MediaLoadData,
+            retryCount: Int,
+        ) {
+            loads.incrementAndGet()
+        }
+
+        override fun onAudioDecoderInitialized(
+            eventTime: AnalyticsListener.EventTime,
+            decoderName: String,
+            initializedTimestampMs: Long,
+            initializationDurationMs: Long,
+        ) {
+            decoders.incrementAndGet()
+        }
+
+        override fun onAudioTrackInitialized(eventTime: AnalyticsListener.EventTime, config: AudioSink.AudioTrackConfig) {
+            outputs.incrementAndGet()
+        }
+
+        override fun onPlaybackStateChanged(playbackState: Int) {
+            states += playbackState
+        }
+
+        override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+            transitions += reason
+        }
+
+        override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) {
+            discontinuities += reason
+        }
+
+        /** Nothing of the item was loaded, decoded or put out again, and playback went on as it was. */
+        val none: Boolean
+            get() = loads.get() == 0 && decoders.get() == 0 && outputs.get() == 0 && states.isEmpty() &&
+                transitions.isEmpty() && discontinuities.isEmpty()
+
+        override fun toString() =
+            "loads $loads, decoders $decoders, audio outputs $outputs, states $states, transitions $transitions, " +
+                "discontinuities $discontinuities"
+    }
+
+    /** Plays [first] through the session player until it is well under way, then watches what the player does. */
+    @OptIn(UnstableApi::class)
+    private fun playingAndWatched(first: MediaItem): Pair<Preparations, Long> {
+        playFirst(first)
+        eventually("playback has started") { onMain { exo.playbackState == Player.STATE_READY && exo.isPlaying } }
+        Thread.sleep(500)
+        val watched = Preparations()
+        val before = onMain {
+            exo.addAnalyticsListener(watched)
+            exo.addListener(watched)
+            exo.currentPosition
+        }
+        return watched to before
+    }
+
+    /**
+     * The refresh of the playing item after a decision (TI §7.1, M3 step 21): new title, artist, album, length and cover
+     * URI for the same file. Media3 swaps the item without preparing it again: no new load, decoder or audio output, no
+     * state change, transition or jump, and the position runs on. Checked on every Media3 version PiPlayer moves to.
+     */
+    @OptIn(UnstableApi::class)
+    @Test
+    fun newMetadataForThePlayingItemDoesNotPrepareItAgain() {
+        val first = item(1, LONG_FIXTURE, "One")
+        val (watched, before) = playingAndWatched(first)
+        val periodBefore = onMain { exo.currentTimeline.getUidOfPeriod(exo.currentPeriodIndex) }
+        val cover = Uri.parse("content://io.github.lorddetson.piplayer.test/cover/1")
+
+        onMain {
+            session.replaceMediaItem(
+                0,
+                first.buildUpon().setMediaMetadata(
+                    MediaMetadata.Builder()
+                        .setTitle("Decided")
+                        .setArtist("Decided artist")
+                        .setAlbumTitle("Decided album")
+                        .setDurationMs(123_456)
+                        .setArtworkUri(cover)
+                        .build(),
+                ).build(),
+            )
+        }
+        Thread.sleep(1_000)
+
+        onMain {
+            assertThat(watched.none).describedAs("no new preparation: $watched").isTrue()
+            assertThat(exo.currentTimeline.getUidOfPeriod(exo.currentPeriodIndex)).describedAs("the same period")
+                .isEqualTo(periodBefore)
+            assertThat(exo.isPlaying).isTrue()
+            assertThat(exo.currentPosition).isGreaterThan(before + 500)
+            assertThat(session.mediaMetadata.title.toString()).isEqualTo("Decided")
+            assertThat(session.mediaMetadata.artworkUri).isEqualTo(cover)
+            assertThat(session.currentMediaItem?.mediaMetadata?.durationMs).isEqualTo(123_456)
+        }
+    }
+
+    /** The control of the test above: another file in the playing item's place is loaded and decoded anew. */
+    @OptIn(UnstableApi::class)
+    @Test
+    fun anotherFileInThePlayingItemsPlaceIsPreparedAgain() {
+        val first = item(1, LONG_FIXTURE, "One")
+        val other = TestFiles.copy(LONG_FIXTURE).copyTo(File(context.cacheDir, "other-file.mp3"), overwrite = true)
+        val (watched, _) = playingAndWatched(first)
+
+        onMain { session.replaceMediaItem(0, first.buildUpon().setUri(Uri.fromFile(other)).build()) }
+
+        eventually("the other file is loaded") { onMain { watched.loads.get() > 0 } }
     }
 }

@@ -25,8 +25,8 @@ import org.junit.runners.Parameterized
 /**
  * Every album of the gapless fixture plays as the piece it was cut from (docs/playback.md §8.1, §8.3): the joins line
  * up to the sample, the FLAC album bit for bit, one audio output serves it and every song change is automatic. The AAC
- * that ffmpeg writes is a known limitation: each song ends late by the rest of its last frame, as fixture.json says.
- * The player is the service's, with its output copied after trimming.
+ * that ffmpeg writes lines up too since Media3 1.12.0-beta01 (androidx/media#3489); before, each song ended late by the
+ * rest of its last frame. The player is the service's, with its output copied after trimming.
  */
 @OptIn(UnstableApi::class)
 @RunWith(Parameterized::class)

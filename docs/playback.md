@@ -1,9 +1,9 @@
 # Playback
 
 How PiPlayer plays music: the playback service, its media session and the player inside it. This is the specification
-of milestone M1 (features.md); each step of M1 adds its section. Facts about Media3 refer to version 1.12.0-alpha02,
-the version PiPlayer builds with; sections 1 to 7 were written on 1.11.1 and their checks pass on it and on the
-1.12.0 alphas.
+of milestone M1 (features.md); each step of M1 adds its section. Facts about Media3 refer to version 1.12.0-beta01,
+the version PiPlayer builds with; sections 1 to 7 were written on 1.11.1 and their checks pass on it, on the 1.12.0
+alphas and on 1.12.0-beta01.
 
 ## 1. Service and session (M1 step 1)
 
@@ -932,24 +932,41 @@ ends and the next begins.
 - Per format:
     - MP3: the LAME (Xing or Info) tag, which LAME and ffmpeg write, or iTunSMPB. An MP3 with neither gets nothing
       trimmed.
-    - AAC in MP4 or M4A: iTunSMPB, as iTunes writes it, or an edit list. AAC encoded by ffmpeg is a known limitation:
-      ffmpeg ends its edit list with a short last frame, and Media3 takes the padding as the frames' length minus the
-      edit's end, which comes to nothing, so the rest of the last frame plays (0 to 1023 samples, up to 23 ms at each
-      join).
+    - AAC in MP4 or M4A: iTunSMPB, as iTunes writes it, or an edit list, also the one ffmpeg writes, which ends on a
+      last frame shortened to the song's end. Media3 before 1.12.0-beta01 took the padding of that layout as the
+      frames' length minus the edit's end, which comes to nothing, so the rest of the last frame played (0 to 1023
+      samples, up to 23 ms at each join); 1.12.0-beta01 trims it exactly (androidx/media#3489, reported by PiPlayer).
     - Raw AAC (ADTS) carries no gapless information: each join keeps the encoder's delay and padding.
     - FLAC and WAV: nothing to trim.
     - Opus in Ogg: the pre-skip, and the end of the last page.
 - The last song's padding is trimmed too.
 - A song with another sample rate or channel layout than the one before it gets a new audio output, which Media3 fades
   in over 20 ms: a short gap. Within an album in one format and rate this does not happen.
-- Media3 1.11 shifted every join of an MP3 with a LAME tag by 529 samples and kept the end of every Opus song; PiPlayer
-  uses 1.12.0-alpha02 (1.12.0-alpha01 fixed both), and moves to 1.12.0 once it is stable, before its first public
-  release.
-- M2a closed on 1.12.0-alpha02: on 08.11.2026 the Maven repository had no 1.12.0 beta, release candidate or stable
-  release (the newest version was alpha02, of 26.10.2026). The move to the stable 1.12 is a separate commit with an
-  A/B run of `GaplessTest` and `ScreenOffGaplessTest` (the old and the new version's journals compared, as for
-  alpha01 to alpha02), and it is required before the first public 0.x pre-release; a beta or release candidate that
-  comes first may be taken the same way, each in its own commit.
+- Media3 1.11 shifted every join of an MP3 with a LAME tag by 529 samples and kept the end of every Opus song
+  (1.12.0-alpha01 fixed both). PiPlayer uses 1.12.0-beta01 and moves to 1.12.0 once it is stable, before its first
+  public release.
+- The Media3 version rule: each move (an alpha, a beta, a release candidate, the stable release) is its own commit
+  with an A/B run. The full instrumented suite runs on CI on API 30 and 36 with the old and the new version and is
+  compared class by class, flaky reruns included; the quiet timing pass and `ScreenOffGaplessTest` (opt-in, it turns
+  the screen off) run on a local emulator, their journals compared. A test that pins a Media3 behaviour (the AAC from
+  ffmpeg, an in-place replacement below, the restored items of §4.4) is reviewed when it turns red, and the move stays
+  out of `main` while anything regresses that PiPlayer cannot fix safely.
+- Versions: M1 moved from 1.11.1 to 1.12.0-alpha01, and alpha01 to alpha02 kept the journals of `GaplessTest` and
+  `ScreenOffGaplessTest` byte for byte. M2a and M2b closed on 1.12.0-alpha02. M3 step 8 (15.11.2026) moved to
+  1.12.0-beta01 (of 11.11.2026). Rollback: `media3` in `gradle/libs.versions.toml` back to 1.12.0-alpha02,
+  and the late samples of the ffmpeg AAC album back into `fixture.json` (the generator prints them as the rest of
+  the last frames).
+- A queue item replaced in place with new metadata for the same file (title, artist, album, length, cover URI) is not
+  prepared again: no new load, decoder or audio output, no state change, song change or jump, and the position runs
+  on. `SessionMetadataTest` checks it on each version, because the refresh after a decision (track-identification.md
+  §7.1) relies on it.
+- After the system restarts the service with no intent and no session added yet, Media3 since 1.12.0-beta01 asks
+  `onGetSession` itself, with a placeholder controller marked as crash recovery, and adds the session
+  (androidx/media#3490, reported by PiPlayer). PiPlayer adds its session as soon as it builds it (§2.3), so its
+  session list is never empty there and that path does not run; `onConnect` never sees the placeholder, which only
+  `onGetSession` gets, and `onGetSession` returns the one session for any controller. The own early add stays:
+  `PlatformQueueTest` checks the platform session's queue with it, and dropping it would need a test of a real sticky
+  restart, which an instrumented test cannot cause.
 
 ### 8.2 The fixture
 
@@ -958,8 +975,8 @@ ends and the next begins.
   sample; on the right a falling sweep and a low tone.
 - It is split at fixed times into 5 songs, one under a second, none a whole number of any encoder's frames (576, 1024,
   1152, 960 samples) or FLAC blocks, and encoded as albums: FLAC, MP3 (LAME, variable bitrate), AAC in M4A with
-  iTunSMPB and no edit list, Opus in Ogg (the piece computed at 48 kHz), and AAC as ffmpeg writes it, the known
-  limitation.
+  iTunSMPB and no edit list, Opus in Ogg (the piece computed at 48 kHz), and AAC as ffmpeg writes it (an edit list
+  ending on a shortened last frame).
 - `scripts/generate_gapless_fixtures.py` makes the albums and checks each file's gapless information against the true
   length of its song (the LAME tag, iTunSMPB, the edit list and frame table, STREAMINFO, the pre-skip and last
   granule). The files (1.5 MB) are in the repository like the other fixtures.
@@ -972,11 +989,11 @@ player with its output copied after trimming:
 - The left channel lines up with the piece to the sample: in windows of 4096 samples before and after every join and
   at both ends, the best match with the formula is at an offset of 0 (searched 1100 samples either way).
 - The FLAC album is the piece bit for bit (MD5).
-- Exactly the piece comes out (AAC from ffmpeg: with its late samples, the last song's included), one audio output
+- Exactly the piece comes out, one audio output
   serves the album, and every song change is automatic. On the phone no underrun; the emulators only log underruns,
   which their host's audio causes.
-- AAC from ffmpeg: each join is late by exactly the rest of the song's last frame. The test fails once Media3 changes
-  this, so that this section is updated.
+- AAC from ffmpeg lines up like the others. On Media3 before 1.12.0-beta01 each join was late by exactly the rest of
+  the song's last frame, and the test held that until the fix arrived.
 
 A debug build keeps an audio journal (`files/debug/audio-journal.txt`): the decoders, each new audio output, every
 song change and every underrun. Through the service with its default settings, the FLAC album plays through with

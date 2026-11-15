@@ -11,8 +11,9 @@ import org.json.JSONObject
 
 /**
  * An album of the gapless fixture (docs/playback.md §8.2), made by scripts/generate_gapless_fixtures.py: one continuous
- * piece cut into songs of [frames] samples at [rate]. [late] says how many samples late each song ends (the AAC that
- * ffmpeg writes, a known limitation); [md5] is the piece's own audio, which a lossless album reproduces.
+ * piece cut into songs of [frames] samples at [rate]. [late] says how many samples late each song ends, for a layout
+ * the player does not trim exactly (none since Media3 1.12.0-beta01, docs/playback.md §8.1); [md5] is the piece's own
+ * audio, which a lossless album reproduces.
  */
 class GaplessAlbum(
     val name: String,
