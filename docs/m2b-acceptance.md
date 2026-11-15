@@ -100,7 +100,9 @@ matters: the measurements empty the debug build's user data, so they come first.
      profiler;
    - step 4: the app opened after a force stop shows the paused queue, play from the lock screen and from a Bluetooth
      device, the headset buttons after process death, and a foreign start of the service sent with `adb` while
-     playback is unaffected;
+     playback is unaffected (15.11.2026: an unknown action and a media button without a key, sent with
+     `am start-foreground-service` and `am startservice`, left playback PLAYING and the process running; the same
+     unknown action while paused caused no crash or exit);
    - step 5: "Open with" from Files while a song plays, several files at once, a file while PiPlayer is in the
      background, a force stop and reopening, and a file whose temporary grant has expired;
    - step 6: a 5-minute sleep timer with the screen off, its fade by ear also during a navigation prompt and over
