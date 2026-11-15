@@ -8,6 +8,7 @@ import android.system.ErrnoException
 import android.system.Os
 import android.system.OsConstants
 import io.github.lorddetson.piplayer.BuildConfig
+import io.github.lorddetson.piplayer.identification.FingerprintStage
 import io.github.lorddetson.piplayer.identification.IdentificationServices
 import io.github.lorddetson.piplayer.identification.ProviderBaseUrls
 import io.github.lorddetson.piplayer.identification.fingerprint.FingerprintResult
@@ -42,8 +43,8 @@ object SpikeServices {
     @Volatile
     private var services: IdentificationServices? = null
 
-    /** True when the build carries an AcoustID application key (local.properties, never git). */
-    val hasAcoustIdKey: Boolean get() = BuildConfig.ACOUSTID_API_KEY.isNotBlank()
+    /** True when the spike's services can look fingerprints up: the build carries an AcoustID application key. */
+    fun hasAcoustIdKey(context: Context): Boolean = services(context).fingerprintStage is FingerprintStage.Available
 
     fun services(context: Context): IdentificationServices = services ?: synchronized(this) {
         services ?: create(UserAgent.forBuild(), AndroidConnectivity(context), BuildConfig.ACOUSTID_API_KEY)
@@ -73,23 +74,28 @@ object SpikeServices {
     suspend fun run(context: Context, file: SpikeFile, onStage: (SpikeStage) -> Unit): SpikeReport =
         SpikeGate.open().use { spike(context).run(file, onStage) }
 
-    /** The spike over the app's build: its AcoustID key and the native fingerprinting. Open [SpikeGate] to run it. */
+    /** The spike over the app's build: its services and the native fingerprinting. Open [SpikeGate] to run it. */
     fun spike(context: Context): IdentificationSpike {
         val calculator = NativeFingerprinting.calculator()
-        return spike(services(context), BuildConfig.ACOUSTID_API_KEY) { source -> calculator.fingerprint(source) }
+        return spike(services(context)) { source -> calculator.fingerprint(source) }
     }
 
-    /** The spike over [services]; the AcoustID stage is skipped when [apiKey] is blank. */
+    /**
+     * The spike over [services]. Its AcoustID stage follows [IdentificationServices.fingerprintStage], as stage 3 of the
+     * app will: skipped when the services have no key.
+     */
     fun spike(
         services: IdentificationServices,
-        apiKey: String,
         fingerprinter: suspend (PcmSource) -> FingerprintResult,
     ): IdentificationSpike {
         val musicBrainz = services.musicBrainz
         val search = RecordingSearch { query ->
             musicBrainz.searchRecordings(query.query, query.limit).recordings.map { it.toCandidate() }
         }
-        val acoustId = apiKey.takeIf { it.isNotBlank() }?.let { key -> AcoustIdLookup(services.acoustId(key)::lookup) }
+        val acoustId = when (val stage = services.fingerprintStage) {
+            is FingerprintStage.Available -> AcoustIdLookup(stage.acoustId::lookup)
+            is FingerprintStage.Unavailable -> null
+        }
         return IdentificationSpike(fingerprinter, acoustId, TextSearch(search))
     }
 }

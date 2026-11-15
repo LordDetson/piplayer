@@ -64,9 +64,9 @@ class SpikeServicesWiringTest {
             baseUrls = TestServices.baseUrls(acoustIdServer.url("/v2/"), musicBrainzServer.url("/ws/2/")),
             timeSource = testTimeSource,
         )
-        // The spike's services know the build's key like the app's, so their stage 3 agrees with the spike.
+        // The spike takes its AcoustID stage from the services, so it agrees with their stage 3.
         assertThat(services.fingerprintStage).isInstanceOf(FingerprintStage.Available::class.java)
-        return SpikeServices.spike(services, key, fingerprinter)
+        return SpikeServices.spike(services, fingerprinter)
     }
 
     @Test
@@ -83,6 +83,27 @@ class SpikeServicesWiringTest {
         assertThat(log.to("${musicBrainzServer.hostName}:${musicBrainzServer.port}")).isNotEmpty()
         assertThat(log.entries.map { it.userAgent }).containsOnly(TestServices.USER_AGENT)
         assertThat(SpikeGate.isOpen()).isFalse()
+    }
+
+    @Test
+    fun `the spike skips AcoustID when the services have no key`() = runTest {
+        val log = RecordingRequestLog { testScheduler.currentTime }
+        acoustIdServer.dispatcher = log.wrap(FakeAcoustId())
+        musicBrainzServer.dispatcher = log.wrap(FakeMusicBrainz())
+        val services = SpikeServices.create(
+            userAgent = TestServices.USER_AGENT,
+            connectivity = TestServices.FakeConnectivity(),
+            acoustIdApiKey = "",
+            baseUrls = TestServices.baseUrls(acoustIdServer.url("/v2/"), musicBrainzServer.url("/ws/2/")),
+            timeSource = testTimeSource,
+        )
+        assertThat(services.fingerprintStage).isInstanceOf(FingerprintStage.Unavailable::class.java)
+
+        val report = SpikeGate.open().use { SpikeServices.spike(services, fingerprinter).run(File) }
+
+        assertThat(report.acoustId).isEqualTo(StageOutcome.Skipped(SkipReason.NO_API_KEY))
+        assertThat(log.to("${acoustIdServer.hostName}:${acoustIdServer.port}")).isEmpty()
+        assertThat((report.textSearch as StageOutcome.Done).value.candidates).isNotEmpty()
     }
 
     @Test

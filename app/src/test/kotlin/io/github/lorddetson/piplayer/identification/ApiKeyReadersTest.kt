@@ -28,6 +28,19 @@ class ApiKeyReadersTest {
     }
 
     @Test
+    fun `shipped code gets an AcoustID client only from the services' fingerprint stage`() {
+        // The key enters through the services' constructor, so a build without one has no way to send to AcoustID and
+        // every caller agrees with IdentificationServices.fingerprintStage (TI §9).
+        val makers = SHIPPED_SOURCE_SETS
+            .flatMap { set -> File(set).walkTopDown().filter { it.isFile && it.extension in setOf("kt", "java") } }
+            .filter { file -> CLIENT_MAKERS.containsMatchIn(file.readText()) }
+            .map { it.invariantSeparatorsPath }
+        assertThat(makers).containsExactly(
+            "src/main/kotlin/io/github/lorddetson/piplayer/identification/IdentificationServices.kt",
+        )
+    }
+
+    @Test
     fun `the crash reports never read build fields beyond the version and the build type`() {
         val fields = File("src/main/kotlin/io/github/lorddetson/piplayer/crash").walkTopDown()
             .filter { it.isFile && it.extension == "kt" }
@@ -42,6 +55,9 @@ class ApiKeyReadersTest {
 
         /** The BuildConfig field and the names the key travels under. */
         val KEY_NAMES = Regex("""ACOUSTID_API_KEY|\bapiKey\b|\bacoustIdApiKey\b""")
+
+        /** A call that makes an AcoustID client: its constructor, or the services' factory with a key of its own. */
+        val CLIENT_MAKERS = Regex("""(?<!class )\bAcoustIdClient\s*\(|\.acoustId\s*\(""")
 
         val BUILD_CONFIG_FIELD = Regex("""BuildConfig\.([A-Z_]+)""")
     }

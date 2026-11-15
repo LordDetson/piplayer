@@ -30,6 +30,20 @@ class UserAgentTest {
     }
 
     @Test
+    fun `rejects a version name with separators, which would not make one product token`() {
+        // RFC 9110 tchar: a product version may not carry ( ) / ; , " or the other separators.
+        for (version in listOf("0.1(rc)", "1/2", "0.1;x", "0.1,2", "0.1\"x", "0.1[x]", "0.1{x}", "0.1@x", "0.1=x")) {
+            assertThatThrownBy { UserAgent.of(version) }.isInstanceOf(IllegalArgumentException::class.java)
+        }
+    }
+
+    @Test
+    fun `accepts every token character in the version name`() {
+        assertThat(UserAgent.of("0.1.0-rc_1+b.2~x!#\$%&'*^`|"))
+            .isEqualTo("PiPlayer/0.1.0-rc_1+b.2~x!#\$%&'*^`| ( https://github.com/LordDetson/piplayer )")
+    }
+
+    @Test
     fun `the build's User-Agent carries its version name and the contact from BuildConfig`() {
         assertThat(UserAgent.forBuild())
             .isEqualTo("PiPlayer/${BuildConfig.VERSION_NAME} ( ${BuildConfig.CONTACT_URL} )")

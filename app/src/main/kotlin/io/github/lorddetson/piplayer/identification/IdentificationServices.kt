@@ -1,6 +1,7 @@
 package io.github.lorddetson.piplayer.identification
 
 import android.content.Context
+import androidx.annotation.VisibleForTesting
 import io.github.lorddetson.piplayer.PiPlayerApplication
 import io.github.lorddetson.piplayer.identification.acoustid.AcoustIdClient
 import io.github.lorddetson.piplayer.identification.musicbrainz.MusicBrainzClient
@@ -110,8 +111,13 @@ class IdentificationServices(
         }
     }
 
-    /** An AcoustID client with an application key (TI §9), sharing the AcoustID limiter and stop. */
-    fun acoustId(apiKey: String): AcoustIdClient = AcoustIdClient(
+    /**
+     * An AcoustID client with an application key (TI §9), sharing the AcoustID limiter and stop. Shipped code takes its
+     * client from [fingerprintStage] only, so the key enters through the constructor and no caller can skip the
+     * no-key state; tests of this module may still make one with a key of their own (ApiKeyReadersTest).
+     */
+    @VisibleForTesting(otherwise = VisibleForTesting.PRIVATE)
+    internal fun acoustId(apiKey: String): AcoustIdClient = AcoustIdClient(
         http = http,
         limiter = limiter(ProviderId.ACOUSTID),
         retryPolicy = retryPolicy,

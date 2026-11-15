@@ -28,6 +28,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboard
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
@@ -47,6 +48,7 @@ fun SpikeScreen(onClose: () -> Unit, viewModel: SpikeViewModel = viewModel()) {
         uri?.let(viewModel::identify)
     }
     val clipboard = LocalClipboard.current
+    val hasAcoustIdKey = SpikeServices.hasAcoustIdKey(LocalContext.current)
     val scope = rememberCoroutineScope()
 
     Surface(modifier = Modifier.fillMaxSize()) {
@@ -66,7 +68,7 @@ fun SpikeScreen(onClose: () -> Unit, viewModel: SpikeViewModel = viewModel()) {
                 TextButton(onClick = onClose) { Text(stringResource(R.string.spike_close)) }
             }
             Text(stringResource(R.string.spike_explanation), style = MaterialTheme.typography.bodyMedium)
-            if (!SpikeServices.hasAcoustIdKey) {
+            if (!hasAcoustIdKey) {
                 Text(
                     stringResource(R.string.spike_no_key),
                     style = MaterialTheme.typography.bodyMedium,
