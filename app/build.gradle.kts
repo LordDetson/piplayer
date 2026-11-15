@@ -40,6 +40,28 @@ require(contactUrl.matches(Regex("""[!#-'*-\[\]-~]+"""))) {
         "'$contactUrl'"
 }
 
+/**
+ * -Ppiplayer.minifiedTests=true runs the instrumented tests against the `benchmark` build, the release build with R8
+ * signed with the debug key, instead of the debug build (TI §11.2, M3 step 7), so that MinifiedClientsTest checks the
+ * identification clients under R8 without a self-test inside the app. AGP tests a minified build as it is: the test APK
+ * is processed against the app's mapping, and app code that only tests call must be kept by rules of the run's own
+ * ([minifiedTestRules] for the app, benchmark only; proguard-minified-test-apk.pro for the test APK). The test APK holds
+ * only [minifiedTestSources]: the other instrumented tests use debug-only classes and test the debug build. A local run
+ * on the emulator, never on CI; the install tasks serve every connected device, so ANDROID_SERIAL names the emulator:
+ *
+ * ```
+ * ANDROID_SERIAL=<emulator> gradlew :app:installBenchmark :app:installBenchmarkAndroidTest -Ppiplayer.minifiedTests=true
+ * python <main folder>/tools/instrumented/run_instrumented.py <emulator> MinifiedClientsTest --no-install
+ * ```
+ */
+val minifiedTests: Boolean = providers.gradleProperty("piplayer.minifiedTests").map { it.toBoolean() }.getOrElse(false)
+val minifiedTestRules = "proguard-minified-tests.pro"
+val minifiedTestSources = listOf(
+    "io/github/lorddetson/piplayer/PiPlayerTestRunner.kt",
+    "io/github/lorddetson/piplayer/identification/MinifiedClientsTest.kt",
+    "io/github/lorddetson/piplayer/fakes/**",
+)
+
 val prepareRecordings = tasks.register<PrepareFingerprintSamples>("prepareRecordings") {
     manifest = rootProject.layout.projectDirectory.file("nativelib/fingerprint-samples.json")
     script = rootProject.layout.projectDirectory.file("scripts/prepare_fingerprint_samples.py")
@@ -92,8 +114,11 @@ val licenseNotices = mapOf(
 
 androidComponents {
     onVariants { variant ->
-        variant.androidTest?.sources?.assets
-            ?.addGeneratedSourceDirectory(prepareRecordings, PrepareFingerprintSamples::outputDir)
+        // The minified run's tests read no recordings, so it needs no fpcalc.
+        if (!minifiedTests) {
+            variant.androidTest?.sources?.assets
+                ?.addGeneratedSourceDirectory(prepareRecordings, PrepareFingerprintSamples::outputDir)
+        }
         val (licenses, components) = registerDependencyLicenses(
             variant.name, variant.runtimeConfiguration, layout.projectDirectory.dir("licenses"), licenseNotices, nativeLibraries,
         )
@@ -156,7 +181,16 @@ android {
             applicationIdSuffix = ".benchmark"
             signingConfig = signingConfigs.getByName("debug")
             matchingFallbacks += "release"
+            if (minifiedTests) {
+                proguardFile(minifiedTestRules)
+                testProguardFile("proguard-minified-test-apk.pro")
+            }
         }
+    }
+    if (minifiedTests) {
+        testBuildType = "benchmark"
+        // The debug run's test package, which the instrumented test helper starts (with --no-install).
+        defaultConfig.testApplicationId = "io.github.lorddetson.piplayer.test"
     }
 
     sourceSets {
@@ -263,4 +297,12 @@ dependencies {
     androidTestImplementation(libs.androidx.sqlite.framework)
     androidTestImplementation(libs.room3.testing)
     kspAndroidTest(libs.room3.compiler)
+}
+
+// The minified run compiles only the tests written for it ([minifiedTests]); the list replaces the compiler's own
+// patterns (every .kt and .java file), which an added include would only extend.
+if (minifiedTests) {
+    tasks.matching { it.name == "compileBenchmarkAndroidTestKotlin" }.configureEach {
+        (this as PatternFilterable).setIncludes(minifiedTestSources)
+    }
 }
