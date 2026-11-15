@@ -14,6 +14,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.first
@@ -135,8 +136,8 @@ class IdentificationSettingsTest {
         assertThat(file.data.first()[intPreferencesKey("disclosure_version")]).isEqualTo(current)
     }
 
-    @Test
-    fun `a turn-off cancelled before its write keeps the gate closed until Enable is stored`() = runBlocking<Unit> {
+    /** A gate whose next write is cancelled before it reaches the file, as when its caller goes away. */
+    private suspend fun gateWithACancelledTurnOff(): DataStoreOnlineGate = coroutineScope {
         val writing = CompletableDeferred<Unit>()
         var hold = false
         val held = object : DataStore<Preferences> by file {
@@ -156,13 +157,78 @@ class IdentificationSettingsTest {
         val off = launch(Dispatchers.Default) { gate.turnOff() }
         withTimeout(5_000) { writing.await() }
         off.cancelAndJoin()
+        gate
+    }
+
+    @Test
+    fun `a turn-off cancelled before its write keeps the gate closed until Enable is stored`() = runBlocking<Unit> {
+        val gate = gateWithACancelledTurnOff()
 
         // The file still says on, but the user asked for off: closed rather than open by accident.
         assertThat(file.data.first()[booleanPreferencesKey("online_lookups_enabled")]).isTrue()
         assertThat(gate.isOpen()).isFalse()
+        assertThat(gate.open.first()).isFalse()
 
         gate.enable()
         assertThat(gate.isOpen()).isTrue()
+    }
+
+    @Test
+    fun `after a cancelled turn-off the gate follows the file again once it says off`() = runBlocking<Unit> {
+        val gate = gateWithACancelledTurnOff()
+
+        // For example a restore: first the file says off, then on again with the current disclosure.
+        IdentificationSettings(file).turnOff()
+        IdentificationSettings(file).enable()
+
+        eventually { gate.isOpen() }
+    }
+
+    @Test
+    fun `the open flow follows the gate, also while a turn-off is being written`() = runBlocking<Unit> {
+        val writing = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        var hold = false
+        val held = object : DataStore<Preferences> by file {
+            override suspend fun updateData(transform: suspend (t: Preferences) -> Preferences): Preferences {
+                if (hold) {
+                    writing.complete(Unit)
+                    release.await()
+                }
+                return file.updateData(transform)
+            }
+        }
+        val gate = gate(IdentificationSettings(held))
+        gate.awaitLoaded()
+        assertThat(gate.open.first()).isFalse()
+
+        gate.enable()
+        assertThat(gate.open.first()).isTrue()
+
+        hold = true
+        val off = async(Dispatchers.Default) { gate.turnOff() }
+        withTimeout(5_000) { writing.await() }
+        assertThat(gate.open.first()).isFalse()
+        release.complete(Unit)
+        withTimeout(5_000) { off.await() }
+        assertThat(gate.open.first()).isFalse()
+    }
+
+    @Test
+    fun `a settings file that cannot be read is read again`() = runBlocking<Unit> {
+        IdentificationSettings(file).enable()
+        var reads = 0
+        val flaky = object : DataStore<Preferences> by file {
+            override val data: Flow<Preferences> = flow {
+                if (reads++ == 0) throw java.io.IOException("test: the file cannot be read now")
+                emitAll(file.data)
+            }
+        }
+        val gate = gate(IdentificationSettings(flaky))
+
+        assertThat(withTimeout(5_000) { gate.awaitLoaded() }.enabled).isTrue()
+        assertThat(gate.isOpen()).isTrue()
+        assertThat(reads).isEqualTo(2)
     }
 
     @Test

@@ -18,6 +18,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -79,15 +80,24 @@ internal fun IdentificationSection(
             .semantics { heading() },
     )
     var disclosing by rememberSaveable { mutableStateOf(false) }
+    // The last answer shows until the stored state changes, so that a second tap before the first is stored reverses it
+    // instead of repeating it.
+    var shown by remember(state.lookupsOn) { mutableStateOf(state.lookupsOn) }
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
             .fillMaxWidth()
-            .toggleable(value = state.lookupsOn, role = Role.Switch) { on ->
+            .toggleable(value = shown, role = Role.Switch) { on ->
                 when {
-                    !on -> onTurnOff()
+                    !on -> {
+                        shown = false
+                        onTurnOff()
+                    }
                     state.needsDisclosure -> disclosing = true
-                    else -> onEnable()
+                    else -> {
+                        shown = true
+                        onEnable()
+                    }
                 }
             }
             .padding(horizontal = 24.dp, vertical = 12.dp),
@@ -100,12 +110,13 @@ internal fun IdentificationSection(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        Switch(checked = state.lookupsOn, onCheckedChange = null, modifier = Modifier.padding(start = 16.dp))
+        Switch(checked = shown, onCheckedChange = null, modifier = Modifier.padding(start = 16.dp))
     }
     if (disclosing) {
         DisclosureDialog(
             onEnable = {
                 disclosing = false
+                shown = true
                 onEnable()
             },
             onNotNow = {
@@ -174,6 +185,8 @@ private fun ProtectedFieldsChoice(protected: Set<ProtectedField>, onProtect: (Pr
         Text(summary, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
     if (!choosing) return
+    // As with the switch: the last taps show until the stored list changes.
+    var shown by remember(protected) { mutableStateOf(protected) }
     AlertDialog(
         onDismissRequest = { choosing = false },
         title = { Text(stringResource(R.string.identification_protected_fields)) },
@@ -185,12 +198,15 @@ private fun ProtectedFieldsChoice(protected: Set<ProtectedField>, onProtect: (Pr
                     modifier = Modifier.padding(bottom = 8.dp),
                 )
                 for (field in ProtectedField.entries) {
-                    val checked = field in protected
+                    val checked = field in shown
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .toggleable(value = checked, role = Role.Checkbox) { onProtect(field, it) }
+                            .toggleable(value = checked, role = Role.Checkbox) { protect ->
+                                shown = if (protect) shown + field else shown - field
+                                onProtect(field, protect)
+                            }
                             .padding(vertical = 8.dp),
                     ) {
                         Checkbox(checked = checked, onCheckedChange = null)

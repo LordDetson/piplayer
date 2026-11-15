@@ -13,13 +13,16 @@ import io.github.lorddetson.piplayer.library.values.LegacyEncoding
 import io.github.lorddetson.piplayer.library.values.LegacyEncodings
 import io.github.lorddetson.piplayer.settings.AppearanceSettings
 import io.github.lorddetson.piplayer.settings.HiddenFiles
-import io.github.lorddetson.piplayer.settings.IdentificationSettings
 import io.github.lorddetson.piplayer.settings.LibrarySettings
 import io.github.lorddetson.piplayer.settings.ProtectedField
 import io.github.lorddetson.piplayer.settings.ThemeMode
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
@@ -68,31 +71,45 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         viewModelScope.launch { library.setLegacyEncoding(encoding) }
     }
 
-    private val identification = IdentificationSettings(application)
     private val onlineGate = (application as PiPlayerApplication).onlineGate
-    private val services = IdentificationServices.of(application)
+    private val identification = onlineGate.settings
 
-    private val privacy: Flow<IdentificationPrivacyState> = combine(
-        identification.consent,
+    /** The choices: the switch shows the gate itself, which closes at once on off and stays closed after a failed off. */
+    private val choices: Flow<IdentificationPrivacyState> = combine(
+        onlineGate.open,
+        identification.needsDisclosure,
         identification.protectedFields,
-        services.status(ProviderId.ACOUSTID),
-        services.status(ProviderId.MUSICBRAINZ),
-        services.status(ProviderId.COVER_ART_ARCHIVE),
-    ) { consent, protectedFields, acoustId, musicBrainz, coverArtArchive ->
-        val version = identification.disclosureVersion
-        IdentificationPrivacyState(
-            lookupsOn = consent.allows(version),
-            needsDisclosure = consent.disclosureVersion < version,
-            protectedFields = protectedFields,
-            acoustId = if (services.fingerprintStage is FingerprintStage.Unavailable) ProviderState.NoKey else acoustId.shown,
-            musicBrainz = musicBrainz.shown,
-            coverArtArchive = coverArtArchive.shown,
-        )
+    ) { open, needsDisclosure, protectedFields ->
+        IdentificationPrivacyState(lookupsOn = open, needsDisclosure = needsDisclosure, protectedFields = protectedFields)
     }
 
-    /** Settings, "Identification and privacy" (TI §9). */
+    /** The providers' status, off the main thread: the first use of the services builds their HTTP client. */
+    private val providers: Flow<List<ProviderState>> = flow {
+        val services = IdentificationServices.of(application)
+        val noKey = services.fingerprintStage is FingerprintStage.Unavailable
+        emitAll(
+            combine(
+                services.status(ProviderId.ACOUSTID),
+                services.status(ProviderId.MUSICBRAINZ),
+                services.status(ProviderId.COVER_ART_ARCHIVE),
+            ) { acoustId, musicBrainz, coverArtArchive ->
+                listOf(if (noKey) ProviderState.NoKey else acoustId.shown, musicBrainz.shown, coverArtArchive.shown)
+            },
+        )
+    }.flowOn(Dispatchers.Default)
+
+    /** Settings, "Identification and privacy" (TI §9); the choices are read at once, as the other settings are. */
     val identificationPrivacy: StateFlow<IdentificationPrivacyState> =
-        privacy.stateIn(viewModelScope, SharingStarted.Eagerly, runBlocking { privacy.first() })
+        combine(choices, providers.onStart { emit(List(3) { ProviderState.Ready }) }) { state, (acoustId, musicBrainz, caa) ->
+            state.copy(acoustId = acoustId, musicBrainz = musicBrainz, coverArtArchive = caa)
+        }.stateIn(
+            viewModelScope,
+            SharingStarted.Eagerly,
+            runBlocking {
+                onlineGate.awaitLoaded()
+                choices.first()
+            },
+        )
 
     /**
      * The answers to the disclosure and the setting, through the app's gate, which closes at once on Not now and off.

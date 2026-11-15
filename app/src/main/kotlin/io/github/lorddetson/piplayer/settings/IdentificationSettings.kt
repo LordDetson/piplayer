@@ -8,18 +8,22 @@ import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import io.github.lorddetson.piplayer.net.OnlineConsent
 import io.github.lorddetson.piplayer.net.OnlineGate
-import java.util.concurrent.atomic.AtomicInteger
+import java.io.IOException
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.retryWhen
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -128,9 +132,11 @@ class IdentificationSettings(
  * it (TI §8), a change reaches calls that are already waiting.
  *
  * Changes of the consent go through [enable], [notNow] and [turnOff]. The last two close the gate at once, before the
- * write starts. A close whose write fails, as on a full disk, keeps the gate closed until an [enable] is stored.
+ * write starts. A close that may not have been stored (its write failed, as on a full disk, or was cancelled) keeps the
+ * gate closed until the file says off or an [enable] is stored, so it never opens against the user's last answer. A
+ * file that cannot be read is read again, with growing pauses; the gate keeps what it last read meanwhile.
  */
-class DataStoreOnlineGate(private val settings: IdentificationSettings, scope: CoroutineScope) : OnlineGate {
+class DataStoreOnlineGate(val settings: IdentificationSettings, scope: CoroutineScope) : OnlineGate {
 
     private val stored = MutableStateFlow<OnlineConsent?>(null)
 
@@ -138,19 +144,35 @@ class DataStoreOnlineGate(private val settings: IdentificationSettings, scope: C
     val consent: StateFlow<OnlineConsent?> = stored.asStateFlow()
 
     /** Closes that have started and whose write the gate has not seen yet. */
-    private val closing = AtomicInteger()
+    private val closing = MutableStateFlow(0)
 
-    @Volatile
-    private var closeFailed = false
+    /** A close that may not have been stored: closed until the file says off or an Enable is stored. */
+    private val closeFailed = MutableStateFlow(false)
 
     private val writes = Mutex()
 
     init {
-        scope.launch { settings.consent.collect { stored.value = it } }
+        scope.launch {
+            settings.consent
+                .retryWhen { cause, attempt ->
+                    val retry = cause is IOException
+                    if (retry) delay(READ_RETRY_PAUSE * (1 shl attempt.coerceAtMost(6).toInt()))
+                    retry
+                }
+                .collect { consent ->
+                    stored.value = consent
+                    if (!consent.enabled) closeFailed.value = false
+                }
+        }
     }
 
-    override fun isOpen(): Boolean =
-        closing.get() == 0 && !closeFailed && stored.value?.allows(settings.disclosureVersion) == true
+    override fun isOpen(): Boolean = opens(stored.value, closing.value, closeFailed.value)
+
+    /** Whether the gate is open, as Settings shows it; it changes as [isOpen] does. */
+    val open: Flow<Boolean> = combine(stored, closing, closeFailed, ::opens).distinctUntilChanged()
+
+    private fun opens(consent: OnlineConsent?, closes: Int, failed: Boolean) =
+        closes == 0 && !failed && consent?.allows(settings.disclosureVersion) == true
 
     /** Waits until the file has been read; the consent read. */
     suspend fun awaitLoaded(): OnlineConsent = stored.filterNotNull().first()
@@ -158,7 +180,10 @@ class DataStoreOnlineGate(private val settings: IdentificationSettings, scope: C
     /** The answer Enable; the gate is open when this returns, unless the write failed. */
     suspend fun enable() {
         writes.withLock {
-            if (settings.enable() && seen { it.allows(settings.disclosureVersion) }) closeFailed = false
+            if (settings.enable()) {
+                seen { it.allows(settings.disclosureVersion) }
+                closeFailed.value = false
+            }
         }
     }
 
@@ -169,19 +194,25 @@ class DataStoreOnlineGate(private val settings: IdentificationSettings, scope: C
     suspend fun turnOff() = close { settings.turnOff() }
 
     private suspend fun close(write: suspend () -> Boolean) {
-        closing.incrementAndGet()
+        closing.update { it + 1 }
         try {
             writes.withLock {
-                // Unseen (the file was changed again meanwhile) counts as failed: the gate stays closed.
-                if (!(write() && seen { !it.enabled })) closeFailed = true
+                // Stored but not seen yet: closed until the file read says off.
+                if (!write() || !seen { !it.enabled }) failClosed()
             }
         } catch (e: CancellationException) {
-            // The write may not have happened: closed until the next stored Enable, never open by accident.
-            closeFailed = true
+            // The write may not have happened.
+            failClosed()
             throw e
         } finally {
-            closing.decrementAndGet()
+            closing.update { it - 1 }
         }
+    }
+
+    private fun failClosed() {
+        closeFailed.value = true
+        // The read may have said off already, before the flag was up.
+        if (stored.value?.enabled == false) closeFailed.value = false
     }
 
     /** Whether the gate's copy reaches a consent that passes [check] within a few seconds of a write. */
@@ -190,5 +221,6 @@ class DataStoreOnlineGate(private val settings: IdentificationSettings, scope: C
 
     private companion object {
         val SEEN_TIMEOUT = 5.seconds
+        val READ_RETRY_PAUSE = 1.seconds
     }
 }

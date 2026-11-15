@@ -146,6 +146,25 @@ class IdentificationSectionTest {
     }
 
     @Test
+    fun aSecondTapBeforeTheFirstIsStoredReversesIt() {
+        // The state stays as it is, as while the writes are still on their way.
+        state = IdentificationPrivacyState(lookupsOn = false, needsDisclosure = false)
+        show()
+
+        switch().performClick()
+        switch().assertIsOn().performClick()
+        switch().assertIsOff()
+        assertThat(calls).containsExactly("enable", "off")
+
+        compose.onNodeWithText(text(R.string.identification_protected_fields)).performScrollTo().performClick()
+        compose.waitUntilExactlyOneExists(hasText(text(R.string.identification_protected_fields_explained)), timeoutMillis = 5_000)
+        val title = compose.onNode(hasText(text(R.string.identification_field_title)) and isCheckbox).performScrollTo()
+        title.performClick()
+        title.performClick()
+        assertThat(calls).containsExactly("enable", "off", "title=true", "title=false")
+    }
+
+    @Test
     fun theSectionListsWhatEachServiceReceivesWithLinksToTheirTerms() {
         show()
 
