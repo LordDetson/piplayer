@@ -10,8 +10,8 @@ plugins {
 
 /**
  * The AcoustID application key, from -Pacoustid.apiKey or acoustid.apiKey in local.properties (never in git), for every
- * build type (TI §9). Empty when neither is set: the build then has no fingerprint lookup and identifies by text search
- * only. A shipped key is not a secret, but the build never prints it.
+ * build type (TI §9). Empty when neither is set: the build then has no fingerprint lookup and identifies tracks by the
+ * other stages (known IDs, ISRC, text search). A shipped key is not a secret, but the build never prints it.
  */
 val acoustIdApiKey: String = providers.gradleProperty("acoustid.apiKey")
     .orElse(
