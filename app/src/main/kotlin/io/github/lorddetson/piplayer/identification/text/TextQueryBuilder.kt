@@ -11,10 +11,17 @@ enum class QueryVariant {
     TITLE_ARTIST,
     FUZZY_TITLE_ARTIST_DURATION,
     TITLE_DURATION,
+
+    /** The user's own text from manual search, never one of the automatic variants. */
+    MANUAL,
 }
 
 /** One MusicBrainz recording search: a Lucene query and the number of results to ask for. */
-data class RecordingQuery(val variant: QueryVariant, val query: String, val limit: Int)
+data class RecordingQuery(val variant: QueryVariant, val query: String, val limit: Int) {
+
+    /** The user's free text rather than a Lucene query: the client sends it with `dismax=true` (TI §3.3). */
+    val manual: Boolean get() = variant == QueryVariant.MANUAL
+}
 
 /**
  * Tuning switches of the text search, compared on the owner's corpus in M0.
@@ -75,6 +82,17 @@ object TextQueryBuilder {
 
     /** A featured artist at the end of a title, which MusicBrainz keeps in the artist credit. */
     private val featuredTail = Regex("""\s+\(?(?:featuring\b|feat\b\.?|ft\b\.?)\s*.*$""", RegexOption.IGNORE_CASE)
+
+    /**
+     * Free text typed into manual search (TI §3.3): one query marked as manual, with [MANUAL_LIMIT] results. The client
+     * sends it with `dismax=true`, which reads it as plain words, so it is not escaped; every kind of space becomes one
+     * plain space. Blank text gives null.
+     */
+    fun manual(text: String): RecordingQuery? {
+        val query = Spaces.plain(text).trim()
+        if (query.isEmpty()) return null
+        return RecordingQuery(QueryVariant.MANUAL, query, MANUAL_LIMIT)
+    }
 
     /** Variants that need a missing value are left out, and so is a variant identical to an earlier one. */
     fun build(

@@ -436,6 +436,12 @@ PiPlayer never adds an ID3v1 tag to a file that has none; §7.5 lists the TagLib
 
 ### 3.3 Stage 4: text search fallback
 
+- The search input (the hint) is assembled per field from stage 0 data. Title, artist and track number come from the
+  tags as decoded at stage 0 (after the legacy-encoding setting, §3.1) and, for a field the tags leave empty, from the
+  file-name guess below; the album comes from the tags only; the duration is the exact duration of stage 0 (§3.1), never
+  a tag or media index length. A tag value without a letter or digit (`-`, `?`) counts as empty, so the file name fills
+  that field. The hint's album and track number feed scoring (§4.1), not the query. The file-name parser is the same one
+  that gives precedence level 5 (§7.1), so tuning it also changes what the library shows.
 - Parse the filename (`NN - Artist - Title (Remix)`, `Artist_-_Title`, track-number prefixes, `[bitrate]` noise,
   etc.). Tag values are used as decoded at stage 0 (§3.1). The traces of video downloaders are dropped too (added in
   M0 after the owner's first files): a video ID in square brackets (`Title [dQw4w9WgXcQ]`) or joined by a hyphen
@@ -461,7 +467,17 @@ PiPlayer never adds an ID3v1 tag to a file that has none; §7.5 lists the TagLib
   variant 2 still finds. Every kind of space counts as a space: stores often put a no-break space between a song's
   name and its version ("Girlfriend", no-break space, "Radio Edit").
 - `limit=25` for automatic queries, `limit=50` for manual search. The album tag feeds scoring (§4.1), not the query.
-  Free text typed by the user goes through `dismax=true`.
+  Free text typed by the user goes through `dismax=true`: it is sent as one query marked as manual, with its spaces
+  collapsed and without Lucene escaping; blank text sends nothing.
+- A MusicBrainz link or ID pasted into manual search is not searched: it becomes a lookup. Links to a recording or a
+  release on `musicbrainz.org` or one of its subdomains (such as `beta.`), over `http` or `https` or without the scheme,
+  also `/ws/2/` links and links with a query, a fragment or more path after the ID (`/release/<mbid>/disc/1`), give a
+  recording or release lookup; the ID is compared in lower case. A bare MBID could name either, so it is looked up as a
+  recording first and then as a release. Links and IDs are also found among other pasted words, without the brackets,
+  quotes or punctuation around them; a recording or release link wins over a bare MBID, which wins over another
+  MusicBrainz link. Any other `musicbrainz.org` link (artist, release group, work, track, a search page, a malformed ID
+  or escape) is refused with a hint to paste a recording or release link, and is never sent as search text. A link to
+  another site is plain text.
 - MusicBrainz's own `score` is never shown as confidence (it is relative and full of ties).
 - The query builder is first checked in M0, on the JVM, against a list of real track titles (§11.4); the variants and
   their order are tuned there and in M3.
@@ -470,21 +486,29 @@ PiPlayer never adds an ID3v1 tag to a file that has none; §7.5 lists the TagLib
 
 ### 4.1 Recording confidence (0 to 1)
 
-Tiered, not a flat weighted sum. A candidate found by several stages takes its highest score. The weights, credits
-and penalties below are starting points, tuned in M3.
+Tiered, not a flat weighted sum. A candidate found by several stages (recordings are the same when their MusicBrainz
+recording IDs are) takes its highest score, and its reason lists every stage that found it. The weights, credits and
+penalties below are starting points, tuned in M3 on the corpus (PIM-60, §11.4).
 
 1. **Identifier tier**:
    - MusicBrainz recording ID from the file's tags, with the recording length within 7 s of the file's duration: 1.0;
+     a recording outside the window, or one whose length is unknown on either side, is scored by the similarity tier
+     instead (a copied or wrong ID would otherwise reach the high band unchecked);
    - ISRC hit with the recording length within 2 s: 0.95; if the ISRC maps to several recordings, each is scored by
-     the similarity tier instead;
+     the similarity tier instead, and so is a single recording outside the window or without a length on either side;
    - AcoustID result: its score × the duration credit; a recording without a length keeps its score (AcoustID
-     only matches fingerprints whose length is within 7 s of the file's anyway).
-2. **Similarity tier** (text search, and candidates without identifier evidence): 0.4 × title similarity + 0.3 ×
-   artist similarity + 0.2 × duration credit + 0.1 × album/track agreement, capped at 0.85, so text alone never
-   reaches the high band.
-3. **Penalties**, applied after the tier score: a duration difference over 30 s multiplies the score by 0.3; a title
-   similarity of at least 0.9 with an artist similarity below 0.5 subtracts 0.3 (only when the file has an artist).
-   Without a duration on either side there is no duration credit and no duration penalty.
+     only matches fingerprints whose length is within 7 s of the file's anyway). An AcoustID track without any linked
+     recording is not a candidate, because there is nothing to apply.
+2. **Similarity tier** (text search, and recordings of stages 1 and 2 that do not qualify for the identifier tier):
+   0.4 × title similarity + 0.3 × artist similarity + 0.2 × duration credit + 0.1 × album/track agreement, capped at
+   0.85, so text alone never reaches the high band.
+3. **Penalties**, applied after the tier score. The duration penalty applies to every tier: a duration difference over
+   30 s multiplies the score by 0.3. The title/artist penalty applies to the similarity tier only: a title similarity of
+   at least 0.9 with an artist similarity below 0.5 subtracts 0.3 (only when the file has an artist). Without a duration
+   on either side there is no duration credit and no duration penalty. Decided in M3: an identifier hit whose title or
+   artist disagrees with the file's values keeps its tier score, and the disagreement is shown in its reason instead.
+   People identify files because their tags are wrong, and a correct fingerprint of a cover version would otherwise be
+   demoted. The corpus run (PIM-60) checks this against the high-band error target.
 
 Definitions:
 
@@ -496,8 +520,24 @@ Definitions:
   brackets) are compared separately: a suffix on only one side lowers the title similarity by 0.2, two different
   suffixes by 0.2 to 0.4. A featured artist or a remaster note in brackets is not a suffix, and brackets earlier in the
   title belong to the name, as in "(Don't Fear) The Reaper".
+- Title refinement (added in M0): the whole titles, names and brackets together, are compared too, and that ratio counts
+  when it is higher, at most 0.8 (the price of a suffix on one side). It covers titles that split differently, such as
+  "Song (Part) Radio Edit", which has no trailing group, against "Song (Part)", which has one.
+- Artist refinement (added in M0): the artist similarity is the best of three ratios: the file's artist against the
+  whole credit as printed (names joined by their join phrases), against the first credited name (for names that contain
+  a separator, such as "Above & Beyond"), and the file's first artist against the first credited name (for a file that
+  lists several artists). The file's first artist is the text before the first `,`, `&`, `;` or a word `feat`, `ft` or
+  `featuring`; "Feather" stays whole.
 - Album/track agreement: 1 when a release of the candidate matches the album tag (similarity at least 0.9) and the
-  track position equals the track number tag, 0.5 when one of the two matches, 0 otherwise or without these tags.
+  track position equals the track number tag, 0.5 when one of the two matches, 0 otherwise or without these tags. The
+  track position is the position on the medium (`position` where the answer has it, otherwise the track offset + 1),
+  never the printed `number`, which can be "A4" on vinyl or continue across discs.
+
+**Reason.** Each candidate carries a structured reason, which the review card shows (§6), for example "fingerprint 0.97
+· duration ±1 s · title 92%": the stage whose tier gave the score and whether that was the identifier or the similarity
+tier, every stage that found the recording, the AcoustID score when the fingerprint found it, the duration difference
+(the recording's length minus the file's duration, unknown without both), the title and artist similarity to the
+file's values (unknown when the file has no such value), and which of the two disagree (similarity below 0.5).
 
 Bands:
 
@@ -506,6 +546,10 @@ Bands:
 | ≥ 0.90 and runner-up gap ≥ 0.10 | high | pre-selected, user taps Apply | prepared automatically, still shown in the summary before saving |
 | 0.50 to 0.90, or ≥ 0.90 with a runner-up gap below 0.10 | medium | candidate list, user picks | review queue |
 | < 0.50 | no match | "Not found" + manual search | "Needs attention" list |
+
+The runner-up gap is the best score minus the second best after merging; a single candidate's runner-up counts as 0.
+The boundaries belong to the higher band (0.90 with a gap of exactly 0.10 is high, exactly 0.50 is medium), and scores
+are compared with a tolerance of 10⁻⁹ so that floating-point rounding never moves a boundary case.
 
 Thresholds are starting points. They are tuned in M3 on the corpus (§11.4), where they drive pre-selection, and
 re-checked before release (M5); in M4a they also drive automatic preparation.
@@ -1166,7 +1210,8 @@ tests, and a high-band error rate within the threshold of §11.4.
 | M3 | Retry later: an empty AcoustID result is retried after 1 hour and once in the next batch, then counts as final; a text-search result of at least 0.50 cancels the retry |
 | M0 | Text query builder: Lucene escaping, lower-case terms, the variants of §3.3 in order, skipped variants for missing values, the stop rule and the limits |
 | M0 | PCM conversion: 8-, 16-, 24-, 32-bit and float input, stereo and 5.1 downmix, rounding and clipping to 16-bit; the fingerprint path stops at 120 s, skips the resampler at 11 025 Hz, flushes it at the end of a short file and starts a new one when the format changes |
-| M3 | Recording scoring (§4.1): identifier tiers, duration credit, the 0.85 cap for text, both penalties, and a score of at least 0.90 with a runner-up gap below 0.10 landing in the medium band |
+| M3 | Recording scoring (§4.1): identifier tiers (a tag recording ID within 7 s; an ISRC within 2 s, and the similarity tier for an ISRC with several recordings or a length outside the window; AcoustID score × duration credit), duration credit, the 0.85 cap for text, the duration penalty on every tier and the title/artist penalty on the similarity tier only, an identifier hit's disagreement shown in its reason, merging by recording with the highest score, the band boundaries, and a score of at least 0.90 with a runner-up gap below 0.10 landing in the medium band |
+| M3 | Text search input (§3.3): the hint from decoded tags, the file-name guess and the exact duration, tags winning per field; track positions from the medium, never the printed number (vinyl "A4", numbering across discs); a manual query is marked manual with limit 50; pasted MusicBrainz links and IDs become recording or release lookups, other MusicBrainz links are refused |
 | M3 | Release ranking on recorded MusicBrainz JSON fixtures (for example a track with hundreds of same-title recordings, video recordings and compilations): the folder preference, the full type order, Digital Media equal to CD, date order, a recording on two tracks of one release; fixtures stripped of CC BY-NC-SA `tags`/`genres` before committing |
 | M3 | Edition picker: every release of the group is listed; an edition without the identified recording maps the file by position and title or is marked "does not contain this song" |
 | M0 | Rate limiter: never exceeds the configured rate under parallel callers; a pause holds back waiting callers; backoff with jitter on 503, 429, 502 and 504; Retry-After honoured; a rejected User-Agent is not retried; after giving up on a Retry-After over 120 s, later calls fail at once without a request until the pause is over |

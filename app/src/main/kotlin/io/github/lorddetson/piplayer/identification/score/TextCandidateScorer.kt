@@ -7,7 +7,10 @@ import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 
-/** What is known about a file before a text search: from tags or from the parsed file name. */
+/**
+ * What is known about a file before a text search: from tags or from the parsed file name, field by field
+ * (identification/text/TrackHints.kt, TI §3.3).
+ */
 data class TrackHint(
     val title: String?,
     val artist: String?,
@@ -27,6 +30,7 @@ data class TextCandidate(
     val releases: List<CandidateRelease> = emptyList(),
 )
 
+/** A release of a candidate; [trackNumber] is the track's position on its medium, never the printed number. */
 data class CandidateRelease(val title: String, val trackNumber: Int?)
 
 data class TextScore(
@@ -37,7 +41,11 @@ data class TextScore(
     val total: Double,
 )
 
-/** Similarity tier of the recording confidence (TI §4.1) for candidates found by text search. */
+/**
+ * Similarity tier of the recording confidence (TI §4.1): for candidates found by text search, and for stage 1 and 2
+ * recordings that do not qualify for the identifier tier ([RecordingScorer]). Both penalties apply here; the
+ * title/artist one applies to this tier only.
+ */
 object TextCandidateScorer {
 
     const val TEXT_CAP = 0.85
@@ -52,10 +60,16 @@ object TextCandidateScorer {
     private val artistSeparators =
         Regex("""\s*(?:,|&|;|\bfeaturing\b|\bfeat\b\.?|\bft\b\.?)\s*""", RegexOption.IGNORE_CASE)
 
+    /** Whether [text] has a letter or digit; "-" or "<unknown>" after cleanup counts as no value. */
+    internal fun present(text: String?): Boolean = text != null && TextNormalizer.normalize(text).isNotEmpty()
+
+    /** Whether the hint has an artist to compare, which the title/artist penalty needs. */
+    internal fun hasArtist(hint: TrackHint): Boolean = present(hint.artist)
+
     fun score(hint: TrackHint, candidate: TextCandidate): TextScore {
         val title = hint.title?.let { Similarity.title(it, candidate.title) } ?: 0.0
         // An artist without letters or digits ("-", "<unknown>" after cleanup) counts as no artist.
-        val hintArtist = hint.artist?.takeIf { TextNormalizer.normalize(it).isNotEmpty() }
+        val hintArtist = hint.artist?.takeIf { hasArtist(hint) }
         val artist = hintArtist?.let { artistSimilarity(it, candidate) } ?: 0.0
         val difference = if (hint.durationMs != null && candidate.lengthMs != null) {
             hint.durationMs - candidate.lengthMs
@@ -66,10 +80,17 @@ object TextCandidateScorer {
         val albumTrack = albumTrackAgreement(hint, candidate)
 
         var total = min(TEXT_CAP, 0.4 * title + 0.3 * artist + 0.2 * durationCredit + 0.1 * albumTrack)
-        if (difference != null && abs(difference) > NO_CREDIT_MS) total *= DURATION_PENALTY_FACTOR
+        total = durationPenalty(total, difference)
         if (hintArtist != null && title >= MATCH && artist < 0.5) total -= ARTIST_PENALTY
         return TextScore(title, artist, durationCredit, albumTrack, total.coerceIn(0.0, 1.0))
     }
+
+    /**
+     * The duration penalty of TI §4.1, which applies to every tier: a difference over 30 s multiplies [score] by 0.3;
+     * without a difference there is none.
+     */
+    internal fun durationPenalty(score: Double, differenceMs: Long?): Double =
+        if (differenceMs != null && abs(differenceMs) > NO_CREDIT_MS) score * DURATION_PENALTY_FACTOR else score
 
     /** 1 up to a difference of 2 s, falling linearly to 0 at 30 s. */
     fun durationCredit(differenceMs: Long): Double {

@@ -1,5 +1,7 @@
 package io.github.lorddetson.piplayer.identification.acoustid
 
+import io.github.lorddetson.piplayer.identification.score.CandidateRelease
+import io.github.lorddetson.piplayer.identification.score.TextCandidate
 import io.github.lorddetson.piplayer.identification.score.TextCandidateScorer
 import kotlin.math.roundToLong
 
@@ -18,7 +20,25 @@ data class AcoustIdCandidate(
     /** Titles of the release groups the recording appears on, in AcoustID's order. */
     val releaseGroups: List<String>,
     val confidence: Double,
+    /** Each credited name in AcoustID's order, for the artist comparison (TI §4.1). */
+    val artistNames: List<String> = emptyList(),
 )
+
+/**
+ * The candidate as a recording for the combined scorer (TI §4.1), or null for an AcoustID track without a recording,
+ * which has nothing to apply. A recording AcoustID knows only by its ID gets an empty title and credit. Release groups
+ * carry no track positions.
+ */
+fun AcoustIdCandidate.toTextCandidate(): TextCandidate? = recordingId?.let { id ->
+    TextCandidate(
+        recordingId = id,
+        title = title.orEmpty(),
+        artistCredit = artistCredit.orEmpty(),
+        artistNames = artistNames,
+        lengthMs = lengthMs,
+        releases = releaseGroups.map { CandidateRelease(it, null) },
+    )
+}
 
 /** Turns an AcoustID answer into candidates. */
 object AcoustIdCandidates {
@@ -63,6 +83,7 @@ object AcoustIdCandidates {
             lengthMs = lengthMs,
             releaseGroups = recording.releaseGroups.mapNotNull { it.title },
             confidence = result.score * credit,
+            artistNames = recording.artists.map { it.name }.filter { it.isNotEmpty() },
         )
     }
 }

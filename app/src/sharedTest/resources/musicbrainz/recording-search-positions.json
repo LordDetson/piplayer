@@ -1,0 +1,62 @@
+{
+  "created": "2026-11-15T12:00:00.000Z",
+  "count": 1,
+  "offset": 0,
+  "recordings": [
+    {
+      "id": "c1c1c1c1-1111-4111-8111-111111111111",
+      "score": 100,
+      "title": "Night Ferry",
+      "length": 251000,
+      "artist-credit": [
+        {"name": "The Quiet Harbors", "artist": {"id": "22222222-2222-4222-8222-222222222222", "name": "The Quiet Harbors"}}
+      ],
+      "releases": [
+        {
+          "id": "c2c2c2c2-2222-4222-8222-222222222222",
+          "title": "Night Ferry",
+          "status": "Official",
+          "track-count": 8,
+          "media": [
+            {
+              "position": 1,
+              "format": "12\" Vinyl",
+              "track-count": 8,
+              "track-offset": 3,
+              "track": [{"id": "c3c3c3c3-3333-4333-8333-333333333333", "number": "A4", "title": "Night Ferry"}]
+            }
+          ]
+        },
+        {
+          "id": "c4c4c4c4-4444-4444-8444-444444444444",
+          "title": "Night Ferry (Deluxe)",
+          "status": "Official",
+          "track-count": 24,
+          "media": [
+            {
+              "position": 2,
+              "format": "CD",
+              "track-count": 12,
+              "track-offset": 1,
+              "track": [{"id": "c5c5c5c5-5555-4555-8555-555555555555", "number": "14", "title": "Night Ferry"}]
+            }
+          ]
+        },
+        {
+          "id": "c6c6c6c6-6666-4666-8666-666666666666",
+          "title": "Harbor Sessions",
+          "status": "Official",
+          "track-count": 10,
+          "media": [
+            {
+              "position": 1,
+              "format": "Digital Media",
+              "track-count": 10,
+              "track": [{"id": "c7c7c7c7-7777-4777-8777-777777777777", "number": "7", "position": 6, "title": "Night Ferry"}]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

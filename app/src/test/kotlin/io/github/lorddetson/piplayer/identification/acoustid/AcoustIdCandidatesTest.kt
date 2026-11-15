@@ -97,6 +97,33 @@ class AcoustIdCandidatesTest {
     }
 
     @Test
+    fun `a candidate keeps each credited name for the artist comparison`() {
+        val best = AcoustIdCandidates.from(fixture, fileDurationMs = 214_000)[0]
+        assertThat(best.artistNames).containsExactly("The Quiet Harbors", "Mira Vale")
+    }
+
+    @Test
+    fun `a candidate with a recording becomes a recording for scoring, one without does not`() {
+        val candidates = AcoustIdCandidates.from(fixture, fileDurationMs = 214_000)
+        val recording = candidates[0].toTextCandidate()!!
+        assertThat(recording.recordingId).isEqualTo("b0e4d1f2-1111-4111-8111-000000000001")
+        assertThat(recording.title).isEqualTo("Paper Lanterns")
+        assertThat(recording.artistCredit).isEqualTo("The Quiet Harbors feat. Mira Vale")
+        assertThat(recording.artistNames).containsExactly("The Quiet Harbors", "Mira Vale")
+        assertThat(recording.lengthMs).isEqualTo(214_400)
+        // AcoustID's release groups carry no track positions.
+        assertThat(recording.releases.map { it.title }).containsExactly("Harbor Lights", "Quiet Songs")
+        assertThat(recording.releases.map { it.trackNumber }).containsOnlyNulls()
+
+        val idOnly = candidates.single { it.recordingId?.endsWith("3") == true }.toTextCandidate()!!
+        assertThat(idOnly.title).isEmpty()
+        assertThat(idOnly.artistCredit).isEmpty()
+        assertThat(idOnly.artistNames).isEmpty()
+
+        assertThat(candidates.single { it.recordingId == null }.toTextCandidate()).isNull()
+    }
+
+    @Test
     fun `an empty answer gives no candidates`() {
         assertThat(AcoustIdCandidates.from(AcoustIdResponse("ok"), 200_000)).isEmpty()
     }

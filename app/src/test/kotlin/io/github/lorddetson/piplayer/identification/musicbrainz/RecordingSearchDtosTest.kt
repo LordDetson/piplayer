@@ -1,6 +1,8 @@
 package io.github.lorddetson.piplayer.identification.musicbrainz
 
 import io.github.lorddetson.piplayer.identification.score.CandidateRelease
+import io.github.lorddetson.piplayer.identification.score.TextCandidateScorer
+import io.github.lorddetson.piplayer.identification.score.TrackHint
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 
@@ -75,6 +77,36 @@ class RecordingSearchDtosTest {
         assertThat(recording.artistCredit.single().joinphrase).isEmpty()
         assertThat(recording.releases).isEmpty()
         assertThat(recording.isrcs).isEmpty()
+    }
+
+    @Test
+    fun `a candidate's track is its position on the medium, never the printed number`() {
+        val positions = MusicBrainzJson.decodeFromString<RecordingSearchResponse>(fixture("recording-search-positions.json"))
+        val candidate = positions.recordings.single().toCandidate()
+        // Vinyl "A4" is the fourth track; "14" numbered across discs is the second track of disc 2; a track position
+        // the answer sends is taken as it is.
+        assertThat(candidate.releases).containsExactly(
+            CandidateRelease("Night Ferry", 4),
+            CandidateRelease("Night Ferry (Deluxe)", 2),
+            CandidateRelease("Harbor Sessions", 6),
+        )
+    }
+
+    @Test
+    fun `a track with neither a position nor a track offset has no position, even with a numeric printed number`() {
+        val json = """{"recordings":[{"id":"x","title":"T","releases":[
+            {"id":"r","title":"R","media":[{"track":[{"id":"t","number":"5"}]}]}]}]}"""
+        val candidate = MusicBrainzJson.decodeFromString<RecordingSearchResponse>(json).recordings.single().toCandidate()
+        assertThat(candidate.releases).containsExactly(CandidateRelease("R", null))
+    }
+
+    @Test
+    fun `the position makes the album and track agree with the file's track number tag`() {
+        val positions = MusicBrainzJson.decodeFromString<RecordingSearchResponse>(fixture("recording-search-positions.json"))
+        val candidate = positions.recordings.single().toCandidate()
+        val hint = TrackHint("Night Ferry", "The Quiet Harbors", 251_000, album = "Night Ferry (Deluxe)", trackNumber = 2)
+        assertThat(TextCandidateScorer.score(hint, candidate).albumTrack).isEqualTo(1.0)
+        assertThat(TextCandidateScorer.score(hint.copy(trackNumber = 14), candidate).albumTrack).isEqualTo(0.5)
     }
 
     @Test

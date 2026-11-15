@@ -85,8 +85,13 @@ data class MediumDto(
 @Serializable
 data class TrackDto(
     val id: String,
-    /** Printed track number, which can be text such as "A4". */
+    /**
+     * Printed track number, which can be text such as "A4" or continue across discs; never used as the position
+     * (TI §4.1, §5.1).
+     */
     val number: String? = null,
+    /** The track's position on its medium, where the answer has it. */
+    val position: Int? = null,
     val title: String? = null,
     val length: Long? = null,
 )
@@ -96,8 +101,9 @@ fun RecordingDto.creditString(): String = artistCredit.joinToString("") { it.nam
 
 /**
  * The recording as a scoring candidate. The server lists a release once for every track that links the recording, so a
- * release can appear with several track numbers; exact repeats are dropped. The track number is the printed number,
- * or the position when the number is not numeric.
+ * release can appear with several track numbers; exact repeats are dropped. The track number is the track's position on
+ * its medium: the track's `position` where the answer has it, otherwise the medium's track offset + 1. The printed
+ * number is never used, because vinyl prints "A4" and some releases number on across discs (TI §4.1).
  */
 fun RecordingDto.toCandidate(): TextCandidate = TextCandidate(
     recordingId = id,
@@ -107,7 +113,7 @@ fun RecordingDto.toCandidate(): TextCandidate = TextCandidate(
     lengthMs = length,
     releases = releases.map { release ->
         val medium = release.media.firstOrNull()
-        val number = medium?.track?.firstOrNull()?.number?.toIntOrNull() ?: medium?.trackOffset?.plus(1)
-        release.id to CandidateRelease(release.title, number)
+        val position = medium?.track?.firstOrNull()?.position ?: medium?.trackOffset?.plus(1)
+        release.id to CandidateRelease(release.title, position)
     }.distinct().map { it.second },
 )

@@ -38,7 +38,7 @@ class TextSearch(
 ) {
 
     suspend fun search(original: TrackHint, limit: Int = TextQueryBuilder.AUTOMATIC_LIMIT): TextSearchResult {
-        val hint = if (options.bracketVersion) original.copy(title = original.title?.let(VersionSuffix::bracket)) else original
+        val hint = TrackHints.forScoring(original, options)
         val attempts = mutableListOf<VariantAttempt>()
         var failure: IOException? = null
         for (query in TextQueryBuilder.build(hint, limit, options)) {
