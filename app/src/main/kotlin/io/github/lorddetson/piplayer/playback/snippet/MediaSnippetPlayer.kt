@@ -1,18 +1,149 @@
 package io.github.lorddetson.piplayer.playback.snippet
 
 import android.content.Context
+import android.media.AudioFocusRequest
+import android.media.AudioManager
 import android.net.Uri
+import android.os.Handler
+import android.os.Looper
+import androidx.annotation.OptIn
+import androidx.media3.common.AudioAttributes
+import androidx.media3.common.C
+import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.exoplayer.ExoPlayer
+import io.github.lorddetson.piplayer.playback.PlaybackPlayer
+import io.github.lorddetson.piplayer.playback.PlaybackRenderers
 import kotlinx.coroutines.flow.StateFlow
 
 /** The snippet player on Media3 and the platform's audio focus (TI §6). */
 internal class MediaSnippetPlayer(context: Context, main: Player) : SnippetPlayer {
 
-    override val state: StateFlow<SnippetState> get() = TODO()
+    private val controller = SnippetController(
+        PlayerMainPlayback(main),
+        AudioManagerSnippetFocus(context),
+        ExoSnippetOutput(context.applicationContext),
+    )
 
-    override val positionMs: Long get() = TODO()
+    override val state: StateFlow<SnippetState> get() = controller.state
 
-    override fun play(uri: Uri, durationMs: Long?): Unit = TODO()
+    override val positionMs: Long get() = controller.positionMs
 
-    override fun stop(): Unit = TODO()
+    override fun play(uri: Uri, durationMs: Long?) = controller.play(uri, durationMs)
+
+    override fun stop() = controller.stop()
+}
+
+/**
+ * The main player behind its controller. It counts as playing when it would go on if nothing paused it, also while it
+ * buffers, as the playback service counts it when it is swiped away.
+ */
+internal class PlayerMainPlayback(private val player: Player) : MainPlayback {
+
+    override val isPlaying: Boolean
+        get() = player.playWhenReady &&
+            (player.playbackState == Player.STATE_READY || player.playbackState == Player.STATE_BUFFERING)
+
+    override fun pause() = player.pause()
+
+    override fun play() = player.play()
+}
+
+/** An `AUDIOFOCUS_GAIN_TRANSIENT` request for music, whose changes come on the main thread. */
+internal class AudioManagerSnippetFocus(context: Context) : SnippetFocus {
+
+    private val audioManager = context.getSystemService(AudioManager::class.java)
+    private var request: AudioFocusRequest? = null
+
+    override fun request(onChange: (FocusChange) -> Unit): Boolean {
+        abandon()
+        val attributes = android.media.AudioAttributes.Builder()
+            .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
+            .setContentType(android.media.AudioAttributes.CONTENT_TYPE_MUSIC)
+            .build()
+        val request = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
+            .setAudioAttributes(attributes)
+            .setOnAudioFocusChangeListener(
+                { change -> changeOf(change)?.let(onChange) },
+                Handler(Looper.getMainLooper()),
+            )
+            .build()
+        if (audioManager.requestAudioFocus(request) != AudioManager.AUDIOFOCUS_REQUEST_GRANTED) return false
+        this.request = request
+        return true
+    }
+
+    override fun abandon() {
+        request?.let(audioManager::abandonAudioFocusRequest)
+        request = null
+    }
+
+    private fun changeOf(change: Int): FocusChange? = when (change) {
+        AudioManager.AUDIOFOCUS_LOSS -> FocusChange.LOSS
+        AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> FocusChange.LOSS_TRANSIENT
+        AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> FocusChange.DUCK
+        AudioManager.AUDIOFOCUS_GAIN -> FocusChange.GAIN
+        else -> null
+    }
+}
+
+/**
+ * A short-lived ExoPlayer for each snippet, with the playback service's renderers and extractors so that it plays what
+ * the main player plays. It has no media session and does not handle audio focus: Media3 would request a full
+ * `AUDIOFOCUS_GAIN`, and the main player would lose its focus for good (TI §6). The window's end is a clipping end, so
+ * the player itself reports the end of the snippet.
+ */
+@OptIn(UnstableApi::class)
+internal class ExoSnippetOutput(private val context: Context) : SnippetOutput<Uri> {
+
+    private val handler = Handler(Looper.getMainLooper())
+    private var player: ExoPlayer? = null
+
+    override val positionMs: Long get() = player?.currentPosition ?: 0
+
+    override fun start(source: Uri, window: SnippetWindow, events: SnippetOutput.Events) {
+        stop()
+        val player = ExoPlayer.Builder(context, PlaybackRenderers(context), PlaybackPlayer.mediaSources(context))
+            .setAudioAttributes(
+                AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MUSIC).build(),
+                /* handleAudioFocus= */ false,
+            )
+            .setHandleAudioBecomingNoisy(true)
+            .build()
+        this.player = player
+        // Reported a moment later, so that the controller never releases the player inside the player's own callback.
+        player.addListener(object : Player.Listener {
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                if (playbackState == Player.STATE_ENDED) handler.post(events::ended)
+            }
+
+            override fun onPlayerError(error: PlaybackException) {
+                handler.post(events::failed)
+            }
+
+            override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+                if (!playWhenReady && reason == Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_BECOMING_NOISY) {
+                    handler.post(events::becameNoisy)
+                }
+            }
+        })
+        val item = MediaItem.Builder()
+            .setUri(source)
+            .setClippingConfiguration(MediaItem.ClippingConfiguration.Builder().setEndPositionMs(window.endMs).build())
+            .build()
+        player.setMediaItem(item, window.startMs)
+        player.prepare()
+        player.play()
+    }
+
+    override fun setVolume(volume: Float) {
+        player?.volume = volume
+    }
+
+    override fun stop() {
+        player?.release()
+        player = null
+    }
 }

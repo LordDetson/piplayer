@@ -73,7 +73,13 @@ class SnippetPlayerTest {
     fun startTheMainPlayer() {
         onMain {
             main = PlaybackPlayer.builder(context).build()
-            tracker = PlayTracker(main, recorder, clock = { now }, wallClock = { 1_800_000_000_000L }, thresholdOf = { 5_000L })
+            tracker = PlayTracker(
+                main,
+                recorder,
+                clock = { now },
+                wallClock = { 1_800_000_000_000L },
+                thresholdOf = { 5_000L },
+            )
             tracker.start()
             main.setMediaItems(listOf(mainItem("first"), mainItem("second")))
             main.prepare()
@@ -176,7 +182,8 @@ class SnippetPlayerTest {
         val first = playSnippet()
         val before = pausedForTheSnippet()
         assertThat(first).describedAs("the snippet's first position").isBetween(19_500L, 21_000L)
-        assertThat(transientRequests()).describedAs("transient focus requests while the snippet plays: ${ownFocusEntries()}")
+        assertThat(transientRequests())
+            .describedAs("transient focus requests while the snippet plays: ${ownFocusEntries()}")
             .isEqualTo(1)
         // Time that would count for the main player if it played: three times its threshold.
         now += 15_000
@@ -205,7 +212,8 @@ class SnippetPlayerTest {
         assertThat(recorded).describedAs("recorded plays").isEmpty()
         onMain {
             assertThat(controller.currentMediaItemIndex).isEqualTo(before.index)
-            assertThat((0 until controller.mediaItemCount).map { controller.getMediaItemAt(it).mediaId }).isEqualTo(before.ids)
+            val ids = (0 until controller.mediaItemCount).map { controller.getMediaItemAt(it).mediaId }
+            assertThat(ids).isEqualTo(before.ids)
         }
     }
 
@@ -238,7 +246,9 @@ class SnippetPlayerTest {
         onMain { snippet.stop() }
 
         assertThat(awaitEnd()).isEqualTo(SnippetEnd.CLOSED)
-        throughout("the main player stays paused", 1.seconds) { onMain { !controller.playWhenReady && !main.isPlaying } }
+        throughout("the main player stays paused", 1.seconds) {
+            onMain { !controller.playWhenReady && !main.isPlaying }
+        }
         assertUnchanged(before)
     }
 
@@ -299,7 +309,7 @@ class SnippetPlayerTest {
         const val LONG_FIXTURE = "playback/snippet-60s.mp3"
         const val LONG_FIXTURE_MS = 60_000L
 
-        /** A focus request for `AUDIOFOCUS_GAIN_TRANSIENT` exactly, not one of its `_MAY_DUCK` or `_EXCLUSIVE` kinds. */
+        /** A request for `AUDIOFOCUS_GAIN_TRANSIENT` exactly, not one of its `_MAY_DUCK` or `_EXCLUSIVE` kinds. */
         val TRANSIENT_GAIN = Regex("gain: GAIN_TRANSIENT(\\s|$)")
 
         /** Every test's session needs its own ID while an earlier one may not have gone yet. */

@@ -7,8 +7,8 @@ import kotlinx.coroutines.flow.StateFlow
 
 /**
  * Plays a 15 s snippet of a file from the review card (TI §6) without disturbing the main player: the main player is
- * paused through [Player] (the card's MediaController of the playback service) and resumed afterwards if it was playing;
- * its queue, position and play statistics do not change. Use it on the main thread.
+ * paused through [Player] (the card's MediaController of the playback service) and resumed afterwards if it was
+ * playing; its queue, position and play statistics do not change. Use it on the main thread.
  */
 interface SnippetPlayer {
 
@@ -24,7 +24,7 @@ interface SnippetPlayer {
      */
     fun play(uri: Uri, durationMs: Long?)
 
-    /** Ends the snippet, as when the card closes: the main player resumes if it was playing. Nothing when none plays. */
+    /** Ends the snippet as when the card closes: the main player resumes if it was playing. Nothing when none plays. */
     fun stop()
 
     companion object {

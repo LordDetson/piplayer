@@ -15,7 +15,10 @@ data class SnippetWindow(val startMs: Long, val endMs: Long) {
         const val FROM_START_BELOW_MS = 45_000L
 
         /** The window of a file of [durationMs]; an unknown length plays from the start. */
-        fun of(durationMs: Long?): SnippetWindow = TODO()
+        fun of(durationMs: Long?): SnippetWindow {
+            val startMs = if (durationMs != null && durationMs >= FROM_START_BELOW_MS) durationMs / 3 else 0
+            return SnippetWindow(startMs, startMs + LENGTH_MS)
+        }
     }
 }
 
@@ -79,11 +82,94 @@ internal class SnippetController<S>(
 
     val state: StateFlow<SnippetState> = mutableState.asStateFlow()
 
-    val positionMs: Long get() = TODO()
+    /** Whether the main player played before the first of the snippets now playing; it resumes only then. */
+    private var mainWasPlaying = false
 
-    fun play(source: S, durationMs: Long?): Unit = TODO()
+    /** Counts focus requests, so that a change heard after its request was abandoned changes nothing. */
+    private var focusId = 0
 
-    fun stop(): Unit = TODO()
+    /** Counts snippets, so that a report of one that has ended or was replaced changes nothing. */
+    private var snippetId = 0
+
+    /** The snippet's volume: lowered while a prompt that allows ducking holds the focus. */
+    private var volume = 1f
+
+    private val playing: Boolean get() = mutableState.value is SnippetState.Playing
+
+    val positionMs: Long get() = if (playing) output.positionMs else 0
+
+    fun play(source: S, durationMs: Long?) {
+        if (playing) {
+            // The focus and the memory of the main player stay with the new snippet.
+            output.stop()
+        } else {
+            mainWasPlaying = main.isPlaying
+            if (mainWasPlaying) main.pause()
+            volume = 1f
+            val requested = ++focusId
+            val granted = focus.request { change -> if (requested == focusId) onFocusChange(change) }
+            if (!granted) {
+                val resume = mainWasPlaying
+                mainWasPlaying = false
+                mutableState.value = SnippetState.Ended(SnippetEnd.FOCUS_REFUSED)
+                if (resume) main.play()
+                return
+            }
+        }
+        val started = ++snippetId
+        val window = SnippetWindow.of(durationMs)
+        mutableState.value = SnippetState.Playing(window.startMs, window.endMs)
+        output.start(
+            source,
+            window,
+            object : SnippetOutput.Events {
+                override fun ended() = endIfCurrent(started, SnippetEnd.FINISHED)
+
+                override fun failed() = endIfCurrent(started, SnippetEnd.FAILED)
+
+                override fun becameNoisy() = endIfCurrent(started, SnippetEnd.BECAME_NOISY)
+            },
+        )
+        if (volume != 1f) output.setVolume(volume)
+    }
+
+    fun stop() {
+        if (playing) end(SnippetEnd.CLOSED)
+    }
+
+    private fun onFocusChange(change: FocusChange) {
+        if (!playing) return
+        when (change) {
+            FocusChange.LOSS, FocusChange.LOSS_TRANSIENT -> end(SnippetEnd.FOCUS_LOST)
+            FocusChange.DUCK -> setVolume(DUCK_VOLUME)
+            FocusChange.GAIN -> setVolume(1f)
+        }
+    }
+
+    private fun setVolume(volume: Float) {
+        this.volume = volume
+        output.setVolume(volume)
+    }
+
+    private fun endIfCurrent(started: Int, reason: SnippetEnd) {
+        if (started == snippetId && playing) end(reason)
+    }
+
+    private fun end(reason: SnippetEnd) {
+        // New numbers silence the ended snippet's player and focus listener.
+        snippetId++
+        focusId++
+        output.stop()
+        // The focus goes before the main player asks for its own (TI §6).
+        focus.abandon()
+        val resume = mainWasPlaying && reason.resumesMain
+        mainWasPlaying = false
+        mutableState.value = SnippetState.Ended(reason)
+        if (resume) main.play()
+    }
+
+    private val SnippetEnd.resumesMain: Boolean
+        get() = this == SnippetEnd.FINISHED || this == SnippetEnd.CLOSED || this == SnippetEnd.FAILED
 
     companion object {
         /** The snippet's volume while a short prompt that allows ducking holds the focus. */
