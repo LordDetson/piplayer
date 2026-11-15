@@ -8,8 +8,10 @@ import okhttp3.HttpUrl
 /**
  * A fake Cover Art Archive (TI §5.2) with its image host: `/release/{mbid}/front[-250|-500|-1200]` and the same under
  * `/release-group/` answer 307 to [archive], served at [archiveUrl] like archive.org, which sends the JPEG. The
- * release index `/release/{mbid}` of an MBID set with [withIndex] answers 307 to the image host's `index.json`. An
- * MBID not set with [withImages], [withoutThumbnails], [missingAfterRedirect] or [busy] gets CAA's 404.
+ * release index `/release/{mbid}` of an MBID set with [withIndex] answers 307 to the image host's `index.json`, and the
+ * images its links name (`/release/{mbid}/{id}[-250|-500|-1200].{jpg|png}`) answer 307 to the image host, which sends
+ * the JPEG of that size (any image ID). An MBID not set with [withImages], [withoutThumbnails], [missingAfterRedirect],
+ * [withIndex] or [busy] gets CAA's 404.
  *
  * ```
  * val caa = FakeCaa { archiveServer.url("/") }
@@ -64,6 +66,19 @@ class FakeCaa(private val archiveUrl: () -> HttpUrl) : FixtureDispatcher() {
         val image = segments.getOrNull(2)?.removeSuffix(".jpg")
         val size = SIZES[image]
         if (request.method == "GET" && entity == "release" && mbid != null && segments.size == 2) return index(mbid)
+        if (request.method == "GET" && entity == "release" && mbid != null && segments.size == 3 && indexes.containsKey(mbid)) {
+            INDEX_IMAGE.matchEntire(segments[2])?.let { match ->
+                val (id, px) = match.destructured
+                val suffix = if (px.isEmpty()) "" else "_thumb$px"
+                return redirect(
+                    archiveUrl().newBuilder()
+                        .addPathSegment("download")
+                        .addPathSegment("mbid-$mbid")
+                        .addPathSegment("mbid-$mbid-$id$suffix.jpg")
+                        .build(),
+                )
+            }
+        }
         if (request.method != "GET" || entity !in ENTITIES || mbid == null || size == null) return notFound()
         return when (entries[mbid]) {
             Kind.IMAGES, Kind.MISSING_AFTER_REDIRECT -> {
@@ -109,7 +124,7 @@ class FakeCaa(private val archiveUrl: () -> HttpUrl) : FixtureDispatcher() {
                 return notFound()
             }
             if (file == "index.json") return indexes[mbid]?.response() ?: notFound()
-            if (entries[mbid] != Kind.IMAGES) return notFound()
+            if (entries[mbid] != Kind.IMAGES) return indexImage(mbid, file)
             val suffix = file.removePrefix("mbid-$mbid-$IMAGE_ID")
             if (suffix in missingThumbnails[mbid].orEmpty()) return notFound()
             val image = when (suffix) {
@@ -121,6 +136,20 @@ class FakeCaa(private val archiveUrl: () -> HttpUrl) : FixtureDispatcher() {
             }
             return image.fixture.response()
         }
+
+        /** An image of the release index of [mbid], by archive.org's name for it; 404 for an MBID without an index. */
+        private fun indexImage(mbid: String, file: String): MockResponse {
+            if (!indexes.containsKey(mbid)) return notFound()
+            val px = Regex("mbid-${Regex.escape(mbid)}-\\d+(?:_thumb(250|500|1200))?").matchEntire(file)?.groupValues?.get(1)
+                ?: return notFound()
+            val image = when (px) {
+                "250" -> FRONT_250
+                "500" -> FRONT_500
+                "1200" -> FRONT_1200
+                else -> ORIGINAL
+            }
+            return image.fixture.response()
+        }
     }
 
     /** A JPEG fixture and its size in pixels. */
@@ -129,6 +158,9 @@ class FakeCaa(private val archiveUrl: () -> HttpUrl) : FixtureDispatcher() {
     companion object {
         private const val IMAGE_ID = "1234567890"
         private val ENTITIES = setOf("release", "release-group")
+
+        /** An image named by a release index: its ID and, for a thumbnail, its size in pixels. */
+        private val INDEX_IMAGE = Regex("""(\d+)(?:-(250|500|1200))?\.(?:jpg|png)""")
 
         /** The CAA image name and the suffix archive.org gives that size. */
         private val SIZES = mapOf("front" to "", "front-250" to "_thumb250", "front-500" to "_thumb500", "front-1200" to "_thumb1200")

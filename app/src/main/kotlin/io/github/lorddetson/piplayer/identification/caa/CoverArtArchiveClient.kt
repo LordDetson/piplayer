@@ -37,7 +37,8 @@ sealed interface CaaResult<out T> {
 /**
  * A fetched cover. [requested] is the address asked for, [url] the one that sent the image after the redirects;
  * [original] is true when the image is the uploaded original, asked for or taken after a missing thumbnail. [size] is
- * read from the image header, null when the format does not say it without decoding (WebP).
+ * read from the image header, null when the format does not say it without decoding (WebP). [source] is the release or
+ * release group of a front image ([CoverArtArchiveClient.cover]), null for an image of the release index.
  */
 class CoverImage(
     val bytes: ByteArray,
@@ -46,7 +47,11 @@ class CoverImage(
     val requested: HttpUrl,
     val url: HttpUrl,
     val original: Boolean,
+    val source: CoverSource?,
 ) {
+    /** A release group's front image, shown as taken from another edition (TI §5.2). */
+    val anotherEdition: Boolean get() = source?.anotherEdition == true
+
     override fun toString(): String = "CoverImage($format, $size, ${bytes.size} bytes, $url, original=$original)"
 }
 
@@ -122,7 +127,20 @@ class CoverArtArchiveClient(
     suspend fun cover(source: CoverSource, size: CoverSize): CaaResult<CoverImage> {
         val original = CoverUrls.image(baseUrl, source, CoverSize.ORIGINAL)
         val thumbnail = if (size == CoverSize.ORIGINAL) null else CoverUrls.image(baseUrl, source, size)
-        return fetch(thumbnail, original, frontAddresses = true)
+        return fetch(thumbnail, original, front = source)
+    }
+
+    /**
+     * The [size] image of the first of [sources] ([CoverUrls.sources]) that has a front image: the next source is asked
+     * for only after [CaaResult.NotFound] for the one before, so a release without a front image gives way to its
+     * release group (TI §5.2). A busy answer ends the attempt. [CoverImage.source] tells which source answered.
+     */
+    suspend fun cover(sources: List<CoverSource>, size: CoverSize): CaaResult<CoverImage> {
+        for (source in sources) {
+            val result = cover(source, size)
+            if (result != CaaResult.NotFound) return result
+        }
+        return CaaResult.NotFound
     }
 
     /**
@@ -130,7 +148,7 @@ class CoverArtArchiveClient(
      * thumbnail falls back to the image's own original, which the index listed.
      */
     suspend fun image(image: CaaImage, px: Int?): CaaResult<CoverImage> =
-        fetch(px?.let(image::thumbnail), image.original, frontAddresses = false)
+        fetch(px?.let(image::thumbnail), image.original, front = null)
 
     /** The images of a release (TI §5.2); [CaaResult.NotFound] for a release without images or an ID that is no MBID. */
     suspend fun releaseIndex(releaseId: String): CaaResult<CaaReleaseIndex> {
@@ -144,10 +162,13 @@ class CoverArtArchiveClient(
     }
 
     /**
-     * [thumbnail] (null: none wanted or none known), falling back to [original]. For [frontAddresses] (`front-*`), a 404
-     * from CAA itself means the entity has no front image, so the original is recorded instead of asked for.
+     * [thumbnail] (null: none wanted or none known), falling back to [original]. For the `front-*` addresses of [front],
+     * a 404 from CAA itself means the entity has no front image, so the original is recorded instead of asked for, and a
+     * live 404 entry of the original answers for every thumbnail, none of which exists without it.
      */
-    private suspend fun fetch(thumbnail: HttpUrl?, original: HttpUrl, frontAddresses: Boolean): CaaResult<CoverImage> {
+    private suspend fun fetch(thumbnail: HttpUrl?, original: HttpUrl, front: CoverSource?): CaaResult<CoverImage> {
+        val frontAddresses = front != null
+        if (frontAddresses && recorded(original)?.kind == FailureKind.NOT_FOUND) return CaaResult.NotFound
         if (thumbnail != null) {
             val entry = recorded(thumbnail)
             when (entry?.kind) {
@@ -155,7 +176,7 @@ class CoverArtArchiveClient(
                 // A thumbnail known to be missing: straight to the original.
                 FailureKind.NOT_FOUND -> Unit
                 null -> when (val answer = send(thumbnail, ::readImage)) {
-                    is Answer.Got -> return CaaResult.Found(answer.toCover(thumbnail, original = false))
+                    is Answer.Got -> return CaaResult.Found(answer.toCover(thumbnail, original = false, front))
                     is Answer.Busy -> return CaaResult.Busy(answer.until)
                     is Answer.Missing -> if (frontAddresses && !answer.fromImageHost) {
                         // CAA itself has no front image, so its original is missing too.
@@ -167,7 +188,7 @@ class CoverArtArchiveClient(
         }
         recorded(original)?.let { return it.toResult() }
         return when (val answer = send(original, ::readImage)) {
-            is Answer.Got -> CaaResult.Found(answer.toCover(original, original = true))
+            is Answer.Got -> CaaResult.Found(answer.toCover(original, original = true, front))
             is Answer.Missing -> CaaResult.NotFound
             is Answer.Busy -> CaaResult.Busy(answer.until)
         }
@@ -181,23 +202,25 @@ class CoverArtArchiveClient(
         FailureKind.BUSY -> CaaResult.Busy(expiresAt)
     }
 
-    private fun Answer.Got<Pair<ByteArray, ImageFormat>>.toCover(requested: HttpUrl, original: Boolean): CoverImage {
+    private fun Answer.Got<Pair<ByteArray, ImageFormat>>.toCover(
+        requested: HttpUrl,
+        original: Boolean,
+        source: CoverSource?,
+    ): CoverImage {
         val (bytes, format) = value
-        return CoverImage(bytes, format, ImageHeader.size(bytes), requested, url, original)
+        return CoverImage(bytes, format, ImageHeader.size(bytes), requested, url, original, source)
     }
 
     /**
      * Sends a GET for [url] and records its failures: a 404 for its address, a 503 for its address and as a pause of
      * the limiter; a success removes the address's entry. A blocked call records nothing ([RetryingCaller]).
      */
-    private suspend fun <T> send(url: HttpUrl, read: (Response) -> CallOutcome<T>): Answer<T> {
-        val key = url.toString()
-        return caller.execute(
+    private suspend fun <T> send(url: HttpUrl, read: (Response) -> CallOutcome<T>): Answer<T> =
+        caller.execute(
             request = Request.Builder().url(url).get().build(),
             giveUp = { attempts, cause -> CaaException.Unavailable(attempts, cause) },
             paused = { remaining -> CaaException.Paused(remaining) },
         ) { response -> classify(url, response, read) }
-    }
 
     private fun <T> classify(asked: HttpUrl, response: Response, read: (Response) -> CallOutcome<T>): CallOutcome<Answer<T>> {
         val key = asked.toString()
@@ -263,7 +286,7 @@ class CoverArtArchiveClient(
 
     /** The body as CAA's release index; any other body is retried like MusicBrainz's (TI §8). */
     private fun readIndex(response: Response): CallOutcome<CaaReleaseIndex> = try {
-        CallOutcome.Success(CaaReleaseIndex.parse(response.body.string()))
+        CallOutcome.Success(CaaReleaseIndex.parse(response.body.string(), baseUrl))
     } catch (e: IllegalArgumentException) {
         // SerializationException is an IllegalArgumentException.
         CallOutcome.Retry(CaaException.Unreadable(response.code, e))

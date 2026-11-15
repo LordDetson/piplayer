@@ -101,6 +101,72 @@ class CoverUrlsTest {
         assertThat(CoverUrls.fromJson(null)).isNull()
     }
 
+    @Test
+    fun `the release group follows the release whenever the release's own images are asked for`() {
+        val release = CoverSource(CoverEntity.RELEASE, RELEASE)
+        val group = CoverSource(CoverEntity.RELEASE_GROUP, GROUP)
+
+        // Unknown flags (a release MBID from the tags) and a usable front image both ask the release first.
+        assertThat(CoverUrls.sources(RELEASE, GROUP, null)).containsExactly(release, group)
+        assertThat(CoverUrls.sources(RELEASE, GROUP, usable)).containsExactly(release, group)
+        assertThat(CoverUrls.sources(RELEASE, GROUP, usable.copy(darkened = true))).containsExactly(group)
+        assertThat(CoverUrls.sources(RELEASE, null, null)).containsExactly(release)
+        assertThat(CoverUrls.sources(RELEASE, "not an mbid", null)).containsExactly(release)
+        assertThat(CoverUrls.sources(null, null, null)).isEmpty()
+        assertThat(CoverUrls.sources(RELEASE, null, CoverArtArchiveDto())).isEmpty()
+    }
+
+    @Test
+    fun `index addresses on coverartarchive_org are moved onto the configured base address`() {
+        val local = "http://127.0.0.1:8080/caa/".toHttpUrl()
+
+        assertThat(CoverUrls.fromIndex("http://coverartarchive.org/release/$RELEASE/1-250.jpg", local).toString())
+            .isEqualTo("http://127.0.0.1:8080/caa/release/$RELEASE/1-250.jpg")
+        assertThat(CoverUrls.fromIndex("https://coverartarchive.org/release/$RELEASE/1.jpg", local).toString())
+            .isEqualTo("http://127.0.0.1:8080/caa/release/$RELEASE/1.jpg")
+        // In the app the base address is CAA's own, so the address only becomes HTTPS.
+        assertThat(CoverUrls.fromIndex("http://coverartarchive.org/release/$RELEASE/1.jpg", base).toString())
+            .isEqualTo("https://coverartarchive.org/release/$RELEASE/1.jpg")
+        // An address already on the base address keeps its path, without the base path twice.
+        assertThat(CoverUrls.fromIndex("http://127.0.0.1:8080/caa/release/$RELEASE/1.jpg", local).toString())
+            .isEqualTo("http://127.0.0.1:8080/caa/release/$RELEASE/1.jpg")
+    }
+
+    @Test
+    fun `index addresses on any other host, or with another scheme, are dropped`() {
+        val local = "http://127.0.0.1:8080/".toHttpUrl()
+
+        assertThat(CoverUrls.fromIndex("https://tracker.example/release/$RELEASE/1.jpg", local)).isNull()
+        assertThat(CoverUrls.fromIndex("https://archive.org/download/mbid-$RELEASE/x.jpg", base)).isNull()
+        assertThat(CoverUrls.fromIndex("http://127.0.0.1:9090/release/$RELEASE/1.jpg", local)).isNull()
+        assertThat(CoverUrls.fromIndex("ftp://coverartarchive.org/release/$RELEASE/1.jpg", local)).isNull()
+        assertThat(CoverUrls.fromIndex(null, local)).isNull()
+    }
+
+    @Test
+    fun `a release index drops an image whose original is on another host, and thumbnails on another host`() {
+        val local = "http://127.0.0.1:8080/".toHttpUrl()
+        val json = """
+            {"images": [
+              {"id": 1, "front": true, "image": "https://tracker.example/release/$RELEASE/1.jpg",
+               "thumbnails": {"250": "https://coverartarchive.org/release/$RELEASE/1-250.jpg"}},
+              {"id": 2, "image": "https://coverartarchive.org/release/$RELEASE/2.jpg",
+               "thumbnails": {"250": "https://tracker.example/release/$RELEASE/2-250.jpg",
+                              "small": "https://coverartarchive.org/release/$RELEASE/2-250.jpg",
+                              "500": "https://tracker.example/release/$RELEASE/2-500.jpg"}}
+            ]}
+        """.trimIndent()
+
+        val index = CaaReleaseIndex.parse(json, local)
+
+        assertThat(index.images.map { it.id }).containsExactly("2")
+        val image = index.images.single()
+        assertThat(image.original.toString()).isEqualTo("http://127.0.0.1:8080/release/$RELEASE/2.jpg")
+        // The numbered name on another host gives way to the older name on CAA.
+        assertThat(image.thumbnails.mapValues { it.value.toString() })
+            .isEqualTo(mapOf(250 to "http://127.0.0.1:8080/release/$RELEASE/2-250.jpg"))
+    }
+
     private companion object {
         const val RELEASE = "11111111-1111-4111-8111-111111111111"
         const val GROUP = "22222222-2222-4222-8222-222222222222"

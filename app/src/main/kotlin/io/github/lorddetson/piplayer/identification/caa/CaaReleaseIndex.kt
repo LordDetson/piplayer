@@ -8,7 +8,7 @@ import okhttp3.HttpUrl
 
 /**
  * One image of a release in Cover Art Archive (TI §5.2), for the cover picker. Its addresses come from CAA's JSON and
- * are rewritten to HTTPS ([CoverUrls.fromJson]).
+ * point at the configured Cover Art Archive address ([CoverUrls.fromIndex]).
  *
  * @property thumbnails by their size in pixels (250, 500, 1200).
  */
@@ -25,16 +25,22 @@ data class CaaImage(
     fun thumbnail(px: Int): HttpUrl? = thumbnails[px]
 }
 
-/** The images of a release (the JSON of `release/{mbid}`), in CAA's order; images without a usable address left out. */
+/**
+ * The images of a release (the JSON of `release/{mbid}`), in CAA's order; images without a usable original left out,
+ * as are thumbnails without a usable address. Addresses on hosts other than Cover Art Archive are not usable.
+ */
 data class CaaReleaseIndex(val images: List<CaaImage>) {
 
     /** The first image marked as the front. */
     val front: CaaImage? get() = images.firstOrNull { it.front }
 
     companion object {
-        /** Reads CAA's JSON; throws [IllegalArgumentException] for a body that is not it. */
-        fun parse(json: String): CaaReleaseIndex =
-            CaaReleaseIndex(MusicBrainzJson.decodeFromString<IndexDto>(json).images.mapNotNull(ImageDto::toImage))
+        /**
+         * Reads CAA's JSON, with its image addresses moved onto [base], the configured Cover Art Archive address
+         * ([CoverUrls.fromIndex]); throws [IllegalArgumentException] for a body that is not it.
+         */
+        fun parse(json: String, base: HttpUrl): CaaReleaseIndex =
+            CaaReleaseIndex(MusicBrainzJson.decodeFromString<IndexDto>(json).images.mapNotNull { it.toImage(base) })
 
         /** The thumbnail sizes CAA names, with the older names that stand for them when the numbered ones are missing. */
         private val THUMBNAIL_NAMES = listOf(250 to "small", 500 to "large", 1200 to null)
@@ -55,10 +61,11 @@ data class CaaReleaseIndex(val images: List<CaaImage>) {
         val thumbnails: Map<String, String?> = emptyMap(),
         val types: List<String> = emptyList(),
     ) {
-        fun toImage(): CaaImage? {
-            val original = CoverUrls.fromJson(image) ?: return null
+        fun toImage(base: HttpUrl): CaaImage? {
+            val original = CoverUrls.fromIndex(image, base) ?: return null
             val thumbnails = THUMBNAIL_NAMES.mapNotNull { (px, older) ->
-                val url = CoverUrls.fromJson(thumbnails[px.toString()]) ?: older?.let { CoverUrls.fromJson(thumbnails[it]) }
+                val url = CoverUrls.fromIndex(thumbnails[px.toString()], base)
+                    ?: older?.let { CoverUrls.fromIndex(thumbnails[it], base) }
                 url?.let { px to it }
             }.toMap()
             return CaaImage(

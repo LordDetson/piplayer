@@ -2,6 +2,7 @@ package io.github.lorddetson.piplayer.identification.caa
 
 import io.github.lorddetson.piplayer.identification.musicbrainz.CoverArtArchiveDto
 import io.github.lorddetson.piplayer.identification.musicbrainz.MusicBrainzClient
+import io.github.lorddetson.piplayer.identification.provider.CoverArtArchiveProvider
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
@@ -39,21 +40,25 @@ data class CoverSource(val entity: CoverEntity, val mbid: String) {
 /** The addresses of Cover Art Archive images (TI §5.2). */
 object CoverUrls {
 
+    /** The first of [sources]: the source asked for first. */
+    fun source(releaseId: String?, releaseGroupId: String?, flags: CoverArtArchiveDto?): CoverSource? =
+        sources(releaseId, releaseGroupId, flags).firstOrNull()
+
     /**
-     * The source of a release's cover: the release itself when its [flags] show a usable front image (front, not
-     * darkened); otherwise its release group, or none without a usable group ID. Unknown flags (a release MBID from the
-     * tags that was not looked up) ask the release itself, and CAA's 404 answers a release without a front image. An ID
-     * that is not an MBID counts as missing, so nothing is sent for it.
+     * The sources of a release's cover, in the order they are asked for ([CoverArtArchiveClient.cover]): the release
+     * itself when its [flags] show a usable front image (front, not darkened) or are not known (a release MBID from the
+     * tags that was not looked up), then its release group, which is asked for when the release has no front image
+     * after all. Without a usable front image only the release group is left; an ID that is not an MBID counts as
+     * missing, so nothing is sent for it.
      */
-    fun source(releaseId: String?, releaseGroupId: String?, flags: CoverArtArchiveDto?): CoverSource? {
+    fun sources(releaseId: String?, releaseGroupId: String?, flags: CoverArtArchiveDto?): List<CoverSource> {
         val release = releaseId?.let(MusicBrainzClient::plainMbid)
         val group = releaseGroupId?.let(MusicBrainzClient::plainMbid)
         val releaseUsable = release != null && (flags == null || flags.front && !flags.darkened)
-        return when {
-            releaseUsable -> CoverSource(CoverEntity.RELEASE, release)
-            group != null -> CoverSource(CoverEntity.RELEASE_GROUP, group)
-            else -> null
-        }
+        return listOfNotNull(
+            release?.takeIf { releaseUsable }?.let { CoverSource(CoverEntity.RELEASE, it) },
+            group?.let { CoverSource(CoverEntity.RELEASE_GROUP, it) },
+        )
     }
 
     /** `{base}{entity}/{mbid}/{image}`; [base] is used as configured, never rewritten. */
@@ -78,4 +83,26 @@ object CoverUrls {
         val url = text?.trim()?.toHttpUrlOrNull() ?: return null
         return if (url.isHttps) url else url.newBuilder().scheme("https").build()
     }
+
+    /**
+     * An image address of the release index, sent only to Cover Art Archive (TI §5.2): on [base]'s own host and port it
+     * keeps its path on [base]; on [CAA_HOST] it is moved onto [base], its path appended to the base's path; on any other
+     * host, or with a scheme other than HTTP(S), it gives null. Either way it takes [base]'s scheme, so in the app,
+     * whose base is CAA's HTTPS address, `http://` becomes `https://` as in [fromJson].
+     */
+    fun fromIndex(text: String?, base: HttpUrl): HttpUrl? {
+        val url = text?.trim()?.toHttpUrlOrNull() ?: return null
+        return when {
+            url.host == base.host && url.port == base.port ->
+                base.newBuilder().encodedPath(url.encodedPath).encodedQuery(url.encodedQuery).build()
+            url.host == CAA_HOST -> base.newBuilder()
+                .apply { url.pathSegments.filter { it.isNotEmpty() }.forEach(::addPathSegment) }
+                .encodedQuery(url.encodedQuery)
+                .build()
+            else -> null
+        }
+    }
+
+    /** Cover Art Archive's own host, which its JSON names in image addresses. */
+    private val CAA_HOST = CoverArtArchiveProvider.host
 }

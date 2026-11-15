@@ -19,7 +19,8 @@ enum class FailureKind {
 
 /**
  * A failed image address (TI §5.2): live until [expiresAt]. [busyInARow] counts the 503s of the address in a row, so
- * the next one doubles even after this entry has expired; it is 0 for a 404.
+ * the next one doubles even after this entry has expired, as long as it expired at most
+ * [FailureTtlPolicy.BUSY_ROW_GAP] ago; it is 0 for a 404.
  */
 data class FailureEntry(val kind: FailureKind, val failedAt: Instant, val expiresAt: Instant, val busyInARow: Int) {
     fun isLive(now: Instant): Boolean = now < expiresAt
@@ -31,13 +32,20 @@ class FailureTtlPolicy(private val clock: Clock) {
     /** A 404 now. */
     fun notFound(): FailureEntry = entry(FailureKind.NOT_FOUND, NOT_FOUND_TTL, busyInARow = 0)
 
-    /** A 503 now, after [previous] (the address's entry, live or not, or null). */
+    /**
+     * A 503 now, after [previous] (the address's entry, live or not, or null). It continues the row of a previous 503
+     * that expired at most [BUSY_ROW_GAP] ago; after a longer quiet time the row starts again.
+     */
     fun busy(previous: FailureEntry?): FailureEntry {
-        val inARow = if (previous?.kind == FailureKind.BUSY) previous.busyInARow + 1 else 1
+        val inARow = if (previous?.kind == FailureKind.BUSY && inTheRow(previous)) previous.busyInARow + 1 else 1
         // 5 min * 2^7 is already past the cap, so the shift never overflows.
         val ttl = minOf(MAX_BUSY_TTL, FIRST_BUSY_TTL * (1 shl minOf(inARow - 1, 7)))
         return entry(FailureKind.BUSY, ttl, inARow)
     }
+
+    /** Whether [previous] expired at most [BUSY_ROW_GAP] ago (a live entry always counts). */
+    private fun inTheRow(previous: FailureEntry): Boolean =
+        !clock.instant().isAfter(previous.expiresAt.plus(BUSY_ROW_GAP.toJavaDuration()))
 
     /** [entry] while it is live, otherwise null. */
     fun live(entry: FailureEntry?): FailureEntry? = entry?.takeIf { it.isLive(clock.instant()) }
@@ -51,6 +59,9 @@ class FailureTtlPolicy(private val clock: Clock) {
         val NOT_FOUND_TTL: Duration = 7.days
         val FIRST_BUSY_TTL: Duration = 5.minutes
         val MAX_BUSY_TTL: Duration = 6.hours
+
+        /** The quiet time after an expired 503 entry that ends the address's row of 503s. */
+        val BUSY_ROW_GAP: Duration = 6.hours
     }
 }
 

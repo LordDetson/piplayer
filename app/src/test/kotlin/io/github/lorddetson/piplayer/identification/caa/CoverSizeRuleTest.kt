@@ -68,13 +68,37 @@ class CoverSizeRuleTest {
     }
 
     @Test
-    fun `a proposed cover of unknown size starts unticked over any current cover, without reading a header`() = runTest {
+    fun `a proposed cover of unknown size starts unticked over a cover of known size and ticked over none`() = runTest {
         val probe = FakeProbe(PictureSize(100, 100))
 
         assertThat(CoverSizeRule.startsTicked(null, CurrentCover.Known(PictureSize(100, 100)), probe)).isFalse()
-        assertThat(CoverSizeRule.startsTicked(null, CurrentCover.SystemThumbnail, probe)).isFalse()
-        assertThat(CoverSizeRule.startsTicked(null, CurrentCover.Embedded("content://x/9"), probe)).isFalse()
         assertThat(CoverSizeRule.startsTicked(null, CurrentCover.None, probe)).isTrue()
         assertThat(probe.reads).isEmpty()
+    }
+
+    @Test
+    fun `a proposed cover of unknown size starts ticked over a system thumbnail, whose size is not known either`() = runTest {
+        val probe = FakeProbe(PictureSize(3000, 3000))
+
+        assertThat(CoverSizeRule.startsTicked(null, CurrentCover.SystemThumbnail, probe)).isTrue()
+        assertThat(probe.reads).isEmpty()
+    }
+
+    @Test
+    fun `a proposed cover of unknown size has the embedded header read, unticked over a readable picture`() = runTest {
+        val probe = FakeProbe(PictureSize(100, 100))
+        val current = CurrentCover.Embedded("content://media/external/audio/media/9")
+
+        assertThat(CoverSizeRule.startsTicked(null, current, probe)).isFalse()
+        assertThat(probe.reads).containsExactly(current.uri)
+    }
+
+    @Test
+    fun `a proposed cover of unknown size starts ticked over an embedded picture whose header cannot be read`() = runTest {
+        val probe = FakeProbe(null)
+        val current = CurrentCover.Embedded("content://media/external/audio/media/10")
+
+        assertThat(CoverSizeRule.startsTicked(null, current, probe)).isTrue()
+        assertThat(probe.reads).containsExactly(current.uri)
     }
 }

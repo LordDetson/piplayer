@@ -33,15 +33,15 @@ object CoverSizeRule {
      * header read through [probe] only when the answer depends on it.
      */
     suspend fun startsTicked(proposed: PictureSize?, current: CurrentCover, probe: PictureProbe): Boolean =
-        // Over any cover, a proposed cover whose own size is not known cannot be shown not to be smaller.
         when (current) {
             CurrentCover.None -> true
+            // A proposed cover whose own size is not known cannot be shown not to be smaller than a known one.
             is CurrentCover.Known -> proposed != null && !smaller(proposed, current.size)
-            // Its size is not kept: treated as not smaller.
-            CurrentCover.SystemThumbnail -> proposed != null
-            // A header that cannot be read is a picture the user does not see.
+            // Its size is not kept: treated as not smaller, whatever the proposed cover's size.
+            CurrentCover.SystemThumbnail -> true
+            // A header that cannot be read is a picture the user does not see, so there is no cover to compare with.
             is CurrentCover.Embedded ->
-                proposed != null && (probe.embedded(current.uri)?.let { !smaller(proposed, it) } ?: true)
+                probe.embedded(current.uri)?.let { proposed != null && !smaller(proposed, it) } ?: true
         }
 
     private val PictureSize.shortSide: Int get() = minOf(width, height)

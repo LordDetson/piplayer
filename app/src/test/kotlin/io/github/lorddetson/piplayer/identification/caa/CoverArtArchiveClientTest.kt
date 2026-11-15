@@ -18,7 +18,9 @@ import io.github.lorddetson.piplayer.net.RetryPolicy
 import kotlin.random.Random
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Duration.Companion.hours
 import kotlin.time.Duration.Companion.minutes
+import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
@@ -143,6 +145,49 @@ class CoverArtArchiveClientTest {
     }
 
     @Test
+    fun `a release without a front image is followed by its release group, marked as another edition`() = runTest {
+        fake { withImages(GROUP) }
+
+        val image = client().cover(CoverUrls.sources(UNKNOWN, GROUP, flags = null), CoverSize.DISPLAY).found()
+
+        assertThat(image.source).isEqualTo(CoverSource(CoverEntity.RELEASE_GROUP, GROUP))
+        assertThat(image.anotherEdition).isTrue()
+        assertThat(image.size).isEqualTo(PictureSize(500, 500))
+        assertThat(log.to(caaHost).map { it.path }).containsExactly("/release/$UNKNOWN/front-500", "/release-group/$GROUP/front-500")
+    }
+
+    @Test
+    fun `a release with a front image is not followed by its release group`() = runTest {
+        fake { withImages(RELEASE).withImages(GROUP) }
+
+        val image = client().cover(CoverUrls.sources(RELEASE, GROUP, flags = null), CoverSize.DISPLAY).found()
+
+        assertThat(image.source).isEqualTo(CoverSource(CoverEntity.RELEASE, RELEASE))
+        assertThat(image.anotherEdition).isFalse()
+        assertThat(log.to(caaHost).map { it.path }).containsExactly("/release/$RELEASE/front-500")
+    }
+
+    @Test
+    fun `a busy release does not ask its release group`() = runTest {
+        fake {
+            busy(BUSY, retryAfterSeconds = 1)
+            withImages(GROUP)
+        }
+
+        val answer = client().cover(CoverUrls.sources(BUSY, GROUP, flags = null), CoverSize.DISPLAY)
+
+        assertThat(answer).isInstanceOf(CaaResult.Busy::class.java)
+        assertThat(log.to(caaHost).map { it.path }).containsExactly("/release/$BUSY/front-500")
+    }
+
+    @Test
+    fun `without any source there is no cover and nothing is sent`() = runTest {
+        fake()
+        assertThat(client().cover(emptyList(), CoverSize.DISPLAY)).isEqualTo(CaaResult.NotFound)
+        assertThat(log.size).isZero()
+    }
+
+    @Test
     fun `a missing front-1200 after the redirect falls back to the original and is not asked for again`() = runTest {
         fake { withoutThumbnails(RELEASE, "front-1200") }
         val client = client()
@@ -192,9 +237,33 @@ class CoverArtArchiveClientTest {
         assertThat(failures.get(key(UNKNOWN, CoverSize.ORIGINAL))).isEqualTo(policy.notFound())
 
         assertThat(client.cover(release(UNKNOWN), CoverSize.DISPLAY)).isEqualTo(CaaResult.NotFound)
+        assertThat(client.cover(release(UNKNOWN), CoverSize.EMBED)).isEqualTo(CaaResult.NotFound)
         assertThat(client.cover(release(UNKNOWN), CoverSize.ORIGINAL)).isEqualTo(CaaResult.NotFound)
-        // DISPLAY had no entry of its own and is asked for once; the original's entry answers the rest.
-        assertThat(log.entries.map { it.path }).containsExactly("/release/$UNKNOWN/front-250", "/release/$UNKNOWN/front-500")
+        // No thumbnail exists without the original, so the original's entry answers every other size.
+        assertThat(log.entries.map { it.path }).containsExactly("/release/$UNKNOWN/front-250")
+    }
+
+    @Test
+    fun `a 404 entry of a front original answers every thumbnail size, and an expired one lets them go`() = runTest {
+        fake { withImages(RELEASE) }
+        val client = client()
+        failures.put(key(RELEASE, CoverSize.ORIGINAL), policy.notFound())
+
+        for (size in listOf(CoverSize.LIST, CoverSize.DISPLAY, CoverSize.EMBED)) {
+            assertThat(client.cover(release(RELEASE), size)).isEqualTo(CaaResult.NotFound)
+        }
+        assertThat(log.size).isZero()
+
+        clock.advance(FailureTtlPolicy.NOT_FOUND_TTL)
+        assertThat(client.cover(release(RELEASE), CoverSize.LIST).found().size).isEqualTo(PictureSize(250, 250))
+    }
+
+    @Test
+    fun `a 503 entry of a front original does not hold the thumbnails back`() = runTest {
+        fake { withImages(RELEASE) }
+        failures.put(key(RELEASE, CoverSize.ORIGINAL), policy.busy(null))
+
+        assertThat(client().cover(release(RELEASE), CoverSize.LIST).found().size).isEqualTo(PictureSize(250, 250))
     }
 
     @Test
@@ -216,6 +285,42 @@ class CoverArtArchiveClientTest {
         assertThat(log.to(caaHost).map { it.path }).containsExactly("/release/$BUSY/front-250", "/release/$RELEASE/front-250")
         // The next request of any address waits out the Retry-After.
         assertThat(log.to(caaHost)[1].timeMs).isGreaterThanOrEqualTo(30_000)
+    }
+
+    @Test
+    fun `a 503 with a Retry-After over 120 s pauses every CAA request for it, and later calls fail without a request`() = runTest {
+        fake {
+            busy(BUSY, retryAfterSeconds = 600)
+            withImages(RELEASE)
+        }
+        val client = client()
+
+        assertThat(client.cover(release(BUSY), CoverSize.LIST)).isEqualTo(CaaResult.Busy(clock.after(5.minutes)))
+        assertThat(failures.get(key(BUSY, CoverSize.LIST)))
+            .isEqualTo(FailureEntry(FailureKind.BUSY, clock.now, clock.after(5.minutes), busyInARow = 1))
+
+        val error = runCatching { client.cover(release(RELEASE), CoverSize.LIST) }.exceptionOrNull()
+
+        assertThat(error).isInstanceOf(CaaException.Paused::class.java)
+        assertThat((error as CaaException.Paused).remaining).isBetween(599.seconds, 600.seconds)
+        assertThat(server.requestCount + archive.requestCount).isEqualTo(1)
+        // A blocked call records nothing for its own address.
+        assertThat(failures.get(key(RELEASE, CoverSize.LIST))).isNull()
+    }
+
+    @Test
+    fun `a 503 with a Retry-After of years pauses every CAA request for 1 hour`() = runTest {
+        fake { withImages(RELEASE) }
+        // About 63 years; still an Int, as OkHttp's own 503 handling reads the header before the client sees it.
+        caa.enqueue(MockResponse.Builder().code(503).addHeader("Retry-After", "2000000000").body("busy").build())
+        val client = client()
+
+        assertThat(client.cover(release(OTHER), CoverSize.LIST)).isInstanceOf(CaaResult.Busy::class.java)
+        val error = runCatching { client.cover(release(RELEASE), CoverSize.LIST) }.exceptionOrNull()
+
+        assertThat(error).isInstanceOf(CaaException.Paused::class.java)
+        assertThat((error as CaaException.Paused).remaining).isBetween(1.hours - 1.seconds, 1.hours)
+        assertThat(server.requestCount + archive.requestCount).isEqualTo(1)
     }
 
     @Test
@@ -303,7 +408,7 @@ class CoverArtArchiveClientTest {
     }
 
     @Test
-    fun `the release index lists the images with HTTPS addresses, through the redirect`() = runTest {
+    fun `the release index lists the images on the configured CAA address, through the redirect`() = runTest {
         fake { withIndex(FakeCaa.INDEX_RELEASE) }
         val id = FakeCaa.INDEX_RELEASE
 
@@ -314,7 +419,8 @@ class CoverArtArchiveClientTest {
             archiveHost to "/download/mbid-$id/index.json",
         )
         assertThat(log.entries.map { it.userAgent }).containsOnly(TestServices.USER_AGENT)
-        val prefix = "https://coverartarchive.org/release/$id"
+        // The fixture's links name coverartarchive.org; they are moved onto the configured (fake) base address.
+        val prefix = "http://$caaHost/release/$id"
         assertThat(index.images.map { it.id }).containsExactly("1234567890", "2234567890")
         val front = index.images[0]
         assertThat(index.front).isEqualTo(front)
@@ -334,6 +440,31 @@ class CoverArtArchiveClientTest {
         assertThat(back.thumbnail(250).toString()).isEqualTo("$prefix/2234567890-250.jpg")
         assertThat(back.thumbnail(500).toString()).isEqualTo("$prefix/2234567890-500.jpg")
         assertThat(back.thumbnail(1200)).isNull()
+    }
+
+    @Test
+    fun `an image of the release index is fetched from the fake CAA, never from coverartarchive_org`() = runTest {
+        fake { withIndex(FakeCaa.INDEX_RELEASE) }
+        val client = client()
+        val index = client.releaseIndex(FakeCaa.INDEX_RELEASE).found()
+        // Checked before anything is fetched, so a wrong address fails here and never reaches the real service.
+        val addresses = index.images.flatMap { listOf(it.original) + it.thumbnails.values }
+        assertThat(addresses.map { "${it.host}:${it.port}" }).containsOnly(caaHost)
+        val before = log.size
+
+        val thumbnail = client.image(index.front!!, 250).found()
+        val back = client.image(index.images[1], null).found()
+
+        assertThat(thumbnail.size).isEqualTo(PictureSize(250, 250))
+        assertThat(thumbnail.original).isFalse()
+        assertThat(back.original).isTrue()
+        assertThat(log.entries.drop(before).map { it.host to it.path.substringAfterLast('/') }).containsExactly(
+            caaHost to "1234567890-250.jpg",
+            archiveHost to "mbid-${FakeCaa.INDEX_RELEASE}-1234567890_thumb250.jpg",
+            caaHost to "2234567890.png",
+            archiveHost to "mbid-${FakeCaa.INDEX_RELEASE}-2234567890.jpg",
+        )
+        assertThat(log.entries.map { it.userAgent }).containsOnly(TestServices.USER_AGENT)
     }
 
     @Test

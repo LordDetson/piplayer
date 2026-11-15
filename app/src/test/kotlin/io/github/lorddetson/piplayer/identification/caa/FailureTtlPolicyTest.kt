@@ -48,6 +48,38 @@ class FailureTtlPolicyTest {
     }
 
     @Test
+    fun `a 503 up to 6 hours after the previous 503 entry expired still doubles`() {
+        val first = policy.busy(null)
+        clock.advance(5.minutes + 6.hours)
+
+        val second = policy.busy(first)
+        assertThat(second.expiresAt).isEqualTo(clock.after(10.minutes))
+        assertThat(second.busyInARow).isEqualTo(2)
+    }
+
+    @Test
+    fun `a 503 more than 6 hours after the previous 503 entry expired starts again at 5 minutes`() {
+        val first = policy.busy(null)
+        clock.advance(5.minutes + 6.hours + 1.seconds)
+
+        val second = policy.busy(first)
+        assertThat(second.expiresAt).isEqualTo(clock.after(5.minutes))
+        assertThat(second.busyInARow).isEqualTo(1)
+    }
+
+    @Test
+    fun `a long row of 503s ends after a month without one`() {
+        var entry: FailureEntry? = null
+        repeat(8) { entry = policy.busy(entry) }
+        assertThat(entry!!.busyInARow).isEqualTo(8)
+
+        clock.advance(30.days)
+        val next = policy.busy(entry)
+        assertThat(next.expiresAt).isEqualTo(clock.after(5.minutes))
+        assertThat(next.busyInARow).isEqualTo(1)
+    }
+
+    @Test
     fun `a 503 after a 404 starts again at 5 minutes`() {
         val entry = policy.busy(policy.notFound())
         assertThat(entry.expiresAt).isEqualTo(clock.after(5.minutes))
