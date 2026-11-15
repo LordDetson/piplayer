@@ -1,6 +1,7 @@
 package io.github.lorddetson.piplayer.identification
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
 import io.github.lorddetson.piplayer.BuildConfig
 import io.github.lorddetson.piplayer.fakes.FakeAcoustId
 import io.github.lorddetson.piplayer.fakes.FakeCaa
@@ -40,10 +41,11 @@ import org.junit.runner.RunWith
  *
  * ```
  * ANDROID_SERIAL=<emulator> gradlew :app:installBenchmark :app:installBenchmarkAndroidTest -Ppiplayer.minifiedTests=true
- * python <main folder>/tools/instrumented/run_instrumented.py <emulator> MinifiedClientsTest --no-install
+ * python <main folder>/tools/instrumented/run_instrumented.py <emulator> MinifiedClientsTest --no-install -e minified true
  * ```
  *
- * The normal run (and CI) runs the same tests against the debug build.
+ * With `-e minified true` the run fails unless the build under test is the benchmark one, so a debug build reinstalled
+ * by mistake cannot pass for the minified check. The normal run (and CI) runs the same tests against the debug build.
  */
 @RunWith(AndroidJUnit4::class)
 class MinifiedClientsTest {
@@ -100,6 +102,14 @@ class MinifiedClientsTest {
             "io.github.lorddetson.piplayer.identification.musicbrainz.RecordingSearchResponse"
         assertThat(renamed).describedAs("renamed in the ${BuildConfig.BUILD_TYPE} build")
             .isEqualTo(BuildConfig.BUILD_TYPE == "benchmark")
+    }
+
+    @Test
+    fun aRunThatNamesTheBuildTestsThatBuild() {
+        // `-e minified true` says the run is meant for the minified build: a reinstalled debug build must not pass it.
+        val minified = InstrumentationRegistry.getArguments().getString(MINIFIED_ARGUMENT)?.toBooleanStrict() ?: return
+        assertThat(BuildConfig.BUILD_TYPE).describedAs("the build under a run with -e $MINIFIED_ARGUMENT $minified")
+            .isEqualTo(if (minified) "benchmark" else "debug")
     }
 
     @Test
@@ -242,6 +252,8 @@ class MinifiedClientsTest {
     private fun String.occurrences(part: String): Int = windowed(part.length).count { it == part }
 
     private companion object {
+        /** The instrumentation argument that names the build a run is meant for: `true` minified, `false` debug. */
+        const val MINIFIED_ARGUMENT = "minified"
         const val KEY = "minifiedTestKey1"
         const val FINGERPRINT = "AQAAT0mUaEkSRZEGAA"
         const val INVALID_KEY_FINGERPRINT = "AQAAinvalidKey"
