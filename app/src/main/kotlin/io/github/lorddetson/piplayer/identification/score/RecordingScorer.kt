@@ -51,22 +51,28 @@ object RecordingScorer {
      * Scores each finding by its tier, merges the recordings found by several stages (by recording ID, keeping the
      * highest score and every stage in the reason) and places the best in a band. The title is compared as the text
      * search compares it ([TrackHints.forScoring] with [options]), so text candidates score as they did in the search.
+     * Before scoring, a field that one stage's copy of a recording lacks is filled from another copy ([described]).
      */
     fun rank(hint: TrackHint, findings: List<StageFinding>, options: QueryOptions = QueryOptions()): Ranking {
         val file = TrackHints.forScoring(hint, options)
+        val described = described(findings)
+        val fill = { candidate: TextCandidate -> candidate.filledFrom(described.getValue(candidate.recordingId)) }
         val scored = findings.flatMap { finding ->
             when (finding) {
-                is StageFinding.TagRecordingId ->
-                    listOf(identifier(file, finding.recording, Source.TAG_RECORDING_ID, TAG_ID_SCORE, TAG_ID_WINDOW_MS))
+                is StageFinding.TagRecordingId -> listOf(
+                    identifier(file, fill(finding.recording), Source.TAG_RECORDING_ID, TAG_ID_SCORE, TAG_ID_WINDOW_MS),
+                )
                 is StageFinding.Isrc -> {
-                    val recordings = finding.recordings.distinctBy { it.recordingId }
+                    val recordings = finding.recordings.distinctBy { it.recordingId }.map(fill)
                     // An ISRC that maps to several recordings proves none of them.
                     recordings.singleOrNull()
                         ?.let { listOf(identifier(file, it, Source.ISRC, ISRC_SCORE, ISRC_WINDOW_MS)) }
                         ?: recordings.map { similarity(file, it, Source.ISRC) }
                 }
-                is StageFinding.Fingerprint -> finding.candidates.mapNotNull { fingerprint(file, it) }
-                is StageFinding.TextSearch -> finding.candidates.map { similarity(file, it, Source.TEXT_SEARCH) }
+                is StageFinding.Fingerprint -> finding.candidates.mapNotNull { found ->
+                    found.toTextCandidate()?.let { fingerprint(file, fill(it), found.acoustIdScore) }
+                }
+                is StageFinding.TextSearch -> finding.candidates.map { similarity(file, fill(it), Source.TEXT_SEARCH) }
             }
         }
         val matches = scored.groupBy { it.recordingId }.map { (_, copies) -> merge(copies) }
@@ -95,16 +101,45 @@ object RecordingScorer {
     }
 
     /**
-     * AcoustID's score times the duration credit; null for a track without a recording, which has nothing to apply. The
-     * credit is taken against the hint's exact duration, like every other tier and the reason, not from
+     * AcoustID's score times the duration credit. A track without a recording never gets here, because it has nothing
+     * to apply. The credit is taken against the hint's exact duration, like every other tier and the reason, not from
      * [AcoustIdCandidate.confidence], whose duration is whatever the caller gave [AcoustIdCandidates.from].
      */
-    private fun fingerprint(file: TrackHint, found: AcoustIdCandidate): RecordingMatch? {
-        val candidate = found.toTextCandidate() ?: return null
+    private fun fingerprint(file: TrackHint, candidate: TextCandidate, acoustIdScore: Double): RecordingMatch {
         val difference = difference(file, candidate)
         val credit = difference?.let(TextCandidateScorer::durationCredit) ?: 1.0
-        val reason = reason(file, candidate, Source.FINGERPRINT, Tier.IDENTIFIER, found.acoustIdScore)
-        return RecordingMatch(candidate, penalized(found.acoustIdScore * credit, difference), reason)
+        val reason = reason(file, candidate, Source.FINGERPRINT, Tier.IDENTIFIER, acoustIdScore)
+        return RecordingMatch(candidate, penalized(acoustIdScore * credit, difference), reason)
+    }
+
+    /**
+     * Every recording found, described by all its copies: per field, the first copy that has it, the strongest stage
+     * first. AcoustID knows some recordings by their ID only, with no title, credit or length.
+     */
+    private fun described(findings: List<StageFinding>): Map<String, TextCandidate> =
+        findings.flatMap { finding ->
+            when (finding) {
+                is StageFinding.TagRecordingId -> listOf(Source.TAG_RECORDING_ID to finding.recording)
+                is StageFinding.Isrc -> finding.recordings.map { Source.ISRC to it }
+                is StageFinding.Fingerprint ->
+                    finding.candidates.mapNotNull { it.toTextCandidate() }.map { Source.FINGERPRINT to it }
+                is StageFinding.TextSearch -> finding.candidates.map { Source.TEXT_SEARCH to it }
+            }
+        }
+            .sortedBy { (source, _) -> source.ordinal }
+            .groupBy({ (_, candidate) -> candidate.recordingId }, { (_, candidate) -> candidate })
+            .mapValues { (_, copies) -> copies.reduce { described, copy -> described.filledFrom(copy) } }
+
+    /** This copy with each field it lacks taken from [other]; the credit and its names travel together. */
+    private fun TextCandidate.filledFrom(other: TextCandidate): TextCandidate {
+        val hasCredit = TextCandidateScorer.present(artistCredit)
+        return copy(
+            title = title.takeIf { TextCandidateScorer.present(it) } ?: other.title,
+            artistCredit = if (hasCredit) artistCredit else other.artistCredit,
+            artistNames = if (hasCredit) artistNames else other.artistNames,
+            lengthMs = lengthMs ?: other.lengthMs,
+            releases = releases.ifEmpty { other.releases },
+        )
     }
 
     /** The similarity tier, whose penalties [TextCandidateScorer] applies, the title/artist one included. */
@@ -118,7 +153,7 @@ object RecordingScorer {
      * today's windows and credit it never changes an identifier score, but the rule stays here so that tuning the
      * windows in M3 (PIM-60) cannot drop it.
      */
-    private fun penalized(score: Double, differenceMs: Long?): Double =
+    internal fun penalized(score: Double, differenceMs: Long?): Double =
         TextCandidateScorer.durationPenalty(score, differenceMs).coerceIn(0.0, 1.0)
 
     private fun difference(file: TrackHint, candidate: TextCandidate): Long? {

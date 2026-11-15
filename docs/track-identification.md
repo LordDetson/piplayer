@@ -142,7 +142,7 @@ Cheapest and most reliable source first; stop as soon as a stage gives a confide
 |---|-------|-------|--------|
 | 0 | Local read | file URI | existing tags (TagLib, legacy encodings decoded), exact duration, size, content key, embedded cover details; normally already done by the background tag pass |
 | 1 | Known IDs | MusicBrainz recording/release IDs in tags | recording + release directly |
-| 2 | ISRC | ISRC tag | `/ws/2/isrc/{isrc}` → recordings (can clash: always check duration and artist/title) |
+| 2 | ISRC | ISRC tag | `/ws/2/isrc/{isrc}` → recordings (can clash: always check the duration; an artist/title disagreement is shown in the reason, §4.1) |
 | 3 | Fingerprint | first 120 s of decoded audio (§3.2) | Chromaprint fingerprint → AcoustID lookup → recordings with score |
 | 4 | Text search | tags + parsed filename + duration | MusicBrainz Lucene recording search |
 | 5 | Release choice | recording MBID(s) | ranked releases (§4.2) |
@@ -487,7 +487,10 @@ PiPlayer never adds an ID3v1 tag to a file that has none; §7.5 lists the TagLib
 ### 4.1 Recording confidence (0 to 1)
 
 Tiered, not a flat weighted sum. A candidate found by several stages (recordings are the same when their MusicBrainz
-recording IDs are) takes its highest score, and its reason lists every stage that found it. The weights, credits and
+recording IDs are) takes its highest score, and its reason lists every stage that found it. Before scoring, a field that
+one stage's copy of the recording lacks (AcoustID knows some recordings by their ID only, without a title, credit or
+length) is taken from another stage's copy, the strongest stage first; a copy keeps the fields it has. So the candidate
+shown, its reason and the duration credit use what any stage knows (decided in M3 after review). The weights, credits and
 penalties below are starting points, tuned in M3 on the corpus (PIM-60, §11.4).
 
 1. **Identifier tier**:
@@ -508,7 +511,11 @@ penalties below are starting points, tuned in M3 on the corpus (PIM-60, §11.4).
    on either side there is no duration credit and no duration penalty. Decided in M3: an identifier hit whose title or
    artist disagrees with the file's values keeps its tier score, and the disagreement is shown in its reason instead.
    People identify files because their tags are wrong, and a correct fingerprint of a cover version would otherwise be
-   demoted. The corpus run (PIM-60) checks this against the high-band error target.
+   demoted. The same holds for an ISRC hit: a reused or wrong ISRC is caught by the 2 s window and by the fallback for
+   an ISRC with several recordings, and a single recording of another song within the window shows its disagreement.
+   The corpus run (PIM-60) checks this against the high-band error target, with fingerprint and ISRC errors counted
+   separately. With today's windows (7 s and 2 s) and duration credit (0 from 30 s), the duration penalty never changes
+   an identifier score; it stays in the rule so that tuning the windows or the credit cannot drop it.
 
 Definitions:
 
@@ -1210,7 +1217,7 @@ tests, and a high-band error rate within the threshold of §11.4.
 | M3 | Retry later: an empty AcoustID result is retried after 1 hour and once in the next batch, then counts as final; a text-search result of at least 0.50 cancels the retry |
 | M0 | Text query builder: Lucene escaping, lower-case terms, the variants of §3.3 in order, skipped variants for missing values, the stop rule and the limits |
 | M0 | PCM conversion: 8-, 16-, 24-, 32-bit and float input, stereo and 5.1 downmix, rounding and clipping to 16-bit; the fingerprint path stops at 120 s, skips the resampler at 11 025 Hz, flushes it at the end of a short file and starts a new one when the format changes |
-| M3 | Recording scoring (§4.1): identifier tiers (a tag recording ID within 7 s; an ISRC within 2 s, and the similarity tier for an ISRC with several recordings or a length outside the window; AcoustID score × duration credit), duration credit, the 0.85 cap for text, the duration penalty on every tier and the title/artist penalty on the similarity tier only, an identifier hit's disagreement shown in its reason, merging by recording with the highest score, the band boundaries, and a score of at least 0.90 with a runner-up gap below 0.10 landing in the medium band |
+| M3 | Recording scoring (§4.1): identifier tiers (a tag recording ID within 7 s; an ISRC within 2 s, and the similarity tier for an ISRC with several recordings or a length outside the window; AcoustID score × duration credit), duration credit, the 0.85 cap for text, the duration penalty on every tier (for the identifier tiers checked on the penalty step itself, since today's windows and credit never let it show in a score) and the title/artist penalty on the similarity tier only, an identifier hit's disagreement shown in its reason, merging by recording with the highest score and a field one stage lacks (an AcoustID recording known by its ID only) taken from another stage's copy, the band boundaries, and a score of at least 0.90 with a runner-up gap below 0.10 landing in the medium band |
 | M3 | Text search input (§3.3): the hint from decoded tags, the file-name guess and the exact duration, tags winning per field; track positions from the medium, never the printed number (vinyl "A4", numbering across discs); a manual query is marked manual with limit 50; pasted MusicBrainz links and IDs become recording or release lookups, other MusicBrainz links are refused |
 | M3 | Release ranking on recorded MusicBrainz JSON fixtures (for example a track with hundreds of same-title recordings, video recordings and compilations): the folder preference, the full type order, Digital Media equal to CD, date order, a recording on two tracks of one release; fixtures stripped of CC BY-NC-SA `tags`/`genres` before committing |
 | M3 | Edition picker: every release of the group is listed; an edition without the identified recording maps the file by position and title or is marked "does not contain this song" |

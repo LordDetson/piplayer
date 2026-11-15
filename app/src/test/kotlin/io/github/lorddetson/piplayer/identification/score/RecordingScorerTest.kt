@@ -159,11 +159,19 @@ class RecordingScorerTest {
     }
 
     @Test
-    fun `the duration penalty applies to identifier tiers too`() {
-        // A fingerprint hit 40 s off: no credit, then the penalty; it never reaches a band.
+    fun `a fingerprint hit 30 s or more off gets no duration credit and never reaches a band`() {
         val ranking = rank(StageFinding.Fingerprint(listOf(fingerprint(lengthMs = 254_000))))
         assertThat(ranking.matches.single().score).isCloseTo(0.0, tolerance)
         assertThat(ranking.band).isEqualTo(Band.NO_MATCH)
+    }
+
+    @Test
+    fun `the duration penalty is part of every identifier score`() {
+        // Not observable through rank with today's windows and credit (TI 4.1): checked on the step itself.
+        assertThat(RecordingScorer.penalized(1.0, 31_000)).isCloseTo(0.3, tolerance)
+        assertThat(RecordingScorer.penalized(1.0, -31_000)).isCloseTo(0.3, tolerance)
+        assertThat(RecordingScorer.penalized(1.0, 30_000)).isEqualTo(1.0)
+        assertThat(RecordingScorer.penalized(0.95, null)).isEqualTo(0.95)
     }
 
     @Test
@@ -248,6 +256,47 @@ class RecordingScorerTest {
         assertThat(match.reason.source).isEqualTo(Source.TAG_RECORDING_ID)
         assertThat(match.reason.fingerprintScore).isEqualTo(0.91)
         assertThat(match.reason.foundBy).containsExactlyInAnyOrder(Source.TAG_RECORDING_ID, Source.FINGERPRINT)
+    }
+
+    @Test
+    fun `a recording AcoustID knows only by its ID takes its title, credit and similarity from another stage`() {
+        val match = rank(
+            StageFinding.Fingerprint(listOf(fingerprint(title = null, credit = null, lengthMs = null))),
+            StageFinding.TextSearch(listOf(recording())),
+        ).matches.single()
+        assertThat(match.score).isCloseTo(0.97, tolerance)
+        assertThat(match.reason.source).isEqualTo(Source.FINGERPRINT)
+        assertThat(match.candidate.title).isEqualTo("Paper Lanterns")
+        assertThat(match.candidate.artistCredit).isEqualTo("The Quiet Harbors")
+        assertThat(match.candidate.artistNames).containsExactly("The Quiet Harbors")
+        assertThat(match.candidate.lengthMs).isEqualTo(214_000)
+        assertThat(match.reason.title).isEqualTo(1.0)
+        assertThat(match.reason.artist).isEqualTo(1.0)
+        assertThat(match.reason.durationDeltaMs).isEqualTo(0)
+        assertThat(match.reason.foundBy).containsExactlyInAnyOrder(Source.FINGERPRINT, Source.TEXT_SEARCH)
+    }
+
+    @Test
+    fun `the length another stage knows gives an ID-only AcoustID hit its duration credit`() {
+        // 9 s off: the fingerprint scores 0.97 * 0.75, below the text copy's 0.4 + 0.3 + 0.2 * 0.75 = 0.85.
+        val match = rank(
+            StageFinding.Fingerprint(listOf(fingerprint(title = null, credit = null, lengthMs = null))),
+            StageFinding.TextSearch(listOf(recording(lengthMs = 223_000))),
+        ).matches.single()
+        assertThat(match.score).isCloseTo(0.85, tolerance)
+        assertThat(match.reason.source).isEqualTo(Source.TEXT_SEARCH)
+        assertThat(match.reason.fingerprintScore).isEqualTo(0.97)
+    }
+
+    @Test
+    fun `a stage's own title and credit are kept when another stage spells them differently`() {
+        val match = rank(
+            StageFinding.Fingerprint(listOf(fingerprint(title = "Paper Lantern", credit = "Quiet Harbors"))),
+            StageFinding.TextSearch(listOf(recording())),
+        ).matches.single()
+        assertThat(match.reason.source).isEqualTo(Source.FINGERPRINT)
+        assertThat(match.candidate.title).isEqualTo("Paper Lantern")
+        assertThat(match.candidate.artistCredit).isEqualTo("Quiet Harbors")
     }
 
     @Test
