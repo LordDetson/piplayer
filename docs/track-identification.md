@@ -1332,7 +1332,10 @@ whose first sync after the update runs as on a first launch (about 1.7 s on the 
   has no file ID, and a library file that the tag pass has not read yet gets its key at stage 0 (§3.1), before any
   lookup. So the rows serve every file that is identified, a file that enters the media index later finds its results
   by its key, and byte-identical copies share them as they share an identity. A file whose key changes (its audio was
-  re-encoded) starts without them.
+  re-encoded) starts without them. They are kept per audio content, not per track: the track key of §10 also holds the
+  track's start in the file, which is 0 for every file until CUE sheets arrive, so until then a content key names one
+  track. CUE support adds the start to the keys of these three tables in a later library database version; as working
+  rows of a rebuildable database they are dropped then rather than migrated, and a run fills them again.
 - `release_cache(release_mbid, payload_json, fetched_at)`: the release lookups of §5.1 as JSON, under the MBID they
   were asked for and, when MusicBrainz answered with another (a merged release), under that one too. A row older than
   30 days counts as missing, so a later lookup brings MusicBrainz's corrections, and the next write drops such rows.

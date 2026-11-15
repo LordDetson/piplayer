@@ -70,6 +70,7 @@ class CoverArtArchiveClientTest {
         statuses: ProviderStatusStore = ProviderStatusStore(),
         maxRetries: Int = 3,
         maxImageBytes: Long = CoverArtArchiveClient.MAX_IMAGE_BYTES,
+        failures: FailureCache = this@CoverArtArchiveClientTest.failures,
     ) = CoverArtArchiveClient(
         http = HttpClients.create(TestServices.USER_AGENT, gate),
         limiter = RateLimiter(interval, testTimeSource),
@@ -241,6 +242,39 @@ class CoverArtArchiveClientTest {
         assertThat(client.cover(release(UNKNOWN), CoverSize.ORIGINAL)).isEqualTo(CaaResult.NotFound)
         // No thumbnail exists without the original, so the original's entry answers every other size.
         assertThat(log.entries.map { it.path }).containsExactly("/release/$UNKNOWN/front-250")
+    }
+
+    @Test
+    fun `every failure entry is read and written off the caller's thread, the original's entry after a CAA 404 too`() = runTest {
+        fake { withImages(RELEASE) }
+        val caller = Thread.currentThread()
+        val onCaller = mutableListOf<String>()
+        val watched = object : FailureCache {
+            private fun check(call: String) {
+                if (Thread.currentThread() == caller) synchronized(onCaller) { onCaller += call }
+            }
+
+            override fun get(key: String): FailureEntry? = failures.get(key).also { check("get $key") }
+
+            override fun put(key: String, entry: FailureEntry) {
+                check("put $key")
+                failures.put(key, entry)
+            }
+
+            override fun remove(key: String) {
+                check("remove $key")
+                failures.remove(key)
+            }
+        }
+        val client = client(failures = watched)
+
+        // A 404 from CAA itself for the thumbnail, which records the original's address as well.
+        assertThat(client.cover(release(UNKNOWN), CoverSize.LIST)).isEqualTo(CaaResult.NotFound)
+        assertThat(failures.get(key(UNKNOWN, CoverSize.ORIGINAL))).isEqualTo(policy.notFound())
+        client.cover(release(RELEASE), CoverSize.LIST).found()
+
+        // The app keeps its entries in library.db, so none of these may block a caller on the main thread.
+        assertThat(onCaller).isEmpty()
     }
 
     @Test

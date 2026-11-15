@@ -181,7 +181,7 @@ class CoverArtArchiveClient(
                     is Answer.Busy -> return CaaResult.Busy(answer.until)
                     is Answer.Missing -> if (frontAddresses && !answer.fromImageHost) {
                         // CAA itself has no front image, so its original is missing too.
-                        failures.put(original.toString(), ttl.notFound())
+                        record(original, ttl.notFound())
                         return CaaResult.NotFound
                     }
                 }
@@ -195,9 +195,18 @@ class CoverArtArchiveClient(
         }
     }
 
-    /** The live failure entry of [url], if any, read on the I/O dispatcher: the app keeps its entries in a database. */
+    /**
+     * The live failure entry of [url], if any, read on the I/O dispatcher: the app keeps its entries in a database, and
+     * a caller may be on the main thread. Entries written while an answer is handled are on that dispatcher already
+     * ([RetryingCaller]); [record] is for the others.
+     */
     private suspend fun recorded(url: HttpUrl): FailureEntry? =
         withContext(ioDispatcher) { ttl.live(failures.get(url.toString())) }
+
+    /** Records [entry] for [url] on the I/O dispatcher, as [recorded] reads it. */
+    private suspend fun record(url: HttpUrl, entry: FailureEntry) {
+        withContext(ioDispatcher) { failures.put(url.toString(), entry) }
+    }
 
     private fun FailureEntry.toResult(): CaaResult<Nothing> = when (kind) {
         FailureKind.NOT_FOUND -> CaaResult.NotFound

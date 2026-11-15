@@ -15,8 +15,11 @@ import io.github.lorddetson.piplayer.identification.caa.RoomFailureCache
 import io.github.lorddetson.piplayer.identification.musicbrainz.toCandidate
 import io.github.lorddetson.piplayer.identification.release.FolderReleaseHint
 import io.github.lorddetson.piplayer.identification.release.InMemoryReleaseCache
+import io.github.lorddetson.piplayer.identification.release.LookupPlanTest.Companion.candidate
+import io.github.lorddetson.piplayer.identification.release.LookupPlanTest.Companion.match
 import io.github.lorddetson.piplayer.identification.release.NoFolderReleaseHint
 import io.github.lorddetson.piplayer.identification.release.ReleaseFixtures
+import io.github.lorddetson.piplayer.identification.release.ReleaseRequest
 import io.github.lorddetson.piplayer.identification.release.RoomReleaseCache
 import io.github.lorddetson.piplayer.library.db.LibraryAccess
 import io.github.lorddetson.piplayer.library.db.LibraryDatabase
@@ -24,6 +27,8 @@ import io.github.lorddetson.piplayer.identification.provider.ProviderId
 import io.github.lorddetson.piplayer.identification.provider.ProviderStatus
 import io.github.lorddetson.piplayer.identification.provider.ProviderStoppedException
 import io.github.lorddetson.piplayer.identification.provider.StopReason
+import io.github.lorddetson.piplayer.identification.score.Band
+import io.github.lorddetson.piplayer.identification.score.Ranking
 import io.github.lorddetson.piplayer.identification.score.TrackHint
 import io.github.lorddetson.piplayer.identification.text.RecordingSearch
 import io.github.lorddetson.piplayer.identification.text.TextSearch
@@ -390,5 +395,37 @@ class IdentificationServicesTest {
         assertThat(failures.get(CoverUrls.image(caaBase, source, CoverSize.ORIGINAL).toString())?.kind)
             .isEqualTo(FailureKind.NOT_FOUND)
         assertThat(services.folderReleaseHint).isSameAs(hint)
+    }
+
+    @Test
+    fun `the release choice of the services asks their folder hint and suggests the release it confirms`() = runTest {
+        val log = RecordingRequestLog { testScheduler.currentTime }
+        musicBrainzServer.dispatcher = log.wrap(musicBrainz.withHarborLights())
+        // Without the hint the ranking suggests HARBOR_RELEASE; the hint confirms the other edition of the recording.
+        val live = "88888888-8888-4888-8888-888888888888"
+        val folders = mutableListOf<String?>()
+        val hint = FolderReleaseHint { folder -> folders += folder; setOf(live) }
+        val services = IdentificationServices.create(
+            userAgent = TestServices.USER_AGENT,
+            gate = TestServices.openGate(),
+            connectivity = TestServices.FakeConnectivity(),
+            baseUrls = TestServices.baseUrls(acoustIdServer.url("/v2/"), musicBrainzServer.url("/ws/2/")),
+            timeSource = testTimeSource,
+            folderReleaseHint = hint,
+        )
+        val recording = FakeMusicBrainz.HARBOR_RECORDING
+        val ranking = Ranking(
+            listOf(match(candidate(recording, "Paper Lanterns", "The Quiet Harbors feat. Ada Vale", 214_000), 0.97)),
+            0.97,
+            Band.HIGH,
+        )
+
+        val choice = services.releases.choose(ranking, ReleaseRequest(durationMs = 214_000, folder = "Music/Harbors"))
+
+        assertThat(folders).containsExactly("Music/Harbors")
+        assertThat(choice.ranked.getValue(recording).first().release.id).isEqualTo(live)
+        // The suggestion is looked up for the top of that ranking: the confirmed release, not HARBOR_RELEASE.
+        assertThat(log.entries.map { it.path.substringBefore('?') }.filter { it.startsWith("/ws/2/release/") })
+            .containsExactly("/ws/2/release/$live")
     }
 }

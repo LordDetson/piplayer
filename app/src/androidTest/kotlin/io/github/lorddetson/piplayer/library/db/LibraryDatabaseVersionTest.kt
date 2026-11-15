@@ -15,7 +15,7 @@ import org.junit.runner.RunWith
 
 /**
  * Library database version 13 (TI §10.1, §11.2 M3 "Library database version 13"): an older file is dropped and built
- * again, with the tables and columns of identification.
+ * again, with the tables, columns and keys of identification.
  */
 @RunWith(AndroidJUnit4::class)
 class LibraryDatabaseVersionTest {
@@ -57,6 +57,10 @@ class LibraryDatabaseVersionTest {
 
     private fun LibraryDatabase.columns(table: String) = strings("SELECT name FROM pragma_table_info('$table') ORDER BY cid")
 
+    /** The primary key columns of [table] in key order. */
+    private fun LibraryDatabase.primaryKey(table: String) =
+        strings("SELECT name FROM pragma_table_info('$table') WHERE pk > 0 ORDER BY pk")
+
     @Test
     fun anOlderLibraryDatabaseIsDroppedAndBuiltAgainAtVersion13() = runBlocking<Unit> {
         writeVersion12()
@@ -94,6 +98,13 @@ class LibraryDatabaseVersionTest {
                 "content_key", "run_id", "position", "started_at", "stage", "provider", "http_status", "result_count",
                 "best_score", "elapsed_ms", "note",
             )
+            // One job per content key, one candidate per place in the ranking, one trace row per step of a run.
+            assertThat(database.primaryKey("lookup_job")).containsExactly("content_key")
+            assertThat(database.primaryKey("candidate")).containsExactly("content_key", "position")
+            assertThat(database.primaryKey("identification_trace")).containsExactly("content_key", "run_id", "position")
+            assertThat(database.primaryKey("decided_mirror")).containsExactly("file_id", "field")
+            assertThat(database.primaryKey("release_cache")).containsExactly("release_mbid")
+            assertThat(database.primaryKey("api_cache")).containsExactly("key")
         } finally {
             database.close()
         }
