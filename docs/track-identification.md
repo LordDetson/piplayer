@@ -964,8 +964,8 @@ Phases (a) to (c) land in M4a, with accepted results saved in PiPlayer only; pha
 
 | Service | Use | Notes |
 |---------|-----|-------|
-| AcoustID + Chromaprint | 1.0 (core, M3) | free Open Source plan: AcoustID confirmed in writing on 2026-11-05 that a free GPL app without ads or paid features qualifies, with donations through an external link; register the app key |
-| MusicBrainz ws/2 | 1.0 (core, M3) | no key; 1 req/s per IP; mandatory User-Agent; core data CC0, genres/tags CC BY-NC-SA; register PiPlayer at metabrainz.org (non-profit tier) and confirm before the Play release (M5) |
+| AcoustID + Chromaprint | 1.0 (core, M3) | free Open Source plan: AcoustID confirmed in writing on 2026-11-05 that a free GPL app without ads or paid features qualifies, with donations through an external link; one registered application key for every build until M5, then one per build flavor |
+| MusicBrainz ws/2 | 1.0 (core, M3) | no key; 1 req/s per IP; mandatory User-Agent; core data CC0, genres/tags CC BY-NC-SA; register PiPlayer at metabrainz.org (non-profit tier) and confirm before the Play release (M5); until then the free web service with a User-Agent that names a contact is enough (MetaBrainz in writing, 2026-10-30) |
 | Cover Art Archive | 1.0 (core, M3) | images remain copyrighted by rights holders ("use at your own risk"); depends on Internet Archive uptime |
 | GitHub Releases API | 1.0 (M5), opt-in update check, GitHub build only | sends no library data; disclosed like the services above |
 | Radio Browser | v1.x, user-triggered (internet radio) | free community directory of radio stations, no key; receives search terms; the streams come from the stations themselves; send a User-Agent and pick a server from its DNS list |
@@ -976,9 +976,21 @@ Phases (a) to (c) land in M4a, with accepted results saved in PiPlayer only; pha
 
 Rules:
 
-- User-Agent on every request: `PiPlayer/<version> ( https://github.com/LordDetson/piplayer )`, never the OkHttp
-  default. Each build flavor (GitHub, Google Play) and each fork uses its own AcoustID application key, and a fork
-  puts its own repository URL in the User-Agent.
+- User-Agent on every request: `PiPlayer/<version> ( <contact> )`, never the OkHttp default. The contact comes from
+  the Gradle property `piplayer.contactUrl` through `BuildConfig`, and is `https://github.com/LordDetson/piplayer`
+  when the property is not set. It must be one token of printable ASCII without spaces, quotes, backslashes or
+  parentheses (a parenthesis would end the comment of the header early); the build and the User-Agent code refuse
+  anything else, and an empty value fails the build instead of falling back to the default. A fork puts its own
+  repository URL or e-mail address there (README, "Forks"). Shipped code always sends the build's User-Agent.
+- One AcoustID application key goes into every build type (debug, release, benchmark) through `BuildConfig`: from
+  `acoustid.apiKey` in `local.properties`, which git ignores, or from `-Pacoustid.apiKey`. A build without a key gets
+  an empty field. Its fingerprint stage then reports itself unavailable (no key) and sends nothing to AcoustID, while
+  the other stages, text search included, run as usual; CI builds release and benchmark this way. There are no build
+  flavors until M5, when the GitHub and the Google Play builds get one key each. A fork registers its own key.
+- The key is not a secret (below), but it stays out of everything PiPlayer prints or shares: the build never echoes
+  it, not even when it refuses a malformed one, and it never appears in a log line, a crash or problem report, the
+  debug screens or a `toString`. A JVM test keeps the code that reads it to the app's wiring and the AcoustID client,
+  and another keeps the crash report to the version and build type of `BuildConfig`.
 - Rate limits, in detail for MusicBrainz (§8 lists all providers): one limiter per host for the whole process;
   requests start at least 1.1 s apart, in arrival order. Busy answers (503, 429, 502, 504) and network errors are
   retried with waits that double from 1 s up to 32 s, each taken at random between half and all of its step, and
@@ -986,30 +998,49 @@ Rules:
   the retries). Every wait is a pause of the shared limiter, so it holds back every caller, also when the client gives
   up (for at most 1 hour). A call that would have to wait longer than a retry ever waits (a Retry-After of 120 s plus
   its jitter of up to 1 s) sends nothing and fails at once with how long the service asked to wait; this also ends a
-  call that was already waiting when such a pause began. A 403 that rejects the User-Agent stops the client. In M0 the limiter keeps its state in memory; persisting the
-  last request time (§8) comes with batches (M4a).
+  call that was already waiting when such a pause began. A 403 that rejects the User-Agent stops MusicBrainz for the
+  rest of the process (§8). Until batches (M4a) the limiter keeps its state in memory; persisting the last request time
+  (§8) comes with them.
 - Each provider sits behind a `MetadataProvider` interface with policy flags: `commercialAllowed`, `mayPersist`,
   `mayWriteToFile`, `maxDisplayAge`, `requiresApiKey`, `requiresSecret`, attribution text and per-item link, own rate
   limiter. `requiresApiKey` means an application key that ships in the APK and is not a secret (AcoustID, see
   below). `requiresSecret` means a real secret, for example an OAuth consumer secret, which may not ship in the APK
-  and so has to come from the user or from a server; no provider of 1.0 needs one.
+  and so has to come from the user or from a server; no provider of 1.0 needs one. The values of 1.0, with each
+  provider's shortest gap between two requests (§8); no provider sets a display age:
+
+  | Provider | Host | `commercialAllowed` | `mayPersist` | `mayWriteToFile` | `requiresApiKey` | `requiresSecret` | Interval |
+  |---|---|---|---|---|---|---|---|
+  | AcoustID | api.acoustid.org | no (free Open Source plan) | yes | no (its track ID stays in the user database) | yes | no | 350 ms |
+  | MusicBrainz | musicbrainz.org | yes (core data CC0; tags and genres are never requested) | yes | yes (CC0 core fields) | no | no | 1.1 s |
+  | Cover Art Archive | coverartarchive.org | no (images stay with their rights holders) | yes | yes (accepted covers, §5.2) | no | no | 1 s |
+
+  Cover Art Archive's limiter of 1 s also covers the redirect to the image host (archive.org), which takes no slot of
+  its own.
 - Only CC0 core fields are written into files as text; embedded covers follow §5.2. Attribution in About (M5):
   "Identification: AcoustID / Chromaprint · Metadata: MusicBrainz (CC0) · Covers: Cover Art Archive".
-- API keys shipped in the APK are not secrets (established open-source taggers publish theirs); document that forks
-  must register their own key. Users need no key of their own: the AcoustID limit counts per IP address (§8).
+- API keys shipped in the APK are not secrets (established open-source taggers publish theirs); the README's "Forks"
+  section tells forks to register their own key and set their own contact. Users need no key of their own: the
+  AcoustID limit counts per IP address (§8).
 - Public 0.x pre-releases on GitHub may use online identification: AcoustID (2026-11-05) and MetaBrainz (2026-10-30)
   confirmed the terms in writing.
-- Privacy: online lookup is opt-in with a clear explanation. Every online service is disclosed in the app before its
-  first use, in the privacy policy and in Play Data safety, which must declare what is **shared** with whom:
+- Privacy: online lookup is opt-in with a clear explanation. The opt-in is one setting plus the version of the
+  disclosure the user accepted (`disclosure_version`), with no switch per service. The online gate built on it is
+  closed by default, also before the setting exists, and closes again when the disclosure version rises. The HTTP
+  client checks it on every request and every redirect hop, and before every host lookup and new connection (§8), so
+  nothing leaves the device while it is closed. Every online service is disclosed in the app before its first use, in
+  the privacy policy and in Play Data safety, which must declare what is **shared** with whom:
   - AcoustID: fingerprints and durations;
   - MusicBrainz: existing tags, parsed file names, durations and IDs;
-  - Cover Art Archive: release and release group IDs;
+  - Cover Art Archive: release and release group IDs, also in the background while albums without a local cover are
+    shown in lists (§5.2); the Internet Archive (archive.org), where it redirects image requests, gets the same IDs;
   - LRCLIB (v1.x): artist, title, album and duration;
   - GitHub Releases API (opt-in update check, GitHub build only): the request for the latest release;
   - all of them: IP address and user agent.
 - Problem reports and crash reports leave the device only when the user shares them; an identification trace
   included in one leaves out file names and tag values by default (§10.1).
-- Keep `docs/THIRD_PARTY_SERVICES.md` with terms URLs and access dates.
+- [THIRD_PARTY_SERVICES.md](THIRD_PARTY_SERVICES.md) lists every service PiPlayer talks to with its terms URLs, the
+  date they were last read and what the service receives. It is updated whenever a service is added or its terms
+  change, and every term is read again before the first Google Play release.
 
 ## 10. Data model (Room, sketch)
 

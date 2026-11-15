@@ -17,6 +17,36 @@ Early design. There is no app code yet; the first specification is in
 - [MusicBrainz](https://musicbrainz.org/) for metadata (CC0 core data)
 - [Cover Art Archive](https://coverartarchive.org/) for album covers
 
+What each service receives, and where its terms are, is listed in
+[docs/THIRD_PARTY_SERVICES.md](docs/THIRD_PARTY_SERVICES.md).
+
+## Forks
+
+PiPlayer's builds name themselves to these services. A fork you publish should speak for itself:
+
+1. Register your own AcoustID application key at [acoustid.org](https://acoustid.org/new-application) and put it into
+   `local.properties`, which git ignores:
+
+   ```properties
+   acoustid.apiKey=YourKey
+   ```
+
+   Gradle's `-Pacoustid.apiKey=YourKey` works too, but Gradle lists command-line properties in its `properties`
+   report, so `local.properties` is the better place. The key may contain only letters and digits, and every build
+   type uses it. Without a key the app still builds and works: it skips fingerprint lookups and identifies tracks by
+   text search only.
+2. Set your own contact for the User-Agent, a URL or an e-mail address, in `gradle.properties` or with
+   `-Ppiplayer.contactUrl=...`:
+
+   ```properties
+   piplayer.contactUrl=https://github.com/you/your-fork
+   ```
+
+   It must be one token of printable ASCII without spaces, quotes, backslashes or parentheses. Without it the
+   User-Agent names this repository, and
+   MusicBrainz would contact this project about your users' traffic.
+3. Give the fork a different name and icon (see License).
+
 ## License
 
 PiPlayer is free software: you can redistribute it and/or modify it under the terms of the GNU General Public
