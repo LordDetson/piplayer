@@ -26,6 +26,9 @@ sealed interface MusicBrainzRef {
         private const val HOST = "musicbrainz.org"
         private val schemes = setOf("http", "https")
 
+        /** A URI scheme at the end of the text before `://`; what comes before it is a label glued to the link. */
+        private val schemeAtEnd = Regex("""[A-Za-z][A-Za-z0-9+.-]*$""")
+
         /** Brackets, quotes and sentence punctuation that a pasted link or ID can come wrapped in. */
         private const val WRAPPING = "()[]{}<>\"'.,;:!?«»“”‘’"
 
@@ -47,12 +50,20 @@ sealed interface MusicBrainzRef {
             if (mbid.matches(word)) return AnyEntity(word.lowercase(Locale.ROOT))
             if (!word.contains(HOST, ignoreCase = true)) return null
             // Split by hand: a URI parser rejects links that are still MusicBrainz links, such as a broken escape.
-            val scheme = word.substringBefore("://", missingDelimiterValue = "https").lowercase(Locale.ROOT)
-            if (scheme !in schemes) return null
-            val rest = word.substringAfter("://")
+            val separator = word.indexOf("://")
+            val pathStart = word.indexOfFirst { it == '/' || it == '?' || it == '#' }
+            // A "://" after the first '/', '?' or '#' belongs to the path, query or fragment of a link without a scheme.
+            val rest = if (separator >= 0 && separator < pathStart) {
+                val scheme = schemeAtEnd.find(word.substring(0, separator))?.value?.lowercase(Locale.ROOT)
+                if (scheme !in schemes) return null
+                word.substring(separator + 3)
+            } else {
+                word
+            }
             val authorityEnd = rest.indexOfFirst { it == '/' || it == '?' || it == '#' }.takeIf { it >= 0 } ?: rest.length
-            val host = rest.substring(0, authorityEnd).substringAfterLast('@').substringBefore(':').lowercase(Locale.ROOT)
-            if (host != HOST && !host.endsWith(".$HOST")) return null
+            val authority = rest.substring(0, authorityEnd).substringAfterLast('@').lowercase(Locale.ROOT)
+            // The host, before an optional port or after a label glued on with ':' ("Link:musicbrainz.org/...").
+            authority.split(':').firstOrNull { it == HOST || it.endsWith(".$HOST") } ?: return null
             var parts = rest.substring(authorityEnd).substringBefore('?').substringBefore('#')
                 .split('/').filter { it.isNotEmpty() }
             if (parts.size >= 2 && parts[0] == "ws" && parts[1] == "2") parts = parts.drop(2)

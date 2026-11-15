@@ -38,6 +38,13 @@ class MusicBrainzRefTest {
             // A link that can be looked up wins over another MusicBrainz link or a bare ID in the same text.
             "musicbrainz.org/artist/b1a9c0e9-d987-4042-ae91-78d6a3267d69 https://musicbrainz.org/recording/b1a9c0e9-d987-4042-ae91-78d6a3267d69|recording",
             "00000000-0000-4000-8000-000000000000 musicbrainz.org/release/b1a9c0e9-d987-4042-ae91-78d6a3267d69|release",
+            // A link without a scheme whose query holds another link.
+            "musicbrainz.org/recording/b1a9c0e9-d987-4042-ae91-78d6a3267d69?returnto=https://x|recording",
+            "beta.musicbrainz.org/release/b1a9c0e9-d987-4042-ae91-78d6a3267d69#https://x|release",
+            // A label glued to the link without a space.
+            "Ссылка:https://musicbrainz.org/recording/b1a9c0e9-d987-4042-ae91-78d6a3267d69|recording",
+            "Ссылкаhttps://musicbrainz.org/recording/b1a9c0e9-d987-4042-ae91-78d6a3267d69|recording",
+            "Ссылка:musicbrainz.org/release/b1a9c0e9-d987-4042-ae91-78d6a3267d69|release",
         ],
     )
     fun `a recording or release link or a bare ID becomes a lookup`(text: String, kind: String) {
@@ -81,6 +88,9 @@ class MusicBrainzRefTest {
             "b1a9c0e9-d987-4042-ae91-78d6a3267d6",
             "b1a9c0e9d9874042ae9178d6a3267d69",
             "ftp://musicbrainz.org/recording/b1a9c0e9-d987-4042-ae91-78d6a3267d69",
+            "x:ftp://musicbrainz.org/recording/b1a9c0e9-d987-4042-ae91-78d6a3267d69",
+            "https://example.com/?u=https://musicbrainz.org/recording/b1a9c0e9-d987-4042-ae91-78d6a3267d69",
+            "example.com/musicbrainz.org/recording/b1a9c0e9-d987-4042-ae91-78d6a3267d69",
             "",
         ],
     )
