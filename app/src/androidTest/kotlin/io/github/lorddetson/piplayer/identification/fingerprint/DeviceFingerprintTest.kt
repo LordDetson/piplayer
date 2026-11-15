@@ -77,7 +77,8 @@ class DeviceFingerprintTest(private val sample: String) {
         fun forget() = results.clear()
     }
 
-    private val entry get() = index[sample] ?: throw AssertionError("$sample is not prepared: check nativelib/fingerprint-samples.json")
+    private val entry
+        get() = index[sample] ?: throw AssertionError("$sample is not prepared: check nativelib/fingerprint-samples.json")
 
     private fun fingerprint(): FingerprintResult = results.getOrPut(sample) {
         val file: File = TestFiles.copy("recordings/${entry.getString("file")}")

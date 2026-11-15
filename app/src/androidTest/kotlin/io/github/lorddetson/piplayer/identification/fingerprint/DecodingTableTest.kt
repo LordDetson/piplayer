@@ -61,7 +61,9 @@ class DecodingTableTest(private val row: Row) {
             Row("raw AMR-NB", "amr-nb-8000-mono.amr", "audio/3gpp", Path.PLATFORM_DECODER),
             Row("AMR-NB in 3GP", "amr-nb-8000-mono.3gp", "audio/3gpp", Path.PLATFORM_DECODER),
             Row("raw AMR-WB", "amr-wb-16000-mono.awb", "audio/amr-wb", Path.PLATFORM_DECODER),
-            Row("AMR-WB in 3GP", "amr-wb-16000-mono.3gp", "audio/amr-wb", Path.PLATFORM_DECODER, shortBySeconds = 0.005),
+            Row(
+                "AMR-WB in 3GP", "amr-wb-16000-mono.3gp", "audio/amr-wb", Path.PLATFORM_DECODER, shortBySeconds = 0.005,
+            ),
             Row("Ogg Vorbis", "vorbis-48000-mono.ogg", "audio/vorbis", Path.PLATFORM_DECODER),
             Row("Vorbis in Matroska", "vorbis-44100-stereo.mka", "audio/vorbis", Path.PLATFORM_DECODER),
             Row("Opus in Ogg", "opus-48000-stereo.opus", "audio/opus", Path.PLATFORM_DECODER),
