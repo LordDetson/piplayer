@@ -27,9 +27,11 @@ internal interface MainPlayback {
     /** Playing or about to play: it would go on if nothing paused it. */
     val isPlaying: Boolean
 
+    /** Pauses it for the snippet. */
     fun pause()
 
-    fun play()
+    /** Ends the pause of [pause]: plays it again when [resume], else leaves it paused. */
+    fun endPause(resume: Boolean)
 }
 
 /** How the audio focus changed for the snippet's request. */
@@ -109,16 +111,18 @@ internal class SnippetController<S>(
             val requested = ++focusId
             val granted = focus.request { change -> if (requested == focusId) onFocusChange(change) }
             if (!granted) {
-                val resume = mainWasPlaying
+                val paused = mainWasPlaying
                 mainWasPlaying = false
                 mutableState.value = SnippetState.Ended(SnippetEnd.FOCUS_REFUSED)
-                if (resume) main.play()
+                if (paused) main.endPause(resume = true)
                 return
             }
         }
         val started = ++snippetId
         val window = SnippetWindow.of(durationMs)
-        mutableState.value = SnippetState.Playing(window.startMs, window.endMs)
+        // The player keeps the whole window, in case the known length is short; the progress ends with the file.
+        val endMs = if (durationMs != null && durationMs > 0) minOf(window.endMs, durationMs) else window.endMs
+        mutableState.value = SnippetState.Playing(window.startMs, endMs)
         output.start(
             source,
             window,
@@ -162,10 +166,10 @@ internal class SnippetController<S>(
         output.stop()
         // The focus goes before the main player asks for its own (TI §6).
         focus.abandon()
-        val resume = mainWasPlaying && reason.resumesMain
+        val paused = mainWasPlaying
         mainWasPlaying = false
         mutableState.value = SnippetState.Ended(reason)
-        if (resume) main.play()
+        if (paused) main.endPause(resume = reason.resumesMain)
     }
 
     private val SnippetEnd.resumesMain: Boolean

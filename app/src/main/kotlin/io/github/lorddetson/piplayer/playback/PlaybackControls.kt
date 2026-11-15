@@ -10,6 +10,12 @@ interface PlaybackControls {
 
     fun setStopAfterCurrent(enabled: Boolean)
 
+    /** Pauses the player as a hold for a snippet of the review card (TI §6). */
+    fun holdForSnippet()
+
+    /** Ends the snippet's hold: the player resumes when [resume] and nothing stopped it meanwhile (TI §6). */
+    fun endSnippetHold(resume: Boolean)
+
     /** The state for PiPlayer's own controllers, as [PlaybackExtras]. */
     fun extras(): Bundle
 
@@ -18,6 +24,8 @@ interface PlaybackControls {
         val NONE: PlaybackControls = object : PlaybackControls {
             override fun setSleepTimer(durationMs: Long, finishTrack: Boolean) = Unit
             override fun setStopAfterCurrent(enabled: Boolean) = Unit
+            override fun holdForSnippet() = Unit
+            override fun endSnippetHold(resume: Boolean) = Unit
             override fun extras(): Bundle = Bundle.EMPTY
         }
     }

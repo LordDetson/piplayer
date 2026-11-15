@@ -148,6 +148,7 @@ class PlaybackSessionCallbackTest {
                     .add(PlaybackSessionCallback.MOVE_IN_QUEUE_COMMAND)
                     .add(PlaybackSessionCallback.PLAY_SONGS_COMMAND)
                     .add(PlaybackSessionCallback.REMOVE_FROM_QUEUE_ENTRIES_COMMAND)
+                    .add(PlaybackSessionCallback.SNIPPET_HOLD_COMMAND)
                     .build()
             } else {
                 ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS
@@ -173,6 +174,7 @@ class PlaybackSessionCallbackTest {
                 .doesNotContain(PlaybackSessionCallback.MOVE_IN_QUEUE_COMMAND)
                 .doesNotContain(PlaybackSessionCallback.PLAY_SONGS_COMMAND)
                 .doesNotContain(PlaybackSessionCallback.REMOVE_FROM_QUEUE_ENTRIES_COMMAND)
+                .doesNotContain(PlaybackSessionCallback.SNIPPET_HOLD_COMMAND)
         }
     }
 
@@ -186,6 +188,14 @@ class PlaybackSessionCallbackTest {
 
         override fun setStopAfterCurrent(enabled: Boolean) {
             calls += "stop after $enabled"
+        }
+
+        override fun holdForSnippet() {
+            calls += "hold"
+        }
+
+        override fun endSnippetHold(resume: Boolean) {
+            calls += "end hold $resume"
         }
 
         override fun extras(): Bundle = PlaybackExtras(sleepDeadlineMs = 123, stopAfterCurrent = true).toBundle()
@@ -211,6 +221,42 @@ class PlaybackSessionCallbackTest {
             assertThat(send(piPlayer, PlaybackSessionCallback.STOP_AFTER_CURRENT_COMMAND, PlaybackTesting.stopAfterArgs(true)).resultCode)
                 .isEqualTo(SessionResult.RESULT_SUCCESS)
             assertThat(controls.calls).containsExactly("timer 90000 true", "stop after true")
+        } finally {
+            withControls.release()
+        }
+    }
+
+    @Test
+    fun onlyPiPlayersScreenMayHoldThePlayerForASnippetAndItsDisconnectEndsTheHold() {
+        val controls = RecordingControls()
+        val withControls = PlaybackSessionCallback(context, store, controls) { queueRequests += it }
+        fun send(controller: MediaSession.ControllerInfo, held: Boolean, resume: Boolean = false) = onMain {
+            withControls.onCustomCommand(
+                session,
+                controller,
+                PlaybackSessionCallback.SNIPPET_HOLD_COMMAND,
+                PlaybackSessionCallback.snippetHoldArgs(held, resume),
+                null,
+            )
+        }.get(5, TimeUnit.SECONDS)
+        try {
+            for (controller in listOf(systemUi, otherApp, notification)) {
+                assertThat(send(controller, held = true).resultCode).describedAs(controller.toString())
+                    .isEqualTo(SessionResult.RESULT_ERROR_NOT_SUPPORTED)
+            }
+            assertThat(controls.calls).isEmpty()
+
+            assertThat(send(piPlayer, held = true).resultCode).isEqualTo(SessionResult.RESULT_SUCCESS)
+            assertThat(send(piPlayer, held = false, resume = true).resultCode).isEqualTo(SessionResult.RESULT_SUCCESS)
+            assertThat(controls.calls).containsExactly("hold", "end hold true")
+
+            // A held player whose holder goes away is let go without a resume; other controllers going away change nothing.
+            controls.calls.clear()
+            send(piPlayer, held = true)
+            onMain { withControls.onDisconnected(session, otherApp) }
+            onMain { withControls.onDisconnected(session, piPlayer) }
+            onMain { withControls.onDisconnected(session, piPlayer) }
+            assertThat(controls.calls).containsExactly("hold", "end hold false")
         } finally {
             withControls.release()
         }

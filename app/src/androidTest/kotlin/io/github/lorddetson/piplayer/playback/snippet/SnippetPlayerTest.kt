@@ -23,6 +23,7 @@ import io.github.lorddetson.piplayer.playback.PlaybackTesting.onMain
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.shell
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.throughout
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.waitUntil
+import java.io.File
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
@@ -267,6 +268,23 @@ class SnippetPlayerTest {
         assertThat(first).describedAs("the snippet's first position").isLessThan(500)
         assertThat(awaitEnd()).isEqualTo(SnippetEnd.FINISHED)
         assertResumesAt(before.positionMs, resumed)
+    }
+
+    @Test
+    fun aFileTheSnippetPlayerCannotReadEndsTheSnippetAndResumesTheMainPlayer() {
+        startMain()
+        // Text with no byte that any audio format starts with: the snippet player reports an error at once.
+        val notAudio = File(context.cacheDir, "snippet-not-audio.mp3").apply { writeText("This is not a sound file.\n".repeat(2_000)) }
+        val paused = main.expect("the main player pauses for the snippet", { currentPosition }) { !playWhenReady }
+        val resumed = main.expect("the main player resumes after the snippet", { currentPosition }) {
+            isPlaying && snippet.state.value is SnippetState.Ended
+        }
+
+        onMain { snippet.play(Uri.fromFile(notAudio), durationMs = 120_000) }
+
+        assertThat(awaitEnd()).isEqualTo(SnippetEnd.FAILED)
+        assertResumesAt(paused.await(), resumed)
+        eventually("the snippet's focus request is gone") { transientRequests() == 0 }
     }
 
     @Test

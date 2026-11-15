@@ -85,7 +85,8 @@ class PlaybackService : MediaLibraryService() {
             close = { sendBroadcast(effectIntent(AudioEffect.ACTION_CLOSE_AUDIO_EFFECT_CONTROL_SESSION, it)) },
         ).also { effects = it }
         player.addListener(effects)
-        val controls = ServiceControls(player, StopAfterCurrentStore(this), ::publishControls).also { controls = it }
+        val controls = ServiceControls(player, StopAfterCurrentStore(this), ::publishControls, ::stopAfterHold)
+            .also { controls = it }
         // Before the saver, so that a snapshot taken at a change of song already sees the new playback (§11).
         val recorder = LibraryPlayRecorder(this).also { recorder = it }
         val tracker = PlayTracker(player, recorder).also { tracker = it }
@@ -189,7 +190,8 @@ class PlaybackService : MediaLibraryService() {
 
     /**
      * Swiping PiPlayer away from recents keeps playback that is playing or held by a short interruption (a call), so
-     * that it resumes afterwards; anything else stops the service. Media3's own rule would also stop held playback.
+     * that it resumes afterwards, and playback paused for a snippet of the review card, which resumes when the card
+     * closes (TI §6); anything else stops the service. Media3's own rule would also stop held playback.
      */
     @OptIn(UnstableApi::class)
     override fun onTaskRemoved(rootIntent: Intent?) {
@@ -197,8 +199,12 @@ class PlaybackService : MediaLibraryService() {
         val player = session?.player
         val playing = player != null && player.playWhenReady &&
             (player.playbackState == Player.STATE_READY || player.playbackState == Player.STATE_BUFFERING)
-        if (!playing) pauseAllPlayersAndStopSelf()
+        if (!playing && controls?.taskRemoved() != true) pauseAllPlayersAndStopSelf()
     }
+
+    /** A snippet's hold that kept the service after a swipe from recents ended without a resume (TI §6). */
+    @OptIn(UnstableApi::class)
+    private fun stopAfterHold() = pauseAllPlayersAndStopSelf()
 
     override fun onDestroy() {
         Library.passGate.setPlaying(false)

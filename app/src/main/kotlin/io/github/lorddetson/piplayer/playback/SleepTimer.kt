@@ -14,6 +14,8 @@ import io.github.lorddetson.piplayer.playback.SleepTimerMachine.Effect
  * The sleep timer on the service's player (docs/playback.md §6.3): [SleepTimerMachine] decides, this applies its
  * decisions on the main thread and looks again when it says. The fade uses the player's own volume. Deadlines are in
  * elapsed realtime, which goes on in deep sleep; the handler's delays do not, so every tick checks the clock again.
+ * While the player is held for a snippet of the review card (TI §6), the timer treats it as playing, and
+ * [onStoppedWhileHeld] hears it when its time comes then.
  */
 @OptIn(UnstableApi::class)
 class SleepTimer(
@@ -21,11 +23,15 @@ class SleepTimer(
     private val endOfSong: EndOfSongPause,
     private val onChange: () -> Unit,
     private val now: () -> Long = SystemClock::elapsedRealtime,
+    private val onStoppedWhileHeld: () -> Unit = {},
 ) : Player.Listener {
 
     private var machine = SleepTimerMachine()
     private val handler = Handler(Looper.getMainLooper())
     private val tick = Runnable { tick() }
+
+    /** Paused for a snippet: the pause is not the timer's business. */
+    private var held = false
 
     val deadlineMs: Long? get() = machine.deadlineMs
 
@@ -43,18 +49,37 @@ class SleepTimer(
         handler.removeCallbacks(tick)
     }
 
+    /** The player is about to pause for a snippet; the pause that follows changes nothing here. */
+    fun hold() {
+        held = true
+    }
+
+    /**
+     * The snippet's hold has ended: [resumes] when the player is about to play again, else a player still paused counts
+     * as paused from now on, as a pause would.
+     */
+    fun endHold(resumes: Boolean) {
+        if (!held) return
+        held = false
+        if (resumes || player.playWhenReady) return
+        apply(machine.paused())
+        reschedule()
+        onChange()
+    }
+
     override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
         if (playWhenReady) {
             tick()
             return
         }
+        if (held) return
         apply(if (reason == Player.PLAY_WHEN_READY_CHANGE_REASON_END_OF_MEDIA_ITEM) machine.songEnded() else machine.paused())
         reschedule()
         onChange()
     }
 
     private fun tick() {
-        val playing = player.playWhenReady &&
+        val playing = held || player.playWhenReady &&
             (player.playbackState == Player.STATE_READY || player.playbackState == Player.STATE_BUFFERING)
         apply(machine.tick(now(), playing, player.volume))
         reschedule()
@@ -73,6 +98,7 @@ class SleepTimer(
                 is Effect.PauseAndRestore -> {
                     player.pause()
                     player.volume = effect.volume
+                    if (held) onStoppedWhileHeld()
                 }
                 is Effect.RestoreVolume -> player.volume = effect.volume
                 Effect.ArmSongEnd -> endOfSong.setForTimer(true)

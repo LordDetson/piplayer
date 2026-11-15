@@ -19,8 +19,9 @@ alphas and on 1.12.0-beta01.
 - Media3 runs the service in the foreground while the player plays, or buffers with play requested, and for up to 10
   minutes after a pause, an error or the end; after that the notification stays as an ordinary one.
 - When the user swipes the app away from recents, playback goes on if it is playing, buffering or held by a short
-  interruption such as a call (it then resumes when the interruption ends); otherwise playback pauses and the service
-  stops once no other app is bound to it. Media3's own rule would also stop playback held by a call.
+  interruption such as a call (it then resumes when the interruption ends), and the service stays while playback is
+  paused for a snippet of the review card (TI §6); otherwise playback pauses and the service stops once no other app
+  is bound to it. Media3's own rule would also stop playback held by a call.
 - Starts of the service that Media3 does not handle itself (an intent from another app that is neither a media button
   nor one of Media3's own) are made safe in step 4, together with media button starts and playback resumption.
 - When the service is destroyed, it releases the session and then the player.
@@ -789,7 +790,8 @@ PiPlayer is in the background, force stop and reopen, and open a file whose temp
   to by hand in the meantime is the one that finishes.
 - A pause while the volume falls or while the song is being finished (by the user, a disconnected output, another
   player taking audio focus) ends the timer and restores the volume. Skipping songs does not. A call holds playback and
-  so lets the timer run out, which is meant at bedtime. A timer that is up while nothing plays just ends.
+  so lets the timer run out, which is meant at bedtime. A timer that is up while nothing plays just ends. The pause
+  for a snippet of the review card is a hold that the timer treats as playback (TI §6).
 - While the music plays, the player's wake lock keeps the timer on time with the screen off and the device dozing.
 
 ### 6.4 Stop after current track

@@ -7,8 +7,8 @@ import kotlinx.coroutines.flow.StateFlow
 
 /**
  * Plays a 15 s snippet of a file from the review card (TI §6) without disturbing the main player: the main player is
- * paused through [Player] (the card's MediaController of the playback service) and resumed afterwards if it was
- * playing; its queue, position and play statistics do not change. Use it on the main thread.
+ * paused through [Player] (the card's MediaController of the playback service, which then holds it for the snippet) and
+ * resumed afterwards if it was playing; its queue, position and play statistics do not change. Use it on the main thread.
  */
 interface SnippetPlayer {
 
@@ -42,7 +42,10 @@ sealed interface SnippetState {
     /** No snippet has played yet. */
     data object Idle : SnippetState
 
-    /** A snippet plays the part of the file from [startMs] to [endMs]. */
+    /**
+     * A snippet plays the part of the file from [startMs] to [endMs]: 15 s later, or the end of the file when its known
+     * length comes first. The card draws its progress over this span.
+     */
     data class Playing(val startMs: Long, val endMs: Long) : SnippetState
 
     /** The last snippet has ended for [reason]. */

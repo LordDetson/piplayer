@@ -95,6 +95,9 @@ class PlaybackSessionCallback(
 
     private val mainHandler = Handler(Looper.getMainLooper())
 
+    /** The controller whose snippet holds the player (TI §6); only touched on the main thread. */
+    private var snippetHolder: MediaSession.ControllerInfo? = null
+
     /**
      * The songs a controller's add resolved, by the media IDs given to Media3, until it puts them into the player (§10.3);
      * only touched on the main thread.
@@ -198,6 +201,7 @@ class PlaybackSessionCallback(
                 .add(MOVE_IN_QUEUE_COMMAND)
                 .add(PLAY_SONGS_COMMAND)
                 .add(REMOVE_FROM_QUEUE_ENTRIES_COMMAND)
+                .add(SNIPPET_HOLD_COMMAND)
                 .build()
         } else {
             ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS
@@ -537,7 +541,26 @@ class PlaybackSessionCallback(
             customCommand.customAction == MOVE_IN_QUEUE_ACTION && mayControl -> Futures.immediateFuture(moveInQueue(args))
             customCommand.customAction == PLAY_SONGS_ACTION && mayControl -> playSongs(args)
             customCommand.customAction == REMOVE_FROM_QUEUE_ENTRIES_ACTION && mayControl -> Futures.immediateFuture(removeEntries(args))
+            customCommand.customAction == SNIPPET_HOLD_ACTION && mayControl -> {
+                snippetHold(controller, args.getBoolean(EXTRA_HELD), args.getBoolean(EXTRA_RESUME))
+                Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+            }
             else -> super.onCustomCommand(session, controller, customCommand, args, progressReporter)
+        }
+    }
+
+    /** A controller that goes away while it holds the player for a snippet ends the hold, without a resume (TI §6). */
+    override fun onDisconnected(session: MediaSession, controller: MediaSession.ControllerInfo) {
+        if (controller == snippetHolder) snippetHold(controller, held = false, resume = false)
+    }
+
+    private fun snippetHold(controller: MediaSession.ControllerInfo, held: Boolean, resume: Boolean) {
+        if (held) {
+            snippetHolder = controller
+            controls.holdForSnippet()
+        } else {
+            snippetHolder = null
+            controls.endSnippetHold(resume)
         }
     }
 
@@ -1538,6 +1561,25 @@ class PlaybackSessionCallback(
         const val EXTRA_ROWS = "io.github.lorddetson.piplayer.playback.ROWS"
 
         const val EXTRA_MEDIA_IDS = "io.github.lorddetson.piplayer.playback.MEDIA_IDS"
+
+        /**
+         * The custom session command with which the review card's snippet pauses the player as a hold for the snippet
+         * ([EXTRA_HELD] true) and ends the hold ([EXTRA_HELD] false), resuming the player when [EXTRA_RESUME] and
+         * nothing stopped it meanwhile (TI §6).
+         */
+        const val SNIPPET_HOLD_ACTION = "io.github.lorddetson.piplayer.playback.SNIPPET_HOLD"
+
+        val SNIPPET_HOLD_COMMAND = SessionCommand(SNIPPET_HOLD_ACTION, Bundle.EMPTY)
+
+        const val EXTRA_HELD = "io.github.lorddetson.piplayer.playback.HELD"
+
+        const val EXTRA_RESUME = "io.github.lorddetson.piplayer.playback.RESUME"
+
+        /** The arguments of a [SNIPPET_HOLD_COMMAND]. */
+        fun snippetHoldArgs(held: Boolean, resume: Boolean = false) = Bundle().apply {
+            putBoolean(EXTRA_HELD, held)
+            putBoolean(EXTRA_RESUME, resume)
+        }
 
         /** Commands that change how the player is set up rather than what it plays. */
         private val SETUP_COMMANDS = intArrayOf(

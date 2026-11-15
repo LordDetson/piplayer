@@ -16,9 +16,9 @@ class SnippetControllerTest {
             isPlaying = false
         }
 
-        override fun play() {
-            log += "main.play"
-            isPlaying = true
+        override fun endPause(resume: Boolean) {
+            log += if (resume) "main.resume" else "main.stays"
+            isPlaying = resume
         }
     }
 
@@ -97,7 +97,7 @@ class SnippetControllerTest {
 
         outputEvents.single().ended()
 
-        assertThat(log).containsExactly("output.stop", "focus.abandon", "main.play")
+        assertThat(log).containsExactly("output.stop", "focus.abandon", "main.resume")
         assertThat(snippet.state.value).isEqualTo(SnippetState.Ended(SnippetEnd.FINISHED))
         assertThat(snippet.positionMs).isZero()
     }
@@ -109,7 +109,7 @@ class SnippetControllerTest {
 
         snippet.stop()
 
-        assertThat(log).containsExactly("output.stop", "focus.abandon", "main.play")
+        assertThat(log).containsExactly("output.stop", "focus.abandon", "main.resume")
         assertThat(snippet.state.value).isEqualTo(SnippetState.Ended(SnippetEnd.CLOSED))
     }
 
@@ -120,7 +120,7 @@ class SnippetControllerTest {
 
         outputEvents.single().failed()
 
-        assertThat(log).containsExactly("output.stop", "focus.abandon", "main.play")
+        assertThat(log).containsExactly("output.stop", "focus.abandon", "main.resume")
         assertThat(snippet.state.value).isEqualTo(SnippetState.Ended(SnippetEnd.FAILED))
     }
 
@@ -145,7 +145,7 @@ class SnippetControllerTest {
 
             focusListeners.single()(change)
 
-            assertThat(log).describedAs(change.name).containsExactly("output.stop", "focus.abandon")
+            assertThat(log).describedAs(change.name).containsExactly("output.stop", "focus.abandon", "main.stays")
             assertThat(snippet.state.value).isEqualTo(SnippetState.Ended(SnippetEnd.FOCUS_LOST))
         }
     }
@@ -157,7 +157,7 @@ class SnippetControllerTest {
 
         outputEvents.single().becameNoisy()
 
-        assertThat(log).containsExactly("output.stop", "focus.abandon")
+        assertThat(log).containsExactly("output.stop", "focus.abandon", "main.stays")
         assertThat(snippet.state.value).isEqualTo(SnippetState.Ended(SnippetEnd.BECAME_NOISY))
     }
 
@@ -167,7 +167,7 @@ class SnippetControllerTest {
 
         snippet.play("song", 60_000)
 
-        assertThat(log).containsExactly("main.pause", "focus.request", "main.play")
+        assertThat(log).containsExactly("main.pause", "focus.request", "main.resume")
         assertThat(snippet.state.value).isEqualTo(SnippetState.Ended(SnippetEnd.FOCUS_REFUSED))
         assertThat(snippet.positionMs).isZero()
 
@@ -189,7 +189,7 @@ class SnippetControllerTest {
 
         log.clear()
         outputEvents.last().ended()
-        assertThat(log).containsExactly("output.stop", "focus.abandon", "main.play")
+        assertThat(log).containsExactly("output.stop", "focus.abandon", "main.resume")
     }
 
     @Test
@@ -226,6 +226,41 @@ class SnippetControllerTest {
         snippet.stop()
         assertThat(log).isEmpty()
         assertThat(snippet.state.value).isEqualTo(SnippetState.Ended(SnippetEnd.FINISHED))
+    }
+
+    @Test
+    fun `the progress ends at a known length below 15 s while the player keeps the whole window`() {
+        snippet.play("short", 2_000)
+
+        assertThat(log).containsExactly("main.pause", "focus.request", "output.start short 0..15000")
+        assertThat(snippet.state.value).isEqualTo(SnippetState.Playing(0, 2_000))
+
+        snippet.play("exact", 15_000)
+        assertThat(snippet.state.value).isEqualTo(SnippetState.Playing(0, 15_000))
+        snippet.play("unknown", null)
+        assertThat(snippet.state.value).isEqualTo(SnippetState.Playing(0, 15_000))
+        snippet.play("no length", 0)
+        assertThat(snippet.state.value).isEqualTo(SnippetState.Playing(0, 15_000))
+        snippet.play("long", 60_000)
+        assertThat(snippet.state.value).isEqualTo(SnippetState.Playing(20_000, 35_000))
+    }
+
+    @Test
+    fun `a focus listener of an earlier snippet changes nothing while a later one plays under a new request`() {
+        snippet.play("first", 60_000)
+        val firstListener = focusListeners.single()
+        outputEvents.single().ended()
+        snippet.play("second", 60_000)
+        assertThat(focusListeners).hasSize(2)
+        playing()
+
+        firstListener(FocusChange.LOSS)
+        firstListener(FocusChange.DUCK)
+
+        assertThat(log).isEmpty()
+        assertThat(snippet.state.value).isEqualTo(SnippetState.Playing(20_000, 35_000))
+        focusListeners.last()(FocusChange.LOSS)
+        assertThat(snippet.state.value).isEqualTo(SnippetState.Ended(SnippetEnd.FOCUS_LOST))
     }
 
     @Test

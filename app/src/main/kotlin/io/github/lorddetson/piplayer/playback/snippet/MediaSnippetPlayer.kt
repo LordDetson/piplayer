@@ -13,14 +13,16 @@ import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.ClippingMediaSource
+import androidx.media3.session.MediaController
 import io.github.lorddetson.piplayer.playback.PlaybackPlayer
+import io.github.lorddetson.piplayer.playback.PlaybackSessionCallback
 import kotlinx.coroutines.flow.StateFlow
 
 /** The snippet player on Media3 and the platform's audio focus (TI §6). */
 internal class MediaSnippetPlayer(context: Context, main: Player) : SnippetPlayer {
 
     private val controller = SnippetController(
-        PlayerMainPlayback(main),
+        PlayerMainPlayback(main, (main as? MediaController)?.let(::SessionMainHold)),
         AudioManagerSnippetFocus(context),
         ExoSnippetOutput(context.applicationContext),
     )
@@ -38,18 +40,63 @@ internal class MediaSnippetPlayer(context: Context, main: Player) : SnippetPlaye
  * The main player behind its controller. It counts as playing when it would go on if nothing paused it, also while it
  * buffers, as the playback service counts it when it is swiped away. Held back by another app's short interruption (a
  * prompt, a call) it does not count: Media3 resumes it when the interruption ends, and a pause and play from here would
- * lose that resume (TI §6).
+ * lose that resume (TI §6). The pause is the playback service's [hold] when its session takes one, else a plain pause.
  */
-internal class PlayerMainPlayback(private val player: Player) : MainPlayback {
+internal class PlayerMainPlayback(private val player: Player, private val hold: MainHold? = null) : MainPlayback {
+
+    /** Whether the last pause went through the hold, which its end then goes through too. */
+    private var held = false
 
     override val isPlaying: Boolean
         get() = player.playWhenReady &&
             (player.playbackState == Player.STATE_READY || player.playbackState == Player.STATE_BUFFERING) &&
             player.playbackSuppressionReason != Player.PLAYBACK_SUPPRESSION_REASON_TRANSIENT_AUDIO_FOCUS_LOSS
 
-    override fun pause() = player.pause()
+    override fun pause() {
+        val hold = hold?.takeIf { it.available }
+        held = hold != null
+        if (hold != null) hold.hold() else player.pause()
+    }
 
-    override fun play() = player.play()
+    override fun endPause(resume: Boolean) {
+        val hold = hold?.takeIf { held }
+        held = false
+        when {
+            hold != null -> hold.end(resume)
+            resume -> player.play()
+        }
+    }
+}
+
+/**
+ * The playback service's hold of its player for a snippet (TI §6): the service pauses the player for it and, at the
+ * end, resumes it only when asked and nothing stopped it meanwhile.
+ */
+internal interface MainHold {
+    /** Whether the main player's session takes the hold; a bare session without the playback service does not. */
+    val available: Boolean
+
+    fun hold()
+
+    fun end(resume: Boolean)
+}
+
+/** The hold through PiPlayer's session command, which only PiPlayer's own screen may send. */
+internal class SessionMainHold(private val controller: MediaController) : MainHold {
+
+    override val available: Boolean
+        get() = controller.isSessionCommandAvailable(PlaybackSessionCallback.SNIPPET_HOLD_COMMAND)
+
+    override fun hold() {
+        controller.sendCustomCommand(PlaybackSessionCallback.SNIPPET_HOLD_COMMAND, PlaybackSessionCallback.snippetHoldArgs(held = true))
+    }
+
+    override fun end(resume: Boolean) {
+        controller.sendCustomCommand(
+            PlaybackSessionCallback.SNIPPET_HOLD_COMMAND,
+            PlaybackSessionCallback.snippetHoldArgs(held = false, resume = resume),
+        )
+    }
 }
 
 /** An `AUDIOFOCUS_GAIN_TRANSIENT` request for music, whose changes come on the main thread. */
@@ -112,22 +159,7 @@ internal class ExoSnippetOutput(private val context: Context) : SnippetOutput<Ur
         val player = PlaybackPlayer.builder(context, handleAudioFocus = false).build()
         this.player = player
         this.window = window
-        // Reported a moment later, so that the controller never releases the player inside the player's own callback.
-        player.addListener(object : Player.Listener {
-            override fun onPlaybackStateChanged(playbackState: Int) {
-                if (playbackState == Player.STATE_ENDED) handler.post(events::ended)
-            }
-
-            override fun onPlayerError(error: PlaybackException) {
-                handler.post(events::failed)
-            }
-
-            override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
-                if (!playWhenReady && reason == Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_BECOMING_NOISY) {
-                    handler.post(events::becameNoisy)
-                }
-            }
-        })
+        player.addListener(SnippetPlayerListener(events) { handler.post(it) })
         // Clipped here: the service's progressive sources do not apply an item's clipping configuration themselves.
         val file = PlaybackPlayer.mediaSources(context).createMediaSource(MediaItem.fromUri(source))
         val clipped = ClippingMediaSource.Builder(file)
@@ -147,5 +179,27 @@ internal class ExoSnippetOutput(private val context: Context) : SnippetOutput<Ur
         player?.release()
         player = null
         window = null
+    }
+}
+
+/**
+ * What the snippet's player reports, each a moment later through [post], so that the controller never releases the
+ * player inside the player's own callback.
+ */
+internal class SnippetPlayerListener(
+    private val events: SnippetOutput.Events,
+    private val post: (() -> Unit) -> Unit,
+) : Player.Listener {
+
+    override fun onPlaybackStateChanged(playbackState: Int) {
+        if (playbackState == Player.STATE_ENDED) post(events::ended)
+    }
+
+    override fun onPlayerError(error: PlaybackException) {
+        post(events::failed)
+    }
+
+    override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+        if (!playWhenReady && reason == Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_BECOMING_NOISY) post(events::becameNoisy)
     }
 }
