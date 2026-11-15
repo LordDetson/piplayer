@@ -358,7 +358,9 @@ PiPlayer never adds an ID3v1 tag to a file that has none; §7.5 lists the TagLib
   for playback also parse it here, and decoded with `MediaCodec` in 1.0; from v1.x the bundled decoders (ALAC first;
   the Android platform has no ALAC decoder) are called through the same service. A "format → extractor and decoder"
   table in code, covered by a test that plays and fingerprints every fixture, makes sure that every format the player
-  can play can also be fingerprinted. The decoder loop takes every free input buffer and every ready output buffer
+  can play can also be fingerprinted. In M3 the table is first a test (§11.2, "Decoding table"): it records the path
+  every playable format takes today, and lists ALAC as not fingerprintable, so in 1.0 an ALAC file is identified by
+  its tags and text search only. The decoder loop takes every free input buffer and every ready output buffer
   without waiting and waits briefly only when neither side moved. Measured in M0 on the API 36 emulator (debug
   build), the two minutes take about 5 s for 48 kHz FLAC and 11 to 15 s for MP3, Vorbis and Opus; nearly all of it is
   the platform's software decoders, while Media3's extractor, the resampler (about 1 s) and Chromaprint (under 0.1 s)
@@ -378,20 +380,21 @@ PiPlayer never adds an ID3v1 tag to a file that has none; §7.5 lists the TagLib
   the lookup checks it against the range a decoder declares, and a 320 kbit/s MP3 whose average the extractor works
   out a little above 320 kbit/s (from a LAME Info frame) would otherwise find no decoder at all (four of the owner's
   first eleven files in M0).
-- End of the stream: the stream ends where the extractor has no sample left. Media3 1.11.1's extractor does not end a
-  FLAC stream that way (found in M0 on the emulators): past the last frame it hands out that frame again, with the
-  same time, while `advance()` keeps reporting more samples, and reading such a repeat fails inside the extractor once
-  the frame is larger than 64 KiB. So for FLAC, a sample with the time of the one before ends the stream before it is
-  read, when it lies within the last 2 s of the container's duration or the duration is unknown. Other formats keep
-  every sample: laced Matroska frames may share a time, an MP3 whose sample rate rises steps back in time, and MP4
-  priming samples have negative times. A decoder that takes no input and gives no output for about five seconds fails
-  the file instead of hanging; a decoder error after some audio came out (a file cut off in the middle of its last
-  frame) ends the stream there and keeps that audio, but the decoded length then no longer counts as the file's
-  length. A decoder in error gives none of the frames it decoded but not yet handed out, so the last FLAC frame, which
-  a cut file leaves broken, is queued only once the frame before it has come out (or after about two seconds without
-  output, for a decoder that keeps frames back); without that, 1 to 6 of 30 frames were lost in about a quarter of the
-  decodes on the API 30 emulator, depending on timing (M2a step 14). PCM in the container that Android has no encoding for (big-endian, 64-bit float) is refused rather than
-  read as noise.
+- End of the stream: the stream ends where the extractor has no sample left. Media3's extractor does not end a FLAC
+  stream that way (found with 1.11.1 in M0 on the emulators, and still so with 1.12.0-alpha02): past the last frame it
+  hands out that frame again, with the same time, while `advance()` keeps reporting more samples, and reading such a
+  repeat fails inside the extractor once the frame is larger than 64 KiB. So for FLAC, a sample with the time of the
+  one before ends the stream before it is read, wherever it lies: a file cut off may end long before the length its
+  header states (changed in M2a; the earlier rule looked only at the last 2 s of the container's duration). Other
+  formats keep every sample: laced Matroska frames may share a time, an MP3 whose sample rate rises steps back in
+  time, and MP4 priming samples have negative times. A decoder that takes no input and gives no output for about five
+  seconds fails the file instead of hanging; a decoder error after some audio came out (a file cut off in the middle
+  of its last frame) ends the stream there and keeps that audio, but the decoded length then no longer counts as the
+  file's length. A decoder in error gives none of the frames it decoded but not yet handed out, so the last FLAC
+  frame, which a cut file leaves broken, is queued only once the frame before it has come out (or after about two
+  seconds without output, for a decoder that keeps frames back); without that, 1 to 6 of 30 frames were lost in about
+  a quarter of the decodes on the API 30 emulator, depending on timing (M2a step 14). PCM in the container that
+  Android has no encoding for (big-endian, 64-bit float) is refused rather than read as noise.
 - PCM conversion: accept every output encoding (8-, 16-, 24- and 32-bit integer, float), average all channels into
   mono, resample to 11 025 Hz with the resampler of speexdsp 1.2.1 (BSD-3-Clause; a Kaiser-windowed sinc filter that
   removes what 11 025 Hz cannot carry before the rate changes; quality 5, float samples, no SIMD), convert to 16-bit
@@ -404,7 +407,9 @@ PiPlayer never adds an ID3v1 tag to a file that has none; §7.5 lists the TagLib
   5.1 into mono with swresample's default matrix (front channels weighted more, the LFE channel left out) where
   PiPlayer averages all channels; an MP3 without a LAME header, or with iTunes gapless data, may start a few
   milliseconds apart; vendor decoders on phones (instead of the platform's `c2.android` ones) may differ in output
-  encoding and delay trimming. M3 adds 5.1, AAC and non-LAME MP3 recordings to the comparison and runs it on a phone.
+  encoding and delay trimming. M3 adds three recordings to the comparison (§11.2): a 5.1 AAC file, a stereo AAC file
+  and an MP3 without a LAME or Xing header, made from the freely licensed samples by the preparation script. The run
+  on a phone follows with the corpus check (§11.4).
 - Chromaprint 1.6.2+ (≥ 1.6.1 is required: older versions drop partial frames between `feed` calls), built from
   source with our own CMake list, KissFFT, no FFmpeg, `USE_INTERNAL_AVRESAMPLE=OFF` (MIT + BSD-3 build), linked
   statically into the JNI library together with speexdsp's `resample.c`; TagLib stays a separate `libtag.so` (LGPL),
@@ -412,19 +417,24 @@ PiPlayer never adds an ID3v1 tag to a file that has none; §7.5 lists the TagLib
   on byte-identical PCM the Android build gives the same raw fingerprint as the desktop fpcalc 1.6.2, bit for bit, on
   five recordings of different formats and sample rates. Results are not guaranteed to be identical across ABIs (the
   sinc table and Chromaprint's FFT use each device's math library), so fingerprints are always compared by their bit
-  error rate.
+  error rate. The JNI library also turns stored raw items into the compressed string that AcoustID takes
+  (`chromaprint_encode_fingerprint`, added in M3), so a cached fingerprint keeps its raw items only and the string is
+  made from them when a lookup needs it; it equals the string of the session that computed the items.
 - Lookup: gzip-compressed form POST (`Content-Encoding: gzip`) to `https://api.acoustid.org/v2/lookup` with
   `client=<app key>`, `duration=<exact duration (§3.1) rounded to the nearest second, as an integer string>`,
   `fingerprint=<compressed>`, `meta=recordings releasegroups releases tracks isrcs compress` (**space-separated**: a
   literal `+` gets encoded as `%2B` and the server then returns no metadata), `format=json`. The server only compares
   fingerprints whose stored length is within 7 s of `duration`, and rejects 0, so a file whose length is unknown is not
-  looked up. The key travels in the request body, never in a URL.
+  looked up. The key travels in the request body, never in a URL. Without an application key (a build made without
+  one, §9) the fingerprint lookup is unavailable: nothing is sent to AcoustID, and text search (stage 4) still runs.
 - Answers (checked in M0 against the server's source code): an error comes as `{"status": "error", "error": {"code",
-  "message"}}`, mostly with HTTP 400; error 4 (invalid application key) stops the client without retries; error 14
-  (too many requests, HTTP 429, sent without Retry-After) and HTTP 500, 502, 503 and 504 are retried with the backoff
-  of §9; other errors are final. The proxies in front of the service may answer with HTML or plain text; such an
-  answer counts by its HTTP status. A recording may come back with its ID only (no metadata) and its `duration` is in
-  seconds with a fraction; a result may have no recordings at all.
+  "message"}}`, mostly with HTTP 400; error 4 (invalid application key) fails without retries and stops AcoustID for
+  the rest of the process (§8); error 14 (too many requests, HTTP 429, sent without Retry-After), HTTP 500, 502, 503
+  and 504, and the 520 to 524 of the proxy in front of the service (its origin errors) are retried with the backoff of
+  §9; other errors are final. The proxies in front of the service may answer with HTML or plain text; such an answer
+  counts by its HTTP status: a retried status is retried, and any other status, a successful one included, is final. A
+  recording may come back with its ID only (no metadata) and its `duration` is in seconds with a fraction; a result
+  may have no recordings at all.
 - The fingerprint and the AcoustID track ID of the best result are cached by content key (§10.1); a confirmed
   decision keeps the AcoustID track ID in the user database (§10.2).
 - An empty result is not final (server-side search timeouts look like "no match"): the file is marked "retry later"
@@ -1252,7 +1262,7 @@ tests, and a high-band error rate within the threshold of §11.4.
 | M2b | "Songs missing information": the reasons of §1 on merged values, including a title from the file name (level 5, or level 4 equal to the display name), the cover rule (embedded and saved in M2b, the album thumbnail in M4a) and the cover and MusicBrainz filters being off by default |
 | M3 | Keep as-is and Skip are remembered by identity and mirrored; a Skip lapses when the tag pass records a new size, modification time or content key; undoing either restores the earlier list state |
 | M0 | Filename parser: a table of real-world names → (artist, title, track number) or "unknown" |
-| M0 | AcoustID request builder: `meta` is space-separated, `duration` is an integer string rounded to the nearest second, body is gzip-compressed, the key stays out of the URL; answers: error 4 stops at once, error 14 and HTTP 429, 500, 502, 503, 504 and 520 to 524 are retried, also when the body is not JSON (such a page counts by its status), other errors are final; recordings with an ID only and results without recordings are kept |
+| M0 | AcoustID request builder: `meta` is space-separated, `duration` is an integer string rounded to the nearest second, body is gzip-compressed, the key stays out of the URL; answers: error 4 stops at once, error 14 and HTTP 429, 500, 502, 503, 504 and 520 to 524 are retried, also when the body is not JSON (such a page counts by its status, so one with any other status, 200 included, is final), other errors are final; recordings with an ID only and results without recordings are kept |
 | M3 | Retry later: an empty AcoustID result is retried after 1 hour and once in the next batch, then counts as final; a text-search result of at least 0.50 cancels the retry |
 | M0 | Text query builder: Lucene escaping, lower-case terms, the variants of §3.3 in order, skipped variants for missing values, the stop rule and the limits |
 | M0 | PCM conversion: 8-, 16-, 24-, 32-bit and float input, stereo and 5.1 downmix, rounding and clipping to 16-bit; the fingerprint path stops at 120 s, skips the resampler at 11 025 Hz, flushes it at the end of a short file and starts a new one when the format changes |
@@ -1280,7 +1290,7 @@ tests, and a high-band error rate within the threshold of §11.4.
 
 | Milestone | Test |
 |-----------|------|
-| M0 | Chromaprint JNI: fingerprints of bundled CC-licensed samples are similar to desktop `fpcalc` output (at most 10 % of bits differ over the aligned overlap; the threshold is calibrated in M0) and return the same AcoustID; never exact string equality (decoders differ). Measured in M0 through the device's own decoders and resampler against fpcalc on the same files (MP3 44.1 kHz, Ogg Vorbis 48 kHz, FLAC 48 kHz/24-bit, FLAC 96 kHz/24-bit, Opus 48 kHz): offset 0 and at most 1.4 % of bits differ (MP3), the others under 0.02 %. M3 adds 5.1, AAC and non-LAME MP3 recordings |
+| M0 | Chromaprint JNI: fingerprints of bundled CC-licensed samples are similar to desktop `fpcalc` output (at most 10 % of bits differ over the aligned overlap; the threshold is calibrated in M0) and return the same AcoustID; never exact string equality (decoders differ). Measured in M0 through the device's own decoders and resampler against fpcalc on the same files (MP3 44.1 kHz, Ogg Vorbis 48 kHz, FLAC 48 kHz/24-bit, FLAC 96 kHz/24-bit, Opus 48 kHz): offset 0 and at most 1.4 % of bits differ (MP3), the others under 0.02 %. M3 adds three recordings and makes the AcoustID lookup opt-in (M3 row below) |
 | M0 | Resampler: a 9 kHz tone at 44.1, 48 and 96 kHz comes out at least 40 dB below a 1 kHz tone of the same level (9 kHz would alias to about 2 kHz, inside the band Chromaprint uses); 1 kHz keeps its level within 0.5 dB and its phase; the output length is exact and does not depend on how the input is cut |
 | M0 | Decoding fixtures (2 s of 1 kHz): MP3, AAC, Vorbis, Opus, FLAC 96 kHz/24-bit, FLAC 5.1, FLAC with frames larger than 64 KiB and no frame size in its header, WAV in 16-bit, 24-bit and float, WAV at 11 025 Hz; each at its own rate and channel count, never shorter than 2 s (encoder delay and Opus pre-skip are trimmed to the sample) and at most one frame longer (the platform trims MP3 padding, but AAC padding and the last Vorbis and Opus packets stay, which does not move the fingerprint), and still 1 kHz at the same level after the whole fingerprint path. Edge cases: an MP3 whose sample rate rises halfway reaches the consumer in both rates; a FLAC file cut off in its last frame keeps what was decoded; a single-frame FLAC is decoded once; a 64-bit float WAV is refused |
 | M0 | TagLib reads the tag fixtures of every format |
@@ -1291,7 +1301,8 @@ tests, and a high-band error rate within the threshold of §11.4.
 | M2b | Legacy-encoding fixtures through the real reader: the Windows-1251 ID3v1, ID3v2 and RIFF INFO fixtures read in automatic mode and with the Windows-1251 choice, the KOI8-R and Shift_JIS fixtures with their own choice; a wrong choice shows other text, and Automatic brings the right text back without reading the file again; every code page of the list is supported by the device |
 | M2b | Deleting `library.db` keeps favorites, playlists, statistics and (from M3) decisions, which re-attach after the rebuild |
 | M2b | Playlist entries resolve after a move, a rename and a media index rebuild; an entry of a deleted file stays, unavailable, and comes back with the file; an M3U8 export imported again on the same device gives the same songs (library.md §16.7) |
-| M3 | Decoding table: every format the player plays is read with `MediaExtractorCompat`, decoded and fingerprinted |
+| M3 | Chromaprint additions: encoding a fingerprint's raw items gives the string of the session that computed them (on synthetic audio and on the five recordings; no items give an empty string; an unknown algorithm is refused). The device comparison with fpcalc gains three recordings that the preparation script makes from the CC samples at their full length: the FLAC overture upmixed to 5.1 AAC in MP4 (all six channels reach the downmix), the 96 kHz FLAC as stereo AAC in MP4, and the Ogg Vorbis recording as a constant-bitrate MP3 without a LAME or Xing header; each within 10 % at offset 0 ± 1 (measured on the API 30 emulator: 1.1 %, under 0.01 % and 1.3 %, all at offset 0). The AcoustID lookup of the samples is a real call: it runs only with the instrumentation argument `-e liveNetwork true` and an AcoustID key, never by default (the test helper never passes the argument) and never on CI, which has no key |
+| M3 | Decoding table: every format the player plays (playback.md §1.7: MP3, also at 320 kbit/s, AAC in MP4 and raw (ADTS), AMR narrowband and wideband raw and in 3GP, Ogg Vorbis, Vorbis in Matroska, Opus in Ogg and WebM, FLAC, also in 5.1, and WAV) is read with `MediaExtractorCompat`, decoded by a platform decoder (WAV without one) and all of its audio reaches Chromaprint at 11 025 Hz; ALAC in MP4 is refused as an unsupported format, because the platform has no ALAC decoder, so in 1.0 an ALAC file is not fingerprinted and is identified by text search only (bundled decoders come in v1.x). The new formats are also decoding fixtures (row M0 above), each at its own rate and channel count, with the 1 kHz tone intact; raw AAC keeps its priming frame and padding (up to two frames more), and the 3GP AMR wideband fixture holds 1.995 s, because the 3GP edit list trims the encoder's delay that the encoder does not flush at the end |
 | M3 | Snippet: a playing main player pauses for the snippet and resumes at the same position; a main player paused before the snippet stays paused; queue, position and statistics do not change; a focus loss during the snippet stops it without resuming the main player |
 | M3 | Session metadata: for a fixture whose embedded cover and tags differ from the saved values, and for an MP3 without a frame-count header, the MediaController's metadata, artwork and duration equal PiPlayer's values after Apply and after Undo, without preparing the file again |
 | M4a | A 500-file batch started from a folder resumes after its process is killed in any phase, and its accepted results appear in every view and on system surfaces |

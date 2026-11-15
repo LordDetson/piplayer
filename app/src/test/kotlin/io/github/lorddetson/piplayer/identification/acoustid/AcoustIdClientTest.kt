@@ -253,6 +253,16 @@ class AcoustIdClientTest {
     }
 
     @Test
+    fun `a successful answer that is not AcoustID's JSON is an HTTP error and not retried`() = runTest {
+        // Judged by its status (TI §3.2): a captive portal or proxy page with 200 is final, unlike one with 503.
+        server.enqueue(MockResponse.Builder().code(200).body("<!DOCTYPE html><title>Sign in</title>").build())
+        val error = runCatching { client().lookup(fingerprint, 214_400) }.exceptionOrNull()
+        assertThat(error).isInstanceOf(AcoustIdException.Http::class.java)
+        assertThat((error as AcoustIdException.Http).code).isEqualTo(200)
+        assertThat(server.requestCount).isEqualTo(1)
+    }
+
+    @Test
     fun `an error inside a successful HTTP answer is still an error`() = runTest {
         server.enqueue(error(200, 3, "invalid fingerprint"))
         val error = runCatching { client().lookup(fingerprint, 214_400) }.exceptionOrNull()
