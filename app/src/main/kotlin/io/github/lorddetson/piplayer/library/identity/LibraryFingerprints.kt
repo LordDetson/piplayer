@@ -4,54 +4,96 @@ import android.content.Context
 import android.net.Uri
 import android.os.Process
 import android.util.Log
+import io.github.lorddetson.piplayer.identification.fingerprint.DecodingException
+import io.github.lorddetson.piplayer.identification.fingerprint.FingerprintResult
 import io.github.lorddetson.piplayer.identification.fingerprint.MediaCodecPcmSource
 import io.github.lorddetson.piplayer.identification.fingerprint.NativeFingerprinting
+import io.github.lorddetson.piplayer.identification.fingerprint.PcmSource
 import io.github.lorddetson.piplayer.library.db.FingerprintEntity
 import io.github.lorddetson.piplayer.library.db.LibraryDatabase
+import java.io.FileDescriptor
+import java.io.FileNotFoundException
 import java.nio.ByteBuffer
 import java.util.concurrent.Executors
 import kotlin.coroutines.cancellation.CancellationException
+import kotlinx.coroutines.ExecutorCoroutineDispatcher
 import kotlinx.coroutines.asCoroutineDispatcher
+import kotlinx.coroutines.job
 import kotlinx.coroutines.withContext
 
 /**
- * The fingerprint cache of the library database (docs/library.md §8.3), filled by fingerprints made with the decoders
- * of identification at background priority, of at most 120 s of audio.
+ * The fingerprint cache of the library database (docs/library.md §8.3), filled by fingerprints of at most 120 s of
+ * audio, made with the decoders of identification. One entry, [compute], serves two lanes (TI §3.2 "Threads"):
+ * re-attachment's computations run one after another on a thread of background priority, and user-triggered
+ * identification has a thread of its own at normal priority, so it never waits behind them. [sources] makes the
+ * decoding source of an open file; the lane's thread decodes too.
  */
 class LibraryFingerprints(
     private val context: Context,
     private val library: LibraryDatabase,
     private val uriOf: (KeyedFile) -> Uri,
     private val clock: () -> Long = System::currentTimeMillis,
+    private val sources: (fd: FileDescriptor, cancelled: () -> Boolean) -> PcmSource = { fd, cancelled ->
+        MediaCodecPcmSource(context, fd, cancelled)
+    },
 ) : FingerprintSource {
+
+    /** The thread a computation waits for. */
+    enum class Lane(internal val dispatcher: ExecutorCoroutineDispatcher) {
+        /** Re-attachment (TI §3.1 step 4): one thread at background priority. */
+        REATTACHMENT(lane("fingerprints", Process.THREAD_PRIORITY_BACKGROUND)),
+
+        /** A fingerprint the user is waiting for: one thread at normal priority, apart from re-attachment's. */
+        USER(lane("fingerprints-user", Process.THREAD_PRIORITY_DEFAULT)),
+    }
 
     override suspend fun cached(contentKey: String): CachedPrint? =
         library.library().fingerprint(contentKey)?.let { CachedPrint(items(it.fingerprint), it.format) }
 
-    override suspend fun compute(file: KeyedFile): IntArray? = withContext(background) {
-        val raw = try {
-            context.contentResolver.openFileDescriptor(uriOf(file), "r")?.use { descriptor ->
-                NativeFingerprinting.calculator().fingerprint(MediaCodecPcmSource(context, descriptor.fileDescriptor))
-                    .fingerprint.raw
-            }
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            Log.w(TAG, "No fingerprint of file ${file.fileId}", e)
-            null
-        } ?: return@withContext null
-        library.library().saveFingerprint(FingerprintEntity(file.contentKey, bytes(raw), file.format, clock()))
-        raw
+    override suspend fun compute(file: KeyedFile): IntArray? = try {
+        compute(uriOf(file), file.contentKey, file.format, Lane.REATTACHMENT).fingerprint.raw
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: DecodingException) {
+        // Expected for some files (ALAC without a decoder, a pipe past the copy's bounds): no stack trace.
+        Log.w(TAG, "No fingerprint of file ${file.fileId}: ${e.message}")
+        null
+    } catch (e: Exception) {
+        Log.w(TAG, "No fingerprint of file ${file.fileId}", e)
+        null
     }
+
+    /**
+     * The fingerprint of the file at [uri], decoded on [lane]'s thread and cached under [contentKey] with the file's
+     * [format] and the decoder path. Throws when the file cannot be opened or decoded (a [DecodingException] says why,
+     * an unsupported format among others); a cancelled caller stops the copy or the decoder soon.
+     */
+    suspend fun compute(uri: Uri, contentKey: String, format: String?, lane: Lane): FingerprintResult =
+        withContext(lane.dispatcher) {
+            val job = coroutineContext.job
+            val descriptor = context.contentResolver.openFileDescriptor(uri, "r")
+                ?: throw FileNotFoundException("No descriptor for $uri")
+            // The calculator keeps to the lane's thread, so the lane is busy until the fingerprint is made.
+            val result = descriptor.use {
+                NativeFingerprinting.calculator(dispatcher = lane.dispatcher)
+                    .fingerprint(sources(it.fileDescriptor) { !job.isActive })
+            }
+            library.library().saveFingerprint(
+                FingerprintEntity(
+                    contentKey, bytes(result.fingerprint.raw), format, clock(), decoderPath = result.source.decoderPath,
+                ),
+            )
+            result
+        }
 
     companion object {
         private const val TAG = "LibraryFingerprints"
 
-        private val background = Executors.newSingleThreadExecutor { task ->
+        private fun lane(name: String, priority: Int) = Executors.newSingleThreadExecutor { task ->
             Thread({
-                Process.setThreadPriority(Process.THREAD_PRIORITY_BACKGROUND)
+                Process.setThreadPriority(priority)
                 task.run()
-            }, "fingerprints").apply { isDaemon = true }
+            }, name).apply { isDaemon = true }
         }.asCoroutineDispatcher()
 
         fun bytes(items: IntArray): ByteArray = ByteBuffer.allocate(items.size * 4).apply { items.forEach(::putInt) }.array()

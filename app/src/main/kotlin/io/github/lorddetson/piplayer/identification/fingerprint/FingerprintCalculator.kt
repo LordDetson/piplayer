@@ -11,13 +11,16 @@ import kotlinx.coroutines.withContext
 
 /**
  * What a source decoded, for reports. [endedEarly] says why decoding stopped before the end of the file, when the
- * decoder failed after some audio had come out; that audio is kept.
+ * decoder failed after some audio had come out; that audio is kept. [route] and [decoderPath] come from the decoding
+ * table (DecoderTable, TI §3.2); the fingerprint cache keeps the path. Sources outside that table leave them out.
  */
 data class SourceInfo(
     val mimeType: String,
     val decoderName: String,
     val durationUs: Long?,
     val endedEarly: String? = null,
+    val route: DecodingRoute? = null,
+    val decoderPath: String? = null,
 )
 
 /** Decoded audio, delivered in pieces. */

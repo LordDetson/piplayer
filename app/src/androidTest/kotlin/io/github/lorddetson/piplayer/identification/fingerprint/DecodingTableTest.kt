@@ -16,7 +16,9 @@ import org.junit.runners.Parameterized
  * platform has no decoder for, is not fingerprintable: in 1.0 such a file is identified by text search only. The
  * fixtures are the 2 s tones of scripts/generate_decoding_fixtures.py, shorter than Chromaprint's first item (about
  * 2.7 s), so "fingerprinted" means that all of the audio reached Chromaprint at its rate and the fingerprint finished;
- * how long that audio is, per fixture, DecodingFixturesTest says.
+ * how long that audio is, per fixture, DecodingFixturesTest says. The table in code (DecoderTable) must agree: every
+ * row here has its codec's row there with the same path, every row there has a fixture here, and decoding reports the
+ * route and decoder path of that row.
  */
 @RunWith(Parameterized::class)
 class DecodingTableTest(private val row: Row) {
@@ -106,6 +108,31 @@ class DecodingTableTest(private val row: Row) {
         }
     }
 
+    /** The code's table (DecoderTable) has a row for the fixture's codec that takes the same path. */
+    @Test
+    fun agreesWithItsRowInTheCodeTable() {
+        val codeRow = DecoderTable.ROWS.singleOrNull { it.mimeType == row.mimeType }
+            ?: throw AssertionError("DecoderTable has no row for ${row.mimeType}")
+
+        when (row.path) {
+            Path.PLATFORM_DECODER -> {
+                assertThat(codeRow.route).isEqualTo(DecodingRoute.PLATFORM_DECODER)
+                assertThat(codeRow.platformDecoder).isTrue()
+            }
+            Path.CONTAINER_PCM -> assertThat(codeRow.route).isEqualTo(DecodingRoute.CONTAINER_PCM)
+            Path.NOT_FINGERPRINTABLE -> {
+                assertThat(codeRow.route).isEqualTo(DecodingRoute.PLATFORM_DECODER)
+                assertThat(codeRow.platformDecoder).isFalse()
+            }
+        }
+    }
+
+    /** No row of the code's table goes without a fixture (checked once per row, it is cheap). */
+    @Test
+    fun everyRowOfTheCodeTableHasAFixture() {
+        assertThat(TABLE.map { it.mimeType }).containsAll(DecoderTable.ROWS.map { it.mimeType })
+    }
+
     /** Also for a row whose path ends before the length is checked on this device (ALAC without a decoder). */
     @Test
     fun knowsTheLengthItsAudioMustHave() {
@@ -132,8 +159,13 @@ class DecodingTableTest(private val row: Row) {
         val decoderNames = decoders.map { it.name }
         if (row.path == Path.CONTAINER_PCM) {
             assertThat(decoderNames).doesNotContain(result.source.decoderName)
+            assertThat(result.source.route).isEqualTo(DecodingRoute.CONTAINER_PCM)
+            assertThat(result.source.decoderPath).isEqualTo(DecoderTable.decoderPath(row.mimeType, null))
         } else {
             assertThat(decoderNames).contains(result.source.decoderName)
+            assertThat(result.source.route).isEqualTo(DecodingRoute.PLATFORM_DECODER)
+            assertThat(result.source.decoderPath)
+                .isEqualTo(DecoderTable.decoderPath(row.mimeType, result.source.decoderName))
         }
         assertThat(result.source.endedEarly).isNull()
         assertThat(result.reachedEnd).isTrue()

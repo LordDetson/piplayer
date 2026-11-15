@@ -23,24 +23,49 @@ sealed class DecodingException(message: String, cause: Throwable? = null) : IOEx
 
     /** The extractor or the decoder failed while reading. */
     class Failed(message: String, cause: Throwable?) : DecodingException(message, cause)
+
+    /** A descriptor that cannot be read at random positions could not be copied within the bounds (TI §3.2). */
+    class CopyRefused(val reason: Reason) : DecodingException("The file could not be copied: $reason") {
+        enum class Reason {
+            /** Longer than the copy may grow. */
+            TOO_LARGE,
+
+            /** Not over before the copy's deadline. */
+            TOO_SLOW,
+
+            /** The copy would leave less free space than the reserve. */
+            NO_SPACE,
+        }
+    }
 }
 
 /**
  * Decodes the first audio track of a file (TI §3.2): Media3's `MediaExtractorCompat` parses the container, so the
- * extractors of playback also serve fingerprinting, and the platform `MediaCodec` decodes. The decoder is asked for
- * 16-bit output (what Chromaprint takes; on Android 13+ a float request would break the platform's trimming of MP3
- * and AAC encoder delay), but every PCM encoding it reports is accepted. PCM in the container (WAV) skips the decoder,
- * which would only pass the bytes on and could mislabel their encoding. The caller owns [fd]: it must stay open until
- * [decode] returns, is read through but not closed, and must not be used by another extractor at the same time.
+ * extractors of playback also serve fingerprinting, and the route and format rules of the codec come from the decoding
+ * table ([DecoderTable]): the platform `MediaCodec` decodes, or for PCM in the container (WAV) nothing does, since a
+ * pass-through decoder could mislabel the encoding. The decoder is asked for 16-bit output (what Chromaprint takes; on
+ * Android 13+ a float request would break the platform's trimming of MP3 and AAC encoder delay), but every PCM encoding
+ * it reports is accepted. The caller owns [fd]: it must stay open until [decode] returns, is read through but not
+ * closed, and must not be used by another extractor at the same time. A descriptor that is not a regular file (a pipe)
+ * is first copied by [copies]; [cancelled] stops that copy.
  */
-class MediaCodecPcmSource(private val context: Context, private val fd: FileDescriptor) : PcmSource {
+class MediaCodecPcmSource(
+    private val context: Context,
+    private val fd: FileDescriptor,
+    private val cancelled: () -> Boolean = { false },
+    private val copies: DescriptorCopy = DescriptorCopy.of(context),
+) : PcmSource {
 
+    override fun decode(consumer: (pcm: ByteBuffer, format: PcmFormat) -> Boolean): SourceInfo =
+        copies.readable(fd, cancelled) { readable -> decode(readable, consumer) }
+
+    /** Decodes [readable], which can be read at random positions: [fd] itself or its copy. */
     @OptIn(UnstableApi::class)
-    override fun decode(consumer: (pcm: ByteBuffer, format: PcmFormat) -> Boolean): SourceInfo {
+    private fun decode(readable: FileDescriptor, consumer: (ByteBuffer, PcmFormat) -> Boolean): SourceInfo {
         val extractor = MediaExtractorCompat(context)
         try {
             try {
-                extractor.setDataSource(fd)
+                extractor.setDataSource(readable)
             } catch (e: IOException) {
                 throw DecodingException.Failed("The file could not be read: ${e.message}", e)
             }
@@ -52,10 +77,14 @@ class MediaCodecPcmSource(private val context: Context, private val fd: FileDesc
             val mimeType = requireNotNull(format.getString(MediaFormat.KEY_MIME))
             val durationUs = format.takeIf { it.containsKey(MediaFormat.KEY_DURATION) }
                 ?.getLong(MediaFormat.KEY_DURATION)?.takeIf { it > 0 }
-            val samples = SampleReader(extractor, repeatsLastFrame = mimeType == MIME_FLAC)
-            if (mimeType == MIME_RAW) {
+            val row = DecoderTable.rowOf(mimeType)
+            val samples = SampleReader(extractor, repeatsLastFrame = row.endsAtRepeatedTime)
+            if (row.route == DecodingRoute.CONTAINER_PCM) {
                 readPcm(samples, rawPcmFormat(format), consumer)
-                return SourceInfo(mimeType, NO_DECODER, durationUs)
+                return SourceInfo(
+                    mimeType, NO_DECODER, durationUs, route = row.route,
+                    decoderPath = DecoderTable.decoderPath(mimeType, decoderName = null),
+                )
             }
             // The bitrate means nothing to a decoder, but the lookup checks it against the decoder's declared range: a
             // 320 kbit/s MP3 whose average the extractor works out at 320 044 bit/s would find no decoder at all.
@@ -78,13 +107,16 @@ class MediaCodecPcmSource(private val context: Context, private val fd: FileDesc
             val endedEarly = try {
                 codec.configure(format, null, null, 0)
                 codec.start()
-                pump(samples, codec, consumer, holdLast = mimeType == MIME_FLAC)
+                pump(samples, codec, consumer, holdLast = row.holdsLastSample)
             } catch (e: MediaCodec.CodecException) {
                 throw DecodingException.Failed("The decoder $name failed: ${e.diagnosticInfo}", e)
             } finally {
                 codec.release()
             }
-            return SourceInfo(mimeType, name, durationUs, endedEarly)
+            return SourceInfo(
+                mimeType, name, durationUs, endedEarly, route = row.route,
+                decoderPath = DecoderTable.decoderPath(mimeType, name),
+            )
         } finally {
             extractor.release()
         }
@@ -207,10 +239,10 @@ class MediaCodecPcmSource(private val context: Context, private val fd: FileDesc
     }
 
     /**
-     * Reads the selected track sample by sample; the stream ends where the extractor has no sample left. Media3
-     * 1.11.1's extractor does not end a FLAC stream that way: past the last frame it hands out that frame again and
-     * again, with the same time, while advance() keeps returning true, and reading such a repeat fails inside the
-     * extractor once the frame is larger than 64 KiB. So when [repeatsLastFrame], a sample with the time of the one
+     * Reads the selected track sample by sample; the stream ends where the extractor has no sample left. Media3's
+     * extractor up to 1.12.0-alpha02 does not end a FLAC stream that way: past the last frame it hands out that frame
+     * again and again, with the same time, while advance() keeps returning true, and reading such a repeat fails inside
+     * the extractor once the frame is larger than 64 KiB. So when [repeatsLastFrame], a sample with the time of the one
      * before ends the stream before it is read, wherever it lies: a file cut off may end long before the length in its
      * header. Other formats may legitimately repeat a time (laced Matroska frames) or step back (an MP3 whose sample
      * rate rises), and MP4 priming samples have negative times; all of those are read as they come.
@@ -274,7 +306,6 @@ class MediaCodecPcmSource(private val context: Context, private val fd: FileDesc
 
     private companion object {
         const val MIME_RAW = "audio/raw"
-        const val MIME_FLAC = "audio/flac"
         const val NO_DECODER = "none (PCM)"
         const val TIMEOUT_US = 10_000L
 

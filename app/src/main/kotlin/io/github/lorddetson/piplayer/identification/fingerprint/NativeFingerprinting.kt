@@ -3,6 +3,8 @@ package io.github.lorddetson.piplayer.identification.fingerprint
 import io.github.lorddetson.piplayer.nativelib.chromaprint.ChromaprintSession
 import io.github.lorddetson.piplayer.nativelib.chromaprint.Fingerprint
 import io.github.lorddetson.piplayer.nativelib.resample.Resampler
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
 
 /** The fingerprint path with the native parts: speexdsp's resampler and Chromaprint. */
 object NativeFingerprinting {
@@ -11,8 +13,11 @@ object NativeFingerprinting {
 
     fun sink(): FingerprintSink = ChromaprintSink(ChromaprintSession())
 
-    fun calculator(maxSeconds: Int = FingerprintCalculator.MAX_SECONDS): FingerprintCalculator =
-        FingerprintCalculator(resamplers, ::sink, maxSeconds)
+    /** A calculator that decodes and fingerprints on [dispatcher]. */
+    fun calculator(
+        maxSeconds: Int = FingerprintCalculator.MAX_SECONDS,
+        dispatcher: CoroutineDispatcher = Dispatchers.Default,
+    ): FingerprintCalculator = FingerprintCalculator(resamplers, ::sink, maxSeconds, dispatcher)
 }
 
 private class NativeResampler(private val resampler: Resampler) : MonoResampler {
