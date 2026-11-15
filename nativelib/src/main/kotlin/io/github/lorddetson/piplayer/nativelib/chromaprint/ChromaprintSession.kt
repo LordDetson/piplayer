@@ -75,4 +75,23 @@ object Chromaprint {
         session.feed(pcm)
         session.finish()
     }
+
+    /** Chromaprint's algorithms run from TEST1 (0) to TEST5 (4). */
+    private val ALGORITHMS = 0..4
+
+    /** The compressed form stores the number of items in 24 bits. */
+    private const val MAX_ITEMS = 0xFF_FFFF
+
+    /**
+     * The compressed, base64-encoded form of stored [raw] items, as AcoustID takes it (TI §3.2): for the items of a
+     * session it equals [Fingerprint.encoded], so a cache can keep the raw items only. No items give an empty string.
+     */
+    fun encode(raw: IntArray, algorithm: Int = ALGORITHM): String {
+        require(algorithm in ALGORITHMS) { "Unknown Chromaprint algorithm $algorithm" }
+        require(raw.size <= MAX_ITEMS) { "${raw.size} items are more than a fingerprint holds" }
+        NativeLibrary.load()
+        return nativeEncode(raw, algorithm) ?: throw ChromaprintException("Chromaprint could not encode the fingerprint")
+    }
+
+    @JvmStatic private external fun nativeEncode(raw: IntArray, algorithm: Int): String?
 }

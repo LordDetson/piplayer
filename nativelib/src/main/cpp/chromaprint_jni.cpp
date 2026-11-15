@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <new>
+#include <vector>
 
 #include <jni.h>
 
@@ -116,6 +117,34 @@ jstring encodedFingerprint(JNIEnv *env, jclass, jlong handle) {
   return nullptr;
 }
 
+/**
+ * The compressed, base64-encoded form of stored raw items: the same string encodedFingerprint gives for them, so a cache
+ * can keep the raw items only. The Kotlin side has checked the algorithm and the size; no items is an empty string, and
+ * null means Chromaprint refused the items.
+ */
+jstring encode(JNIEnv *env, jclass, jintArray raw, jint algorithm) {
+  try {
+    const jsize size = env->GetArrayLength(raw);
+    if (size <= 0) return env->NewStringUTF("");
+    std::vector<uint32_t> items(static_cast<size_t>(size));
+    env->GetIntArrayRegion(raw, 0, size, reinterpret_cast<jint *>(items.data()));
+    if (env->ExceptionCheck()) return nullptr;
+    char *encoded = nullptr;
+    int encodedSize = 0;
+    if (chromaprint_encode_fingerprint(items.data(), size, algorithm, &encoded, &encodedSize, 1) != 1 ||
+        encoded == nullptr) {
+      return nullptr;
+    }
+    jstring result = env->NewStringUTF(encoded);  // base64 is plain ASCII
+    chromaprint_dealloc(encoded);
+    return result;
+  } catch (const std::bad_alloc &) {
+    throwOutOfMemory(env);
+  } catch (...) {
+  }
+  return nullptr;
+}
+
 void release(JNIEnv *, jclass, jlong handle) {
   try {
     chromaprint_free(context(handle));
@@ -137,7 +166,14 @@ bool registerChromaprint(JNIEnv *env) {
       {"nativeEncodedFingerprint", "(J)Ljava/lang/String;", reinterpret_cast<void *>(encodedFingerprint)},
       {"nativeFree", "(J)V", reinterpret_cast<void *>(release)},
   };
-  return env->RegisterNatives(session, methods, sizeof(methods) / sizeof(methods[0])) == JNI_OK;
+  if (env->RegisterNatives(session, methods, sizeof(methods) / sizeof(methods[0])) != JNI_OK) return false;
+
+  jclass chromaprint = env->FindClass("io/github/lorddetson/piplayer/nativelib/chromaprint/Chromaprint");
+  if (chromaprint == nullptr) return false;
+  static const JNINativeMethod encoding[] = {
+      {"nativeEncode", "([II)Ljava/lang/String;", reinterpret_cast<void *>(encode)},
+  };
+  return env->RegisterNatives(chromaprint, encoding, sizeof(encoding) / sizeof(encoding[0])) == JNI_OK;
 }
 
 }  // namespace piplayer

@@ -36,12 +36,16 @@ class ChromaprintFpcalcTest(private val sample: String) {
         }
     }
 
-    @Test
-    fun matchesFpcalcOnTheSamePcm() {
+    private fun pcm(): ShortArray {
         val bytes = TestFiles.assets.open("fingerprints/$sample.pcm").use { it.readBytes() }
-        val pcm = ShortArray(bytes.size / 2).also {
+        return ShortArray(bytes.size / 2).also {
             ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).asShortBuffer().get(it)
         }
+    }
+
+    @Test
+    fun matchesFpcalcOnTheSamePcm() {
+        val pcm = pcm()
         val reference = JSONObject(TestFiles.assets.open("fingerprints/$sample.fpcalc.json").bufferedReader().readText())
             .getJSONArray("fingerprint")
             .let { items -> IntArray(items.length()) { items.getLong(it).toInt() } }
@@ -53,5 +57,12 @@ class ChromaprintFpcalcTest(private val sample: String) {
         assertThat(ours.size).isEqualTo(reference.size)
         assertThat(match.offset).isEqualTo(0)
         assertThat(match.bitErrorRate).isLessThanOrEqualTo(MAX_BIT_ERROR_RATE)
+    }
+
+    @Test
+    fun encodingTheRawItemsOfARecordingGivesTheSessionsEncodedString() {
+        val fingerprint = Chromaprint.fingerprint(pcm())
+
+        assertThat(Chromaprint.encode(fingerprint.raw)).isEqualTo(fingerprint.encoded)
     }
 }

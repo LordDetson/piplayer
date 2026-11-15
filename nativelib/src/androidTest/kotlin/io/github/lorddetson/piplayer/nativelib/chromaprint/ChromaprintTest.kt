@@ -51,6 +51,39 @@ class ChromaprintTest {
     }
 
     @Test
+    fun encodingTheRawItemsGivesTheSessionsEncodedString() {
+        // What the fingerprint cache keeps (raw items) must give AcoustID the same string as the session did (TI §3.2).
+        for (seconds in listOf(4, 30)) {
+            val fingerprint = Chromaprint.fingerprint(pcm.copyOf(seconds * Chromaprint.SAMPLE_RATE))
+            assertThat(fingerprint.raw).describedAs("$seconds s").isNotEmpty()
+            assertThat(Chromaprint.encode(fingerprint.raw)).describedAs("$seconds s").isEqualTo(fingerprint.encoded)
+        }
+    }
+
+    @Test
+    fun encodingNoItemsGivesAnEmptyStringLikeTheSession() {
+        // Under about 2.7 s of audio the session has no items and gives an empty string.
+        val short = Chromaprint.fingerprint(pcm.copyOf(Chromaprint.SAMPLE_RATE))
+        assertThat(short.raw).isEmpty()
+        assertThat(short.encoded).isEmpty()
+        assertThat(Chromaprint.encode(IntArray(0))).isEmpty()
+    }
+
+    @Test
+    fun theEncodedStringNamesTheAlgorithmAndUsesUrlSafeBase64WithoutPadding() {
+        val raw = intArrayOf(0, -1, Int.MIN_VALUE, Int.MAX_VALUE, 0x12345678)
+        // The first byte is the algorithm: 1 (fpcalc's "algorithm 2") is "AQ" in base64, 2 is "Ag".
+        assertThat(Chromaprint.encode(raw)).startsWith("AQ").doesNotContain("=", "+", "/")
+        assertThat(Chromaprint.encode(raw, algorithm = 2)).startsWith("Ag")
+    }
+
+    @Test
+    fun encodingWithAnUnknownAlgorithmIsRefused() {
+        assertThatThrownBy { Chromaprint.encode(intArrayOf(1, 2, 3), algorithm = 99) }
+            .isInstanceOf(IllegalArgumentException::class.java)
+    }
+
+    @Test
     fun anyOtherSampleRateIsRefused() {
         assertThatThrownBy { ChromaprintSession(sampleRate = 44_100) }.isInstanceOf(ChromaprintException::class.java)
     }
