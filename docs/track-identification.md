@@ -142,7 +142,7 @@ Cheapest and most reliable source first; stop as soon as a stage gives a confide
 |---|-------|-------|--------|
 | 0 | Local read | file URI | existing tags (TagLib, legacy encodings decoded), exact duration, size, content key, embedded cover details; normally already done by the background tag pass |
 | 1 | Known IDs | MusicBrainz recording/release IDs in tags | recording + release directly: `/ws/2/recording/{mbid}?inc=artist-credits+isrcs` (a 404 means the ID is unknown and the stage finds nothing); with a release ID too, the release lookup of §5.1, and when that release contains the winning recording it is the suggested edition and the ranking of §4.2 is skipped, otherwise the ranking runs as usual |
-| 2 | ISRC | ISRC tag | `/ws/2/isrc/{isrc}` → recordings (a 404 means none; can clash: always check the duration; an artist/title disagreement is shown in the reason, §4.1) |
+| 2 | ISRC | ISRC tag | `/ws/2/isrc/{isrc}?inc=artists` → recordings with their artist credits (a 404 means none; can clash: always check the duration; an artist/title disagreement is shown in the reason, §4.1, which is why the credits are asked for) |
 | 3 | Fingerprint | first 120 s of decoded audio (§3.2) | Chromaprint fingerprint → AcoustID lookup → recordings with score |
 | 4 | Text search | tags + parsed filename + duration | MusicBrainz Lucene recording search |
 | 5 | Release choice | recording MBID(s) | ranked releases (§4.2) |
@@ -153,11 +153,13 @@ Request budget for one file (M3; MusicBrainz requests are at least 1.1 s apart, 
 
 - stage 1: one recording lookup, plus one release lookup when the tags carry a release ID (it also serves stage 6);
 - stage 2: one ISRC lookup; stage 3: one AcoustID lookup; stage 4: at most the four automatic variants of §3.3;
-- when the winning recording lacks a title, a credit or a length (AcoustID knows some recordings by their ID only, and
-  the ISRC answer has no credits), one recording lookup for it;
+- when the winning recording lacks a title or a credit (AcoustID knows some recordings by their ID only), one recording
+  lookup for it; never for a recording that stage 1 already looked up, and not for a missing length alone, since every
+  MusicBrainz answer gives the same length and a lookup would bring none either (decided in M3 after review);
 - stage 5: release browse pages (§4.2) only for the winning recording and for recordings within the band gap (less
-  than 0.10 below the best, the gap that keeps the best out of the high band, §4.1), at most three recordings in score
-  order, at most 10 pages each, and nothing when the best score is below 0.50; a failed browse of a recording other
+  than 0.10 below the best, the gap that keeps the best out of the high band, §4.1) that score at least 0.50
+  themselves, at most three recordings in score order, at most 10 pages each, and nothing when the best score is below
+  0.50; a failed browse of a recording other
   than the winner is skipped and traced; the browse of a release group waits until the edition picker opens;
 - stage 6: one release lookup, for the chosen release only.
 
@@ -647,7 +649,9 @@ re-checked before release (M5); in M4a they also drive automatic preparation.
    edition") lists **every** edition in the release group, loaded when the picker opens:
    `/ws/2/release?release-group=<mbid>&inc=media+labels&limit=100` (paged as in step 1, all statuses, official
    first), with type, format, country, date, label and track count, the suggested one first and the others in the
-   order of step 2, official ones first. An edition that is not among the recording's releases from step 1 uses
+   order of step 2, official ones first. The group's browse has the page cap of step 1 (10 pages, 1 000 releases); when
+   the cap stops it, the picker says that its list is partial and shows the group's release count (decided in M3 after
+   review). An edition that is not among the recording's releases from step 1 uses
    another recording of the song or lacks it: choosing it loads its tracklist (§5.1) and maps the file to the track
    with the same position and a similar title (title similarity of §4.1 at least 0.9), whose recording ID then
    replaces the identified one. The position is the disc and track position of the identified track on the suggested
@@ -660,7 +664,10 @@ re-checked before release (M5); in M4a they also drive automatic preparation.
 ### 5.1 Release details
 
 - One lookup per chosen release, cached by release MBID for the other tracks of the album:
-  `/ws/2/release/{mbid}?inc=recordings+artist-credits+labels+release-groups+isrcs&fmt=json` (no `genres`).
+  `/ws/2/release/{mbid}?inc=recordings+artist-credits+labels+release-groups+isrcs&fmt=json` (no `genres`). The cache
+  is read with the MBID as asked for in its plain form (trimmed, lower case); a lookup that answers with another ID
+  (MusicBrainz has merged the tagged release into another) is kept under both IDs, so the other tracks of an album
+  tagged with the old ID find it too (decided in M3 after review).
 - Fields taken from it: the artist credits of the track and of the release (every credited artist, the name as
   credited, join phrases), sort names from the credited artists, the medium title as disc subtitle, track and disc
   positions from the medium and track `position` (never the printed `number`), totals from the medium's track count
