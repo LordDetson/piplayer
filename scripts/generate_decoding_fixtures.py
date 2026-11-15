@@ -4,12 +4,14 @@ Each fixture is a 1 kHz tone at half scale in every channel, in one of the forma
 that the fingerprint decoder must handle (TI §3.2): MP3, AAC, Ogg Vorbis, Opus, FLAC at 96 kHz/24-bit and in 5.1, FLAC
 whose frames are larger than the platform decoder's default input buffer and whose header does not say so (written
 to a pipe, with a little noise so that the frames do not compress, and their sizes cleared in STREAMINFO), WAV in
-16-bit, 24-bit and float, and 11025 Hz mono WAV, which needs no resampling. Edge cases: a FLAC file cut off in the
+16-bit, 24-bit and float, and 11025 Hz mono WAV, which needs no resampling. The other containers the player plays
+(docs/playback.md §1.7): raw AAC (ADTS), AMR narrowband and wideband (raw and in 3GP), Opus in WebM and Vorbis in
+Matroska; and ALAC in MP4, which the platform has no decoder for (the decoding table of TI §11.2). Edge cases: a FLAC file cut off in the
 middle of its last frame, two FLAC files cut off long before the length in their header (between two frames and
 inside a frame), a FLAC file of a single frame, an MP3 whose sample rate rises halfway, and a WAV of 64-bit floats,
 which Android has no encoding for. The files are made by ffmpeg from synthetic sound, so they carry no third-party
-rights. The expected values live in the tests (app/src/androidTest/.../DecodingFixturesTest.kt and
-DecodingEdgeCasesTest.kt); keep them in step.
+rights. The expected values live in the tests (app/src/androidTest/.../DecodingFixturesTest.kt,
+DecodingEdgeCasesTest.kt and DecodingTableTest.kt); keep them in step.
 
 Run from the repository root: python scripts/generate_decoding_fixtures.py
 """
@@ -39,6 +41,14 @@ FIXTURES = [
     ("wav-44100-float-mono.wav", 44100, "mono", ["-c:a", "pcm_f32le"]),
     ("flac-48000-24bit-stereo-big-frames.flac", 48000, "stereo",
      ["-c:a", "flac", "-sample_fmt", "s32", "-frame_size", "32768", "-f", "flac", "pipe"]),
+    ("aac-adts-44100-stereo.aac", 44100, "stereo", ["-c:a", "aac", "-b:a", "96k", "-f", "adts"]),
+    ("amr-nb-8000-mono.amr", 8000, "mono", ["-c:a", "libopencore_amrnb", "-b:a", "12.2k", "-f", "amr"]),
+    ("amr-wb-16000-mono.awb", 16000, "mono", ["-c:a", "libvo_amrwbenc", "-b:a", "23.85k", "-f", "amr"]),
+    ("amr-nb-8000-mono.3gp", 8000, "mono", ["-c:a", "libopencore_amrnb", "-b:a", "12.2k", "-f", "3gp"]),
+    ("amr-wb-16000-mono.3gp", 16000, "mono", ["-c:a", "libvo_amrwbenc", "-b:a", "23.85k", "-f", "3gp"]),
+    ("opus-48000-stereo.webm", 48000, "stereo", ["-c:a", "libopus", "-b:a", "96k", "-f", "webm"]),
+    ("vorbis-44100-stereo.mka", 44100, "stereo", ["-c:a", "libvorbis", "-q:a", "4", "-f", "matroska"]),
+    ("alac-44100-stereo.m4a", 44100, "stereo", ["-c:a", "alac", "-sample_fmt", "s16p", "-f", "ipod"]),
 ]
 
 

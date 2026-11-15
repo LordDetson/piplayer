@@ -19,8 +19,9 @@ import org.junit.runners.Parameterized
  * Every format, rate and channel layout of the decoding fixtures (scripts/generate_decoding_fixtures.py, a 2 s tone
  * of 1 kHz) goes through Media3's extractor and the platform decoder at the expected rate and channel count:
  * compressed formats as 16-bit PCM, WAV in its own encoding (it skips the decoder). The start is trimmed to the sample
- * (encoder delay, Opus pre-skip), so the audio is never shorter than 2 s; at the end the platform trims MP3 padding,
- * but AAC padding and the last Vorbis and Opus packets stay, at most one frame. After the whole fingerprint path the
+ * (encoder delay, Opus pre-skip), so the audio is never shorter than the file holds (2 s, except AMR-WB in 3GP, whose
+ * encoder leaves its last 5 ms out). At the end the platform trims MP3 padding, but AAC padding and the last Vorbis
+ * and Opus packets stay, at most one frame; raw AAC keeps its priming frame too. After the whole fingerprint path the
  * tone is still 1 kHz at the same level.
  */
 @RunWith(Parameterized::class)
@@ -34,6 +35,8 @@ class DecodingFixturesTest(private val fixture: Fixture) {
         val encoding: PcmEncoding = PcmEncoding.PCM_16BIT,
         /** What the end may run over 2 s: untrimmed padding of at most one frame. */
         val endPaddingSeconds: Double = 0.0,
+        /** What the file itself lacks of the 2 s: an encoder that does not flush its delay at the end. */
+        val shortBySeconds: Double = 0.0,
     ) {
         override fun toString() = name
     }
@@ -62,6 +65,18 @@ class DecodingFixturesTest(private val fixture: Fixture) {
             Fixture("wav-48000-24bit-stereo.wav", "audio/raw", 48_000, 2, PcmEncoding.PCM_24BIT_PACKED),
             Fixture("wav-44100-float-mono.wav", "audio/raw", 44_100, 1, PcmEncoding.PCM_FLOAT),
             Fixture("wav-11025-16bit-mono.wav", "audio/raw", 11_025, 1),
+            // Containers the player plays too (docs/playback.md §1.7). Raw AAC has no edit list, so neither its priming
+            // frame nor its padding is trimmed: up to two AAC frames more.
+            Fixture("aac-adts-44100-stereo.aac", "audio/mp4a-latm", 44_100, 2, endPaddingSeconds = 0.047),
+            // AMR frames are 20 ms.
+            Fixture("amr-nb-8000-mono.amr", "audio/3gpp", 8_000, 1, endPaddingSeconds = 0.020),
+            Fixture("amr-nb-8000-mono.3gp", "audio/3gpp", 8_000, 1, endPaddingSeconds = 0.020),
+            Fixture("amr-wb-16000-mono.awb", "audio/amr-wb", 16_000, 1, endPaddingSeconds = 0.020),
+            // The 3GP edit list trims the encoder's 80 samples of delay, but the encoder does not flush them at the end:
+            // the file holds 100 frames less those 80 samples, 1.995 s.
+            Fixture("amr-wb-16000-mono.3gp", "audio/amr-wb", 16_000, 1, shortBySeconds = 0.005),
+            Fixture("opus-48000-stereo.webm", "audio/opus", 48_000, 2, endPaddingSeconds = 0.025),
+            Fixture("vorbis-44100-stereo.mka", "audio/vorbis", 44_100, 2, endPaddingSeconds = 0.047),
         ).map { arrayOf<Any>(it) }
     }
 
@@ -90,7 +105,10 @@ class DecodingFixturesTest(private val fixture: Fixture) {
         assertThat(info.decoderName).isNotBlank()
         assertThat(formats).containsExactly(PcmFormat(fixture.sampleRate, fixture.channels, fixture.encoding))
         assertThat(frames.toDouble() / fixture.sampleRate)
-            .isBetween(SECONDS - SLACK_SECONDS, SECONDS + fixture.endPaddingSeconds + SLACK_SECONDS)
+            .isBetween(
+                SECONDS - fixture.shortBySeconds - SLACK_SECONDS,
+                SECONDS + fixture.endPaddingSeconds + SLACK_SECONDS,
+            )
     }
 
     @Test
@@ -109,7 +127,10 @@ class DecodingFixturesTest(private val fixture: Fixture) {
         val result = withSource { source -> runBlocking { calculator.fingerprint(source) } }
 
         assertThat(result.fedSeconds)
-            .isBetween(SECONDS - SLACK_SECONDS, SECONDS + fixture.endPaddingSeconds + SLACK_SECONDS)
+            .isBetween(
+                SECONDS - fixture.shortBySeconds - SLACK_SECONDS,
+                SECONDS + fixture.endPaddingSeconds + SLACK_SECONDS,
+            )
         val samples = captured.drop(Chromaprint.SAMPLE_RATE / 5).dropLast(Chromaprint.SAMPLE_RATE / 5)
         val tone = power(samples, 1_000.0)
         for (other in listOf(500.0, 2_000.0, 2_025.0, 3_000.0)) {
