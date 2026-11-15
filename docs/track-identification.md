@@ -876,13 +876,30 @@ Phases (a) to (c) land in M4a, with accepted results saved in PiPlayer only; pha
 - Manifest: `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_MEDIA_PLAYBACK` and `FOREGROUND_SERVICE_DATA_SYNC` (API 34+).
   Play Console: declare the foreground service types `mediaPlayback` (playback) and `dataSync` (apply), with their
   justifications.
-- Rate limits (process-wide token bucket per provider, last-request time persisted):
+- Rate limits: one limiter per provider for the whole process, held by the app's identification services in the main
+  process. A limiter is a spacer: requests start no closer together than its interval, in arrival order, with no
+  bursts. It keeps its state in memory; persisting the last request time in `device_state` comes with batches (M4a,
+  §9).
   - MusicBrainz: one request per ≥ 1.1 s per device; exponential backoff with jitter on 503, 429, 502 and 504 (§9);
-    pause batch on repeated 503.
+    a successful answer whose body is not MusicBrainz's JSON (the page of a captive portal or a proxy) is retried
+    the same way and reported as "unavailable" when the retries run out; pause batch on repeated 503.
   - AcoustID: ≤ 3 req/s documented. The limit counts per IP address, not per application key (AcoustID in writing,
     2026-11-05), so installs do not share a budget. Single lookups start at least 0.35 s apart; background batches
-    use ≤ 1 req/s, because a device may share its IP address with others; global backoff on 429 / error 14.
-  - Cover Art Archive: no documented limit, but handle 503 with backoff (§5.2).
+    use ≤ 1 req/s, because a device may share its IP address with others; global backoff on 429 / error 14 and on
+    500, 502, 503, 504 and the proxy's 520 to 524 (§3.2).
+  - Cover Art Archive: no documented limit; requests start at least 1 s apart, so that lazy covers in lists (§5.2)
+    do not burst. The redirect to the image host (archive.org) belongs to the same call and takes no slot of its
+    own. A 503 pauses the limiter with the backoff of §9 and is cached as a failure (§5.2).
+- Before every attempt, and again when the limiter lets the attempt go, a call checks the online gate (§9 Privacy),
+  the provider's stop and the network; the HTTP client checks the gate once more before each redirect hop. The
+  network must be Android's default network with both the INTERNET and the VALIDATED capability. A blocked call
+  sends nothing and fails at once, saying why: online lookups are off, there is no network, the network shows a
+  sign-in page first (captive portal), or the provider is stopped. It is never retried and never pauses the limiter,
+  so a user who turns online lookups off during a backoff gets no further attempt.
+- A provider that refuses PiPlayer itself stops for the rest of the process: MusicBrainz after a 403 whose
+  `X-RateLimit-Who` starts with `ua-` (the User-Agent), AcoustID after error 4 (the application key). Its later calls
+  fail without a request. The stop shows in Settings and in the review; it is not persisted, so the next process tries
+  once more.
 - Random jitter; no jobs at fixed clock times; no polling MusicBrainz for changes.
 
 ## 9. Third-party services and compliance
@@ -1138,7 +1155,7 @@ tests, and a high-band error rate within the threshold of §11.4.
 | M2b | "Songs missing information": the reasons of §1 on merged values, including a title from the file name (level 5, or level 4 equal to the display name), the cover rule (embedded and saved in M2b, the album thumbnail in M4a) and the cover and MusicBrainz filters being off by default |
 | M3 | Keep as-is and Skip are remembered by identity and mirrored; a Skip lapses when the tag pass records a new size, modification time or content key; undoing either restores the earlier list state |
 | M0 | Filename parser: a table of real-world names → (artist, title, track number) or "unknown" |
-| M0 | AcoustID request builder: `meta` is space-separated, `duration` is an integer string rounded to the nearest second, body is gzip-compressed, the key stays out of the URL; answers: error 4 stops at once, error 14, 429, 500, 502, 503 and 504 are retried, other errors and non-JSON pages are final; recordings with an ID only and results without recordings are kept |
+| M0 | AcoustID request builder: `meta` is space-separated, `duration` is an integer string rounded to the nearest second, body is gzip-compressed, the key stays out of the URL; answers: error 4 stops at once, error 14 and HTTP 429, 500, 502, 503, 504 and 520 to 524 are retried, also when the body is not JSON (such a page counts by its status), other errors are final; recordings with an ID only and results without recordings are kept |
 | M3 | Retry later: an empty AcoustID result is retried after 1 hour and once in the next batch, then counts as final; a text-search result of at least 0.50 cancels the retry |
 | M0 | Text query builder: Lucene escaping, lower-case terms, the variants of §3.3 in order, skipped variants for missing values, the stop rule and the limits |
 | M0 | PCM conversion: 8-, 16-, 24-, 32-bit and float input, stereo and 5.1 downmix, rounding and clipping to 16-bit; the fingerprint path stops at 120 s, skips the resampler at 11 025 Hz, flushes it at the end of a short file and starts a new one when the format changes |
@@ -1146,6 +1163,7 @@ tests, and a high-band error rate within the threshold of §11.4.
 | M3 | Release ranking on recorded MusicBrainz JSON fixtures (for example a track with hundreds of same-title recordings, video recordings and compilations): the folder preference, the full type order, Digital Media equal to CD, date order, a recording on two tracks of one release; fixtures stripped of CC BY-NC-SA `tags`/`genres` before committing |
 | M3 | Edition picker: every release of the group is listed; an edition without the identified recording maps the file by position and title or is marked "does not contain this song" |
 | M0 | Rate limiter: never exceeds the configured rate under parallel callers; a pause holds back waiting callers; backoff with jitter on 503, 429, 502 and 504; Retry-After honoured; a rejected User-Agent is not retried; after giving up on a Retry-After over 120 s, later calls fail at once without a request until the pause is over |
+| M3 | Sending rules (§8): the app's online gate is closed by default; with the gate closed no client sends a request (AcoustID, MusicBrainz, a Cover Art Archive image and its redirect hop); closing the gate during a backoff sends no further attempt; a blocked call is neither retried nor pauses the limiter; a network that is not validated, or a captive portal, fails at once without a request; a MusicBrainz 403 for the User-Agent and AcoustID error 4 stop that provider for the process, and a stop in one set of services does not reach another; a MusicBrainz 200 with an HTML body is retried, then reported as unavailable; dropped connections and failing DNS lookups are retried and given up, with the limiter paused only by the backoff; one limiter per provider at 1.1 s, 0.35 s and 1 s |
 | M3 | Cover URLs: `http://` → `https://`; a release with a usable front image (`front-500`, `front-1200`, original); a release without one (release group images, marked as another edition); 404 after a redirect; failure TTLs (404: 7 days; 503: 5 minutes, doubling up to 6 hours) |
 | M3 | Cover size rule: a proposed cover whose short side is shorter than the existing cover's starts unticked |
 | M3 | Database-only undo: Apply followed by Undo restores the earlier merged values; stacked decisions (two identifications in a row, an edit on top of an identification) resolve as in §7.1; Undo right after Apply, Keep as-is and Skip; a later file change flags the field per location |
