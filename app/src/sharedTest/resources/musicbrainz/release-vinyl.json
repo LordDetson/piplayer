@@ -1,0 +1,511 @@
+{
+ "id": "636ae605-899a-4f27-9262-756a15d4d969",
+ "title": "Live Magic",
+ "status": "Official",
+ "date": "1987-02",
+ "country": "YE",
+ "barcode": null,
+ "artist-credit": [
+  {
+   "name": "Queen",
+   "joinphrase": "",
+   "artist": {
+    "id": "0383dadf-2a4e-4d10-a46a-e9e041da8eb3",
+    "name": "Queen",
+    "sort-name": "Queen"
+   }
+  }
+ ],
+ "release-events": [
+  {
+   "date": "1987-02",
+   "area": {
+    "iso-3166-1-codes": [
+     "YE"
+    ]
+   }
+  }
+ ],
+ "label-info": [
+  {
+   "catalog-number": "LSEMI 11166",
+   "label": {
+    "id": "c029628b-6633-439e-bcee-ed02e8a338f7",
+    "name": "EMI"
+   }
+  }
+ ],
+ "release-group": {
+  "id": "c88dba71-c542-3424-b746-05f6c8f3e060",
+  "title": "Live Magic",
+  "primary-type": "Album",
+  "secondary-types": [
+   "Live"
+  ],
+  "first-release-date": "1986-12-01",
+  "artist-credit": [
+   {
+    "name": "Queen",
+    "joinphrase": "",
+    "artist": {
+     "id": "0383dadf-2a4e-4d10-a46a-e9e041da8eb3",
+     "name": "Queen",
+     "sort-name": "Queen"
+    }
+   }
+  ]
+ },
+ "cover-art-archive": {
+  "count": 0,
+  "front": false,
+  "back": false,
+  "artwork": false,
+  "darkened": false
+ },
+ "media": [
+  {
+   "position": 1,
+   "title": "",
+   "format": "Vinyl",
+   "track-count": 15,
+   "track-offset": 0,
+   "tracks": [
+    {
+     "id": "bf823bc6-5d0d-41e0-829d-88f001132cd3",
+     "position": 1,
+     "number": "A1",
+     "title": "One Vision",
+     "length": null,
+     "artist-credit": [
+      {
+       "name": "Queen",
+       "joinphrase": "",
+       "artist": {
+        "id": "0383dadf-2a4e-4d10-a46a-e9e041da8eb3",
+        "name": "Queen",
+        "sort-name": "Queen"
+       }
+      }
+     ],
+     "recording": {
+      "id": "e83efa1f-2b9d-46c9-98b5-4afdbbdbdb38",
+      "title": "One Vision",
+      "length": 308026,
+      "video": false,
+      "disambiguation": "live, 1986-08-09: Knebworth Park, Stevenage, England, UK",
+      "first-release-date": "1986-12-01",
+      "isrcs": [
+       "GBCEE8600019"
+      ]
+     }
+    },
+    {
+     "id": "8538ef83-6eab-4004-ae77-fbbee73f1722",
+     "position": 2,
+     "number": "A2",
+     "title": "Tie Your Mother Down",
+     "length": null,
+     "artist-credit": [
+      {
+       "name": "Queen",
+       "joinphrase": "",
+       "artist": {
+        "id": "0383dadf-2a4e-4d10-a46a-e9e041da8eb3",
+        "name": "Queen",
+        "sort-name": "Queen"
+       }
+      }
+     ],
+     "recording": {
+      "id": "d7517317-91fe-495b-86e7-53e88c44910e",
+      "title": "Tie Your Mother Down",
+      "length": 179400,
+      "video": false,
+      "disambiguation": "live, 1986-08-09: Knebworth Park, Stevenage, England, UK",
+      "first-release-date": "1986-12-01",
+      "isrcs": [
+       "GBCEE8600020"
+      ]
+     }
+    },
+    {
+     "id": "6a53426f-b9ec-4422-8b80-9005530f340b",
+     "position": 3,
+     "number": "A3",
+     "title": "Seven Seas of Rhye",
+     "length": null,
+     "artist-credit": [
+      {
+       "name": "Queen",
+       "joinphrase": "",
+       "artist": {
+        "id": "0383dadf-2a4e-4d10-a46a-e9e041da8eb3",
+        "name": "Queen",
+        "sort-name": "Queen"
+       }
+      }
+     ],
+     "recording": {
+      "id": "6f5689e4-7037-4368-b43c-50c07b16bad6",
+      "title": "Seven Seas of Rhye",
+      "length": 79440,
+      "video": false,
+      "disambiguation": "live, 1986-08-09: Knebworth Park, Stevenage, England, UK",
+      "first-release-date": "1986-12-01",
+      "isrcs": [
+       "GBCEE8600021"
+      ]
+     }
+    },
+    {
+     "id": "60685495-9fcb-41ff-a410-c08f7d5adc0a",
+     "position": 4,
+     "number": "A4",
+     "title": "A Kind of Magic",
+     "length": null,
+     "artist-credit": [
+      {
+       "name": "Queen",
+       "joinphrase": "",
+       "artist": {
+        "id": "0383dadf-2a4e-4d10-a46a-e9e041da8eb3",
+        "name": "Queen",
+        "sort-name": "Queen"
+       }
+      }
+     ],
+     "recording": {
+      "id": "6e3904cb-20ac-4ac8-a104-2032571c9c64",
+      "title": "A Kind of Magic (full live version)",
+      "length": 331600,
+      "video": false,
+      "disambiguation": "live, 1986-07-27: Népstadion, Budapest, Hungary",
+      "first-release-date": "1986-12-01",
+      "isrcs": [
+       "GBCEE8600022"
+      ]
+     }
+    },
+    {
+     "id": "0a00ce84-ec13-41f3-ad98-a181623d9939",
+     "position": 5,
+     "number": "A5",
+     "title": "Under Pressure",
+     "length": null,
+     "artist-credit": [
+      {
+       "name": "Queen",
+       "joinphrase": "",
+       "artist": {
+        "id": "0383dadf-2a4e-4d10-a46a-e9e041da8eb3",
+        "name": "Queen",
+        "sort-name": "Queen"
+       }
+      }
+     ],
+     "recording": {
+      "id": "2c218440-ebac-48fa-b9a3-40c854e88dd5",
+      "title": "Under Pressure",
+      "length": 228493,
+      "video": false,
+      "disambiguation": "live, 1986-07-27: Népstadion, Budapest, Hungary",
+      "first-release-date": "1986-12-01",
+      "isrcs": [
+       "GBCEE8600023"
+      ]
+     }
+    },
+    {
+     "id": "6bd330d2-933c-4c79-9d4c-8382f1ee2b6d",
+     "position": 6,
+     "number": "A6",
+     "title": "Another One Bites the Dust",
+     "length": null,
+     "artist-credit": [
+      {
+       "name": "Queen",
+       "joinphrase": "",
+       "artist": {
+        "id": "0383dadf-2a4e-4d10-a46a-e9e041da8eb3",
+        "name": "Queen",
+        "sort-name": "Queen"
+       }
+      }
+     ],
+     "recording": {
+      "id": "688ed7a8-19e4-44d7-b79d-74f7d1cb25c9",
+      "title": "Another One Bites the Dust (full live version)",
+      "length": 350133,
+      "video": false,
+      "disambiguation": "live, 1986-08-09: Knebworth Park, Stevenage, England, UK",
+      "first-release-date": "1986-12-01",
+      "isrcs": [
+       "GBCEE8600024"
+      ]
+     }
+    },
+    {
+     "id": "d8ef0e5a-7203-47cf-849b-e6694a0ab3af",
+     "position": 7,
+     "number": "B1",
+     "title": "I Want to Break Free",
+     "length": null,
+     "artist-credit": [
+      {
+       "name": "Queen",
+       "joinphrase": "",
+       "artist": {
+        "id": "0383dadf-2a4e-4d10-a46a-e9e041da8eb3",
+        "name": "Queen",
+        "sort-name": "Queen"
+       }
+      }
+     ],
+     "recording": {
+      "id": "cd92a844-5ed4-4d4a-80c3-6eb0daf0a18b",
+      "title": "I Want to Break Free",
+      "length": 160600,
+      "video": false,
+      "disambiguation": "live, 1986-08-09: Knebworth Park, Stevenage, England, UK",
+      "first-release-date": "1986-12-01",
+      "isrcs": [
+       "GBCEE8600025"
+      ]
+     }
+    },
+    {
+     "id": "ccdf37fa-c784-41f0-b678-1a352a225f08",
+     "position": 8,
+     "number": "B2",
+     "title": "Is This the World We Created?",
+     "length": null,
+     "artist-credit": [
+      {
+       "name": "Queen",
+       "joinphrase": "",
+       "artist": {
+        "id": "0383dadf-2a4e-4d10-a46a-e9e041da8eb3",
+        "name": "Queen",
+        "sort-name": "Queen"
+       }
+      }
+     ],
+     "recording": {
+      "id": "0edaf5ad-4085-4bd3-9a9b-f1762759f73a",
+      "title": "Is This the World We Created…?",
+      "length": 91373,
+      "video": false,
+      "disambiguation": "live, 1986-07-11: Wembley Stadium, London, England, UK",
+      "first-release-date": "1986-12-01",
+      "isrcs": [
+       "GBCEE8600026"
+      ]
+     }
+    },
+    {
+     "id": "1b8467b8-31fc-44f9-87dc-d22d28528b5b",
+     "position": 9,
+     "number": "B3",
+     "title": "Bohemian Rhapsody",
+     "length": null,
+     "artist-credit": [
+      {
+       "name": "Queen",
+       "joinphrase": "",
+       "artist": {
+        "id": "0383dadf-2a4e-4d10-a46a-e9e041da8eb3",
+        "name": "Queen",
+        "sort-name": "Queen"
+       }
+      }
+     ],
+     "recording": {
+      "id": "cc7867d1-34a5-4bdd-a9b5-faff27ce77fb",
+      "title": "Bohemian Rhapsody",
+      "length": 280893,
+      "video": false,
+      "disambiguation": "live, 1986-08-09: Knebworth Park, Stevenage, England, UK",
+      "first-release-date": "1986-12-01",
+      "isrcs": [
+       "GBCEE8600016"
+      ]
+     }
+    },
+    {
+     "id": "88c230f5-0de5-4691-9cea-ecc1e0771a31",
+     "position": 10,
+     "number": "B4",
+     "title": "Hammer to Fall",
+     "length": null,
+     "artist-credit": [
+      {
+       "name": "Queen",
+       "joinphrase": "",
+       "artist": {
+        "id": "0383dadf-2a4e-4d10-a46a-e9e041da8eb3",
+        "name": "Queen",
+        "sort-name": "Queen"
+       }
+      }
+     ],
+     "recording": {
+      "id": "519a5cdc-bbdc-46b1-99a9-a2af8e99cfa1",
+      "title": "Hammer to Fall (full live version)",
+      "length": 320173,
+      "video": false,
+      "disambiguation": "live, 1986-07-12: Wembley Stadium, London, England, UK",
+      "first-release-date": "1986-12-01",
+      "isrcs": [
+       "GBCEE8600027"
+      ]
+     }
+    },
+    {
+     "id": "1c6e1cb9-16bd-4b54-b54c-ae28e21bd84a",
+     "position": 11,
+     "number": "B5",
+     "title": "Radio Ga‐Ga",
+     "length": null,
+     "artist-credit": [
+      {
+       "name": "Queen",
+       "joinphrase": "",
+       "artist": {
+        "id": "0383dadf-2a4e-4d10-a46a-e9e041da8eb3",
+        "name": "Queen",
+        "sort-name": "Queen"
+       }
+      }
+     ],
+     "recording": {
+      "id": "3f89b941-1743-4fcf-bd89-00623e661302",
+      "title": "Radio Ga Ga",
+      "length": 267160,
+      "video": false,
+      "disambiguation": "live, 1986-08-09: Knebworth Park, Stevenage, England, UK",
+      "first-release-date": "1986-12-01",
+      "isrcs": [
+       "GBCEE8600028"
+      ]
+     }
+    },
+    {
+     "id": "637ebe97-9b9c-427f-bc02-cb11ad4706e7",
+     "position": 12,
+     "number": "B6",
+     "title": "We Will Rock You",
+     "length": null,
+     "artist-credit": [
+      {
+       "name": "Queen",
+       "joinphrase": "",
+       "artist": {
+        "id": "0383dadf-2a4e-4d10-a46a-e9e041da8eb3",
+        "name": "Queen",
+        "sort-name": "Queen"
+       }
+      }
+     ],
+     "recording": {
+      "id": "e9ebfa5b-52ec-423c-83f2-e644f6ec6478",
+      "title": "We Will Rock You",
+      "length": 91573,
+      "video": false,
+      "disambiguation": "live, 1986-08-09: Knebworth Park, Stevenage, England, UK",
+      "first-release-date": "1986-12-01",
+      "isrcs": [
+       "GBCEE8600029"
+      ]
+     }
+    },
+    {
+     "id": "ec7df6f3-87a6-4ce2-a2ff-f191fd3cc453",
+     "position": 13,
+     "number": "B7",
+     "title": "Friends Will Be Friends",
+     "length": null,
+     "artist-credit": [
+      {
+       "name": "Queen",
+       "joinphrase": "",
+       "artist": {
+        "id": "0383dadf-2a4e-4d10-a46a-e9e041da8eb3",
+        "name": "Queen",
+        "sort-name": "Queen"
+       }
+      }
+     ],
+     "recording": {
+      "id": "50aaec1e-b27e-462b-8e69-7043cf8e2b1a",
+      "title": "Friends Will Be Friends",
+      "length": 69733,
+      "video": false,
+      "disambiguation": "live, 1986-08-09: Knebworth Park, Stevenage, England, UK",
+      "first-release-date": "1986-12-01",
+      "isrcs": [
+       "GBCEE8600030"
+      ]
+     }
+    },
+    {
+     "id": "92f7412f-e326-4d43-b728-85917e187c59",
+     "position": 14,
+     "number": "B8",
+     "title": "We Are the Champions",
+     "length": null,
+     "artist-credit": [
+      {
+       "name": "Queen",
+       "joinphrase": "",
+       "artist": {
+        "id": "0383dadf-2a4e-4d10-a46a-e9e041da8eb3",
+        "name": "Queen",
+        "sort-name": "Queen"
+       }
+      }
+     ],
+     "recording": {
+      "id": "b232d70b-8e58-4637-b0ea-4499316c85d4",
+      "title": "We Are the Champions",
+      "length": 122600,
+      "video": false,
+      "disambiguation": "live, 1986-08-09: Knebworth Park, Stevenage, England, UK",
+      "first-release-date": "1986-12-01",
+      "isrcs": [
+       "GBCEE8600031"
+      ]
+     }
+    },
+    {
+     "id": "a2b9a21b-8222-46d9-a1e5-5a8678e900d7",
+     "position": 15,
+     "number": "B9",
+     "title": "God Save the Queen",
+     "length": null,
+     "artist-credit": [
+      {
+       "name": "Queen",
+       "joinphrase": "",
+       "artist": {
+        "id": "0383dadf-2a4e-4d10-a46a-e9e041da8eb3",
+        "name": "Queen",
+        "sort-name": "Queen"
+       }
+      }
+     ],
+     "recording": {
+      "id": "a961aee2-a35e-44b9-9803-af46c31ce53c",
+      "title": "God Save the Queen",
+      "length": 78000,
+      "video": false,
+      "disambiguation": "live, 1986-08-09: Knebworth Park, Stevenage, England, UK",
+      "first-release-date": "1986-12-01",
+      "isrcs": [
+       "GBCEE8600032"
+      ]
+     }
+    }
+   ]
+  }
+ ]
+}

@@ -1,0 +1,171 @@
+{
+ "id": "46464646-4646-4646-8646-464646464646",
+ "title": "Harbor Lights",
+ "status": "Official",
+ "date": "2019-06-01",
+ "country": "GB",
+ "barcode": "5012345678917",
+ "artist-credit": [
+  {
+   "name": "The Quiet Harbors",
+   "joinphrase": "",
+   "artist": {
+    "id": "22222222-2222-4222-8222-222222222222",
+    "name": "The Quiet Harbors",
+    "sort-name": "Quiet Harbors, The"
+   }
+  }
+ ],
+ "release-events": [
+  {
+   "date": "2019-06-01",
+   "area": {
+    "iso-3166-1-codes": [
+     "GB"
+    ]
+   }
+  }
+ ],
+ "label-info": [
+  {
+   "catalog-number": "PIER-CD1",
+   "label": {
+    "id": "1abe0001-0000-4000-8000-000000000001",
+    "name": "Pier Records"
+   }
+  }
+ ],
+ "release-group": {
+  "id": "55555555-5555-4555-8555-555555555555",
+  "title": "Harbor Lights",
+  "primary-type": "Album",
+  "secondary-types": [],
+  "first-release-date": "2018-11-30"
+ },
+ "cover-art-archive": {
+  "count": 1,
+  "front": true,
+  "back": false,
+  "artwork": true,
+  "darkened": false
+ },
+ "media": [
+  {
+   "position": 1,
+   "title": "",
+   "format": "CD",
+   "track-count": 4,
+   "track-offset": 0,
+   "tracks": [
+    {
+     "id": "7a7a0021-0000-4000-8000-000000000021",
+     "position": 1,
+     "number": "1",
+     "title": "Low Tide",
+     "length": 200000,
+     "artist-credit": [
+      {
+       "name": "The Quiet Harbors",
+       "joinphrase": "",
+       "artist": {
+        "id": "22222222-2222-4222-8222-222222222222",
+        "name": "The Quiet Harbors",
+        "sort-name": "Quiet Harbors, The"
+       }
+      }
+     ],
+     "recording": {
+      "id": "5e5e0021-0000-4000-8000-000000000021",
+      "title": "Low Tide",
+      "length": 200000,
+      "video": false
+     }
+    },
+    {
+     "id": "7a7a0022-0000-4000-8000-000000000022",
+     "position": 2,
+     "number": "2",
+     "title": "North Light",
+     "length": 200000,
+     "artist-credit": [
+      {
+       "name": "The Quiet Harbors",
+       "joinphrase": "",
+       "artist": {
+        "id": "22222222-2222-4222-8222-222222222222",
+        "name": "The Quiet Harbors",
+        "sort-name": "Quiet Harbors, The"
+       }
+      }
+     ],
+     "recording": {
+      "id": "5e5e0022-0000-4000-8000-000000000022",
+      "title": "North Light",
+      "length": 200000,
+      "video": false
+     }
+    },
+    {
+     "id": "7a7a0023-0000-4000-8000-000000000023",
+     "position": 3,
+     "number": "3",
+     "title": "Paper Lanterns",
+     "length": 213000,
+     "artist-credit": [
+      {
+       "name": "The Quiet Harbors",
+       "joinphrase": " feat. ",
+       "artist": {
+        "id": "22222222-2222-4222-8222-222222222222",
+        "name": "The Quiet Harbors",
+        "sort-name": "Quiet Harbors, The"
+       }
+      },
+      {
+       "name": "Ada Vale",
+       "joinphrase": "",
+       "artist": {
+        "id": "33333333-3333-4333-8333-333333333333",
+        "name": "Ada Vale",
+        "sort-name": "Vale, Ada"
+       }
+      }
+     ],
+     "recording": {
+      "id": "13131313-1313-4313-8313-131313131313",
+      "title": "Paper Lanterns",
+      "length": 213000,
+      "video": false,
+      "isrcs": [
+       "XXA001900009"
+      ]
+     }
+    },
+    {
+     "id": "7a7a0024-0000-4000-8000-000000000024",
+     "position": 4,
+     "number": "4",
+     "title": "Salt Road",
+     "length": 200000,
+     "artist-credit": [
+      {
+       "name": "The Quiet Harbors",
+       "joinphrase": "",
+       "artist": {
+        "id": "22222222-2222-4222-8222-222222222222",
+        "name": "The Quiet Harbors",
+        "sort-name": "Quiet Harbors, The"
+       }
+      }
+     ],
+     "recording": {
+      "id": "5e5e0024-0000-4000-8000-000000000024",
+      "title": "Salt Road",
+      "length": 200000,
+      "video": false
+     }
+    }
+   ]
+  }
+ ]
+}

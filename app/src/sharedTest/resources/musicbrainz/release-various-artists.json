@@ -1,0 +1,312 @@
+{
+ "id": "a0a0a0a0-a0a0-40a0-80a0-a0a0a0a0a0a0",
+ "title": "Night Ferry Sessions",
+ "status": "Official",
+ "date": "2021-06-18",
+ "country": "GB",
+ "barcode": "5012345678900",
+ "artist-credit": [
+  {
+   "name": "Various Artists",
+   "joinphrase": "",
+   "artist": {
+    "id": "89ad4ac3-39f7-470e-963a-56509c546377",
+    "name": "Various Artists",
+    "sort-name": "Various Artists"
+   }
+  }
+ ],
+ "release-events": [
+  {
+   "date": "2021-06-18",
+   "area": {
+    "iso-3166-1-codes": [
+     "GB"
+    ]
+   }
+  },
+  {
+   "date": "2021-06-18",
+   "area": {
+    "iso-3166-1-codes": [
+     "XE"
+    ]
+   }
+  }
+ ],
+ "label-info": [
+  {
+   "catalog-number": "FM-01",
+   "label": {
+    "id": "1abe0001-0000-4000-8000-000000000001",
+    "name": "Ferry Music"
+   }
+  },
+  {
+   "catalog-number": "HS 7",
+   "label": {
+    "id": "1abe0002-0000-4000-8000-000000000002",
+    "name": "Harbor Sound"
+   }
+  },
+  {
+   "catalog-number": "FM-01",
+   "label": {
+    "id": "1abe0003-0000-4000-8000-000000000003",
+    "name": "Ferry Music"
+   }
+  }
+ ],
+ "release-group": {
+  "id": "a1a1a1a1-a1a1-41a1-81a1-a1a1a1a1a1a1",
+  "title": "Night Ferry Sessions",
+  "primary-type": "Album",
+  "secondary-types": [
+   "Compilation"
+  ],
+  "first-release-date": "2021-06-18",
+  "artist-credit": [
+   {
+    "name": "Various Artists",
+    "joinphrase": "",
+    "artist": {
+     "id": "89ad4ac3-39f7-470e-963a-56509c546377",
+     "name": "Various Artists",
+     "sort-name": "Various Artists"
+    }
+   }
+  ]
+ },
+ "cover-art-archive": {
+  "count": 1,
+  "front": true,
+  "back": false,
+  "artwork": true,
+  "darkened": false
+ },
+ "media": [
+  {
+   "position": 1,
+   "title": "Evening",
+   "format": "CD",
+   "track-count": 5,
+   "track-offset": 0,
+   "tracks": [
+    {
+     "id": "7a7a0041-0000-4000-8000-000000000041",
+     "position": 1,
+     "number": "1",
+     "title": "Evening Swell",
+     "length": 200000,
+     "artist-credit": [
+      {
+       "name": "Ada",
+       "joinphrase": "",
+       "artist": {
+        "id": "33333333-3333-4333-8333-333333333333",
+        "name": "Ada Vale",
+        "sort-name": "Vale, Ada"
+       }
+      }
+     ],
+     "recording": {
+      "id": "5e5e0041-0000-4000-8000-000000000041",
+      "title": "Evening Swell",
+      "length": 200000,
+      "video": false
+     }
+    },
+    {
+     "id": "7a7a0042-0000-4000-8000-000000000042",
+     "position": 2,
+     "number": "2",
+     "title": "Harbour Song",
+     "length": 200000,
+     "artist-credit": [
+      {
+       "name": "Quiet Harbors",
+       "joinphrase": "",
+       "artist": {
+        "id": "22222222-2222-4222-8222-222222222222",
+        "name": "The Quiet Harbors",
+        "sort-name": "Quiet Harbors, The"
+       }
+      }
+     ],
+     "recording": {
+      "id": "5e5e0042-0000-4000-8000-000000000042",
+      "title": "Harbour Song",
+      "length": 200000,
+      "video": false
+     }
+    },
+    {
+     "id": "7a7a0043-0000-4000-8000-000000000043",
+     "position": 3,
+     "number": "3",
+     "title": "Night Watch",
+     "length": 200000,
+     "artist-credit": [
+      {
+       "name": "Ada Vale",
+       "joinphrase": "",
+       "artist": {
+        "id": "33333333-3333-4333-8333-333333333333",
+        "name": "Ada Vale",
+        "sort-name": "Vale, Ada"
+       }
+      }
+     ],
+     "recording": {
+      "id": "5e5e0043-0000-4000-8000-000000000043",
+      "title": "Night Watch",
+      "length": 200000,
+      "video": false
+     }
+    },
+    {
+     "id": "7a7a0044-0000-4000-8000-000000000044",
+     "position": 4,
+     "number": "4",
+     "title": "Lantern Light",
+     "length": 200000,
+     "artist-credit": [
+      {
+       "name": "The Quiet Harbors",
+       "joinphrase": "",
+       "artist": {
+        "id": "22222222-2222-4222-8222-222222222222",
+        "name": "The Quiet Harbors",
+        "sort-name": "Quiet Harbors, The"
+       }
+      }
+     ],
+     "recording": {
+      "id": "5e5e0044-0000-4000-8000-000000000044",
+      "title": "Lantern Light",
+      "length": 200000,
+      "video": false
+     }
+    },
+    {
+     "id": "7a7a0045-0000-4000-8000-000000000045",
+     "position": 5,
+     "number": "5",
+     "title": "Last Ferry",
+     "length": 200000,
+     "artist-credit": [
+      {
+       "name": "The Quiet Harbors",
+       "joinphrase": "",
+       "artist": {
+        "id": "22222222-2222-4222-8222-222222222222",
+        "name": "The Quiet Harbors",
+        "sort-name": "Quiet Harbors, The"
+       }
+      }
+     ],
+     "recording": {
+      "id": "5e5e0045-0000-4000-8000-000000000045",
+      "title": "Last Ferry",
+      "length": 200000,
+      "video": false
+     }
+    }
+   ]
+  },
+  {
+   "position": 2,
+   "title": "Morning",
+   "format": "CD",
+   "track-count": 3,
+   "track-offset": 0,
+   "tracks": [
+    {
+     "id": "7a7a0046-0000-4000-8000-000000000046",
+     "position": 1,
+     "number": "6",
+     "title": "First Light",
+     "length": 200000,
+     "artist-credit": [
+      {
+       "name": "Ada Vale",
+       "joinphrase": "",
+       "artist": {
+        "id": "33333333-3333-4333-8333-333333333333",
+        "name": "Ada Vale",
+        "sort-name": "Vale, Ada"
+       }
+      }
+     ],
+     "recording": {
+      "id": "5e5e0046-0000-4000-8000-000000000046",
+      "title": "First Light",
+      "length": 200000,
+      "video": false
+     }
+    },
+    {
+     "id": "7a7a0047-0000-4000-8000-000000000047",
+     "position": 2,
+     "number": "7",
+     "title": "Paper Lanterns",
+     "length": 230000,
+     "artist-credit": [
+      {
+       "name": "The Quiet Harbors",
+       "joinphrase": " feat. ",
+       "artist": {
+        "id": "22222222-2222-4222-8222-222222222222",
+        "name": "The Quiet Harbors",
+        "sort-name": "Quiet Harbors, The"
+       }
+      },
+      {
+       "name": "Ada Vale",
+       "joinphrase": "",
+       "artist": {
+        "id": "33333333-3333-4333-8333-333333333333",
+        "name": "Ada Vale",
+        "sort-name": "Vale, Ada"
+       }
+      }
+     ],
+     "recording": {
+      "id": "11111111-1111-4111-8111-111111111111",
+      "title": "Paper Lanterns",
+      "length": 230000,
+      "video": false,
+      "isrcs": [
+       "XXA001900001",
+       "XXA001900002"
+      ]
+     }
+    },
+    {
+     "id": "7a7a0048-0000-4000-8000-000000000048",
+     "position": 3,
+     "number": "8",
+     "title": "Morning Tide",
+     "length": 200000,
+     "artist-credit": [
+      {
+       "name": "The Quiet Harbors",
+       "joinphrase": "",
+       "artist": {
+        "id": "22222222-2222-4222-8222-222222222222",
+        "name": "The Quiet Harbors",
+        "sort-name": "Quiet Harbors, The"
+       }
+      }
+     ],
+     "recording": {
+      "id": "5e5e0048-0000-4000-8000-000000000048",
+      "title": "Morning Tide",
+      "length": 200000,
+      "video": false
+     }
+    }
+   ]
+  }
+ ]
+}

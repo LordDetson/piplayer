@@ -1,0 +1,165 @@
+{
+ "release-count": 3,
+ "release-offset": 0,
+ "releases": [
+  {
+   "id": "44444444-4444-4444-8444-444444444444",
+   "title": "Harbor Lights",
+   "status": "Official",
+   "date": "2019-05",
+   "country": "XW",
+   "barcode": "",
+   "artist-credit": [
+    {
+     "name": "The Quiet Harbors",
+     "joinphrase": "",
+     "artist": {
+      "id": "22222222-2222-4222-8222-222222222222",
+      "name": "The Quiet Harbors",
+      "sort-name": "Quiet Harbors, The"
+     }
+    }
+   ],
+   "release-events": [
+    {
+     "date": "2019-05",
+     "area": {
+      "iso-3166-1-codes": [
+       "XW"
+      ]
+     }
+    }
+   ],
+   "label-info": [
+    {
+     "catalog-number": "PIER-001",
+     "label": {
+      "id": "1abe0001-0000-4000-8000-000000000001",
+      "name": "Pier Records"
+     }
+    }
+   ],
+   "cover-art-archive": {
+    "count": 1,
+    "front": true,
+    "back": false,
+    "artwork": true,
+    "darkened": false
+   },
+   "media": [
+    {
+     "position": 1,
+     "title": "",
+     "format": "Digital Media",
+     "track-count": 11
+    }
+   ]
+  },
+  {
+   "id": "46464646-4646-4646-8646-464646464646",
+   "title": "Harbor Lights",
+   "status": "Official",
+   "date": "2019-06-01",
+   "country": "GB",
+   "barcode": "5012345678917",
+   "artist-credit": [
+    {
+     "name": "The Quiet Harbors",
+     "joinphrase": "",
+     "artist": {
+      "id": "22222222-2222-4222-8222-222222222222",
+      "name": "The Quiet Harbors",
+      "sort-name": "Quiet Harbors, The"
+     }
+    }
+   ],
+   "release-events": [
+    {
+     "date": "2019-06-01",
+     "area": {
+      "iso-3166-1-codes": [
+       "GB"
+      ]
+     }
+    }
+   ],
+   "label-info": [
+    {
+     "catalog-number": "PIER-CD1",
+     "label": {
+      "id": "1abe0001-0000-4000-8000-000000000001",
+      "name": "Pier Records"
+     }
+    }
+   ],
+   "cover-art-archive": {
+    "count": 1,
+    "front": true,
+    "back": false,
+    "artwork": true,
+    "darkened": false
+   },
+   "media": [
+    {
+     "position": 1,
+     "title": "",
+     "format": "CD",
+     "track-count": 4
+    }
+   ]
+  },
+  {
+   "id": "47474747-4747-4747-8747-474747474747",
+   "title": "Harbor Lights",
+   "status": "Promotion",
+   "date": "2019-04",
+   "country": "GB",
+   "barcode": null,
+   "artist-credit": [
+    {
+     "name": "The Quiet Harbors",
+     "joinphrase": "",
+     "artist": {
+      "id": "22222222-2222-4222-8222-222222222222",
+      "name": "The Quiet Harbors",
+      "sort-name": "Quiet Harbors, The"
+     }
+    }
+   ],
+   "release-events": [
+    {
+     "date": "2019-04",
+     "area": {
+      "iso-3166-1-codes": [
+       "GB"
+      ]
+     }
+    }
+   ],
+   "label-info": [
+    {
+     "catalog-number": "PROMO-1",
+     "label": {
+      "id": "1abe0001-0000-4000-8000-000000000001",
+      "name": "Pier Records"
+     }
+    }
+   ],
+   "cover-art-archive": {
+    "count": 0,
+    "front": false,
+    "back": false,
+    "artwork": false,
+    "darkened": false
+   },
+   "media": [
+    {
+     "position": 1,
+     "title": "",
+     "format": "CD",
+     "track-count": 4
+    }
+   ]
+  }
+ ]
+}

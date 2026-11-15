@@ -1,0 +1,314 @@
+{
+ "release-count": 14,
+ "release-offset": 8,
+ "releases": [
+  {
+   "id": "0a1982c2-2870-4e24-9811-5bfa9686d4a3",
+   "title": "A Night at the Opera",
+   "status": "Official",
+   "date": "1993",
+   "country": "BR",
+   "barcode": "",
+   "release-events": [
+    {
+     "date": "1993",
+     "area": {
+      "iso-3166-1-codes": [
+       "BR"
+      ]
+     }
+    }
+   ],
+   "label-info": [
+    {
+     "catalog-number": "7 89492 2",
+     "label": {
+      "id": "df7d1c7f-ef95-425f-8eef-445b3d7bcbd9",
+      "name": "Parlophone"
+     }
+    }
+   ],
+   "release-group": {
+    "id": "6b47c9a0-b9e1-3df9-a5e8-50a6ce0dbdbd",
+    "title": "A Night at the Opera",
+    "primary-type": "Album",
+    "secondary-types": [],
+    "first-release-date": "1975-11-21"
+   },
+   "cover-art-archive": {
+    "count": 0,
+    "front": false,
+    "back": false,
+    "artwork": false,
+    "darkened": false
+   },
+   "media": [
+    {
+     "position": 1,
+     "title": "",
+     "format": "CD",
+     "track-count": 12
+    }
+   ]
+  },
+  {
+   "id": "107ef049-7934-3a94-897b-2fb98d98e694",
+   "title": "A Night at the Opera",
+   "status": "Official",
+   "date": "2005-11-21",
+   "country": "GB",
+   "barcode": "0094633847811",
+   "release-events": [
+    {
+     "date": "2005-11-21",
+     "area": {
+      "iso-3166-1-codes": [
+       "GB"
+      ]
+     }
+    }
+   ],
+   "label-info": [
+    {
+     "catalog-number": "00946 3 38478 1 1",
+     "label": {
+      "id": "df7d1c7f-ef95-425f-8eef-445b3d7bcbd9",
+      "name": "Parlophone"
+     }
+    }
+   ],
+   "release-group": {
+    "id": "6b47c9a0-b9e1-3df9-a5e8-50a6ce0dbdbd",
+    "title": "A Night at the Opera",
+    "primary-type": "Album",
+    "secondary-types": [],
+    "first-release-date": "1975-11-21"
+   },
+   "cover-art-archive": {
+    "count": 1,
+    "front": true,
+    "back": false,
+    "artwork": true,
+    "darkened": false
+   },
+   "media": [
+    {
+     "position": 1,
+     "title": "",
+     "format": "Vinyl",
+     "track-count": 12
+    }
+   ]
+  },
+  {
+   "id": "3718806e-9826-4597-b25b-0050d7568148",
+   "title": "A Night at the Opera",
+   "status": "Official",
+   "date": "2005-11-21",
+   "country": "GB",
+   "barcode": "094633847828",
+   "release-events": [
+    {
+     "date": "2005-11-21",
+     "area": {
+      "iso-3166-1-codes": [
+       "GB"
+      ]
+     }
+    }
+   ],
+   "label-info": [
+    {
+     "catalog-number": "00946 3 38478 2 8",
+     "label": {
+      "id": "df7d1c7f-ef95-425f-8eef-445b3d7bcbd9",
+      "name": "Parlophone"
+     }
+    },
+    {
+     "catalog-number": null,
+     "label": {
+      "id": "c029628b-6633-439e-bcee-ed02e8a338f7",
+      "name": "EMI"
+     }
+    }
+   ],
+   "release-group": {
+    "id": "6b47c9a0-b9e1-3df9-a5e8-50a6ce0dbdbd",
+    "title": "A Night at the Opera",
+    "primary-type": "Album",
+    "secondary-types": [],
+    "first-release-date": "1975-11-21"
+   },
+   "cover-art-archive": {
+    "count": 13,
+    "front": true,
+    "back": true,
+    "artwork": true,
+    "darkened": false
+   },
+   "media": [
+    {
+     "position": 1,
+     "title": "",
+     "format": "CD",
+     "track-count": 12
+    }
+   ]
+  },
+  {
+   "id": "64814a3d-f11a-3ad7-9f23-41c68279e0be",
+   "title": "A Night at the Opera",
+   "status": "Official",
+   "date": "2004-02-11",
+   "country": "JP",
+   "barcode": "4988006818132",
+   "release-events": [
+    {
+     "date": "2004-02-11",
+     "area": {
+      "iso-3166-1-codes": [
+       "JP"
+      ]
+     }
+    }
+   ],
+   "label-info": [
+    {
+     "catalog-number": "TOCP-67344",
+     "label": {
+      "id": "c029628b-6633-439e-bcee-ed02e8a338f7",
+      "name": "EMI"
+     }
+    }
+   ],
+   "release-group": {
+    "id": "6b47c9a0-b9e1-3df9-a5e8-50a6ce0dbdbd",
+    "title": "A Night at the Opera",
+    "primary-type": "Album",
+    "secondary-types": [],
+    "first-release-date": "1975-11-21"
+   },
+   "cover-art-archive": {
+    "count": 28,
+    "front": true,
+    "back": true,
+    "artwork": true,
+    "darkened": false
+   },
+   "media": [
+    {
+     "position": 1,
+     "title": "",
+     "format": "CD",
+     "track-count": 12
+    }
+   ]
+  },
+  {
+   "id": "a6286a41-5b4f-47d4-825f-a52fac1d343f",
+   "title": "Under Pressure",
+   "status": "Official",
+   "date": "1999-12-06",
+   "country": "XE",
+   "barcode": "724388803328",
+   "release-events": [
+    {
+     "date": "1999-12-06",
+     "area": {
+      "iso-3166-1-codes": [
+       "XE"
+      ]
+     }
+    }
+   ],
+   "label-info": [
+    {
+     "catalog-number": "7243 8 88033 2 8",
+     "label": {
+      "id": "df7d1c7f-ef95-425f-8eef-445b3d7bcbd9",
+      "name": "Parlophone"
+     }
+    },
+    {
+     "catalog-number": "CDQUEEN 28",
+     "label": {
+      "id": "df7d1c7f-ef95-425f-8eef-445b3d7bcbd9",
+      "name": "Parlophone"
+     }
+    }
+   ],
+   "release-group": {
+    "id": "bdaeec2d-94f1-46b5-91f3-340ec6939c66",
+    "title": "Under Pressure",
+    "primary-type": "Single",
+    "secondary-types": [],
+    "first-release-date": "1981-10"
+   },
+   "cover-art-archive": {
+    "count": 4,
+    "front": true,
+    "back": true,
+    "artwork": true,
+    "darkened": false
+   },
+   "media": [
+    {
+     "position": 1,
+     "title": "",
+     "format": "CD",
+     "track-count": 3
+    }
+   ]
+  },
+  {
+   "id": "e5e2f5bf-ee56-4509-9674-c627c3b38fde",
+   "title": "A Night at the Opera",
+   "status": "Official",
+   "date": "2008-03-09",
+   "country": "ES",
+   "barcode": "8423793300218",
+   "release-events": [
+    {
+     "date": "2008-03-09",
+     "area": {
+      "iso-3166-1-codes": [
+       "ES"
+      ]
+     }
+    }
+   ],
+   "label-info": [
+    {
+     "catalog-number": "CQ002",
+     "label": {
+      "id": "c029628b-6633-439e-bcee-ed02e8a338f7",
+      "name": "EMI"
+     }
+    }
+   ],
+   "release-group": {
+    "id": "6b47c9a0-b9e1-3df9-a5e8-50a6ce0dbdbd",
+    "title": "A Night at the Opera",
+    "primary-type": "Album",
+    "secondary-types": [],
+    "first-release-date": "1975-11-21"
+   },
+   "cover-art-archive": {
+    "count": 9,
+    "front": true,
+    "back": true,
+    "artwork": true,
+    "darkened": false
+   },
+   "media": [
+    {
+     "position": 1,
+     "title": "",
+     "format": "CD",
+     "track-count": 12
+    }
+   ]
+  }
+ ]
+}

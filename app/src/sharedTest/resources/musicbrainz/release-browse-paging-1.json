@@ -1,0 +1,515 @@
+{
+ "release-count": 14,
+ "release-offset": 0,
+ "releases": [
+  {
+   "id": "0668d85b-9d8f-4d8e-9b74-3b1420b605be",
+   "title": "Greatest Hits",
+   "status": "Official",
+   "date": "1981",
+   "country": "JP",
+   "barcode": "",
+   "release-events": [
+    {
+     "date": "1981",
+     "area": {
+      "iso-3166-1-codes": [
+       "JP"
+      ]
+     }
+    }
+   ],
+   "label-info": [
+    {
+     "catalog-number": "P-6480E",
+     "label": {
+      "id": "873f9f75-af68-4872-98e2-431058e4c9a9",
+      "name": "Elektra"
+     }
+    }
+   ],
+   "release-group": {
+    "id": "69ce61c8-127f-3809-95d8-62fdf3ae1347",
+    "title": "Greatest Hits",
+    "primary-type": "Album",
+    "secondary-types": [
+     "Compilation"
+    ],
+    "first-release-date": "1981-11-03"
+   },
+   "cover-art-archive": {
+    "count": 1,
+    "front": true,
+    "back": false,
+    "artwork": true,
+    "darkened": false
+   },
+   "media": [
+    {
+     "position": 1,
+     "title": "",
+     "format": "12\" Vinyl",
+     "track-count": 17
+    }
+   ]
+  },
+  {
+   "id": "08b376de-a78f-44eb-ac1b-7a1a64a11e9a",
+   "title": "Pop Classics, Volume 1",
+   "status": "Official",
+   "date": "1990",
+   "country": null,
+   "barcode": null,
+   "release-events": [
+    {
+     "date": "1990",
+     "area": {
+      "iso-3166-1-codes": []
+     }
+    }
+   ],
+   "label-info": [],
+   "release-group": {
+    "id": "ab8e7983-2f4c-3c56-b91b-2cbb4d8b239c",
+    "title": "Pop Classics, Volume 1",
+    "primary-type": "Album",
+    "secondary-types": [
+     "Compilation"
+    ],
+    "first-release-date": "1990"
+   },
+   "cover-art-archive": {
+    "count": 0,
+    "front": false,
+    "back": false,
+    "artwork": false,
+    "darkened": false
+   },
+   "media": [
+    {
+     "position": 1,
+     "title": "",
+     "format": null,
+     "track-count": 14
+    }
+   ]
+  },
+  {
+   "id": "0a2bb1a5-1e64-46cc-94ad-95d3a7c11ab3",
+   "title": "The Complete Works",
+   "status": "Official",
+   "date": "1985",
+   "country": "GB",
+   "barcode": null,
+   "release-events": [
+    {
+     "date": "1985",
+     "area": {
+      "iso-3166-1-codes": [
+       "GB"
+      ]
+     }
+    }
+   ],
+   "label-info": [
+    {
+     "catalog-number": "QB 1",
+     "label": {
+      "id": "c029628b-6633-439e-bcee-ed02e8a338f7",
+      "name": "EMI"
+     }
+    }
+   ],
+   "release-group": {
+    "id": "7e33af0b-26fc-4049-903e-591e91a9f382",
+    "title": "The Complete Works",
+    "primary-type": "Album",
+    "secondary-types": [
+     "Compilation"
+    ],
+    "first-release-date": "1985"
+   },
+   "cover-art-archive": {
+    "count": 34,
+    "front": true,
+    "back": false,
+    "artwork": true,
+    "darkened": false
+   },
+   "media": [
+    {
+     "position": 1,
+     "title": "Queen",
+     "format": "12\" Vinyl",
+     "track-count": 10
+    },
+    {
+     "position": 2,
+     "title": "Queen II",
+     "format": "12\" Vinyl",
+     "track-count": 11
+    },
+    {
+     "position": 3,
+     "title": "Sheer Heart Attack",
+     "format": "12\" Vinyl",
+     "track-count": 13
+    },
+    {
+     "position": 4,
+     "title": "A Night at the Opera",
+     "format": "12\" Vinyl",
+     "track-count": 12
+    },
+    {
+     "position": 5,
+     "title": "A Day at the Races",
+     "format": "12\" Vinyl",
+     "track-count": 10
+    },
+    {
+     "position": 6,
+     "title": "News of the World",
+     "format": "12\" Vinyl",
+     "track-count": 11
+    },
+    {
+     "position": 7,
+     "title": "Jazz",
+     "format": "12\" Vinyl",
+     "track-count": 13
+    },
+    {
+     "position": 8,
+     "title": "Live Killers I",
+     "format": "12\" Vinyl",
+     "track-count": 13
+    },
+    {
+     "position": 9,
+     "title": "Live Killers II",
+     "format": "12\" Vinyl",
+     "track-count": 10
+    },
+    {
+     "position": 10,
+     "title": "The Game",
+     "format": "12\" Vinyl",
+     "track-count": 10
+    },
+    {
+     "position": 11,
+     "title": "Flash Gordon",
+     "format": "12\" Vinyl",
+     "track-count": 18
+    },
+    {
+     "position": 12,
+     "title": "Hot Space",
+     "format": "12\" Vinyl",
+     "track-count": 11
+    },
+    {
+     "position": 13,
+     "title": "The Works",
+     "format": "12\" Vinyl",
+     "track-count": 9
+    },
+    {
+     "position": 14,
+     "title": "Complete Vision",
+     "format": "12\" Vinyl",
+     "track-count": 7
+    }
+   ]
+  },
+  {
+   "id": "0b840651-dffa-421e-a247-1249716c2ace",
+   "title": "Greatest Hits",
+   "status": "Official",
+   "date": "1985-11-28",
+   "country": "JP",
+   "barcode": "",
+   "release-events": [
+    {
+     "date": "1985-11-28",
+     "area": {
+      "iso-3166-1-codes": [
+       "JP"
+      ]
+     }
+    }
+   ],
+   "label-info": [
+    {
+     "catalog-number": "32XD-329",
+     "label": {
+      "id": "873f9f75-af68-4872-98e2-431058e4c9a9",
+      "name": "Elektra"
+     }
+    }
+   ],
+   "release-group": {
+    "id": "69ce61c8-127f-3809-95d8-62fdf3ae1347",
+    "title": "Greatest Hits",
+    "primary-type": "Album",
+    "secondary-types": [
+     "Compilation"
+    ],
+    "first-release-date": "1981-11-03"
+   },
+   "cover-art-archive": {
+    "count": 17,
+    "front": true,
+    "back": true,
+    "artwork": true,
+    "darkened": false
+   },
+   "media": [
+    {
+     "position": 1,
+     "title": "",
+     "format": "CD",
+     "track-count": 14
+    }
+   ]
+  },
+  {
+   "id": "0f589a81-2afc-4895-8db9-2557b7b2c044",
+   "title": "Greatest Hits",
+   "status": "Official",
+   "date": "1992",
+   "country": "GB",
+   "barcode": "077774603324",
+   "release-events": [
+    {
+     "date": "1992",
+     "area": {
+      "iso-3166-1-codes": [
+       "GB"
+      ]
+     }
+    }
+   ],
+   "label-info": [
+    {
+     "catalog-number": "CDP 7 46033 2",
+     "label": {
+      "id": "df7d1c7f-ef95-425f-8eef-445b3d7bcbd9",
+      "name": "Parlophone"
+     }
+    }
+   ],
+   "release-group": {
+    "id": "69ce61c8-127f-3809-95d8-62fdf3ae1347",
+    "title": "Greatest Hits",
+    "primary-type": "Album",
+    "secondary-types": [
+     "Compilation"
+    ],
+    "first-release-date": "1981-11-03"
+   },
+   "cover-art-archive": {
+    "count": 6,
+    "front": true,
+    "back": true,
+    "artwork": true,
+    "darkened": false
+   },
+   "media": [
+    {
+     "position": 1,
+     "title": "",
+     "format": "CD",
+     "track-count": 17
+    }
+   ]
+  },
+  {
+   "id": "10117d2c-8ab6-3e09-977c-1ebd5b68bde2",
+   "title": "Bohemian Rhapsody",
+   "status": "Official",
+   "date": "1978-07",
+   "country": "GB",
+   "barcode": null,
+   "release-events": [
+    {
+     "date": "1978-07",
+     "area": {
+      "iso-3166-1-codes": [
+       "GB"
+      ]
+     }
+    }
+   ],
+   "label-info": [
+    {
+     "catalog-number": "EMI 2375",
+     "label": {
+      "id": "c029628b-6633-439e-bcee-ed02e8a338f7",
+      "name": "EMI"
+     }
+    }
+   ],
+   "release-group": {
+    "id": "361a28b7-4588-44a6-8c96-86c1efb8258f",
+    "title": "Bohemian Rhapsody",
+    "primary-type": "Single",
+    "secondary-types": [],
+    "first-release-date": "1975"
+   },
+   "cover-art-archive": {
+    "count": 0,
+    "front": false,
+    "back": false,
+    "artwork": false,
+    "darkened": false
+   },
+   "media": [
+    {
+     "position": 1,
+     "title": "",
+     "format": "Vinyl",
+     "track-count": 2
+    }
+   ]
+  },
+  {
+   "id": "11e7564b-5dc3-4b28-bf03-34d942649d34",
+   "title": "Bohemian Rhapsody",
+   "status": "Official",
+   "date": "1992-03",
+   "country": "US",
+   "barcode": "720616479471",
+   "release-events": [
+    {
+     "date": "1992-03",
+     "area": {
+      "iso-3166-1-codes": [
+       "US"
+      ]
+     }
+    }
+   ],
+   "label-info": [
+    {
+     "catalog-number": "7-64794",
+     "label": {
+      "id": "6bb7c1b2-cb06-4381-9c59-02b1ae4aa96d",
+      "name": "Hollywood Records"
+     }
+    }
+   ],
+   "release-group": {
+    "id": "a22cd09b-5dc0-4d46-ac82-f252e93c5979",
+    "title": "Bohemian Rhapsody",
+    "primary-type": "Single",
+    "secondary-types": [
+     "Compilation"
+    ],
+    "first-release-date": "1992-03"
+   },
+   "cover-art-archive": {
+    "count": 2,
+    "front": false,
+    "back": false,
+    "artwork": true,
+    "darkened": false
+   },
+   "media": [
+    {
+     "position": 1,
+     "title": "",
+     "format": "7\" Vinyl",
+     "track-count": 2
+    }
+   ]
+  },
+  {
+   "id": "166a761e-5c13-4380-a30f-faf7118599fc",
+   "title": "Party On!",
+   "status": "Official",
+   "date": "1992",
+   "country": "GB",
+   "barcode": "094632195128",
+   "release-events": [
+    {
+     "date": "1992",
+     "area": {
+      "iso-3166-1-codes": [
+       "GB"
+      ]
+     }
+    }
+   ],
+   "label-info": [
+    {
+     "catalog-number": "0946 3 21951 2 8",
+     "label": {
+      "id": "163c4143-cd64-45c7-844e-36ea73c2eb47",
+      "name": "Dover Records"
+     }
+    },
+    {
+     "catalog-number": "0946 3 21951 2 8",
+     "label": {
+      "id": "6f33dfa3-f7d0-4b22-93db-d351170b2962",
+      "name": "Smash Hits"
+     }
+    },
+    {
+     "catalog-number": "0946 3 21951 2 8",
+     "label": {
+      "id": "40f78adb-da55-4980-b9e9-17a10e2e9c22",
+      "name": "The Hit Label"
+     }
+    },
+    {
+     "catalog-number": "CCD 34",
+     "label": {
+      "id": "163c4143-cd64-45c7-844e-36ea73c2eb47",
+      "name": "Dover Records"
+     }
+    },
+    {
+     "catalog-number": "CCD 34",
+     "label": {
+      "id": "6f33dfa3-f7d0-4b22-93db-d351170b2962",
+      "name": "Smash Hits"
+     }
+    },
+    {
+     "catalog-number": "CCD 34",
+     "label": {
+      "id": "40f78adb-da55-4980-b9e9-17a10e2e9c22",
+      "name": "The Hit Label"
+     }
+    }
+   ],
+   "release-group": {
+    "id": "3229f1d7-5462-4190-acc7-9df06917454c",
+    "title": "Party On!",
+    "primary-type": "Album",
+    "secondary-types": [
+     "Compilation"
+    ],
+    "first-release-date": "1992"
+   },
+   "cover-art-archive": {
+    "count": 4,
+    "front": true,
+    "back": true,
+    "artwork": true,
+    "darkened": false
+   },
+   "media": [
+    {
+     "position": 1,
+     "title": "",
+     "format": "CD",
+     "track-count": 20
+    }
+   ]
+  }
+ ]
+}

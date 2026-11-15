@@ -1,0 +1,369 @@
+{
+ "id": "44444444-4444-4444-8444-444444444444",
+ "title": "Harbor Lights",
+ "status": "Official",
+ "date": "2019-05",
+ "country": "XW",
+ "barcode": "",
+ "artist-credit": [
+  {
+   "name": "The Quiet Harbors",
+   "joinphrase": "",
+   "artist": {
+    "id": "22222222-2222-4222-8222-222222222222",
+    "name": "The Quiet Harbors",
+    "sort-name": "Quiet Harbors, The"
+   }
+  }
+ ],
+ "release-events": [
+  {
+   "date": "2019-05",
+   "area": {
+    "iso-3166-1-codes": [
+     "XW"
+    ]
+   }
+  }
+ ],
+ "label-info": [
+  {
+   "catalog-number": "PIER-001",
+   "label": {
+    "id": "1abe0001-0000-4000-8000-000000000001",
+    "name": "Pier Records"
+   }
+  },
+  {
+   "catalog-number": "[none]",
+   "label": {
+    "id": "1abe0002-0000-4000-8000-000000000002",
+    "name": "Lantern Songs"
+   }
+  }
+ ],
+ "release-group": {
+  "id": "55555555-5555-4555-8555-555555555555",
+  "title": "Harbor Lights",
+  "primary-type": "Album",
+  "secondary-types": [],
+  "first-release-date": "2018-11-30",
+  "artist-credit": [
+   {
+    "name": "The Quiet Harbors",
+    "joinphrase": "",
+    "artist": {
+     "id": "22222222-2222-4222-8222-222222222222",
+     "name": "The Quiet Harbors",
+     "sort-name": "Quiet Harbors, The"
+    }
+   }
+  ]
+ },
+ "cover-art-archive": {
+  "count": 1,
+  "front": true,
+  "back": false,
+  "artwork": true,
+  "darkened": false
+ },
+ "media": [
+  {
+   "position": 1,
+   "title": "",
+   "format": "Digital Media",
+   "track-count": 11,
+   "track-offset": 0,
+   "tracks": [
+    {
+     "id": "7a7a0001-0000-4000-8000-000000000001",
+     "position": 1,
+     "number": "1",
+     "title": "Low Tide",
+     "length": 200000,
+     "artist-credit": [
+      {
+       "name": "The Quiet Harbors",
+       "joinphrase": "",
+       "artist": {
+        "id": "22222222-2222-4222-8222-222222222222",
+        "name": "The Quiet Harbors",
+        "sort-name": "Quiet Harbors, The"
+       }
+      }
+     ],
+     "recording": {
+      "id": "5e5e0001-0000-4000-8000-000000000001",
+      "title": "Low Tide",
+      "length": 200000,
+      "video": false
+     }
+    },
+    {
+     "id": "7a7a0002-0000-4000-8000-000000000002",
+     "position": 2,
+     "number": "2",
+     "title": "North Light",
+     "length": 200000,
+     "artist-credit": [
+      {
+       "name": "The Quiet Harbors",
+       "joinphrase": "",
+       "artist": {
+        "id": "22222222-2222-4222-8222-222222222222",
+        "name": "The Quiet Harbors",
+        "sort-name": "Quiet Harbors, The"
+       }
+      }
+     ],
+     "recording": {
+      "id": "5e5e0002-0000-4000-8000-000000000002",
+      "title": "North Light",
+      "length": 200000,
+      "video": false
+     }
+    },
+    {
+     "id": "7a7a0003-0000-4000-8000-000000000003",
+     "position": 3,
+     "number": "3",
+     "title": "Paper Lanterns",
+     "length": 214000,
+     "artist-credit": [
+      {
+       "name": "The Quiet Harbors",
+       "joinphrase": " feat. ",
+       "artist": {
+        "id": "22222222-2222-4222-8222-222222222222",
+        "name": "The Quiet Harbors",
+        "sort-name": "Quiet Harbors, The"
+       }
+      },
+      {
+       "name": "Ada Vale",
+       "joinphrase": "",
+       "artist": {
+        "id": "33333333-3333-4333-8333-333333333333",
+        "name": "Ada Vale",
+        "sort-name": "Vale, Ada"
+       }
+      }
+     ],
+     "recording": {
+      "id": "11111111-1111-4111-8111-111111111111",
+      "title": "Paper Lanterns",
+      "length": 214000,
+      "video": false,
+      "isrcs": [
+       "XXA001900001"
+      ]
+     }
+    },
+    {
+     "id": "7a7a0004-0000-4000-8000-000000000004",
+     "position": 4,
+     "number": "4",
+     "title": "Salt Road",
+     "length": 200000,
+     "artist-credit": [
+      {
+       "name": "The Quiet Harbors",
+       "joinphrase": "",
+       "artist": {
+        "id": "22222222-2222-4222-8222-222222222222",
+        "name": "The Quiet Harbors",
+        "sort-name": "Quiet Harbors, The"
+       }
+      }
+     ],
+     "recording": {
+      "id": "5e5e0004-0000-4000-8000-000000000004",
+      "title": "Salt Road",
+      "length": 200000,
+      "video": false
+     }
+    },
+    {
+     "id": "7a7a0005-0000-4000-8000-000000000005",
+     "position": 5,
+     "number": "5",
+     "title": "Glass Water",
+     "length": 200000,
+     "artist-credit": [
+      {
+       "name": "The Quiet Harbors",
+       "joinphrase": "",
+       "artist": {
+        "id": "22222222-2222-4222-8222-222222222222",
+        "name": "The Quiet Harbors",
+        "sort-name": "Quiet Harbors, The"
+       }
+      }
+     ],
+     "recording": {
+      "id": "5e5e0005-0000-4000-8000-000000000005",
+      "title": "Glass Water",
+      "length": 200000,
+      "video": false
+     }
+    },
+    {
+     "id": "7a7a0006-0000-4000-8000-000000000006",
+     "position": 6,
+     "number": "6",
+     "title": "Gulls",
+     "length": 200000,
+     "artist-credit": [
+      {
+       "name": "The Quiet Harbors",
+       "joinphrase": "",
+       "artist": {
+        "id": "22222222-2222-4222-8222-222222222222",
+        "name": "The Quiet Harbors",
+        "sort-name": "Quiet Harbors, The"
+       }
+      }
+     ],
+     "recording": {
+      "id": "5e5e0006-0000-4000-8000-000000000006",
+      "title": "Gulls",
+      "length": 200000,
+      "video": false
+     }
+    },
+    {
+     "id": "7a7a0007-0000-4000-8000-000000000007",
+     "position": 7,
+     "number": "7",
+     "title": "Night Ferry",
+     "length": 200000,
+     "artist-credit": [
+      {
+       "name": "The Quiet Harbors",
+       "joinphrase": "",
+       "artist": {
+        "id": "22222222-2222-4222-8222-222222222222",
+        "name": "The Quiet Harbors",
+        "sort-name": "Quiet Harbors, The"
+       }
+      }
+     ],
+     "recording": {
+      "id": "5e5e0007-0000-4000-8000-000000000007",
+      "title": "Night Ferry",
+      "length": 200000,
+      "video": false
+     }
+    },
+    {
+     "id": "7a7a0008-0000-4000-8000-000000000008",
+     "position": 8,
+     "number": "8",
+     "title": "Breakwater",
+     "length": 200000,
+     "artist-credit": [
+      {
+       "name": "The Quiet Harbors",
+       "joinphrase": "",
+       "artist": {
+        "id": "22222222-2222-4222-8222-222222222222",
+        "name": "The Quiet Harbors",
+        "sort-name": "Quiet Harbors, The"
+       }
+      }
+     ],
+     "recording": {
+      "id": "5e5e0008-0000-4000-8000-000000000008",
+      "title": "Breakwater",
+      "length": 200000,
+      "video": false
+     }
+    },
+    {
+     "id": "7a7a0009-0000-4000-8000-000000000009",
+     "position": 9,
+     "number": "9",
+     "title": "Fog Bell",
+     "length": 200000,
+     "artist-credit": [
+      {
+       "name": "The Quiet Harbors",
+       "joinphrase": "",
+       "artist": {
+        "id": "22222222-2222-4222-8222-222222222222",
+        "name": "The Quiet Harbors",
+        "sort-name": "Quiet Harbors, The"
+       }
+      }
+     ],
+     "recording": {
+      "id": "5e5e0009-0000-4000-8000-000000000009",
+      "title": "Fog Bell",
+      "length": 200000,
+      "video": false
+     }
+    },
+    {
+     "id": "7a7a0010-0000-4000-8000-000000000010",
+     "position": 10,
+     "number": "10",
+     "title": "Moorings",
+     "length": 200000,
+     "artist-credit": [
+      {
+       "name": "The Quiet Harbors",
+       "joinphrase": "",
+       "artist": {
+        "id": "22222222-2222-4222-8222-222222222222",
+        "name": "The Quiet Harbors",
+        "sort-name": "Quiet Harbors, The"
+       }
+      }
+     ],
+     "recording": {
+      "id": "5e5e0010-0000-4000-8000-000000000010",
+      "title": "Moorings",
+      "length": 200000,
+      "video": false
+     }
+    },
+    {
+     "id": "7a7a0011-0000-4000-8000-000000000011",
+     "position": 11,
+     "number": "11",
+     "title": "Paper Lanterns (reprise)",
+     "length": 214000,
+     "artist-credit": [
+      {
+       "name": "The Quiet Harbors",
+       "joinphrase": " feat. ",
+       "artist": {
+        "id": "22222222-2222-4222-8222-222222222222",
+        "name": "The Quiet Harbors",
+        "sort-name": "Quiet Harbors, The"
+       }
+      },
+      {
+       "name": "Ada Vale",
+       "joinphrase": "",
+       "artist": {
+        "id": "33333333-3333-4333-8333-333333333333",
+        "name": "Ada Vale",
+        "sort-name": "Vale, Ada"
+       }
+      }
+     ],
+     "recording": {
+      "id": "11111111-1111-4111-8111-111111111111",
+      "title": "Paper Lanterns",
+      "length": 214000,
+      "video": false,
+      "isrcs": [
+       "XXA001900001"
+      ]
+     }
+    }
+   ]
+  }
+ ]
+}

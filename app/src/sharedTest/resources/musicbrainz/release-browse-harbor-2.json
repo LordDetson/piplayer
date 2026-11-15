@@ -1,0 +1,66 @@
+{
+ "release-count": 2,
+ "release-offset": 1,
+ "releases": [
+  {
+   "id": "44444444-4444-4444-8444-444444444444",
+   "title": "Harbor Lights",
+   "status": "Official",
+   "date": "2019-05",
+   "country": "XW",
+   "barcode": "",
+   "artist-credit": [
+    {
+     "name": "The Quiet Harbors",
+     "joinphrase": "",
+     "artist": {
+      "id": "22222222-2222-4222-8222-222222222222",
+      "name": "The Quiet Harbors",
+      "sort-name": "Quiet Harbors, The"
+     }
+    }
+   ],
+   "release-events": [
+    {
+     "date": "2019-05",
+     "area": {
+      "iso-3166-1-codes": [
+       "XW"
+      ]
+     }
+    }
+   ],
+   "label-info": [
+    {
+     "catalog-number": "PIER-001",
+     "label": {
+      "id": "1abe0001-0000-4000-8000-000000000001",
+      "name": "Pier Records"
+     }
+    }
+   ],
+   "release-group": {
+    "id": "55555555-5555-4555-8555-555555555555",
+    "title": "Harbor Lights",
+    "primary-type": "Album",
+    "secondary-types": [],
+    "first-release-date": "2018-11-30"
+   },
+   "cover-art-archive": {
+    "count": 1,
+    "front": true,
+    "back": false,
+    "artwork": true,
+    "darkened": false
+   },
+   "media": [
+    {
+     "position": 1,
+     "title": "",
+     "format": "Digital Media",
+     "track-count": 11
+    }
+   ]
+  }
+ ]
+}

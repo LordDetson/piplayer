@@ -1,0 +1,525 @@
+{
+ "release-count": 12,
+ "release-offset": 0,
+ "releases": [
+  {
+   "id": "157cb7bb-217f-49d4-a305-64e49df5a0a7",
+   "title": "Live Magic",
+   "status": "Official",
+   "date": "2019-04-17",
+   "country": "JP",
+   "barcode": "4988031330043",
+   "release-events": [
+    {
+     "date": "2019-04-17",
+     "area": {
+      "iso-3166-1-codes": [
+       "JP"
+      ]
+     }
+    }
+   ],
+   "label-info": [
+    {
+     "catalog-number": "UICY-15820",
+     "label": {
+      "id": "49b58bdb-3d74-40c6-956a-4c4b46115c9c",
+      "name": "Virgin"
+     }
+    }
+   ],
+   "cover-art-archive": {
+    "count": 0,
+    "front": false,
+    "back": false,
+    "artwork": false,
+    "darkened": false
+   },
+   "media": [
+    {
+     "position": 1,
+     "title": "",
+     "format": "SHM-CD",
+     "track-count": 15
+    }
+   ]
+  },
+  {
+   "id": "388e1d01-bbd7-402a-a3a8-bf26cede791a",
+   "title": "Live Magic",
+   "status": "Official",
+   "date": "1986-12-01",
+   "country": "GB",
+   "barcode": "077774641326",
+   "release-events": [
+    {
+     "date": "1986-12-01",
+     "area": {
+      "iso-3166-1-codes": [
+       "GB"
+      ]
+     }
+    }
+   ],
+   "label-info": [
+    {
+     "catalog-number": "CDP 7 46413 2",
+     "label": {
+      "id": "c029628b-6633-439e-bcee-ed02e8a338f7",
+      "name": "EMI"
+     }
+    }
+   ],
+   "cover-art-archive": {
+    "count": 12,
+    "front": true,
+    "back": true,
+    "artwork": true,
+    "darkened": false
+   },
+   "media": [
+    {
+     "position": 1,
+     "title": "",
+     "format": "CD",
+     "track-count": 15
+    }
+   ]
+  },
+  {
+   "id": "4e11f2e3-b6bf-4808-b421-a0ece3a426f9",
+   "title": "Live Magic",
+   "status": "Official",
+   "date": "1986",
+   "country": "FR",
+   "barcode": "077774641326",
+   "release-events": [
+    {
+     "date": "1986",
+     "area": {
+      "iso-3166-1-codes": [
+       "FR"
+      ]
+     }
+    },
+    {
+     "date": "1986",
+     "area": {
+      "iso-3166-1-codes": [
+       "NL"
+      ]
+     }
+    }
+   ],
+   "label-info": [
+    {
+     "catalog-number": "CDP 746413 2",
+     "label": {
+      "id": "c029628b-6633-439e-bcee-ed02e8a338f7",
+      "name": "EMI"
+     }
+    }
+   ],
+   "cover-art-archive": {
+    "count": 9,
+    "front": true,
+    "back": true,
+    "artwork": true,
+    "darkened": false
+   },
+   "media": [
+    {
+     "position": 1,
+     "title": "",
+     "format": "CD",
+     "track-count": 15
+    }
+   ]
+  },
+  {
+   "id": "606867d4-827e-41a6-9403-0c49096c5f81",
+   "title": "Live Magic",
+   "status": "Official",
+   "date": "2004-10-27",
+   "country": "JP",
+   "barcode": "4988006822856",
+   "release-events": [
+    {
+     "date": "2004-10-27",
+     "area": {
+      "iso-3166-1-codes": [
+       "JP"
+      ]
+     }
+    }
+   ],
+   "label-info": [
+    {
+     "catalog-number": "TOCP-67463",
+     "label": {
+      "id": "c029628b-6633-439e-bcee-ed02e8a338f7",
+      "name": "EMI"
+     }
+    }
+   ],
+   "cover-art-archive": {
+    "count": 10,
+    "front": true,
+    "back": true,
+    "artwork": true,
+    "darkened": false
+   },
+   "media": [
+    {
+     "position": 1,
+     "title": "",
+     "format": "CD",
+     "track-count": 15
+    }
+   ]
+  },
+  {
+   "id": "636ae605-899a-4f27-9262-756a15d4d969",
+   "title": "Live Magic",
+   "status": "Official",
+   "date": "1987-02",
+   "country": "YE",
+   "barcode": null,
+   "release-events": [
+    {
+     "date": "1987-02",
+     "area": {
+      "iso-3166-1-codes": [
+       "YE"
+      ]
+     }
+    }
+   ],
+   "label-info": [
+    {
+     "catalog-number": "LSEMI 11166",
+     "label": {
+      "id": "c029628b-6633-439e-bcee-ed02e8a338f7",
+      "name": "EMI"
+     }
+    }
+   ],
+   "cover-art-archive": {
+    "count": 0,
+    "front": false,
+    "back": false,
+    "artwork": false,
+    "darkened": false
+   },
+   "media": [
+    {
+     "position": 1,
+     "title": "",
+     "format": "Vinyl",
+     "track-count": 15
+    }
+   ]
+  },
+  {
+   "id": "a534984c-1e53-3d75-a24e-e83606729774",
+   "title": "Live Magic",
+   "status": "Official",
+   "date": "1986",
+   "country": "NL",
+   "barcode": "077774641326",
+   "release-events": [
+    {
+     "date": "1986",
+     "area": {
+      "iso-3166-1-codes": [
+       "NL"
+      ]
+     }
+    }
+   ],
+   "label-info": [
+    {
+     "catalog-number": "CDP 7 46413 2",
+     "label": {
+      "id": "c029628b-6633-439e-bcee-ed02e8a338f7",
+      "name": "EMI"
+     }
+    }
+   ],
+   "cover-art-archive": {
+    "count": 9,
+    "front": true,
+    "back": true,
+    "artwork": true,
+    "darkened": false
+   },
+   "media": [
+    {
+     "position": 1,
+     "title": "",
+     "format": "CD",
+     "track-count": 15
+    }
+   ]
+  },
+  {
+   "id": "b663aa15-4eac-460d-a67d-51c71c58aa6b",
+   "title": "Live Magic",
+   "status": "Official",
+   "date": "",
+   "country": "XW",
+   "barcode": "00720616126726",
+   "release-events": [
+    {
+     "date": "",
+     "area": {
+      "iso-3166-1-codes": [
+       "XW"
+      ]
+     }
+    }
+   ],
+   "label-info": [
+    {
+     "catalog-number": null,
+     "label": {
+      "id": "6bb7c1b2-cb06-4381-9c59-02b1ae4aa96d",
+      "name": "Hollywood Records"
+     }
+    }
+   ],
+   "cover-art-archive": {
+    "count": 1,
+    "front": true,
+    "back": false,
+    "artwork": true,
+    "darkened": false
+   },
+   "media": [
+    {
+     "position": 1,
+     "title": "",
+     "format": "Digital Media",
+     "track-count": 15
+    }
+   ]
+  },
+  {
+   "id": "b66c40d3-8082-48f3-bebd-f039b6e19b13",
+   "title": "Live Magic",
+   "status": "Official",
+   "date": "2008-05-04",
+   "country": "ES",
+   "barcode": "8423793300218",
+   "release-events": [
+    {
+     "date": "2008-05-04",
+     "area": {
+      "iso-3166-1-codes": [
+       "ES"
+      ]
+     }
+    }
+   ],
+   "label-info": [
+    {
+     "catalog-number": "CQ010",
+     "label": {
+      "id": "c029628b-6633-439e-bcee-ed02e8a338f7",
+      "name": "EMI"
+     }
+    }
+   ],
+   "cover-art-archive": {
+    "count": 7,
+    "front": true,
+    "back": true,
+    "artwork": true,
+    "darkened": false
+   },
+   "media": [
+    {
+     "position": 1,
+     "title": "",
+     "format": "CD",
+     "track-count": 15
+    }
+   ]
+  },
+  {
+   "id": "b9aff159-000f-4fee-82c4-d4cbcaf22027",
+   "title": "Live Magic",
+   "status": "Official",
+   "date": "1986",
+   "country": "GB",
+   "barcode": "5099924067515",
+   "release-events": [
+    {
+     "date": "1986",
+     "area": {
+      "iso-3166-1-codes": [
+       "GB"
+      ]
+     }
+    }
+   ],
+   "label-info": [
+    {
+     "catalog-number": "24 0675 1",
+     "label": {
+      "id": "c029628b-6633-439e-bcee-ed02e8a338f7",
+      "name": "EMI"
+     }
+    },
+    {
+     "catalog-number": "EMC 3519",
+     "label": {
+      "id": "c029628b-6633-439e-bcee-ed02e8a338f7",
+      "name": "EMI"
+     }
+    }
+   ],
+   "cover-art-archive": {
+    "count": 3,
+    "front": false,
+    "back": true,
+    "artwork": true,
+    "darkened": false
+   },
+   "media": [
+    {
+     "position": 1,
+     "title": "",
+     "format": "12\" Vinyl",
+     "track-count": 15
+    }
+   ]
+  },
+  {
+   "id": "eb42def3-dfae-4d43-8279-aadbc9974b52",
+   "title": "Live Magic",
+   "status": "Official",
+   "date": "1987-02-04",
+   "country": "JP",
+   "barcode": "4988006607415",
+   "release-events": [
+    {
+     "date": "1987-02-04",
+     "area": {
+      "iso-3166-1-codes": [
+       "JP"
+      ]
+     }
+    }
+   ],
+   "label-info": [
+    {
+     "catalog-number": "CP32-5173",
+     "label": {
+      "id": "fd1b4d3d-98dd-454b-8a1b-cb52de62a38c",
+      "name": "EMI"
+     }
+    }
+   ],
+   "cover-art-archive": {
+    "count": 0,
+    "front": false,
+    "back": false,
+    "artwork": false,
+    "darkened": false
+   },
+   "media": [
+    {
+     "position": 1,
+     "title": "",
+     "format": "CD",
+     "track-count": 15
+    }
+   ]
+  },
+  {
+   "id": "f5f8a4ad-d565-48b7-b8aa-6a3af08df091",
+   "title": "Live Magic",
+   "status": null,
+   "date": "2019",
+   "country": "IT",
+   "barcode": "",
+   "release-events": [
+    {
+     "date": "2019",
+     "area": {
+      "iso-3166-1-codes": [
+       "IT"
+      ]
+     }
+    }
+   ],
+   "label-info": [
+    {
+     "catalog-number": "19SC0080",
+     "label": {
+      "id": "512e8486-bfbe-4779-b029-c364209cbb9c",
+      "name": "Virgin EMI Records"
+     }
+    }
+   ],
+   "cover-art-archive": {
+    "count": 0,
+    "front": false,
+    "back": false,
+    "artwork": false,
+    "darkened": false
+   },
+   "media": [
+    {
+     "position": 1,
+     "title": "",
+     "format": "CD",
+     "track-count": 15
+    }
+   ]
+  },
+  {
+   "id": "fb32f55c-6f3d-3734-bee6-333234746024",
+   "title": "Live Magic",
+   "status": "Official",
+   "date": "1996",
+   "country": "US",
+   "barcode": "720616126726",
+   "release-events": [
+    {
+     "date": "1996",
+     "area": {
+      "iso-3166-1-codes": [
+       "US"
+      ]
+     }
+    }
+   ],
+   "label-info": [
+    {
+     "catalog-number": "HR-61267-2",
+     "label": {
+      "id": "6bb7c1b2-cb06-4381-9c59-02b1ae4aa96d",
+      "name": "Hollywood Records"
+     }
+    }
+   ],
+   "cover-art-archive": {
+    "count": 8,
+    "front": true,
+    "back": true,
+    "artwork": true,
+    "darkened": false
+   },
+   "media": [
+    {
+     "position": 1,
+     "title": "",
+     "format": "CD",
+     "track-count": 15
+    }
+   ]
+  }
+ ]
+}

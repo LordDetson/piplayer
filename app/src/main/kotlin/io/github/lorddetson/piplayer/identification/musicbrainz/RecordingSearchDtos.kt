@@ -52,6 +52,11 @@ data class ArtistDto(
     @SerialName("sort-name") val sortName: String? = null,
 )
 
+/**
+ * A release as search, browse and lookup answers give it; each fills the fields its `inc` asks for (TI §4.2, §5.1).
+ *
+ * @property barcode null when unknown; an empty string when the release is known to have none.
+ */
 @Serializable
 data class ReleaseDto(
     val id: String,
@@ -62,6 +67,11 @@ data class ReleaseDto(
     @SerialName("track-count") val trackCount: Int? = null,
     @SerialName("release-group") val releaseGroup: ReleaseGroupDto? = null,
     val media: List<MediumDto> = emptyList(),
+    val barcode: String? = null,
+    @SerialName("label-info") val labelInfo: List<LabelInfoDto> = emptyList(),
+    @SerialName("release-events") val releaseEvents: List<ReleaseEventDto> = emptyList(),
+    @SerialName("cover-art-archive") val coverArtArchive: CoverArtArchiveDto? = null,
+    @SerialName("artist-credit") val artistCredit: List<NameCreditDto> = emptyList(),
 )
 
 @Serializable
@@ -70,16 +80,24 @@ data class ReleaseGroupDto(
     val title: String? = null,
     @SerialName("primary-type") val primaryType: String? = null,
     @SerialName("secondary-types") val secondaryTypes: List<String> = emptyList(),
+    /** The date of the group's earliest release as written ("1975", "1975-11", "1975-11-21"): the original year. */
+    @SerialName("first-release-date") val firstReleaseDate: String? = null,
+    @SerialName("artist-credit") val artistCredit: List<NameCreditDto> = emptyList(),
 )
 
 @Serializable
 data class MediumDto(
     val position: Int? = null,
+    /** The disc subtitle; MusicBrainz sends an empty string for a medium without one. */
+    val title: String? = null,
     val format: String? = null,
     @SerialName("track-count") val trackCount: Int? = null,
     /** Zero-based index of the matched track on this medium. */
     @SerialName("track-offset") val trackOffset: Int? = null,
+    /** The matched tracks, as a recording search gives them. */
     val track: List<TrackDto> = emptyList(),
+    /** Every track of the medium, as a release lookup with `inc=recordings` gives them. */
+    val tracks: List<TrackDto> = emptyList(),
 )
 
 @Serializable
@@ -94,6 +112,10 @@ data class TrackDto(
     val position: Int? = null,
     val title: String? = null,
     val length: Long? = null,
+    /** The track's recording, in a release lookup with `inc=recordings`. */
+    val recording: RecordingDto? = null,
+    /** The track's own credit, in a release lookup with `inc=artist-credits`. */
+    @SerialName("artist-credit") val artistCredit: List<NameCreditDto> = emptyList(),
 )
 
 /** The credit as printed: each name followed by its join phrase. */

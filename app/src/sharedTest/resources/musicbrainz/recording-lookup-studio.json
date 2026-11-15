@@ -1,0 +1,28 @@
+{
+ "id": "b1a9c0e9-d987-4042-ae91-78d6a3267d69",
+ "title": "Bohemian Rhapsody",
+ "length": 355106,
+ "video": false,
+ "disambiguation": "",
+ "first-release-date": "1975-11-21",
+ "isrcs": [
+  "GBCEE0100112",
+  "GBCEE0500364",
+  "GBCEE0900148",
+  "GBCEE7500015",
+  "GBCEE9300005",
+  "GBCEE9800022",
+  "GBUM71029604"
+ ],
+ "artist-credit": [
+  {
+   "name": "Queen",
+   "joinphrase": "",
+   "artist": {
+    "id": "0383dadf-2a4e-4d10-a46a-e9e041da8eb3",
+    "name": "Queen",
+    "sort-name": "Queen"
+   }
+  }
+ ]
+}
