@@ -414,4 +414,46 @@
     <string name="genre_not_found">Этого жанра больше нет в библиотеке.</string>
     <string name="open_genre">Открыть жанр</string>
     <string name="tree_more">Ещё</string>
+    <plurals name="selection_count">
+        <item quantity="one">Выбрана %1$d</item>
+        <item quantity="few">Выбрано %1$d</item>
+        <item quantity="many">Выбрано %1$d</item>
+        <item quantity="other">Выбрано %1$d</item>
+    </plurals>
+    <string name="selection_close">Отменить выбор</string>
+    <string name="selection_select_all">Выбрать все</string>
+    <string name="selection_deselect_all">Снять выбор со всех</string>
+    <string name="selection_select">Выбрать</string>
+    <string name="selection_deselect">Снять выбор</string>
+    <string name="selection_favorites_not_read">Избранное: теги ещё читаются</string>
+    <plurals name="selection_removed_from_playlist">
+        <item quantity="one">Из плейлиста убрана %1$d песня</item>
+        <item quantity="few">Из плейлиста убраны %1$d песни</item>
+        <item quantity="many">Из плейлиста убрано %1$d песен</item>
+        <item quantity="other">Из плейлиста убрано %1$d песни</item>
+    </plurals>
+    <plurals name="selection_removed_from_queue">
+        <item quantity="one">Убрана %1$d песня</item>
+        <item quantity="few">Убраны %1$d песни</item>
+        <item quantity="many">Убрано %1$d песен</item>
+        <item quantity="other">Убрано %1$d песни</item>
+    </plurals>
+    <plurals name="selection_favorites_added">
+        <item quantity="one">В избранное добавлена %1$d песня</item>
+        <item quantity="few">В избранное добавлены %1$d песни</item>
+        <item quantity="many">В избранное добавлено %1$d песен</item>
+        <item quantity="other">В избранное добавлено %1$d песни</item>
+    </plurals>
+    <plurals name="selection_favorites_removed">
+        <item quantity="one">Из избранного убрана %1$d песня</item>
+        <item quantity="few">Из избранного убраны %1$d песни</item>
+        <item quantity="many">Из избранного убрано %1$d песен</item>
+        <item quantity="other">Из избранного убрано %1$d песни</item>
+    </plurals>
+    <plurals name="selection_favorites_not_read_count">
+        <item quantity="one">%1$d песня ещё читается</item>
+        <item quantity="few">%1$d песни ещё читаются</item>
+        <item quantity="many">%1$d песен ещё читаются</item>
+        <item quantity="other">%1$d песни ещё читаются</item>
+    </plurals>
 </resources>

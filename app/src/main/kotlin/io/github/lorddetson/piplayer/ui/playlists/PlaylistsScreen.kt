@@ -106,16 +106,27 @@ class PlaylistActions(
     val delete: (id: Long, name: String) -> Unit,
     /** Opens the chooser for the songs of [QueueTarget]. */
     val addToPlaylist: (QueueTarget) -> Unit,
+    /**
+     * Opens the chooser for selected songs; [onChosen] once a playlist is chosen or made, not when the chooser is cancelled
+     * (docs/library.md §20.3).
+     */
+    val addSelected: (target: QueueTarget, onChosen: () -> Unit) -> Unit = { target, _ -> addToPlaylist(target) },
 )
 
 /** A dialog of the playlists. */
 private sealed interface PlaylistDialog {
     /** The name of a new playlist, which then gets [adding]'s songs, or the new name of [renaming]. */
-    data class Name(val renaming: Long? = null, val initial: String = "", val adding: QueueTarget? = null) : PlaylistDialog
+    data class Name(
+        val renaming: Long? = null,
+        val initial: String = "",
+        val adding: QueueTarget? = null,
+        val onChosen: () -> Unit = {},
+    ) : PlaylistDialog
 
     data class Delete(val id: Long, val name: String) : PlaylistDialog
 
-    data class Choose(val target: QueueTarget) : PlaylistDialog
+    /** The chooser for [target]'s songs; [onChosen] once a playlist is chosen or made. */
+    data class Choose(val target: QueueTarget, val onChosen: () -> Unit = {}) : PlaylistDialog
 }
 
 /**
@@ -180,6 +191,7 @@ fun rememberPlaylistActions(snackbar: SnackbarHostState, open: (Long) -> Unit, o
                 run({ choices.rename(renaming, name) }) { done -> if (done) null else resources.getString(R.string.playlist_failed) }
             } else {
                 val adding = shown.adding
+                if (adding != null) shown.onChosen()
                 run({ choices.create(name) }) { id ->
                     when {
                         id == null -> resources.getString(R.string.playlist_failed)
@@ -198,9 +210,10 @@ fun rememberPlaylistActions(snackbar: SnackbarHostState, open: (Long) -> Unit, o
         }
         is PlaylistDialog.Choose -> ChooseDialog(
             onDismiss = { dialog = null },
-            onNew = { dialog = PlaylistDialog.Name(adding = shown.target) },
+            onNew = { dialog = PlaylistDialog.Name(adding = shown.target, onChosen = shown.onChosen) },
         ) { id ->
             dialog = null
+            shown.onChosen()
             add(id, shown.target)
         }
         null -> Unit
@@ -219,6 +232,7 @@ fun rememberPlaylistActions(snackbar: SnackbarHostState, open: (Long) -> Unit, o
             },
             delete = { id, name -> dialog = PlaylistDialog.Delete(id, name) },
             addToPlaylist = { target -> dialog = PlaylistDialog.Choose(target) },
+            addSelected = { target, onChosen -> dialog = PlaylistDialog.Choose(target, onChosen) },
         )
     }
 }

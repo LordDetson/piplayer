@@ -63,6 +63,25 @@ class LibraryTrackRefsTest {
     }
 
     @Test
+    fun referencesReadInChunksEqualTheOnesReadOneByOne() = runBlocking<Unit> {
+        // More files than one chunk holds; every third has its content read and so an identity (docs/library.md §20.3).
+        index.volume().rows = (1L..1_200L).map { row(it, path = "Music/A/", name = "$it.mp3", durationMs = 1_000 * it) }
+        sync.sync()
+        val files = library.library().files()
+        for (file in files.filter { it.mediaStoreId % 3 == 0L }) {
+            library.library().setContent(file.id, "%064x".format(file.mediaStoreId), file.durationMs ?: 0, DurationSource.HEADER)
+        }
+        attacher.attach()
+        val ids = files.map { it.id } + 999_999L
+
+        val read = refs.refsOf(ids)
+
+        assertThat(read).hasSize(1_200).doesNotContainKey(999_999L)
+        for (file in files) assertThat(read[file.id]).describedAs("file ${file.mediaStoreId}").isEqualTo(refs.refOf(file.id))
+        assertThat(read.values.count { it.identityId != null }).isEqualTo(400)
+    }
+
+    @Test
     fun aSongMovedUnderANewIndexIdIsFoundByItsKey() = runBlocking<Unit> {
         val ref = start()
         index.volume().rows = listOf(row(3, path = "Music/B/", name = "a.mp3", generation = 10, durationMs = 200_000), row(2, path = "Music/A/", name = "b.mp3"))

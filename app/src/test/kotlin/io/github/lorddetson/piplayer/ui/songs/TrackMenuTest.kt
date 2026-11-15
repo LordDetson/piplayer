@@ -107,4 +107,89 @@ class TrackMenuTest {
 
         assertThat(entries(TrackMenuPlace.LIST, state)).doesNotContain(GoToAlbum("album-key")).contains(GoToFolder(folder))
     }
+
+    private fun selection(place: SelectionPlace, state: SelectionMenuState, offers: TrackMenuOffers = TrackMenuOffers()) =
+        TrackMenu.selectionEntries(place, offers, state)
+
+    private val severalNoneFavorite = SelectionMenuState(rows = 3, songs = 3, favorites = FavoriteBatch(counted = 3, notFavorite = 3))
+
+    @Test
+    fun `a selection of a list has Play first, then the track menu's entries for many songs, without Details`() {
+        assertThat(selection(SelectionPlace.LIST, severalNoneFavorite)).containsExactly(
+            TrackMenuEntry.Play,
+            PlayNext,
+            AddToQueue,
+            AddToPlaylist,
+            Favorite(false),
+        )
+    }
+
+    @Test
+    fun `one selected song also has Details, never the places or covers of the song`() {
+        val one = SelectionMenuState(rows = 1, songs = 1, favorites = FavoriteBatch(counted = 1, notFavorite = 0))
+
+        assertThat(selection(SelectionPlace.LIST, one)).containsExactly(
+            TrackMenuEntry.Play,
+            PlayNext,
+            AddToQueue,
+            AddToPlaylist,
+            Favorite(true),
+            Details,
+        )
+    }
+
+    @Test
+    fun `a playlist selection ends with Remove from playlist, and Details only for one available entry`() {
+        assertThat(selection(SelectionPlace.PLAYLIST, severalNoneFavorite)).containsExactly(
+            TrackMenuEntry.Play,
+            PlayNext,
+            AddToQueue,
+            AddToPlaylist,
+            Favorite(false),
+            TrackMenuEntry.RemoveFromPlaylist,
+        )
+        val unavailable = SelectionMenuState(rows = 1, songs = 0)
+        assertThat(selection(SelectionPlace.PLAYLIST, unavailable)).containsExactly(TrackMenuEntry.RemoveFromPlaylist)
+    }
+
+    @Test
+    fun `a queue selection has the row menu's queue entries and no Play, then Remove from queue`() {
+        assertThat(selection(SelectionPlace.QUEUE, severalNoneFavorite)).containsExactly(
+            PlayNext,
+            AddToQueue,
+            AddToPlaylist,
+            Favorite(false),
+            TrackMenuEntry.RemoveFromQueue,
+        )
+        // One entry has Details, also a file opened from another app, which has nothing that needs a library song.
+        val opened = SelectionMenuState(rows = 1, songs = 0)
+        assertThat(selection(SelectionPlace.QUEUE, opened)).containsExactly(Details, TrackMenuEntry.RemoveFromQueue)
+    }
+
+    @Test
+    fun `favorites are Add while one counted song is not one, Remove while all counted are, unread songs aside`() {
+        val oneNot = SelectionMenuState(rows = 4, songs = 4, favorites = FavoriteBatch(counted = 3, notFavorite = 1))
+        val allAre = SelectionMenuState(rows = 4, songs = 4, favorites = FavoriteBatch(counted = 3, notFavorite = 0))
+
+        assertThat(selection(SelectionPlace.LIST, oneNot)).contains(Favorite(false))
+        assertThat(selection(SelectionPlace.LIST, allAre)).contains(Favorite(true))
+    }
+
+    @Test
+    fun `favorites wait while they are read and stay off when no selected song has its tags read`() {
+        val reading = SelectionMenuState(rows = 2, songs = 2, favorites = null)
+        val unread = SelectionMenuState(rows = 2, songs = 2, favorites = FavoriteBatch(counted = 0, notFavorite = 0))
+
+        assertThat(selection(SelectionPlace.LIST, reading)).contains(TrackMenuEntry.FavoriteUnavailable(reading = true))
+            .doesNotContain(Favorite(false), Favorite(true))
+        assertThat(selection(SelectionPlace.LIST, unread)).contains(TrackMenuEntry.FavoriteUnavailable(reading = false))
+    }
+
+    @Test
+    fun `a selection's entries a place has no action for are left out`() {
+        val none = TrackMenuOffers(addToPlaylist = false, favorites = false, covers = false, details = false)
+        val one = SelectionMenuState(rows = 1, songs = 1, favorites = FavoriteBatch(1, 1))
+
+        assertThat(selection(SelectionPlace.LIST, one, none)).containsExactly(TrackMenuEntry.Play, PlayNext, AddToQueue)
+    }
 }

@@ -13,6 +13,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performCustomAccessibilityActionWithLabel
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeLeft
+import androidx.compose.ui.test.longClick
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.media3.common.C
@@ -211,5 +212,53 @@ class QueueScreenTest {
             .performCustomAccessibilityActionWithLabel(text(R.string.queue_move_up))
         controller.waitUntil("Delta moved up") { getMediaItemAt(2).mediaId == "4" }
         assertThat(ids()).containsExactly("1", "3", "4", "2")
+    }
+
+    // Selected entries (docs/library.md §20, docs/playback.md §9.6).
+
+    private val bar = hasTestTag(io.github.lorddetson.piplayer.ui.selection.SelectionTags.BAR)
+
+    private fun row(title: String) = hasTestTag(QueueTags.ROW) and hasText(title) and inQueue
+
+    @Test
+    fun selectedEntriesHaveNoHandleNoSwipeAndNoMovesAndAreRemovedTogetherWithOneUndo() {
+        openQueue()
+
+        waitFor(row("Bravo"))
+        compose.onNode(row("Bravo")).performTouchInput { longClick() }
+        waitFor(bar)
+        compose.onNode(row("Delta")).performClick()
+        compose.waitUntilAtLeastOneExists(
+            hasText(compose.activity.resources.getQuantityString(R.plurals.selection_count, 2, 2)),
+            timeoutMillis = 10_000,
+        )
+        compose.onNode(hasTestTag(QueueTags.handle("2")), useUnmergedTree = true).assertDoesNotExist()
+        assertThat(compose.onNode(row("Charlie")).fetchSemanticsNode().config.getOrNull(androidx.compose.ui.semantics.SemanticsActions.CustomActions).orEmpty()).isEmpty()
+        // A swipe while selecting removes nothing, and a tap selects instead of playing.
+        compose.onNode(row("Charlie")).performTouchInput { swipeLeft() }
+        PlaybackTesting.throughout("Charlie stays", kotlin.time.Duration.parse("1s")) { onMain { controller.mediaItemCount } == 4 }
+        assertThat(onMain { controller.currentMediaItem?.mediaId }).isEqualTo("1")
+        // A swipe inside the row is a tap of it, which may have selected Charlie: start again with Bravo and Delta.
+        tapOn(hasContentDescription(text(R.string.selection_close)))
+        compose.waitUntilDoesNotExist(bar, timeoutMillis = 10_000)
+        compose.onNode(row("Bravo")).performTouchInput { longClick() }
+        waitFor(bar)
+        compose.onNode(row("Delta")).performClick()
+        compose.waitUntilAtLeastOneExists(
+            hasText(compose.activity.resources.getQuantityString(R.plurals.selection_count, 2, 2)),
+            timeoutMillis = 10_000,
+        )
+
+        tapOn(hasTestTag(io.github.lorddetson.piplayer.ui.selection.SelectionTags.MENU))
+        waitFor(hasText(text(R.string.play_next)))
+        compose.onNode(hasText(text(R.string.playlist_play))).assertDoesNotExist()
+        tapOn(hasText(text(R.string.queue_remove)))
+
+        controller.waitUntil("Bravo and Delta are gone") { mediaItemCount == 2 }
+        assertThat(ids()).containsExactly("1", "3")
+        compose.waitUntilDoesNotExist(bar, timeoutMillis = 10_000)
+        tapOn(hasText(text(R.string.queue_undo)))
+        controller.waitUntil("both are back") { mediaItemCount == 4 }
+        assertThat(ids()).containsExactly("1", "2", "3", "4")
     }
 }

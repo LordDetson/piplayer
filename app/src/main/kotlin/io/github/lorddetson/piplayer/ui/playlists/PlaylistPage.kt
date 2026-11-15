@@ -82,6 +82,27 @@ import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import androidx.lifecycle.SavedStateHandle
+import kotlinx.coroutines.CoroutineScope
+import androidx.lifecycle.createSavedStateHandle
+import io.github.lorddetson.piplayer.ui.player.QueueTarget
+import io.github.lorddetson.piplayer.ui.selection.RowSelection
+import io.github.lorddetson.piplayer.ui.selection.SavedSelections
+import io.github.lorddetson.piplayer.ui.selection.SelectionBack
+import io.github.lorddetson.piplayer.ui.selection.SelectionBar
+import io.github.lorddetson.piplayer.ui.selection.SelectionCheck
+import io.github.lorddetson.piplayer.ui.selection.SelectionHolder
+import io.github.lorddetson.piplayer.ui.selection.SelectionMenuItems
+import io.github.lorddetson.piplayer.ui.selection.SelectionUi
+import io.github.lorddetson.piplayer.ui.selection.isSelected
+import io.github.lorddetson.piplayer.ui.selection.isWholeList
+import io.github.lorddetson.piplayer.ui.selection.selectableRow
+import io.github.lorddetson.piplayer.ui.songs.FavoriteBatch
+import io.github.lorddetson.piplayer.ui.songs.SelectionMenuState
+import io.github.lorddetson.piplayer.ui.songs.SelectionPlace
+import io.github.lorddetson.piplayer.ui.songs.TrackMenu
+import io.github.lorddetson.piplayer.ui.songs.TrackMenuEntry
+import io.github.lorddetson.piplayer.ui.songs.TrackMenuOffers
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
 
@@ -100,7 +121,15 @@ sealed interface PlaylistHeader {
  * identities change.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
-class PlaylistPageViewModel(application: Application, private val id: Long) : AndroidViewModel(application) {
+class PlaylistPageViewModel(
+    application: Application,
+    private val id: Long,
+    /** Keeps the selection of entries for process death (docs/library.md §20.5). */
+    saved: SavedStateHandle? = null,
+) : AndroidViewModel(application) {
+
+    /** The selected entries by their IDs (docs/library.md §20.1): a playlist may hold a song twice. */
+    val selection = SelectionHolder(SavedSelections.read(saved)) { SavedSelections.write(saved, it) }
 
     private val playlists = UserData.playlists(application)
 
@@ -131,10 +160,14 @@ class PlaylistPageViewModel(application: Application, private val id: Long) : An
 fun PlaylistPage(id: Long, host: LibraryHost, actions: PlaylistActions, onBack: () -> Unit) {
     val app = LocalContext.current.applicationContext as Application
     val access = rememberAudioAccess()
-    val model = viewModel(key = "playlist $id") { PlaylistPageViewModel(app, id) }
+    val model = viewModel(key = "playlist $id") { PlaylistPageViewModel(app, id, createSavedStateHandle()) }
     val header by model.header.collectAsStateWithLifecycle()
     val items by model.items.collectAsStateWithLifecycle()
     val found = (header as? PlaylistHeader.Found)?.playlist
+    val selected by model.selection.state.collectAsStateWithLifecycle()
+    val pageScope = rememberCoroutineScope()
+    // The selection is judged against the entries once they are read (docs/library.md §20.2, 8).
+    LaunchedEffect(items) { items?.let { shown -> model.selection.onList(shown.map { it.entryId }, "") } }
     // A playlist deleted while its page is open, from its menu or elsewhere, takes the page with it.
     var wasFound by remember { mutableStateOf(false) }
     LaunchedEffect(header) {
@@ -143,7 +176,10 @@ fun PlaylistPage(id: Long, host: LibraryHost, actions: PlaylistActions, onBack: 
     }
     Scaffold(
         topBar = {
-            TopAppBar(
+            val selection = selected
+            if (selection != null) {
+                EntriesSelectionBar(id, selection, model.selection, items.orEmpty(), host, actions, pageScope)
+            } else TopAppBar(
                 title = {
                     Text(found?.name.orEmpty(), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.semantics { heading() })
                 },
@@ -168,14 +204,21 @@ fun PlaylistPage(id: Long, host: LibraryHost, actions: PlaylistActions, onBack: 
                 modifier = modifier.padding(16.dp),
             )
             shown == null || found == null -> Box(modifier, contentAlignment = Alignment.Center) { CircularProgressIndicator() }
-            else -> Entries(id, shown, host, modifier)
+            else -> Entries(id, shown, host, modifier, model.selection, selected)
         }
     }
 }
 
 /** The header with the counts and "Play", and the entries, which drag and move by their accessibility actions. */
 @Composable
-private fun Entries(id: Long, items: List<PlaylistItem>, host: LibraryHost, modifier: Modifier) {
+private fun Entries(
+    id: Long,
+    items: List<PlaylistItem>,
+    host: LibraryHost,
+    modifier: Modifier,
+    selection: SelectionHolder<Long>,
+    selected: SelectionUi<Long>?,
+) {
     val app = LocalContext.current.applicationContext as Application
     val resources = LocalResources.current
     val scope = rememberCoroutineScope()
@@ -252,6 +295,10 @@ private fun Entries(id: Long, items: List<PlaylistItem>, host: LibraryHost, modi
                         }
                     },
                     menu = host.menu,
+                    row = RowSelection(
+                        selecting = selected != null,
+                        selected = selected?.selection?.isSelected(item.entryId) == true,
+                    ) { selection.toggle(item.entryId) },
                     onMoveUp = if (place > 0) ({ step(item, -1) }) else null,
                     onMoveDown = if (place < shown.lastIndex) ({ step(item, 1) }) else null,
                     onRemove = { remove(item) },
@@ -279,6 +326,7 @@ private fun EntryRow(
     dragging: Boolean,
     onClick: () -> Unit,
     menu: SongMenu,
+    row: RowSelection,
     onMoveUp: (() -> Unit)?,
     onMoveDown: (() -> Unit)?,
     onRemove: () -> Unit,
@@ -309,22 +357,29 @@ private fun EntryRow(
         },
         supportingContent = { Text(details, maxLines = 1, overflow = TextOverflow.Ellipsis) },
         leadingContent = {
-            // A handle for the finger only: TalkBack moves the row with its own actions, so the handle says nothing.
-            Icon(painterResource(R.drawable.ic_drag_handle), contentDescription = null, modifier = handle.minimumInteractiveComponentSize())
+            if (row.selecting) {
+                // Rows do not move while selected (docs/library.md §20.2, 3).
+                SelectionCheck(row)
+            } else {
+                // A handle for the finger only: TalkBack moves the row with its own actions, so the handle says nothing.
+                Icon(painterResource(R.drawable.ic_drag_handle), contentDescription = null, modifier = handle.minimumInteractiveComponentSize())
+            }
         },
-        trailingContent = { EntryMenu(title, item.song, menu, onMoveUp, onMoveDown, onRemove) },
+        trailingContent = if (row.selecting) null else ({ EntryMenu(title, item.song, menu, onMoveUp, onMoveDown, onRemove) }),
         tonalElevation = if (dragging) 4.dp else 0.dp,
         shadowElevation = if (dragging) 4.dp else 0.dp,
         modifier = Modifier
             .testTag(PlaylistTags.ROW)
-            .clickable(onClickLabel = stringResource(R.string.songs_play), role = Role.Button, onClick = onClick)
-            .semantics {
-                if (playing) stateDescription = playingText
-                customActions = listOfNotNull(
+            .selectableRow(
+                row,
+                stringResource(R.string.songs_play),
+                onClick,
+                actions = listOfNotNull(
                     onMoveUp?.let { move -> CustomAccessibilityAction(moveUp) { move(); true } },
                     onMoveDown?.let { move -> CustomAccessibilityAction(moveDown) { move(); true } },
-                )
-            },
+                ),
+            )
+            .semantics { if (playing && !row.selecting) stateDescription = playingText },
     )
 }
 
@@ -355,6 +410,68 @@ private fun EntryMenu(
             onMoveUp?.let { item(R.string.queue_move_up, it) }
             onMoveDown?.let { item(R.string.queue_move_down, it) }
             item(R.string.playlist_remove, onRemove)
+        }
+    }
+}
+
+/**
+ * The selection bar of a playlist page (docs/library.md §20): its menu acts on the selected entries in the playlist's
+ * order; songs not in the library are skipped by everything but "Remove from playlist", which has one "Undo" for all.
+ */
+@Composable
+private fun EntriesSelectionBar(
+    id: Long,
+    state: SelectionUi<Long>,
+    selection: SelectionHolder<Long>,
+    items: List<PlaylistItem>,
+    host: LibraryHost,
+    actions: PlaylistActions,
+    /** The page's scope: the message of a removal outlives the bar, which goes with the selection. */
+    scope: CoroutineScope,
+) {
+    val app = LocalContext.current.applicationContext as Application
+    val resources = LocalResources.current
+    val choices = remember(app) { PlaylistChoices(app) }
+    SelectionBack(selecting = true, onEnd = selection::end)
+    SelectionBar(state, onClose = selection::end, onSelectAll = selection::selectAll, onDeselectAll = selection::end) { close ->
+        val chosen = remember(state, items) { items.filter { state.selection.isSelected(it.entryId) } }
+        val songs = chosen.mapNotNull { it.song }
+        var favorites by remember(state) { mutableStateOf<FavoriteBatch?>(null) }
+        LaunchedEffect(state) { favorites = host.favoriteBatch?.state?.invoke(songs.map { it.id }) }
+        val offers = TrackMenuOffers(favorites = host.favoriteBatch != null, covers = false, details = host.menu.details != null)
+        val entries = TrackMenu.selectionEntries(SelectionPlace.PLAYLIST, offers, SelectionMenuState(chosen.size, songs.size, favorites))
+        SelectionMenuItems(entries, close) { entry ->
+            // The whole playlist goes as the playlist (§20.6), any other selection as its songs in order.
+            val target = if (state.selection.isWholeList && songs.size == items.count { it.available }) {
+                QueueTarget.Playlist(id)
+            } else {
+                QueueTarget.Songs(songs.map { it.id })
+            }
+            when (entry) {
+                TrackMenuEntry.Play -> host.playSelection(target)
+                TrackMenuEntry.PlayNext -> host.addToQueue(target, true)
+                TrackMenuEntry.AddToQueue -> host.addToQueue(target, false)
+                TrackMenuEntry.AddToPlaylist -> return@SelectionMenuItems actions.addSelected(target, selection::end)
+                is TrackMenuEntry.Favorite -> host.favoriteBatch?.set?.invoke(songs.map { it.id }, !entry.favorite)
+                TrackMenuEntry.Details -> songs.singleOrNull()?.let { host.menu.details?.invoke(it) }
+                TrackMenuEntry.RemoveFromPlaylist -> PlaylistChoices.scope.launch {
+                    val removed = choices.removeAll(chosen.map { it.entryId })
+                    if (removed == null) {
+                        scope.launch { host.snackbar.showSnackbar(resources.getString(R.string.playlist_failed)) }
+                        return@launch
+                    }
+                    scope.launch {
+                        val result = host.snackbar.showSnackbar(
+                            resources.getQuantityString(R.plurals.selection_removed_from_playlist, removed.size, removed.size),
+                            resources.getString(R.string.queue_undo),
+                            duration = SnackbarDuration.Short,
+                        )
+                        if (result == SnackbarResult.ActionPerformed) PlaylistChoices.scope.launch { choices.restoreAll(removed) }
+                    }
+                }
+                else -> Unit
+            }
+            selection.end()
         }
     }
 }

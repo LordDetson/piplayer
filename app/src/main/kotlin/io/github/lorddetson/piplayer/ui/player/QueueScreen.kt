@@ -55,6 +55,23 @@ import io.github.lorddetson.piplayer.ui.formatDuration
 import io.github.lorddetson.piplayer.ui.songs.SongMenu
 import io.github.lorddetson.piplayer.ui.songs.TrackMenuItems
 import io.github.lorddetson.piplayer.ui.songs.TrackMenuPlace
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.createSavedStateHandle
+import androidx.lifecycle.viewmodel.compose.viewModel
+import io.github.lorddetson.piplayer.ui.selection.RowSelection
+import io.github.lorddetson.piplayer.ui.selection.SelectionBack
+import io.github.lorddetson.piplayer.ui.selection.SelectionBar
+import io.github.lorddetson.piplayer.ui.selection.SelectionCheck
+import io.github.lorddetson.piplayer.ui.selection.SelectionMenuItems
+import io.github.lorddetson.piplayer.ui.selection.SelectionUi
+import io.github.lorddetson.piplayer.ui.selection.isSelected
+import io.github.lorddetson.piplayer.ui.selection.selectableRow
+import io.github.lorddetson.piplayer.ui.songs.FavoriteBatch
+import io.github.lorddetson.piplayer.ui.songs.SelectionMenuState
+import io.github.lorddetson.piplayer.ui.songs.SelectionPlace
+import io.github.lorddetson.piplayer.ui.songs.TrackMenu
+import io.github.lorddetson.piplayer.ui.songs.TrackMenuEntry
+import io.github.lorddetson.piplayer.ui.songs.TrackMenuOffers
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
 
@@ -98,8 +115,15 @@ fun QueueScreen(
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
     menu: SongMenu? = null,
+    /** What the selection's menu does; without it the entries cannot be selected (docs/library.md §20). */
+    selectionActions: QueueSelectionActions? = null,
+    /** Whether the saved queue's restore has ended, before which the selection is not judged (§20.2, 8). */
+    restored: Boolean = true,
 ) {
     val queue = rememberQueue(player)
+    val selectionModel = viewModel { QueueSelectionViewModel(createSavedStateHandle()) }
+    val selected = selectionModel.holder.state.collectAsStateWithLifecycle().value.takeIf { selectionActions != null }
+    LaunchedEffect(queue.entries, restored) { selectionModel.onQueue(queue.entries, restored) }
     // The order while dragging; the player's again once its timeline changes. One state for the screen's life, so that
     // the drag callbacks of an earlier composition read the same one.
     val shownState = remember { mutableStateOf(queue.entries) }
@@ -121,7 +145,9 @@ fun QueueScreen(
     Scaffold(
         modifier = modifier,
         topBar = {
-            TopAppBar(
+            if (selected != null && selectionActions != null) {
+                QueueSelectionBar(selected, selectionModel, queue.entries, menu, selectionActions)
+            } else TopAppBar(
                 title = { Text(stringResource(R.string.queue_open), modifier = Modifier.semantics { heading() }) },
                 navigationIcon = {
                     IconButton(onClick = onBack) { Icon(painterResource(R.drawable.ic_back), stringResource(R.string.library_back)) }
@@ -145,6 +171,11 @@ fun QueueScreen(
                         },
                         onRemove = { actions.remove(entry) },
                         menu = menu,
+                        row = selectionActions?.let {
+                            RowSelection(selected != null, selected?.selection?.isSelected(entry.key) == true) {
+                                selectionModel.holder.toggle(entry.key)
+                            }
+                        },
                         // Moves without dragging, for TalkBack and switch access.
                         onMoveUp = if (place > 0) ({ actions.move(entry, place, place - 1) }) else null,
                         onMoveDown = if (place < shown.lastIndex) ({ actions.move(entry, place, place + 1) }) else null,
@@ -227,7 +258,9 @@ private fun QueueRow(
     onMoveDown: (() -> Unit)?,
     handle: Modifier,
     menu: SongMenu?,
+    row: RowSelection? = null,
 ) {
+    val selecting = row?.selecting == true
     // Not saved: an entry put back by "Undo" under the same key must not come back swiped away and be removed again.
     // Keyed by the entry, so that a refused removal or another entry under the key starts settled.
     val dismiss = remember(entry) { SwipeToDismissBoxState(SwipeToDismissBoxValue.Settled, positionalThreshold = { it / 2 }) }
@@ -241,6 +274,8 @@ private fun QueueRow(
     SwipeToDismissBox(
         state = dismiss,
         backgroundContent = { Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.errorContainer)) },
+        // Rows do not move or go while selected (docs/library.md §20.2, 3).
+        gesturesEnabled = !selecting,
     ) {
         ListItem(
             headlineContent = {
@@ -256,26 +291,32 @@ private fun QueueRow(
                 Text("$artist · ${formatDuration(entry.durationMs)}", maxLines = 1, overflow = TextOverflow.Ellipsis)
             },
             leadingContent = {
-                // A handle for the finger only: TalkBack moves the row with its own actions, so the handle says nothing.
-                Icon(
-                    painterResource(R.drawable.ic_drag_handle),
-                    contentDescription = null,
-                    modifier = handle.minimumInteractiveComponentSize().testTag(QueueTags.handle(entry.key)),
-                )
+                if (selecting) {
+                    SelectionCheck(row)
+                } else {
+                    // A handle for the finger only: TalkBack moves the row with its own actions, so the handle says nothing.
+                    Icon(
+                        painterResource(R.drawable.ic_drag_handle),
+                        contentDescription = null,
+                        modifier = handle.minimumInteractiveComponentSize().testTag(QueueTags.handle(entry.key)),
+                    )
+                }
             },
-            trailingContent = { RowMenu(entry, onRemove, menu) },
+            trailingContent = if (selecting) null else ({ RowMenu(entry, onRemove, menu) }),
             tonalElevation = if (dragging) 4.dp else 0.dp,
             shadowElevation = if (dragging) 4.dp else 0.dp,
             modifier = Modifier
                 .testTag(QueueTags.ROW)
-                .clickable(onClickLabel = stringResource(R.string.songs_play), role = Role.Button, onClick = onPlay)
-                .semantics {
-                    if (playing) stateDescription = playingText
-                    customActions = listOfNotNull(
+                .selectableRow(
+                    row,
+                    stringResource(R.string.songs_play),
+                    onPlay,
+                    actions = listOfNotNull(
                         onMoveUp?.let { move -> CustomAccessibilityAction(moveUp) { move(); true } },
                         onMoveDown?.let { move -> CustomAccessibilityAction(moveDown) { move(); true } },
-                    )
-                },
+                    ),
+                )
+                .semantics { if (playing && !selecting) stateDescription = playingText },
         )
     }
 }
@@ -300,6 +341,55 @@ private fun RowMenu(entry: QueueEntry, onRemove: () -> Unit, menu: SongMenu?) {
                 open = false
                 onRemove()
             })
+        }
+    }
+}
+
+/**
+ * The queue screen's selection bar (docs/playback.md §9.6): its menu follows the row's track menu without "Play", then
+ * "Remove from queue" of every selected entry at once, in the order the screen shows them.
+ */
+@Composable
+private fun QueueSelectionBar(
+    state: SelectionUi<String>,
+    model: QueueSelectionViewModel,
+    entries: List<QueueEntry>,
+    menu: SongMenu?,
+    actions: QueueSelectionActions,
+) {
+    SelectionBack(selecting = true, onEnd = model.holder::end)
+    SelectionBar(state, onClose = model.holder::end, onSelectAll = model.holder::selectAll, onDeselectAll = model.holder::end) { close ->
+        val chosen = remember(state, entries) { entries.filter { state.selection.isSelected(it.key) } }
+        // An added entry plays a library song too (§9.4); anything else is a file opened from another app.
+        val songIds = chosen.mapNotNull { QueueIds.fileId(it.mediaId) }
+        var favorites by remember(state) { mutableStateOf<FavoriteBatch?>(null) }
+        LaunchedEffect(state) { favorites = actions.favorites?.state?.invoke(songIds) }
+        val offers = TrackMenuOffers(
+            addToPlaylist = actions.addToPlaylist != null,
+            favorites = actions.favorites != null,
+            covers = false,
+            details = menu?.details != null && menu.openedDetails != null,
+        )
+        val entriesOfMenu = TrackMenu.selectionEntries(SelectionPlace.QUEUE, offers, SelectionMenuState(chosen.size, songIds.size, favorites))
+        SelectionMenuItems(entriesOfMenu, close) { entry ->
+            val target = QueueTarget.Songs(songIds)
+            when (entry) {
+                TrackMenuEntry.PlayNext -> actions.addToQueue(target, true)
+                TrackMenuEntry.AddToQueue -> actions.addToQueue(target, false)
+                TrackMenuEntry.AddToPlaylist -> return@SelectionMenuItems actions.addToPlaylist?.invoke(target, model.holder::end) ?: Unit
+                is TrackMenuEntry.Favorite -> actions.favorites?.set?.invoke(songIds, !entry.favorite)
+                TrackMenuEntry.Details -> chosen.singleOrNull()?.let { one ->
+                    val id = QueueIds.fileId(one.mediaId)
+                    if (id != null) {
+                        menu?.details?.invoke(Song(id, one.mediaId, one.title, one.artist, null, one.durationMs))
+                    } else {
+                        menu?.openedDetails?.invoke(one.mediaId)
+                    }
+                }
+                TrackMenuEntry.RemoveFromQueue -> actions.removeAll(chosen)
+                else -> Unit
+            }
+            model.holder.end()
         }
     }
 }

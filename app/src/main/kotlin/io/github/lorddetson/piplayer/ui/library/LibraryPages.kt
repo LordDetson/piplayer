@@ -4,6 +4,7 @@ import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.runtime.remember
+import androidx.lifecycle.createSavedStateHandle
 import androidx.compose.runtime.key
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.Spacer
@@ -74,13 +75,20 @@ internal fun PageScaffold(
     menu: QueueMenu? = null,
     actions: @Composable () -> Unit = {},
     titleStyle: FontStyle? = null,
+    /** The page's song list, whose selection takes the top bar's place while it selects (docs/library.md §20.2). */
+    selection: SongsViewModel? = null,
     content: @Composable (Modifier) -> Unit,
 ) {
     Scaffold(
         topBar = {
-            LibraryTopBar(title, onBack, searching, search, onSearch, onSearching, sort, titleStyle) {
-                actions()
-                menu?.let { QueueMenuButton(stringResource(R.string.page_menu), it) }
+            val selected = selection?.selection?.collectAsStateWithLifecycle()?.value
+            if (selection != null && selected != null) {
+                SongsSelectionBar(host, selection, selected)
+            } else {
+                LibraryTopBar(title, onBack, searching, search, onSearch, onSearching, sort, titleStyle) {
+                    actions()
+                    menu?.let { QueueMenuButton(stringResource(R.string.page_menu), it) }
+                }
             }
         },
         bottomBar = { MiniPlayer(host.player, host.cover, onOpen = host.openNowPlaying, coverName = host.coverName) },
@@ -96,7 +104,7 @@ fun AlbumPage(key: String, host: LibraryHost, onBack: () -> Unit) {
     var searching by rememberSaveable { mutableStateOf(false) }
     var search by rememberSaveable { mutableStateOf("") }
     val header = viewModel(key = "album") { AlbumPageViewModel(app, key) }
-    val songs = viewModel(key = "songs") { SongsViewModel(app, SongQuery.album(key), ListName.ALBUM_PAGE) }
+    val songs = viewModel(key = "songs") { SongsViewModel(app, SongQuery.album(key), ListName.ALBUM_PAGE, createSavedStateHandle()) }
     LaunchedEffect(search) { songs.setSearch(search) }
     LifecycleStartEffect(header, access.granted) {
         header.onStart(access.granted)
@@ -118,6 +126,7 @@ fun AlbumPage(key: String, host: LibraryHost, onBack: () -> Unit) {
         onSearching = { open -> searching = open; if (!open) search = "" },
         sort = { SortButton(ListName.ALBUM_PAGE, songs.order.collectAsStateWithLifecycle().value, songs::setOrder) },
         menu = album?.let { albumMenu(host, key) },
+        selection = songs,
         actions = {
             if (album != null) {
                 FavoriteButton(
@@ -178,7 +187,7 @@ fun ArtistPage(key: String, host: LibraryHost, onBack: () -> Unit) {
     var searching by rememberSaveable { mutableStateOf(false) }
     var search by rememberSaveable { mutableStateOf("") }
     val header = viewModel(key = "artist") { ArtistPageViewModel(app, key) }
-    val songs = viewModel(key = "songs") { SongsViewModel(app, SongQuery.artist(key), ListName.ARTIST_PAGE) }
+    val songs = viewModel(key = "songs") { SongsViewModel(app, SongQuery.artist(key), ListName.ARTIST_PAGE, createSavedStateHandle()) }
     LaunchedEffect(search) {
         songs.setSearch(search)
         header.setSearch(search)
@@ -203,6 +212,7 @@ fun ArtistPage(key: String, host: LibraryHost, onBack: () -> Unit) {
         onSearching = { open -> searching = open; if (!open) search = "" },
         sort = { SortButton(ListName.ARTIST_PAGE, songs.order.collectAsStateWithLifecycle().value, songs::setOrder) },
         menu = page?.let { queue(host, QueueTarget.Artist(key)) },
+        selection = songs,
     ) { modifier ->
         when {
             !access.granted -> PermissionCard(access.deniedForGood, access.request, access.openSettings, modifier)
@@ -252,7 +262,7 @@ fun GenrePage(key: String, host: LibraryHost, onBack: () -> Unit) {
     var searching by rememberSaveable { mutableStateOf(false) }
     var search by rememberSaveable { mutableStateOf("") }
     val header = viewModel(key = "genre") { GenrePageViewModel(app, key) }
-    val songs = viewModel(key = "songs") { SongsViewModel(app, SongQuery.genre(key), ListName.GENRE_PAGE) }
+    val songs = viewModel(key = "songs") { SongsViewModel(app, SongQuery.genre(key), ListName.GENRE_PAGE, createSavedStateHandle()) }
     LaunchedEffect(search) { songs.setSearch(search) }
     LifecycleStartEffect(header, access.granted) {
         header.onStart(access.granted)
@@ -271,6 +281,7 @@ fun GenrePage(key: String, host: LibraryHost, onBack: () -> Unit) {
         onSearching = { open -> searching = open; if (!open) search = "" },
         sort = { SortButton(ListName.GENRE_PAGE, songs.order.collectAsStateWithLifecycle().value, songs::setOrder) },
         menu = genre?.let { queue(host, QueueTarget.Genre(key)) },
+        selection = songs,
         titleStyle = if (genre?.unknown == true) FontStyle.Italic else null,
     ) { modifier ->
         when {
@@ -313,6 +324,8 @@ fun FolderPage(volume: String, relativePath: String, host: LibraryHost, onBack: 
     var search by rememberSaveable { mutableStateOf("") }
     val folder = FolderKey(volume, relativePath)
     val page = viewModel(key = "folder") { FolderPageViewModel(app, folder) }
+    // The folder's own songs, which the content holds (docs/library.md §20.1).
+    var songs by remember { mutableStateOf<SongsViewModel?>(null) }
     LaunchedEffect(search) { page.setSearch(search) }
     val title = when {
         relativePath.isNotEmpty() -> relativePath.dropLast(1).substringAfterLast('/')
@@ -329,7 +342,8 @@ fun FolderPage(volume: String, relativePath: String, host: LibraryHost, onBack: 
         onSearching = { open -> searching = open; if (!open) search = "" },
         sort = { SortButton(ListName.FOLDERS, page.order.collectAsStateWithLifecycle().value, page::setOrder) },
         menu = queue(host, QueueTarget.Folder(volume, relativePath)),
-    ) { modifier -> FolderContent(access, page, folder, host, modifier, search) }
+        selection = songs,
+    ) { modifier -> FolderContent(access, page, folder, host, modifier, search, onSongs = { songs = it }) }
 }
 
 @Composable

@@ -45,7 +45,7 @@ fun TrackMenuItems(song: Song?, place: TrackMenuPlace, menu: SongMenu, close: ()
 }
 
 @Composable
-private fun label(entry: TrackMenuEntry): String = when (entry) {
+internal fun label(entry: TrackMenuEntry): String = when (entry) {
     TrackMenuEntry.PlayNext -> stringResource(R.string.play_next)
     TrackMenuEntry.AddToQueue -> stringResource(R.string.add_to_queue)
     TrackMenuEntry.AddToPlaylist -> stringResource(R.string.add_to_playlist)
@@ -56,6 +56,11 @@ private fun label(entry: TrackMenuEntry): String = when (entry) {
     TrackMenuEntry.ChooseCover -> stringResource(R.string.cover_choose)
     TrackMenuEntry.RemoveCover -> stringResource(R.string.cover_remove)
     TrackMenuEntry.Details -> stringResource(R.string.details)
+    TrackMenuEntry.Play -> stringResource(R.string.playlist_play)
+    is TrackMenuEntry.FavoriteUnavailable ->
+        stringResource(if (entry.reading) R.string.favorite_add else R.string.selection_favorites_not_read)
+    TrackMenuEntry.RemoveFromPlaylist -> stringResource(R.string.playlist_remove)
+    TrackMenuEntry.RemoveFromQueue -> stringResource(R.string.queue_remove)
 }
 
 /** Carries out [entry] for [song]. */
@@ -71,5 +76,7 @@ private fun SongMenu.run(entry: TrackMenuEntry, song: Song) {
         TrackMenuEntry.ChooseCover -> covers?.chooseForSong?.invoke(song)
         TrackMenuEntry.RemoveCover -> covers?.removeForSong?.invoke(song)
         TrackMenuEntry.Details -> details?.invoke(song)
+        // A selection's entries, which a song's own menu never has.
+        TrackMenuEntry.Play, is TrackMenuEntry.FavoriteUnavailable, TrackMenuEntry.RemoveFromPlaylist, TrackMenuEntry.RemoveFromQueue -> Unit
     }
 }

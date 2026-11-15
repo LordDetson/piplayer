@@ -373,6 +373,10 @@ interface LibraryDao {
     @Query("$FOUND_FILES WHERE f.id = :fileId")
     suspend fun foundFile(fileId: Long): FoundFileRow?
 
+    /** The files of [fileIds] (at most 500 at once), for track references read in chunks (docs/library.md §20.3). */
+    @Query("$FOUND_FILES WHERE f.id IN (:fileIds)")
+    suspend fun foundFiles(fileIds: List<Long>): List<FoundFileRow>
+
     @Query("$FOUND_FILES WHERE f.content_key = :contentKey")
     suspend fun foundFilesWithKey(contentKey: String): List<FoundFileRow>
 

@@ -155,4 +155,49 @@ class PlaylistsTest {
 
         assertThat(database.user().changeCounter()).isZero()
     }
+
+    @Test
+    fun selectedEntriesAreRemovedTogetherWithoutGapsAndPutBackAtTheirPlaces() = runBlocking<Unit> {
+        // Song 2 stands twice; one copy, an entry without an identity and the last entry go (docs/library.md §20.3).
+        val id = playlists.create("A")
+        playlists.add(id, listOf(entry(1), entry(2), entry(3, identity = null), entry(2), entry(4), entry(5)))
+        val other = playlists.create("B")
+        playlists.add(other, listOf(entry(6)))
+        val before = playlists.entries(id)
+        val chosen = listOf(before[5].id, before[1].id, before[2].id)
+        now = 400
+
+        val removed = playlists.removeAll(chosen + 999L)
+
+        assertThat(removed.map { it.id }).containsExactly(before[1].id, before[2].id, before[5].id)
+        assertThat(names(id)).containsExactly("1.mp3", "2.mp3", "4.mp3")
+        assertThat(playlists.entries(id).map { it.id }).containsExactly(before[0].id, before[3].id, before[4].id)
+        assertThat(positions(id)).containsExactly(0, 1, 2)
+        assertThat(playlists.playlist(id)?.updatedAt).isEqualTo(400)
+        assertThat(names(other)).containsExactly("6.mp3")
+
+        playlists.restoreAll(removed)
+
+        assertThat(playlists.entries(id).map { it.id }).containsExactlyElementsOf(before.map { it.id })
+        assertThat(positions(id)).containsExactly(0, 1, 2, 3, 4, 5)
+        // The identities are checked again: they still exist.
+        assertThat(playlists.entries(id).map { it.identityId }).containsExactlyElementsOf(before.map { it.identityId })
+    }
+
+    @Test
+    fun entriesPutBackIntoAShorterPlaylistGoToItsEndAndAGoneIdentityIsLeftOut() = runBlocking<Unit> {
+        val id = playlists.create("A")
+        playlists.add(id, listOf(entry(1), entry(2), entry(3), entry(4)))
+        val before = playlists.entries(id)
+        val removed = playlists.removeAll(listOf(before[2].id, before[3].id))
+        // Meanwhile the first entry goes too, and the identity of song 4 is deleted.
+        playlists.remove(before[0].id)
+        database.identities().delete(listOf(4L))
+
+        playlists.restoreAll(removed)
+
+        assertThat(names(id)).containsExactly("2.mp3", "3.mp3", "4.mp3")
+        assertThat(positions(id)).containsExactly(0, 1, 2)
+        assertThat(playlists.entries(id).last().identityId).isNull()
+    }
 }

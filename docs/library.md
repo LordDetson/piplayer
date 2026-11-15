@@ -530,7 +530,8 @@ keeps playing meanwhile, and the crash leaves a native crash report of `:tagger`
   tap. Each song row
   has a menu with "Play next" and "Add to queue" (playback.md §9.1), "Go to album", "Go to artist" (one entry per
   artist) and "Go to folder"; album, artist and folder rows and the top bars of their pages have "Play next" and "Add
-  to queue". Since M2b the song menu is the track menu of playback.md §9.1, with "Details" last (§18).
+  to queue". Since M2b the song menu is the track menu of playback.md §9.1, with "Details" last (§18), and a long press
+  on a song row starts selecting songs (§20).
 - The debug entry moves from the list into the top bar.
 
 ### 6.2 Grouping
@@ -1476,6 +1477,8 @@ Decision: an entry never points at a file. It refers to a track identity (§8.1)
   fails says "The playlist could not be changed". Removing says so with "Undo", which puts the entry back in its place. The
   page has no sort and no search: the playlist's order is the user's. A playlist deleted while its page is open closes
   the page; a page opened for a playlist that is gone says so.
+- Since M2b entries can be selected (§20): while selecting, rows have no drag handle and no "Move up" or "Move down"
+  action, and the selection menu has "Remove from playlist" for the selected entries, with one "Undo" for all of them.
 - "Add to playlist" is in the song menu after "Add to queue", and in the menus of album, artist and folder rows and page
   top bars. It opens a chooser with "New playlist" first and the playlists by name; the songs go to the end of the chosen
   playlist, an album's by disc and track, an artist's and a folder's (with its subfolders) in the sort kept for their kind,
@@ -1947,3 +1950,176 @@ Instrumented tests on the API 30 emulator:
   "Unknown genre" last, the sort by songs and the search; the tab updated after the hidden files change; a genre page
   that plays from a row, "Play", "Shuffle", the menu of a genre row; a genre page found as gone; "Unknown genre" drawn in
   italics in its row, in its page's top bar and heading, and a real genre's name not.
+
+## 20. Multi-select (M2b: PIM-63)
+
+Several songs of one list chosen at once, for the queue, playlists and favorites. The queue screen's own part (removing
+entries, the service commands) is in playback.md §9.6, the order of the track menu that selection follows in playback.md
+§9.1. Identification (M3) and tag editing (M4b) add their entries to the selection menu when they land. The owner left the
+open choices to the recommendations (14.11.2026); they are marked "decision".
+
+### 20.1 Where songs can be selected
+
+- Decision: the song rows of every song list: the Songs tab (also while its search is open), album, artist, genre and
+  folder pages, the songs the Folders tab shows itself (a volume's root shown as the tab, also with a search, §6.1), the
+  smart list pages (§17.2), the playlist page (§16.3) and the queue screen (playback.md §9.2). A page selects only its
+  songs: the albums of an artist page, the subfolders of a folder page or of the Folders tab, disc headers, "Play all,
+  with subfolders", the chips and the buttons of a page's header ("Play", "Shuffle") are never selected.
+- Decision: rows of albums, artists, genres, folders and playlists are not selected in M2b; their menus already act on
+  all their songs (playback.md §9.1).
+- Now Playing, the mini player and the controller tree (playback.md §10, Android Auto) have no selection. Nothing that a
+  controller sees changes: no node, no command available to it, no item of the tree (§20.7).
+
+### 20.2 Selection mode
+
+1. A long press on a song row starts selection with that row selected. Decision: no drag to select a range in M2b.
+2. While selecting, a tap on a song row selects or deselects it, and so does a long press; nothing plays. Deselecting the
+   last selected row ends selection.
+3. Each song row shows a check box before its cover; the row's menu button is hidden. On the playlist page and the queue
+   screen the drag handles are hidden, the queue's swipe to remove is off, and the rows drop their accessibility actions
+   "Move up" and "Move down": rows do not move while selected (decision).
+4. The playing song keeps its mark. Unavailable entries of a playlist ("Not in the library") and files opened from
+   another app in the queue can be selected.
+5. The top bar becomes the selection bar: a close button ("Cancel selection"), the title "<N> selected", "Select all"
+   and a "More options" menu with the actions of §20.3. Search and sort are not offered while selecting; a search typed
+   before stays applied, and the search field comes back with its text when selection ends (decision). On the library
+   screen the tab row stays under the selection bar. Decision: when every song the list shows is selected, "Select all"
+   becomes "Deselect all", which deselects everything and so ends selection.
+6. "Select all" selects every song the list shows now, with its search and, on Songs missing information, its chips.
+   Decision: it selects the list, not a copy of its rows: a song that joins the list while all is selected (a sync, the
+   tag pass, a chip turned on) is selected too, and a song deselected after "Select all" stays deselected.
+7. The title counts the selected songs that the list shows. A selected song that leaves the list (deleted, hidden, a chip
+   turned off) leaves the selection; selection ends when nothing selected is left. A deselected song that leaves the list
+   leaves the exceptions of "Select all" too, so the selection is the whole list again.
+8. This is judged only against a loaded list: while a list is loading, asks for the permission, shows its first page
+   ahead of the whole list (§1.4), or still shows the result of an older search or other chips than the ones now chosen,
+   selected songs are kept and the count waits. On the queue screen it is judged only once the saved queue is restored
+   (playback.md §4.4).
+9. On the library screen a switch of tabs ends selection: the selection belongs to the list it was made in. The mini
+   player and the header items of a page (an album on an artist page, a subfolder, "Play", "Shuffle", the chips) work as
+   usual; a page opened from there and closed again finds its selection as it was (decision).
+10. Accessibility: a song row says that it is selected or not and has the role of a check box while selecting; outside
+    selection its long press is labelled "Select" and it offers "Select" as an accessibility action, so TalkBack and
+    switch access reach selection without a long press. The selection bar's title is a polite live region, so the count
+    is read when it changes. Every control of the bar has a label.
+
+### 20.3 Actions
+
+The selection menu has the entries of the track menu (playback.md §9.1) that make sense for many songs, in its order,
+with "Play" first, then the entries of the place:
+
+| Entry | Songs tab, album, artist, genre, folder and smart list pages | Playlist page | Queue screen |
+|---|---|---|---|
+| Play | yes | yes | no |
+| Play next | yes | yes | yes |
+| Add to queue | yes | yes | yes |
+| Add to playlist | yes | yes | yes |
+| Add to favorites or Remove from favorites | yes | yes | yes |
+| Details | exactly one song selected | exactly one available entry selected | exactly one entry selected |
+| Remove from playlist | no | yes | no |
+| Remove from queue | no | no | yes |
+
+- The songs go in the order the list shows them, not in the order they were selected (decision): an album page's
+  selection goes by disc and track, the queue's in the order the screen shows (playback.md §9.2).
+- **Play** replaces the queue with the selected songs and plays the first of them; with shuffle on the first stays first
+  and the others follow in a shuffled order, as a tap plays a list (playback.md §3.6). Decision: it plays only the
+  selected songs, not the list from the first of them. On the queue screen it is not offered (playback.md §9.6).
+- **Play next** and **Add to queue** add the selected songs as the song menu adds one (playback.md §9.1), with the message
+  for the number of songs. On the queue screen they add the selected songs once more, as the row's menu does.
+- **Add to playlist** opens the playlist chooser of §16.3 ("New playlist" first). The songs go to the end of the chosen
+  playlist in the order above; the same playlist the page shows may be chosen, since a song may stand twice (§16.1).
+  Cancelling the chooser (or the name dialog of a new playlist) keeps the selection.
+- **Add to favorites** or **Remove from favorites** (decision): when the menu opens, the app reads, off the main thread,
+  the identities of the selected songs and which of them are favorites, from the user database itself as the song menu
+  does (§15.2), in chunks and not one song at a time. Until that read ends the entry is shown disabled. A song whose
+  tags are not read yet has no identity and does not count. The entry is "Add to favorites" when at least one counted
+  song is not a favorite, otherwise "Remove from favorites"; when no selected song has an identity, it is disabled and
+  says that the tags are still being read. The write is one transaction of the user database that checks each identity
+  again (§8.1) and raises the change counter once (§3.1, §15.2); songs without an identity are skipped, and the message
+  says how many changed and how many are still being read.
+- **Details** (§18) opens the details of the one selected song (on the queue screen also of a file opened from another
+  app, §18.5). Decision: it is not offered for more than one song, and "Go to album", "Go to artist", "Go to folder",
+  "Choose cover" and "Remove own cover" are not in the selection menu at all: each names one song's place or picture,
+  and the row's own menu has them.
+- **Remove from playlist** removes the selected entries (only those entries: another copy of the same song stays) in one
+  transaction that closes the gaps (§16.1), and says "Removed <N> songs from the playlist" with "Undo", which puts each
+  entry back at its position. An entry not in the library can be removed.
+- **Remove from queue**: playback.md §9.6.
+- Unavailable entries of a playlist and files opened from another app in the queue are skipped by the actions that need a
+  library song (play, add, playlist, favorites); decision: when the selection holds no library song, those entries are
+  left out of the menu, as the track menu leaves out what a place cannot do (playback.md §9.1). The message counts only
+  the songs that were added or changed.
+- Every action ends selection, "Details" too (decision). "Select all" and the chooser's cancel do not.
+
+### 20.4 Back
+
+- While selecting, the system back gesture and the back button end selection and do nothing else: the page stays. On the
+  library screen, the root of the app, back ends selection and the app stays.
+- The next back closes the page as before; on the library screen it leaves the app as before.
+- The close button of the selection bar does the same as the first back.
+
+### 20.5 Rotation and process death
+
+- The selection lives with the list's state holder, so it survives a rotation and any other change of configuration
+  whatever its size.
+- Decision: it is also saved for process death when its saved form is small: whether it is "all except" (§20.2, 6) or
+  "only these", at most 1 000 keys (file IDs on library lists, entry IDs on the playlist page, the queue screen's keys of
+  playback.md §9.6), and for "all except" the list it was made on (its search and chips). A larger selection is not
+  saved, and the app comes back without one: nothing of the library changes by losing it.
+- After a restore, "only these" keeps the keys the loaded list still shows (§20.2, 8); with none left, selection is over.
+  "All except" comes back only when the list comes back with the same search and chips; otherwise it is dropped, so that
+  an action never covers songs the person did not see selected (the chips of Songs missing information are not saved
+  and come back at their default).
+- On the queue screen a restored selection is checked against the restored queue as a selection is after a change of
+  the play order (playback.md §9.6).
+
+### 20.6 Large selections
+
+- On a library list (every place but the playlist page and the queue), a selection of the whole list ("Select all" with
+  nothing deselected) is sent as the list itself (its compact request, §6.4). An "all except" selection is sent as the
+  list plus the file IDs of the songs left out; decision: no rows are needed, since a library list never holds a song
+  twice, and a song left out that is no longer in the list is ignored. Only an "only these" selection is sent as file IDs
+  in the list's order. So the size of what is sent grows with the rows the person tapped, not with the list.
+- Decision: the playlist page and the queue screen send the file IDs of the selected songs in their order, since they
+  hold their entries themselves and may hold a song twice; a whole playlist is sent as the playlist.
+- The cost of what is made of it is in playback.md §9.6: "Play" of an "all except" selection is the list's request with
+  the songs left out removed as journal edits; "Play next" and "Add to queue" add entries as adding a folder does.
+- Writes run off the main thread, in one transaction per action: favorites, playlist entries added or removed.
+
+### 20.7 What does not change
+
+- Android Auto and other controllers: the tree, its nodes and the commands offered to a controller stay as they are. The
+  new service commands of playback.md §9.6 are PiPlayer's own, offered only to PiPlayer's own screen and refused to any
+  other controller, like "Add to queue".
+- `user.db` stays at version 5 and the library database at version 12: selection is screen state. Nothing runs at
+  start-up or in the first sync.
+
+### 20.8 Checks
+
+JVM tests: the selection model (toggle, "Select all" as all except, the count against the shown keys, keys that leave the
+list, deselected keys that leave the list making it the whole list again, the order of the selected songs in the list's
+order, whole-list and everything-shown detection, the saved form with its list and its 1 000-key limit, a restore that
+drops missing keys and an "all except" made on other chips); the queue's keys of media IDs held more than once dropped
+after a change of the queue; the entries of the selection menu in each place and for one or several songs, favorites
+shown as "Add" while one counted song is not a favorite, "Remove" while all counted ones are, disabled while read or with
+none counted, Details only for one, the song entries left out without a library song; the queue removal of a set of rows
+(playback.md §9.6).
+
+Instrumented tests on the emulators:
+
+- On a song row: a long press starts selection, a tap toggles, the check box, the menu button hidden, the semantics of a
+  selected row and the "Select" accessibility action; disc headers and header items not selectable; the selection bar
+  with its count, "Select all" and "Deselect all" and the live region.
+- On the screen: the Songs tab selection with the bar, its count and "Select all"; back ends selection and stays on an
+  album page and on the library screen, the next back leaves the page or the app; the close button; a tab switch ends
+  selection; the search text comes back after selection; "Play", "Play next" and "Add to queue" of a selection in the
+  list's order through the real service; "Add to playlist" to an existing playlist; favorites added and removed for
+  several songs, unread songs skipped; "Details" of one song; on the playlist page, removal of entries with a duplicate
+  copy and an unavailable entry, then "Undo", and the drag handles and move actions gone while selecting; on the queue
+  screen, removal of scattered entries with "Undo", no swipe and no "Play" while selecting.
+- Process death: a list holder built again from its saved state brings the selection back; more than 1 000 keys are not
+  saved; an "all except" made on another list (other chips or another search, which name the list alike) is dropped.
+- The user database: several favorites in one transaction that raises the change counter once, unread and gone
+  identities skipped; playlist entries removed and put back in one transaction each; track references read in chunks
+  equal to the one-by-one read.
+- Through the service: playback.md §9.6.

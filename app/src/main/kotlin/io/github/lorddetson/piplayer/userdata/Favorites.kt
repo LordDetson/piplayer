@@ -27,6 +27,27 @@ class Favorites(private val database: UserDatabase, private val clock: () -> Lon
         true
     }
 
+    /** Which of [identityIds] are favorites, read in chunks (docs/library.md §20.3). */
+    suspend fun favoriteIdentities(identityIds: Collection<Long>): Set<Long> =
+        identityIds.distinct().chunked(CHUNK).flatMapTo(HashSet()) { dao.favoritesAmong(it) }
+
+    /**
+     * Makes the songs of [songs] (each an identity with the content key it was read by) favorites, or not, in one
+     * transaction that checks each identity as [set] does and raises the change counter once; how many songs were
+     * written, leaving out those whose identity is gone (docs/library.md §20.3).
+     */
+    suspend fun setAll(songs: List<Pair<Long, ByteArray?>>, favorite: Boolean): Int = database.withWriteTransaction {
+        val now = clock()
+        var written = 0
+        for ((identityId, contentKey) in songs) {
+            val identity = database.identities().current(identityId, contentKey) ?: continue
+            if (favorite) dao.add(identity, now) else dao.remove(identity)
+            written++
+        }
+        if (written > 0) database.user().countChange()
+        written
+    }
+
     suspend fun isFavoriteAlbum(albumKey: String): Boolean = dao.isFavoriteAlbum(albumKey)
 
     fun isFavoriteAlbumFlow(albumKey: String): Flow<Boolean> = dao.isFavoriteAlbumFlow(albumKey)
@@ -52,6 +73,9 @@ class Favorites(private val database: UserDatabase, private val clock: () -> Lon
     companion object {
         /** The prefix of an album key made of a release ID (`AlbumKey`). */
         const val RELEASE_PREFIX = "mbid:"
+
+        /** Identities of one read: within SQLite's limit on bound values. */
+        private const val CHUNK = 500
 
         /** The release ID of an album key made of one, as 16 bytes; null for any other key. */
         fun releaseMbidOf(albumKey: String): ByteArray? =

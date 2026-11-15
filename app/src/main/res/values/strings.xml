@@ -414,4 +414,35 @@
     <string name="open_genre">Open genre</string>
     <!-- The controller tree's node that holds Playlists, Genres and Folders (docs/playback.md §10.1). -->
     <string name="tree_more">More</string>
+    <!-- Multi-select (docs/library.md §20). -->
+    <plurals name="selection_count">
+        <item quantity="one">%1$d selected</item>
+        <item quantity="other">%1$d selected</item>
+    </plurals>
+    <string name="selection_close">Cancel selection</string>
+    <string name="selection_select_all">Select all</string>
+    <string name="selection_deselect_all">Deselect all</string>
+    <string name="selection_select">Select</string>
+    <string name="selection_deselect">Deselect</string>
+    <string name="selection_favorites_not_read">Favorites: the tags are still being read</string>
+    <plurals name="selection_removed_from_playlist">
+        <item quantity="one">Removed %1$d song from the playlist</item>
+        <item quantity="other">Removed %1$d songs from the playlist</item>
+    </plurals>
+    <plurals name="selection_removed_from_queue">
+        <item quantity="one">Removed %1$d song</item>
+        <item quantity="other">Removed %1$d songs</item>
+    </plurals>
+    <plurals name="selection_favorites_added">
+        <item quantity="one">Added %1$d song to favorites</item>
+        <item quantity="other">Added %1$d songs to favorites</item>
+    </plurals>
+    <plurals name="selection_favorites_removed">
+        <item quantity="one">Removed %1$d song from favorites</item>
+        <item quantity="other">Removed %1$d songs from favorites</item>
+    </plurals>
+    <plurals name="selection_favorites_not_read_count">
+        <item quantity="one">%1$d song is still being read</item>
+        <item quantity="other">%1$d songs are still being read</item>
+    </plurals>
 </resources>

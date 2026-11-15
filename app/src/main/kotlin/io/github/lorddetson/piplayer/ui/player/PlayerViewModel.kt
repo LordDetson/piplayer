@@ -97,6 +97,14 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     /** The sleep timer and "stop after current track" as the service reports them (§6.5). */
     val extras: StateFlow<PlaybackExtras> = mutableExtras.asStateFlow()
 
+    private val mutableRestored = MutableStateFlow(false)
+
+    /**
+     * Whether the restore of the saved queue has ended, whatever it found: the queue screen judges its selection against
+     * the queue only from then on (docs/library.md §20.2, 8).
+     */
+    val restored: StateFlow<Boolean> = mutableRestored.asStateFlow()
+
     private val connection = PlaybackConnection(application, object : MediaController.Listener {
         @OptIn(UnstableApi::class)
         override fun onError(controller: MediaController, sessionError: SessionError) {
@@ -118,7 +126,8 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
             mutableExtras.value = PlaybackExtras.from(sessionExtras)
             mutablePlayer.value = this
             // Opening the screen shows the queue saved before the process died, paused (docs/playback.md §4.4).
-            sendCustomCommand(PlaybackSessionCallback.RESTORE_COMMAND, Bundle.EMPTY)
+            val restore = sendCustomCommand(PlaybackSessionCallback.RESTORE_COMMAND, Bundle.EMPTY)
+            restore.addListener({ mutableRestored.value = true }, ContextCompat.getMainExecutor(application))
         }
     }
 
@@ -221,6 +230,10 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
                     is QueueTarget.Songs -> putLongArray(PlaybackSessionCallback.EXTRA_SONG_IDS, target.ids.toLongArray())
                     else -> putString(PlaybackSessionCallback.EXTRA_REQUEST, QueueRequest(NO_SONG, 0, queryOf(target)).mediaId)
                 }
+                // An "all except" selection: the list without the songs left out (docs/library.md §20.6).
+                if (target is QueueTarget.Selected && target.excluded.isNotEmpty()) {
+                    putLongArray(PlaybackSessionCallback.EXTRA_EXCLUDED, target.excluded.toLongArray())
+                }
             }
             connection.whenConnected {
                 val result = sendCustomCommand(PlaybackSessionCallback.ADD_TO_QUEUE_COMMAND, args)
@@ -271,6 +284,56 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
                         PlayerMessage(app.getString(R.string.queue_removed, title), app.getString(R.string.queue_undo)) {
                             undoRemoval(token)
                         },
+                    )
+                },
+                ContextCompat.getMainExecutor(getApplication()),
+            )
+        }
+    }
+
+    /**
+     * "Play" of selected songs (docs/library.md §20.3, docs/playback.md §9.6): the songs alone, the whole list as its
+     * request from its first song, or the list without the songs an "all except" selection leaves out.
+     */
+    fun playSelection(target: QueueTarget) {
+        when {
+            target is QueueTarget.Selected && target.excluded.isEmpty() -> return play(0, null, target.query)
+            target is QueueTarget.Playlist -> return play(0, null, SongQuery.playlist(target.id))
+            target !is QueueTarget.Songs && target !is QueueTarget.Selected -> return
+        }
+        val args = Bundle().apply {
+            when (target) {
+                is QueueTarget.Songs -> putLongArray(PlaybackSessionCallback.EXTRA_SONG_IDS, target.ids.toLongArray())
+                is QueueTarget.Selected -> {
+                    putString(PlaybackSessionCallback.EXTRA_REQUEST, QueueRequest(NO_SONG, 0, target.query).mediaId)
+                    putLongArray(PlaybackSessionCallback.EXTRA_EXCLUDED, target.excluded.toLongArray())
+                }
+                else -> Unit
+            }
+        }
+        connection.whenConnected { sendCustomCommand(PlaybackSessionCallback.PLAY_SONGS_COMMAND, args) }
+    }
+
+    /** Removes the selected queue [entries] at once, with one "Undo" in the message (docs/playback.md §9.6). */
+    fun removeFromQueue(entries: List<QueueEntry>) {
+        if (entries.isEmpty()) return
+        val args = Bundle().apply {
+            putIntArray(PlaybackSessionCallback.EXTRA_ROWS, entries.map { it.row }.toIntArray())
+            putStringArrayList(PlaybackSessionCallback.EXTRA_MEDIA_IDS, ArrayList(entries.map { it.mediaId }))
+        }
+        connection.whenConnected {
+            val result = sendCustomCommand(PlaybackSessionCallback.REMOVE_FROM_QUEUE_ENTRIES_COMMAND, args)
+            result.addListener(
+                {
+                    val sessionResult = runCatching { result.get() }.getOrNull() ?: return@addListener
+                    if (sessionResult.resultCode != SessionResult.RESULT_SUCCESS) return@addListener
+                    val app = getApplication<Application>()
+                    val token = sessionResult.extras.getLong(PlaybackSessionCallback.EXTRA_TOKEN, -1)
+                    mutableMessages.trySend(
+                        PlayerMessage(
+                            app.resources.getQuantityString(R.plurals.selection_removed_from_queue, entries.size, entries.size),
+                            app.getString(R.string.queue_undo),
+                        ) { undoRemoval(token) },
                     )
                 },
                 ContextCompat.getMainExecutor(getApplication()),
@@ -369,6 +432,12 @@ sealed interface QueueTarget {
     /** A genre's songs by its key, `!none` for the songs without one (docs/library.md §19.2). */
     data class Genre(val key: String) : QueueTarget
 
+    /**
+     * A selection of a library list (docs/library.md §20.6): the songs of [query] as it is shown (its order and search)
+     * without the songs of [excluded], by file ID: the whole list when none is left out.
+     */
+    data class Selected(val query: SongQuery, val excluded: List<Long> = emptyList()) : QueueTarget
+
     companion object {
         /**
          * The list of [target] without a search: an album by disc and track, an artist, a folder and a genre in the order
@@ -382,6 +451,7 @@ sealed interface QueueTarget {
                 is Genre -> SongQuery.genre(target.key) to ListName.GENRE_PAGE
                 is Playlist -> return SongQuery.playlist(target.id)
                 is Songs -> return SongQuery.SONGS
+                is Selected -> return target.query
             }
             val order = ListSorts(context).order(list).first()
             return query.copy(sort = SongSort.of(order.field) ?: query.sort, reversed = order.reversed)

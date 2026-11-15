@@ -353,4 +353,218 @@ class QueueEditingTest {
             saved != null && saved.queueRevision > 0 && file?.revision == saved.queueRevision && file.added.size == 1
         }
     }
+
+    // Selected entries and selected songs (docs/playback.md §9.6).
+
+    private fun removeEntries(vararg rows: Int, mediaIds: List<String> = rows.map { ids()[it] }): SessionResult = send(
+        PlaybackSessionCallback.REMOVE_FROM_QUEUE_ENTRIES_COMMAND,
+        Bundle().apply {
+            putIntArray(PlaybackSessionCallback.EXTRA_ROWS, rows)
+            putStringArrayList(PlaybackSessionCallback.EXTRA_MEDIA_IDS, ArrayList(mediaIds))
+        },
+    )
+
+    private fun playSongs(vararg ids: Long): SessionResult = send(
+        PlaybackSessionCallback.PLAY_SONGS_COMMAND,
+        Bundle().apply { putLongArray(PlaybackSessionCallback.EXTRA_SONG_IDS, ids) },
+    )
+
+    /** The Songs list without [excluded]: an "all except" selection (library.md §20.6). */
+    private fun allExcept(command: SessionCommand, vararg excluded: Long, next: Boolean = false): SessionResult = send(
+        command,
+        Bundle().apply {
+            putString(PlaybackSessionCallback.EXTRA_REQUEST, QueueRequest(-1, 0).mediaId)
+            putLongArray(PlaybackSessionCallback.EXTRA_EXCLUDED, excluded)
+            putBoolean(PlaybackSessionCallback.EXTRA_NEXT, next)
+        },
+    )
+
+    @Test
+    fun scatteredEntriesAreRemovedAtOnceAndOneUndoPutsThemAllBack() {
+        startAtSong1()
+
+        val removal = removeEntries(4, 1, 3)
+
+        assertThat(removal.resultCode).isEqualTo(SessionResult.RESULT_SUCCESS)
+        controller.waitUntil("three entries are gone") { mediaItemCount == 3 }
+        assertThat(ids()).containsExactly("1", "3", "6")
+        assertThat(onMain { controller.currentMediaItem?.mediaId }).isEqualTo("1")
+        eventually("one edit per entry is saved") { store.readQueueBlocking()?.journal?.size == 3 }
+
+        assertThat(undo(removal).resultCode).isEqualTo(SessionResult.RESULT_SUCCESS)
+        controller.waitUntil("the entries are back") { mediaItemCount == 6 }
+        assertThat(ids()).containsExactly("1", "2", "3", "4", "5", "6")
+        assertThat(undo(removal).resultCode).isNotEqualTo(SessionResult.RESULT_SUCCESS)
+    }
+
+    @Test
+    fun underShuffleTheCurrentEntryAmongTheRemovedGivesWayToTheNextThatStaysAndUndoBringsItBack() {
+        startAtSong1()
+        onMain { controller.shuffleModeEnabled = true }
+        controller.waitUntil("shuffle is on") { shuffleModeEnabled }
+        val order = played()
+        val list = ids()
+        // The current song, the next one in the play order and the last one.
+        val rows = listOf(order[0], order[1], order[5]).map(list::indexOf).toIntArray()
+
+        val removal = removeEntries(*rows)
+
+        controller.waitUntil("three entries are gone") { mediaItemCount == 3 }
+        assertThat(played()).containsExactly(order[2], order[3], order[4])
+        controller.waitUntil("the next entry that stays plays") { currentMediaItem?.mediaId == order[2] && isPlaying }
+
+        assertThat(undo(removal).resultCode).isEqualTo(SessionResult.RESULT_SUCCESS)
+        controller.waitUntil("the entries are back") { mediaItemCount == 6 }
+        assertThat(ids()).isEqualTo(list)
+        assertThat(played()).isEqualTo(order)
+        controller.waitUntil("the removed current song is current again") { currentMediaItem?.mediaId == order[0] }
+    }
+
+    @Test
+    fun upNextEntriesAmongTheRemovedLeaveTheRunAndTheOthersStayInIt() {
+        startAtSong1()
+        add(5, 6, next = true)
+        controller.waitUntil("two songs added") { mediaItemCount == 8 }
+        assertThat(ids()).containsExactly("1", "5/a1", "6/a2", "2", "3", "4", "5", "6")
+
+        removeEntries(1, 3)
+        controller.waitUntil("two entries are gone") { mediaItemCount == 6 }
+        add(4, next = false)
+
+        controller.waitUntil("song 4 added") { mediaItemCount == 7 }
+        assertThat(ids()).containsExactly("1", "6/a2", "4/a3", "3", "4", "5", "6")
+    }
+
+    @Test
+    fun removingEveryEntryForgetsTheSavedQueueAndUndoBringsTheWholeQueueBack() {
+        startAtSong1()
+        onMain { controller.seekToNextMediaItem() }
+        controller.waitUntil("song 2 plays") { currentMediaItem?.mediaId == "2" }
+        eventually("the queue is saved at song 2") { store.readBlocking()?.songId == 2L }
+
+        val removal = removeEntries(0, 1, 2, 3, 4, 5)
+
+        assertThat(removal.resultCode).isEqualTo(SessionResult.RESULT_SUCCESS)
+        controller.waitUntil("the queue is empty") { mediaItemCount == 0 }
+        eventually("the saved queue is forgotten") { store.readBlocking() == null }
+
+        assertThat(undo(removal).resultCode).isEqualTo(SessionResult.RESULT_SUCCESS)
+        controller.waitUntil("the whole queue is back at song 2") { mediaItemCount == 6 && currentMediaItem?.mediaId == "2" }
+        assertThat(ids()).containsExactly("1", "2", "3", "4", "5", "6")
+        eventually("the queue is saved again") { store.readBlocking()?.songId == 2L }
+    }
+
+    @Test
+    fun entriesInManyRunsGoAroundThePlayingOneAndComeBackInTheirPlayOrder() {
+        songs.songs = (1L..30L).map { SongSourceRule.song(it, "Song %02d".format(it), LONG_FIXTURE) }
+        controller.tap(QueueRequest(startSongId = 1, startRow = 0), "Song 01")
+        controller.waitUntil("song 1 plays first of 30") { isPlaying && currentMediaItem?.mediaId == "1" && mediaItemCount == 30 }
+        onMain { controller.shuffleModeEnabled = true }
+        controller.waitUntil("shuffle is on") { shuffleModeEnabled }
+        val order = played()
+        val list = ids()
+        // Every other entry but the current one: more runs than are removed one by one.
+        val rows = list.indices.filter { it % 2 == 1 }.toIntArray()
+
+        val removal = removeEntries(*rows)
+
+        controller.waitUntil("fifteen entries are gone") { mediaItemCount == 15 }
+        assertThat(ids()).isEqualTo(list.filterIndexed { row, _ -> row % 2 == 0 })
+        assertThat(played()).isEqualTo(order.filter { it in ids() })
+        assertThat(onMain { controller.currentMediaItem?.mediaId }).isEqualTo("1")
+        eventually("one edit per entry is saved") { store.readQueueBlocking()?.journal?.size == 15 }
+
+        assertThat(undo(removal).resultCode).isEqualTo(SessionResult.RESULT_SUCCESS)
+        controller.waitUntil("the entries are back") { mediaItemCount == 30 }
+        assertThat(ids()).isEqualTo(list)
+        assertThat(played()).isEqualTo(order)
+        assertThat(onMain { controller.currentMediaItem?.mediaId }).isEqualTo("1")
+    }
+
+    @Test
+    fun aRowThatNoLongerShowsItsMediaIdRemovesNothing() {
+        startAtSong1()
+
+        val result = removeEntries(1, 2, mediaIds = listOf("2", "4"))
+
+        assertThat(result.resultCode).isNotEqualTo(SessionResult.RESULT_SUCCESS)
+        throughout("nothing is removed", 1.seconds) { onMain { controller.mediaItemCount } == 6 }
+    }
+
+    @Test
+    fun anUndoOfSeveralEntriesAfterAnotherEditIsRefused() {
+        startAtSong1()
+        val removal = removeEntries(2, 3)
+        controller.waitUntil("two entries are gone") { mediaItemCount == 4 }
+        add(6, next = true)
+        controller.waitUntil("song 6 added") { mediaItemCount == 5 }
+
+        assertThat(undo(removal).resultCode).isNotEqualTo(SessionResult.RESULT_SUCCESS)
+        assertThat(ids()).hasSize(5)
+    }
+
+    @Test
+    fun selectedSongsPlayAsAQueueOfAddedEntriesInTheirOrder() {
+        startAtSong1()
+
+        val result = playSongs(5, 2, 4)
+
+        assertThat(result.resultCode).isEqualTo(SessionResult.RESULT_SUCCESS)
+        controller.waitUntil("song 5 plays first of three") { mediaItemCount == 3 && currentMediaItem?.mediaId == "5/a1" && isPlaying }
+        assertThat(ids()).containsExactly("5/a1", "2/a2", "4/a3")
+        eventually("the queue of added songs is saved") {
+            val saved = store.readBlocking()
+            saved != null && saved.queue == null && store.readQueueBlocking()?.added?.size == 3
+        }
+    }
+
+    @Test
+    fun underShuffleTheFirstSelectedSongStaysFirst() {
+        onMain { controller.shuffleModeEnabled = true }
+        controller.waitUntil("shuffle is on") { shuffleModeEnabled }
+
+        playSongs(4, 1, 6, 2, 3)
+
+        controller.waitUntil("song 4 plays") { mediaItemCount == 5 && currentMediaItem?.mediaId == "4/a1" }
+        assertThat(played().first()).isEqualTo("4/a1")
+        assertThat(played()).containsExactlyInAnyOrder("4/a1", "1/a2", "6/a3", "2/a4", "3/a5")
+    }
+
+    @Test
+    fun allButSomeSongsOfAListPlayAsItsRequestWithTheSongsLeftOutRemovedAndComeBackAfterTheProcess() {
+        startAtSong1()
+
+        val result = allExcept(PlaybackSessionCallback.PLAY_SONGS_COMMAND, 1, 3)
+
+        assertThat(result.resultCode).isEqualTo(SessionResult.RESULT_SUCCESS)
+        controller.waitUntil("song 2 plays first of four") { mediaItemCount == 4 && currentMediaItem?.mediaId == "2" && isPlaying }
+        assertThat(ids()).containsExactly("2", "4", "5", "6")
+        onMain { controller.pause() }
+        eventually("the request is saved with two removals") {
+            val saved = store.readBlocking()
+            saved != null && saved.queue != null && saved.songId == 2L && store.readQueueBlocking()?.journal?.size == 2 &&
+                store.readQueueBlocking()?.added?.isEmpty() == true
+        }
+
+        onMain {
+            controller.stop()
+            controller.clearMediaItems()
+        }
+        controller.waitUntil("the player is empty") { mediaItemCount == 0 }
+        ActivityScenario.launch(MainActivity::class.java).use {
+            controller.waitUntil("the queue is back") { mediaItemCount == 4 && currentMediaItem?.mediaId == "2" }
+            assertThat(ids()).containsExactly("2", "4", "5", "6")
+        }
+    }
+
+    @Test
+    fun allButSomeSongsOfAListAreAddedToTheQueue() {
+        startAtSong1()
+
+        val result = allExcept(PlaybackSessionCallback.ADD_TO_QUEUE_COMMAND, 2, 5, 6, next = true)
+
+        assertThat(result.extras.getInt(PlaybackSessionCallback.EXTRA_ADDED)).isEqualTo(3)
+        controller.waitUntil("three songs added") { mediaItemCount == 9 }
+        assertThat(ids().subList(1, 4)).containsExactly("1/a1", "3/a2", "4/a3")
+    }
 }

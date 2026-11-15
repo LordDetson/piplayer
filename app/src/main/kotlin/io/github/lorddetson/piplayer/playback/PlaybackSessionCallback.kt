@@ -39,6 +39,7 @@ import io.github.lorddetson.piplayer.library.lists.ListKind
 import io.github.lorddetson.piplayer.library.songs.Song
 import io.github.lorddetson.piplayer.library.songs.SongList
 import io.github.lorddetson.piplayer.settings.LibrarySettings
+import java.util.Collections
 import java.util.Random
 import java.util.concurrent.Executors
 import java.util.concurrent.RejectedExecutionException
@@ -127,11 +128,25 @@ class PlaybackSessionCallback(
     /** The entry removed last and what undoing it needs; only touched on the main thread. */
     private var lastRemoval: Removal? = null
 
-    private class Removal(val before: QueueState?, val row: Int, val position: Int?, val item: MediaItem, val version: Long)
+    /**
+     * What undoing a removal needs (§9.2, §9.6): the queue's state [before], the removed [items] at their [rows] before the
+     * removal (ascending), for one entry its play [position] while shuffle was on, for several the whole play [order], and
+     * the [current] row with its [positionMs] when several entries took the current one with them.
+     */
+    private class Removal(
+        val before: QueueState?,
+        val rows: IntArray,
+        val items: List<MediaItem>,
+        val position: Int?,
+        val version: Long,
+        val order: IntArray? = null,
+        val current: Int? = null,
+        val positionMs: Long = 0,
+    )
 
-    /** The URI of an opened file that the last removal took out: its grant stays while an undo may want it back. */
-    private val undoUri: String?
-        get() = lastRemoval?.item?.mediaId?.takeIf { QueueIds.fileId(it) == null }
+    /** The URIs of opened files that the last removal took out: their grants stay while an undo may want them back. */
+    private val undoUris: List<String>
+        get() = lastRemoval?.items?.map { it.mediaId }?.filter { QueueIds.fileId(it) == null }.orEmpty()
 
     private val transitions = object : Player.Listener {
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) = onTransition()
@@ -181,6 +196,8 @@ class PlaybackSessionCallback(
                 .add(REMOVE_FROM_QUEUE_COMMAND)
                 .add(UNDO_REMOVE_COMMAND)
                 .add(MOVE_IN_QUEUE_COMMAND)
+                .add(PLAY_SONGS_COMMAND)
+                .add(REMOVE_FROM_QUEUE_ENTRIES_COMMAND)
                 .build()
         } else {
             ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS
@@ -518,6 +535,8 @@ class PlaybackSessionCallback(
             customCommand.customAction == REMOVE_FROM_QUEUE_ACTION && mayControl -> Futures.immediateFuture(removeFromQueue(args))
             customCommand.customAction == UNDO_REMOVE_ACTION && mayControl -> Futures.immediateFuture(undoRemoval(args.getLong(EXTRA_TOKEN, -1)))
             customCommand.customAction == MOVE_IN_QUEUE_ACTION && mayControl -> Futures.immediateFuture(moveInQueue(args))
+            customCommand.customAction == PLAY_SONGS_ACTION && mayControl -> playSongs(args)
+            customCommand.customAction == REMOVE_FROM_QUEUE_ENTRIES_ACTION && mayControl -> Futures.immediateFuture(removeEntries(args))
             else -> super.onCustomCommand(session, controller, customCommand, args, progressReporter)
         }
     }
@@ -1015,7 +1034,7 @@ class PlaybackSessionCallback(
     private fun edited(state: QueueState) {
         currentOrigin = state
         // A file that left the queue gives back its grant, unless an undo may still want it (§5.3).
-        openGrants.keepOnly(state.openItems.map { it.uri } + listOfNotNull(undoUri))
+        openGrants.keepOnly(state.openItems.map { it.uri } + undoUris)
         report(state)
     }
 
@@ -1074,6 +1093,8 @@ class PlaybackSessionCallback(
         val request = args.getString(EXTRA_REQUEST)?.let(QueueRequest::parse)
         if (ids == null && request == null) return Futures.immediateFuture(SessionResult(SessionError.ERROR_BAD_VALUE))
         val next = args.getBoolean(EXTRA_NEXT)
+        // An "all except" selection names the songs it leaves out of the list (library.md §20.6).
+        val excluded = args.getLongArray(EXTRA_EXCLUDED)?.toHashSet().orEmpty()
         val result = SettableFuture.create<SessionResult>()
         expansion.execute {
             try {
@@ -1081,7 +1102,7 @@ class PlaybackSessionCallback(
                     val found = SongList.songsById(context, ids.toList())
                     ids.toList().mapNotNull(found::get)
                 } else {
-                    SongList.load(context, query = requireNotNull(request).list)
+                    SongList.load(context, query = requireNotNull(request).list).filter { it.id !in excluded }
                 }
                 if (songs.isEmpty()) {
                     result.set(SessionResult(SessionError.ERROR_BAD_VALUE))
@@ -1089,7 +1110,7 @@ class PlaybackSessionCallback(
                 }
                 val refs = trackRefs()
                 val libraryId = libraryIdNow(refs)
-                val tracks = songs.map { song -> refs.lookup { it.refOf(song.id) } ?: TrackRef(song.id, null, null, null, null) }
+                val tracks = tracksOf(refs, songs)
                 mainHandler.post { result.set(insertSongs(songs, tracks, libraryId, next)) }
             } catch (e: Exception) {
                 Log.w(TAG, "Could not add songs to the queue", e)
@@ -1136,14 +1157,76 @@ class PlaybackSessionCallback(
         val position = player.playOrder?.positionOf(row)
         val item = player.getMediaItemAt(row)
         // Known before the removal, so that the removed file keeps its grant for an undo.
-        lastRemoval = Removal(before, row, position, item, -1)
+        lastRemoval = Removal(before, intArrayOf(row), listOf(item), position, -1)
         player.removeMediaItem(row)
-        val removal = Removal(before, row, position, item, version)
+        val removal = Removal(before, intArrayOf(row), listOf(item), position, version)
         lastRemoval = removal
         return SessionResult(SessionResult.RESULT_SUCCESS, Bundle().apply { putLong(EXTRA_TOKEN, removal.version) })
     }
 
-    /** Puts the entry removed last back where it was, in the list and the play order, if nothing changed since (§9.2). */
+    /**
+     * Removes the entries at the rows the screen showed, all of them or none when one row shows another entry now (§9.6):
+     * run by run from the last, so that each is one edit of the journal, and with the current one among them the next
+     * entry that stays in the play order plays.
+     */
+    private fun removeEntries(args: Bundle): SessionResult {
+        val player = player ?: return SessionResult(SessionError.ERROR_INVALID_STATE)
+        val rows = args.getIntArray(EXTRA_ROWS)
+        val ids = args.getStringArrayList(EXTRA_MEDIA_IDS)
+        val count = player.mediaItemCount
+        if (rows == null || ids == null || rows.isEmpty() || rows.size != ids.size || rows.toHashSet().size != rows.size ||
+            rows.indices.any { rows[it] !in 0 until count || player.getMediaItemAt(rows[it]).mediaId != ids[it] }
+        ) {
+            return SessionResult(SessionError.ERROR_BAD_VALUE)
+        }
+        val sorted = rows.sortedArray()
+        val removed = sorted.toHashSet()
+        val before = currentOrigin
+        val order = player.playOrder?.indices()
+        val current = player.currentMediaItemIndex
+        val currentGoes = current in removed
+        val next = if (currentGoes) QueueEditing.nextKept(QueueView(Collections.nCopies(count, EntryKey.Added(0)), current, order), removed) else null
+        val positionMs = player.currentPosition
+        val items = sorted.map { player.getMediaItemAt(it) }
+        // Known before the removal, so that removed files keep their grants for an undo.
+        lastRemoval = Removal(before, sorted, items, null, -1, order, current.takeIf { currentGoes }, positionMs)
+        val runs = QueueEditing.runs(sorted)
+        if (runs.size <= MAX_RUNS || sorted.size == count) {
+            for (run in runs) player.removeMediaItems(run.first, run.last + 1)
+            if (next != null && player.mediaItemCount > 0) {
+                val row = next - sorted.count { it < next }
+                if (player.currentMediaItemIndex != row) player.seekToDefaultPosition(row)
+            }
+        } else {
+            // Many runs: each removal would make the player build its whole timeline anew, too much for a long queue.
+            // The entry that plays on stays in the player; the others are set around it at once, and journalled as the
+            // runs would have journalled them.
+            val state = before
+            val view = state?.let { viewOf(player, it) }
+            val after = if (state != null && view != null) QueueEditing.removeRows(state, QueueView(view.keys, view.current), sorted) else null
+            val kept = (0 until count).filter { it !in removed }
+            val anchor = when {
+                !currentGoes -> current
+                next != null -> next
+                else -> order?.firstOrNull { it !in removed } ?: kept.first()
+            }
+            if (anchor != current) player.seekToDefaultPosition(anchor)
+            val newRow = IntArray(count) { -1 }
+            kept.forEachIndexed { index, row -> newRow[row] = index }
+            currentOrigin = after ?: currentOrigin
+            player.keepAround(anchor, kept.map { player.getMediaItemAt(it) }, newRow[anchor])
+            order?.filter { it !in removed }?.map { newRow[it] }?.toIntArray()?.let { player.setPlayOrder(StartFirstShuffleOrder.of(it)) }
+            if (after != null) edited(after)
+        }
+        val removal = Removal(before, sorted, items, null, version, order, current.takeIf { currentGoes }, positionMs)
+        lastRemoval = removal
+        return SessionResult(SessionResult.RESULT_SUCCESS, Bundle().apply { putLong(EXTRA_TOKEN, removal.version) })
+    }
+
+    /**
+     * Puts the entries removed last back where they were, in the list and the play order, if nothing changed since (§9.2);
+     * several entries also bring the current one back at its position (§9.6).
+     */
     private fun undoRemoval(token: Long): SessionResult {
         val player = player ?: return SessionResult(SessionError.ERROR_INVALID_STATE)
         // Only the removal the message names, and only while the queue is as that removal left it.
@@ -1151,13 +1234,128 @@ class PlaybackSessionCallback(
             ?: return SessionResult(SessionError.ERROR_INVALID_STATE)
         lastRemoval = null
         val wasEmpty = player.mediaItemCount == 0
-        player.insert(removal.row.coerceAtMost(player.mediaItemCount), listOf(removal.item), removal.position.takeIf { player.playOrder != null })
+        if (removal.items.size == 1 && removal.order == null && removal.current == null) {
+            player.insert(removal.rows[0].coerceAtMost(player.mediaItemCount), removal.items, removal.position.takeIf { player.playOrder != null })
+        } else {
+            val runs = QueueEditing.runs(removal.rows)
+            if (wasEmpty || runs.size <= MAX_RUNS) {
+                // Run by run in ascending rows, each where it stood before the runs after it come back.
+                for (run in runs.reversed()) {
+                    val first = removal.rows.indexOf(run.first)
+                    player.insert(run.first.coerceAtMost(player.mediaItemCount), removal.items.subList(first, first + run.last - run.first + 1), null)
+                }
+            } else {
+                // As the removal did: the entry that plays stays, and the whole queue is set around it at once.
+                val total = player.mediaItemCount + removal.items.size
+                val all = arrayOfNulls<MediaItem>(total)
+                removal.rows.forEachIndexed { index, row -> all[row] = removal.items[index] }
+                var next = 0
+                val anchor = player.currentMediaItemIndex
+                var anchorRow = 0
+                for (row in 0 until total) {
+                    if (all[row] != null) continue
+                    if (next == anchor) anchorRow = row
+                    all[row] = player.getMediaItemAt(next++)
+                }
+                player.keepAround(anchor, all.map { it!! }, anchorRow)
+            }
+            removal.order?.takeIf { it.size == player.mediaItemCount && player.shuffleModeEnabled }?.let {
+                player.setPlayOrder(StartFirstShuffleOrder.of(it))
+            }
+        }
         if (wasEmpty) player.prepare()
+        removal.current?.takeIf { it < player.mediaItemCount }?.let { player.seekTo(it, removal.positionMs) }
         val before = removal.before
         if (before != null) {
             commit(before)
         }
         return SessionResult(SessionResult.RESULT_SUCCESS)
+    }
+
+    /**
+     * Makes the queue [target] while the entry at [anchor] stays in the player as the one at [anchorInTarget], with four
+     * changes of the list at most however scattered the change is (§9.6): no transition for the entry that plays. Goes
+     * past the edits, so the caller journals the change itself.
+     */
+    private fun SessionPlayer.keepAround(anchor: Int, target: List<MediaItem>, anchorInTarget: Int) {
+        val inner = wrappedPlayer
+        val count = inner.mediaItemCount
+        if (anchor + 1 < count) inner.removeMediaItems(anchor + 1, count)
+        if (anchor > 0) inner.removeMediaItems(0, anchor)
+        if (anchorInTarget > 0) inner.addMediaItems(0, target.subList(0, anchorInTarget))
+        if (anchorInTarget + 1 < target.size) inner.addMediaItems(target.subList(anchorInTarget + 1, target.size))
+    }
+
+    /** The track references of [songs], read in chunks; a song the library does not give has one of its file ID alone. */
+    private fun tracksOf(refs: LibraryTrackRefs?, songs: List<Song>): List<TrackRef> {
+        val found = refs.lookup { it.refsOf(songs.map { song -> song.id }) }.orEmpty()
+        return songs.map { song -> found[song.id] ?: TrackRef(song.id, null, null, null, null) }
+    }
+
+    /**
+     * Plays selected songs (§9.6): [EXTRA_SONG_IDS] as a queue of added entries, or the list of [EXTRA_REQUEST] from its
+     * first song not in [EXTRA_EXCLUDED], with the songs left out removed as edits of the journal. A list ranked by plays
+     * keeps its songs as added entries, as a tap on it does (library.md §17.3).
+     */
+    private fun playSongs(args: Bundle): ListenableFuture<SessionResult> {
+        val ids = args.getLongArray(EXTRA_SONG_IDS)
+        val request = args.getString(EXTRA_REQUEST)?.let(QueueRequest::parse)
+        if (ids == null && request == null) return Futures.immediateFuture(SessionResult(SessionError.ERROR_BAD_VALUE))
+        val excluded = args.getLongArray(EXTRA_EXCLUDED)?.toHashSet().orEmpty()
+        // The user changed the queue: a restore or an open still on its way must not overwrite it.
+        val token = restoreGeneration.incrementAndGet()
+        val result = SettableFuture.create<SessionResult>()
+        expansion.execute {
+            try {
+                val refs = trackRefs()
+                val libraryId = libraryIdNow(refs)
+                var added = true
+                val songs: List<Song>
+                var state: QueueState? = null
+                if (ids != null) {
+                    val found = SongList.songsById(context, ids.toList())
+                    songs = ids.toList().mapNotNull(found::get)
+                } else {
+                    val list = SongList.load(context, query = requireNotNull(request).list)
+                    songs = list.filter { it.id !in excluded }
+                    val first = list.indexOfFirst { it.id !in excluded }
+                    if (first >= 0 && !request.list.kind.rankedByPlays) {
+                        added = false
+                        val leftOut = list.indices.filter { list[it].id in excluded }.toIntArray()
+                        state = QueueEditing.removeRows(
+                            QueueState(QueueRequest(list[first].id, first, request.list), emptyList(), libraryId),
+                            QueueView(list.map { EntryKey.Song(it.id) }, first),
+                            leftOut,
+                        )
+                    }
+                }
+                if (songs.isEmpty()) {
+                    result.set(SessionResult(SessionError.ERROR_BAD_VALUE))
+                    return@execute
+                }
+                val queue = state ?: QueueEditing.added(libraryId, tracksOf(refs, songs))
+                val items = if (added) songs.mapIndexed { index, song -> mediaItem(song, index + 1L) } else songs.map(::mediaItem)
+                mainHandler.post {
+                    val player = player
+                    if (released || player == null || token != restoreGeneration.get()) {
+                        result.set(SessionResult(SessionError.ERROR_INVALID_STATE))
+                        return@post
+                    }
+                    // The state first, so that the transition the new items bring is judged against it.
+                    currentOrigin = queue
+                    lastRemoval = null
+                    player.setMediaItems(items, 0, 0)
+                    player.prepare()
+                    player.play()
+                    commit(queue)
+                    result.set(SessionResult(SessionResult.RESULT_SUCCESS, Bundle().apply { putInt(EXTRA_ADDED, songs.size) }))
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Could not play the selected songs", e)
+                result.set(SessionResult(SessionError.ERROR_UNKNOWN))
+            }
+        }
+        return result
     }
 
     /** Moves an entry in the order the screen shows: the play order while shuffle is on, the list otherwise (§9.2). */
@@ -1306,6 +1504,31 @@ class PlaybackSessionCallback(
 
         const val EXTRA_TO = "io.github.lorddetson.piplayer.playback.TO"
 
+        /**
+         * The custom session command with which PiPlayer's own screen plays selected songs (docs/playback.md §9.6): the
+         * songs of [EXTRA_SONG_IDS] in their order as a queue of added entries, or the list of [EXTRA_REQUEST] without the
+         * songs of [EXTRA_EXCLUDED], from the first song left.
+         */
+        const val PLAY_SONGS_ACTION = "io.github.lorddetson.piplayer.playback.PLAY_SONGS"
+
+        val PLAY_SONGS_COMMAND = SessionCommand(PLAY_SONGS_ACTION, Bundle.EMPTY)
+
+        /** The file IDs of the songs an "all except" selection leaves out of [EXTRA_REQUEST]'s list (library.md §20.6). */
+        const val EXTRA_EXCLUDED = "io.github.lorddetson.piplayer.playback.EXCLUDED"
+
+        /**
+         * The custom session command with which PiPlayer's own screen removes the entries at [EXTRA_ROWS] of the list,
+         * which must have the media IDs of [EXTRA_MEDIA_IDS], all at once (docs/playback.md §9.6). Its result tells the
+         * [EXTRA_TOKEN] that [UNDO_REMOVE_COMMAND] names to put them all back.
+         */
+        const val REMOVE_FROM_QUEUE_ENTRIES_ACTION = "io.github.lorddetson.piplayer.playback.REMOVE_FROM_QUEUE_ENTRIES"
+
+        val REMOVE_FROM_QUEUE_ENTRIES_COMMAND = SessionCommand(REMOVE_FROM_QUEUE_ENTRIES_ACTION, Bundle.EMPTY)
+
+        const val EXTRA_ROWS = "io.github.lorddetson.piplayer.playback.ROWS"
+
+        const val EXTRA_MEDIA_IDS = "io.github.lorddetson.piplayer.playback.MEDIA_IDS"
+
         /** Commands that change how the player is set up rather than what it plays. */
         private val SETUP_COMMANDS = intArrayOf(
             Player.COMMAND_SET_AUDIO_ATTRIBUTES,
@@ -1315,6 +1538,12 @@ class PlaybackSessionCallback(
         )
 
         private const val TAG = "PlaybackSession"
+
+        /**
+         * Selected entries in more runs than this are removed or put back around the entry that plays rather than run by
+         * run: each change of the list makes the player build its whole timeline anew (docs/playback.md §9.6).
+         */
+        private const val MAX_RUNS = 8
 
         /** As long as a list read waits for the first sync (docs/library.md §1.4). */
         private const val READY_TIMEOUT_MS = 30_000L

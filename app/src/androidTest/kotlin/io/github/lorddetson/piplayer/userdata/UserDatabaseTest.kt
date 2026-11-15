@@ -228,4 +228,44 @@ class UserDatabaseTest {
         assertThat(dao.changeCounter()).isEqualTo(4)
         assertThat(rules.all()).containsExactly(FolderRuleEntity("external_primary", "Music/", FolderRuleEntity.EXCLUDE))
     }
+
+    @Test
+    fun severalFavoritesAreSetInOneTransactionThatRaisesTheChangeCounterOnce() = runBlocking<Unit> {
+        // Selected songs made favorites at once (docs/library.md §20.3).
+        val dao = database.user()
+        val favorites = Favorites(database)
+        for (id in 1L..4L) database.identities().add(identity(id))
+        favorites.set(2, favorite = true)
+        val before = dao.changeCounter()
+
+        // Identity 9 does not exist and has no key that leads anywhere: it is left out.
+        val written = favorites.setAll(listOf(1L to null, 2L to null, 3L to null, 9L to null), favorite = true)
+
+        assertThat(written).isEqualTo(3)
+        assertThat(dao.changeCounter()).isEqualTo(before + 1)
+        assertThat(dao.rulesCounter()).isZero()
+        assertThat(favorites.favoriteIdentities(listOf(1L, 2L, 3L, 4L, 9L))).containsExactlyInAnyOrder(1L, 2L, 3L)
+
+        // An identity deleted since the read goes to the identity that holds its key now (§8.1).
+        assertThat(favorites.setAll(listOf(1L to null, 3L to null, 7L to ByteArray(32) { 4 }), favorite = false)).isEqualTo(3)
+        assertThat(favorites.favoriteIdentities(listOf(1L, 2L, 3L, 4L))).containsExactly(2L)
+        assertThat(dao.changeCounter()).isEqualTo(before + 2)
+
+        // Nothing written raises nothing.
+        assertThat(favorites.setAll(listOf(9L to null), favorite = true)).isZero()
+        assertThat(dao.changeCounter()).isEqualTo(before + 2)
+    }
+
+    @Test
+    fun favoritesAreReadInChunksOfAnyLength() = runBlocking<Unit> {
+        val favorites = Favorites(database)
+        database.identities().addAll(
+            (1L..1_200L).map { id -> identity(id).copy(contentKey = ByteArray(32).also { java.nio.ByteBuffer.wrap(it).putLong(id) }) },
+        )
+        favorites.setAll((1L..1_200L step 2).map { it to null }, favorite = true)
+
+        val read = favorites.favoriteIdentities((1L..1_200L).toList())
+
+        assertThat(read).hasSize(600).allMatch { it % 2 == 1L }
+    }
 }

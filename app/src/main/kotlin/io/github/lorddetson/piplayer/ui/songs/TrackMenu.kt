@@ -41,7 +41,43 @@ sealed interface TrackMenuEntry {
     data object RemoveCover : TrackMenuEntry
 
     data object Details : TrackMenuEntry
+
+    /** "Play" of the selected songs (docs/library.md §20.3). */
+    data object Play : TrackMenuEntry
+
+    /**
+     * The favorite entry of a selection that cannot act now: still [reading] which songs are favorites, or none of the
+     * selected songs has its tags read (docs/library.md §20.3); shown disabled.
+     */
+    data class FavoriteUnavailable(val reading: Boolean) : TrackMenuEntry
+
+    /** "Remove from playlist" of the selected entries of a playlist page. */
+    data object RemoveFromPlaylist : TrackMenuEntry
+
+    /** "Remove from queue" of the selected entries of the queue screen (docs/playback.md §9.6). */
+    data object RemoveFromQueue : TrackMenuEntry
 }
+
+/** Where a selection's menu is (docs/library.md §20.3). */
+enum class SelectionPlace {
+    /** A song list or page of the library. */
+    LIST,
+
+    /** A playlist page. */
+    PLAYLIST,
+
+    /** The queue screen. */
+    QUEUE,
+}
+
+/** Of the counted selected songs (those with their tags read), how many are not favorites (docs/library.md §20.3). */
+data class FavoriteBatch(val counted: Int, val notFavorite: Int)
+
+/**
+ * What is known of a selection when its menu opens: how many [rows] are selected, how many of them are [songs] of the
+ * library (not an unavailable playlist entry, not a file opened from another app), and [favorites], null while it is read.
+ */
+data class SelectionMenuState(val rows: Int, val songs: Int, val favorites: FavoriteBatch? = null)
 
 /** What the place's menu can do: entries it has no action for are left out. */
 data class TrackMenuOffers(
@@ -88,5 +124,37 @@ object TrackMenu {
         }
         // "Identify" (M3) and "Edit tags" (M4b) will come here, before "Details".
         if (offers.details) add(TrackMenuEntry.Details)
+    }
+
+    /**
+     * The entries of a selection's menu (docs/library.md §20.3): the track menu's entries that make sense for many songs,
+     * in its order with "Play" first, then the place's own.
+     */
+    fun selectionEntries(place: SelectionPlace, offers: TrackMenuOffers, state: SelectionMenuState): List<TrackMenuEntry> = buildList {
+        // Unavailable entries and opened files have no library song to play, add or keep anything for.
+        if (state.songs > 0) {
+            // On the queue screen "Play" would replace the queue with a part of itself (docs/playback.md §9.6).
+            if (place != SelectionPlace.QUEUE) add(TrackMenuEntry.Play)
+            add(TrackMenuEntry.PlayNext)
+            add(TrackMenuEntry.AddToQueue)
+            if (offers.addToPlaylist) add(TrackMenuEntry.AddToPlaylist)
+            if (offers.favorites) {
+                val favorites = state.favorites
+                add(
+                    when {
+                        favorites == null -> TrackMenuEntry.FavoriteUnavailable(reading = true)
+                        favorites.counted == 0 -> TrackMenuEntry.FavoriteUnavailable(reading = false)
+                        else -> TrackMenuEntry.Favorite(favorite = favorites.notFavorite == 0)
+                    },
+                )
+            }
+        }
+        // One song's details; on the queue screen also a file opened from another app's.
+        if (offers.details && state.rows == 1 && (state.songs == 1 || place == SelectionPlace.QUEUE)) add(TrackMenuEntry.Details)
+        when (place) {
+            SelectionPlace.LIST -> Unit
+            SelectionPlace.PLAYLIST -> add(TrackMenuEntry.RemoveFromPlaylist)
+            SelectionPlace.QUEUE -> add(TrackMenuEntry.RemoveFromQueue)
+        }
     }
 }

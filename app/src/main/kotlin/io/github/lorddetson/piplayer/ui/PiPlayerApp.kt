@@ -12,6 +12,7 @@ import io.github.lorddetson.piplayer.settings.LibrarySettings
 import io.github.lorddetson.piplayer.ui.library.AlbumPage
 import io.github.lorddetson.piplayer.ui.player.FavoriteState
 import io.github.lorddetson.piplayer.ui.songs.FavoriteActions
+import io.github.lorddetson.piplayer.ui.songs.SelectionFavorites
 import io.github.lorddetson.piplayer.ui.library.ArtistPage
 import io.github.lorddetson.piplayer.ui.library.FolderPage
 import io.github.lorddetson.piplayer.ui.library.GenrePage
@@ -68,6 +69,7 @@ import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarResult
 import io.github.lorddetson.piplayer.playback.QueueIds
 import io.github.lorddetson.piplayer.ui.player.QueueActions
+import io.github.lorddetson.piplayer.ui.player.QueueSelectionActions
 import io.github.lorddetson.piplayer.ui.player.QueueScreen
 import io.github.lorddetson.piplayer.ui.player.QueueTarget
 import androidx.compose.material3.SnackbarHost
@@ -219,6 +221,11 @@ fun PiPlayerApp(viewModel: PlayerViewModel = viewModel()) {
     val covers = rememberCoverActions(snackbar)
     val favorites = remember(context) { FavoriteChoices(context) }
     val favoriteActions = rememberFavoriteActions(favorites, snackbar)
+    val resources = LocalResources.current
+    val messageScope = rememberCoroutineScope()
+    val favoriteBatch = remember(favoriteActions) {
+        favoriteActions.batch({ text -> messageScope.launch { snackbar.showSnackbar(text) } }, resources)
+    }
     val playlists = rememberPlaylistActions(
         snackbar,
         open = { id -> open(PlaylistRoute(id)) },
@@ -256,6 +263,8 @@ fun PiPlayerApp(viewModel: PlayerViewModel = viewModel()) {
         covers = covers,
         playlists = playlists,
         openGenre = { open(GenreRoute(it)) },
+        playSelection = viewModel::playSelection,
+        favoriteBatch = favoriteBatch,
     )
     // What the artist and the album on Now Playing open (docs/library.md §6.1).
     var playingLinks by remember { mutableStateOf<SongLinks?>(null) }
@@ -300,6 +309,13 @@ fun PiPlayerApp(viewModel: PlayerViewModel = viewModel()) {
                     snackbar = snackbar,
                     onBack = { close() },
                     menu = menu,
+                    selectionActions = QueueSelectionActions(
+                        addToQueue = viewModel::addToQueue,
+                        removeAll = viewModel::removeFromQueue,
+                        addToPlaylist = playlists.addSelected,
+                        favorites = favoriteBatch,
+                    ),
+                    restored = viewModel.restored.collectAsStateWithLifecycle().value,
                 )
             }
             entry<TrackDetailsRoute>(metadata = FROM_THE_SIDE) { route ->
@@ -443,6 +459,23 @@ private class AppFavoriteActions(
     }
 
     val actions = FavoriteActions(isFavorite = { song -> favorites.isFavorite(song.id) }, set = { song, on -> setById(song.id, on) })
+
+    /** Selected songs made favorites or not at once, with a message of how many changed and how many are unread (§20.3). */
+    fun batch(sayText: (String) -> Unit, resources: android.content.res.Resources) = SelectionFavorites(
+        state = { ids -> favorites.batchState(ids) },
+        set = { ids, favorite ->
+            FavoriteChoices.scope.launch {
+                val result = favorites.setSongs(ids, favorite) ?: return@launch say(R.string.favorite_failed)
+                val parts = listOfNotNull(
+                    result.changed.takeIf { it > 0 }?.let { n ->
+                        resources.getQuantityString(if (favorite) R.plurals.selection_favorites_added else R.plurals.selection_favorites_removed, n, n)
+                    },
+                    result.notRead.takeIf { it > 0 }?.let { n -> resources.getQuantityString(R.plurals.selection_favorites_not_read_count, n, n) },
+                )
+                if (parts.isNotEmpty()) sayText(parts.joinToString(" · "))
+            }
+        },
+    )
 }
 
 @Composable

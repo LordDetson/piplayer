@@ -1042,6 +1042,8 @@ By hand on the phone: one of the owner's albums (MP3 with a LAME tag) with the s
 - A drag while shuffle is on changes the play order, not the list underneath: turning shuffle off afterwards goes on in
   the list's order from the current song. With shuffle off a drag moves the entry in the list.
 - A tap on a song in any list still replaces the whole queue, edits included, without asking.
+- Since M2b entries can be selected (library.md §20, §9.6): while selecting, rows have no handle and no "Move up" or
+  "Move down" action, swiping does not remove, and a tap selects instead of playing.
 
 ### 9.3 Own shuffle order and "Play next"
 
@@ -1096,6 +1098,60 @@ gone with its entries, order and run; on the library database, songs by file ID;
 album, artist and folder menus, the queue screen in play order with the current song, a tap, a removal with undo, a
 swiped row undone that stays, a drag, and "Move up" and "Move down". An edit of a 20 000-song queue reaches the
 controllers within 0.25 s (the median of 5 runs, `@TimingTest`).
+
+### 9.6 Selected entries and selected songs (M2b, PIM-63)
+
+- The selection menu of the queue screen (library.md §20.3) follows the row's track menu (§9.1): "Play next", "Add to
+  queue", "Add to playlist", favorites and "Details", then "Remove from queue". "Play next" and "Add to queue" add the
+  selected songs again, as the row's menu adds one. Decision: "Play" is not offered there, since it would replace the
+  queue with a part of itself; "Remove from queue" of the others does that and can be undone.
+- Keys: the screen keys an entry by its media ID and, for a media ID the queue holds more than once (a file opened
+  twice, a song that stands twice in a playlist), by its copy number in the play order. When the queue changes from
+  anywhere while selecting (shuffle turned on or off, a move, an insert or a removal from a controller), copy numbers
+  can name other entries, so the selected entries whose media ID the queue held or holds more than once are deselected
+  (decision); entries with a media ID of their own stay selected.
+- "Remove from queue" of selected entries removes them all at once. The screen sends their rows in the list together
+  with their media IDs; the service removes nothing when one row no longer shows its media ID (the queue changed since).
+  Rows are removed as runs of neighbouring rows, from the last run to the first; each removed entry is one edit of the
+  journal (§9.4), as one removal at a time would make it, and up-next entries among them leave the run. Removing more
+  than 200 entries folds the journal at the next restore, as many single removals would.
+- Decision: entries in more than 8 runs are not removed run by run, since every change of the list makes the player build
+  its whole timeline anew, which runs out of memory on a 20 000-song queue with 1 000 runs (measured on the API 30
+  emulator). Instead the entry that plays on stays in the player and the others are taken out and put back around it in
+  at most four changes; the journal and the play order are the same as run by run, and the playing song goes on
+  without a new playback (§11.1). Its undo puts the queue back around the entry that plays in the same way.
+- Removing every entry ("Select all" with nothing deselected) empties the queue and forgets the saved one, as removing the
+  last entry does, and "Undo" puts the whole queue back and saves it again.
+- Removing the current song plays the next entry that stays, in the order the queue plays (the shuffle order while
+  shuffle is on); playing or paused stays as it was.
+- The message says "Removed <N> songs" with "Undo". Undo puts every removed entry back where it was, in the list and in
+  the play order as it was, and the current song back at its position if it was removed, as long as the queue has not
+  changed since; it follows the rules of one removal (§9.2): a newer message replaces it, and an undo that does not fit
+  is refused.
+- "Play" of selected songs (library.md §20.3) from a library list: an "only these" selection becomes a queue of added
+  entries (§9.4) with no compact request, the first current and playing; with shuffle on, the first stays first and the
+  others are shuffled after it (§3.6). A whole-list selection is played as the list's compact request from its first
+  song, as a tap on it plays it. An "all except" selection is played as the list's compact request starting at the first
+  selected song, with the songs left out removed as edits of the journal, so its cost grows with the songs left out, not
+  with the list (more than 200 of them fold at the next restore). The queue is saved and restored like any edited queue.
+- "Play next" and "Add to queue" of a selection use the existing command with the selected file IDs, the list's request
+  for a whole-list selection, or the request with the file IDs of the songs left out for an "all except" one; the
+  entries are added entries, as adding a folder makes them.
+- `PLAY_SONGS` and `REMOVE_FROM_QUEUE_ENTRIES` are commands of PiPlayer's own screen: offered only to it when it connects,
+  never to Android Auto, the media notification or another app, and refused from them, as adding songs is (§9.1).
+
+Checks. JVM tests: rows grouped into runs, from the last; the journal after removing scattered rows equals the journal of
+one removal at a time, also next to opened files, a song that stands twice and up-next entries (which leave the run);
+removing every row gives no queue; the rebuilt queue equals the edited one; the next entry that stays after removing the
+current one, with shuffle off and on; the request with the songs left out removed rebuilds to the selected songs in
+order. Instrumented tests on the emulators, through the service: scattered entries removed with shuffle off and on, the
+current one among them, up-next entries among them; entries in more than 8 runs under shuffle, the playing one staying
+current, and their undo with the play order; all of them, undone; undo of all, refused after another edit; a row
+that no longer shows its media ID removes nothing; "Play" of only these and of all but some, with shuffle off and on,
+restored after the process is gone; "Add to queue" of all but some; both commands not offered to and refused from
+another controller. Timing (`@TimingTest`, median of 5, local emulator): removing 1 000 scattered entries of a
+20 000-song queue reaches the controllers within 0.5 s; removing all of them but the current one and undoing that each
+within 1 s.
 
 ## 10. The library tree for controllers (M2a step 10)
 

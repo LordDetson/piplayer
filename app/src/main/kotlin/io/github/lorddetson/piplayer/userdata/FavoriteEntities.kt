@@ -66,6 +66,10 @@ interface FavoriteDao {
     @Query("DELETE FROM favorite WHERE identity_id = :identityId")
     suspend fun remove(identityId: Long)
 
+    /** Which of [identityIds] (at most 500 at once) are favorites (docs/library.md §20.3). */
+    @Query("SELECT identity_id FROM favorite WHERE identity_id IN (:identityIds)")
+    suspend fun favoritesAmong(identityIds: List<Long>): List<Long>
+
     @Query("SELECT * FROM favorite ORDER BY identity_id")
     suspend fun favorites(): List<FavoriteEntity>
 

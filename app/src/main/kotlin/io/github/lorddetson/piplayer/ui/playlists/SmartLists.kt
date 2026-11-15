@@ -1,5 +1,6 @@
 package io.github.lorddetson.piplayer.ui.playlists
 
+import androidx.lifecycle.createSavedStateHandle
 import android.app.Application
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -257,7 +258,9 @@ fun SmartListPage(kind: ListKind, host: LibraryHost, onBack: () -> Unit) {
     var search by rememberSaveable { mutableStateOf("") }
     val chosen by MissingReasonChoice.chosen.collectAsStateWithLifecycle()
     val order = smartListOrder(kind)
-    val songs = viewModel(key = "smart ${kind.token}") { SongsViewModel(app, SongQuery.smart(kind, MissingReasonChoice.chosen.value), order) }
+    val songs = viewModel(key = "smart ${kind.token}") {
+        SongsViewModel(app, SongQuery.smart(kind, MissingReasonChoice.chosen.value), order, createSavedStateHandle())
+    }
     LaunchedEffect(search) { songs.setSearch(search) }
     if (kind == ListKind.MISSING_INFO) LaunchedEffect(chosen) { songs.setKey(chosen.toString()) }
     val state by songs.state.collectAsStateWithLifecycle()
@@ -271,6 +274,7 @@ fun SmartListPage(kind: ListKind, host: LibraryHost, onBack: () -> Unit) {
         onSearch = { search = it },
         onSearching = { open -> searching = open; if (!open) search = "" },
         sort = { SortButton(order, songs.order.collectAsStateWithLifecycle().value, songs::setOrder) },
+        selection = songs,
     ) { modifier ->
         val empty = when {
             search.isNotBlank() -> R.string.search_nothing_found

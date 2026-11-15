@@ -115,6 +115,60 @@ class QueueEditTimingTest {
         }
     }
 
+    /**
+     * Selected entries of a 20 000-song queue removed at once (docs/playback.md §9.6): 1 000 scattered ones reach the
+     * controllers within 0.5 s, all but the current one within 1 s, and the undo of that within 1 s.
+     */
+    @Test
+    @TimingTest
+    fun selectedEntriesOfA20000SongQueueAreRemovedAndPutBackInTime() {
+        val template = SongSourceRule.song(0, "Song")
+        songs.songs = List(SIZE) { index -> template.copy(id = index + 1L, title = "Song %05d".format(index + 1)) }
+        SongList.load(TestFiles.targetContext)
+
+        fun start() {
+            controller.tap(QueueRequest(startSongId = 1, startRow = 0), "Song 00001")
+            controller.waitUntil("the queue plays", timeout = 30.seconds) { mediaItemCount == SIZE && currentMediaItem?.mediaId == "1" }
+        }
+
+        fun removeArgs(rows: IntArray): Bundle.() -> Unit = {
+            putIntArray(PlaybackSessionCallback.EXTRA_ROWS, rows)
+            putStringArrayList(PlaybackSessionCallback.EXTRA_MEDIA_IDS, ArrayList(rows.map { (it + 1).toString() }))
+        }
+
+        val scattered = mutableListOf<Long>()
+        val allButOne = mutableListOf<Long>()
+        val undone = mutableListOf<Long>()
+        repeat(1 + RUNS) {
+            start()
+            // Every 20th entry after the current one.
+            val rows = IntArray(1_000) { 1 + it * 20 }
+            scattered += timed({ send(PlaybackSessionCallback.REMOVE_FROM_QUEUE_ENTRIES_COMMAND, removeArgs(rows)) }) {
+                it.currentTimeline.windowCount == SIZE - 1_000
+            }
+
+            start()
+            val all = IntArray(SIZE - 1) { it + 1 }
+            var token = -1L
+            allButOne += timed({
+                val result = onMain {
+                    controller.sendCustomCommand(PlaybackSessionCallback.REMOVE_FROM_QUEUE_ENTRIES_COMMAND, Bundle().apply(removeArgs(all)))
+                }.get(10, TimeUnit.SECONDS)
+                token = result.extras.getLong(PlaybackSessionCallback.EXTRA_TOKEN, -1)
+            }) { it.currentTimeline.windowCount == 1 }
+            undone += timed({
+                send(PlaybackSessionCallback.UNDO_REMOVE_COMMAND) { putLong(PlaybackSessionCallback.EXTRA_TOKEN, token) }
+            }) { it.currentTimeline.windowCount == SIZE }
+        }
+
+        for ((name, times, limit) in listOf(Triple("1 000 scattered", scattered, 500L), Triple("all but one", allButOne, 1_000L), Triple("undo", undone, 1_000L))) {
+            val measured = times.drop(1).sorted()
+            val median = measured[measured.size / 2]
+            Log.i(TAG, "remove $name of 20 000: warm-up ${times.first()} ms, measured $measured ms, median $median ms")
+            assertThat(median).describedAs("$name: median of $measured ms").isLessThanOrEqualTo(limit)
+        }
+    }
+
     private companion object {
         const val TAG = "QueueEditTimingTest"
         const val SIZE = 20_000

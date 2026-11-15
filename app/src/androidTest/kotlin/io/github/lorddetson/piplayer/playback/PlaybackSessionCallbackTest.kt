@@ -146,6 +146,8 @@ class PlaybackSessionCallbackTest {
                     .add(PlaybackSessionCallback.REMOVE_FROM_QUEUE_COMMAND)
                     .add(PlaybackSessionCallback.UNDO_REMOVE_COMMAND)
                     .add(PlaybackSessionCallback.MOVE_IN_QUEUE_COMMAND)
+                    .add(PlaybackSessionCallback.PLAY_SONGS_COMMAND)
+                    .add(PlaybackSessionCallback.REMOVE_FROM_QUEUE_ENTRIES_COMMAND)
                     .build()
             } else {
                 ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS
@@ -169,6 +171,8 @@ class PlaybackSessionCallbackTest {
                 .doesNotContain(PlaybackSessionCallback.REMOVE_FROM_QUEUE_COMMAND)
                 .doesNotContain(PlaybackSessionCallback.UNDO_REMOVE_COMMAND)
                 .doesNotContain(PlaybackSessionCallback.MOVE_IN_QUEUE_COMMAND)
+                .doesNotContain(PlaybackSessionCallback.PLAY_SONGS_COMMAND)
+                .doesNotContain(PlaybackSessionCallback.REMOVE_FROM_QUEUE_ENTRIES_COMMAND)
         }
     }
 
@@ -923,6 +927,30 @@ class PlaybackSessionCallbackTest {
             }.get(5, TimeUnit.SECONDS)
 
             assertThat(result.resultCode).describedAs(controller.toString()).isEqualTo(SessionResult.RESULT_ERROR_NOT_SUPPORTED)
+            assertThat(onMain { session.player.mediaItemCount }).describedAs(controller.toString()).isZero()
+        }
+    }
+
+    @Test
+    fun onlyPiPlayersScreenMayPlaySelectedSongsOrRemoveSelectedEntries() {
+        // Android Auto and other controllers keep their commands (docs/library.md §20.7, docs/playback.md §9.6).
+        songs.songs = listOf(SongSourceRule.song(1, "A"), SongSourceRule.song(2, "B"))
+        val play = Bundle().apply { putLongArray(PlaybackSessionCallback.EXTRA_SONG_IDS, longArrayOf(1, 2)) }
+        val remove = Bundle().apply {
+            putIntArray(PlaybackSessionCallback.EXTRA_ROWS, intArrayOf(0))
+            putStringArrayList(PlaybackSessionCallback.EXTRA_MEDIA_IDS, arrayListOf("1"))
+        }
+
+        for (controller in listOf(systemUi, otherApp, notification)) {
+            for ((command, args) in listOf(
+                PlaybackSessionCallback.PLAY_SONGS_COMMAND to play,
+                PlaybackSessionCallback.REMOVE_FROM_QUEUE_ENTRIES_COMMAND to remove,
+            )) {
+                val result = onMain { callback.onCustomCommand(session, controller, command, args, null) }.get(5, TimeUnit.SECONDS)
+
+                assertThat(result.resultCode).describedAs("$controller ${command.customAction}")
+                    .isEqualTo(SessionResult.RESULT_ERROR_NOT_SUPPORTED)
+            }
             assertThat(onMain { session.player.mediaItemCount }).describedAs(controller.toString()).isZero()
         }
     }

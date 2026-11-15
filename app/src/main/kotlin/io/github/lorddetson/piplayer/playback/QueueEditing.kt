@@ -65,15 +65,69 @@ object QueueEditing {
     }
 
     /** The entries from [from] to [to] removed; null when that empties the queue. */
-    fun removeRange(state: QueueState, view: QueueView, from: Int, to: Int): QueueState? {
-        var result = state
-        val keys = view.keys.toMutableList()
-        for (row in to - 1 downTo from) {
-            result = remove(result, QueueView(keys.toList(), view.current), row) ?: return null
-            keys.removeAt(row)
-            renumberOpened(keys)
+    fun removeRange(state: QueueState, view: QueueView, from: Int, to: Int): QueueState? =
+        removeRows(state, view, IntArray(to - from) { from + it })
+
+    /**
+     * [rows] as runs of neighbouring rows, each from its first row to its last, from the last run to the
+     * first: the order in which removing them leaves the rows of the runs still to remove as they were (§9.6).
+     */
+    fun runs(rows: IntArray): List<IntRange> {
+        val sorted = rows.distinct().sortedDescending()
+        val runs = ArrayList<IntRange>()
+        var i = 0
+        while (i < sorted.size) {
+            val last = sorted[i]
+            var first = last
+            while (i + 1 < sorted.size && sorted[i + 1] == first - 1) first = sorted[++i]
+            runs += first..last
+            i++
         }
-        return result
+        return runs
+    }
+
+    /** The entries at [rows] removed, run by run from the last ([runs]); null when that empties the queue (§9.6). */
+    fun removeRows(state: QueueState, view: QueueView, rows: IntArray): QueueState? {
+        val keys = view.keys
+        val removed = BooleanArray(keys.size)
+        for (row in rows) removed[row] = true
+        val left = keys.size - removed.count { it }
+        // An empty queue is no queue: the caller forgets it (docs/playback.md §9.4).
+        if (left == 0) return null
+        // Removed from the last row to the first, each removal leaves the rows before it as they were: its row among the
+        // entries the journal counts is the one it had at the start. One pass, rather than a copy of the queue per entry.
+        val lanes = IntArray(keys.size)
+        var lane = 0
+        for (row in keys.indices) {
+            lanes[row] = lane
+            if (keys[row] !is EntryKey.Opened) lane++
+        }
+        val edits = ArrayList<QueueEdit>()
+        val gone = HashSet<EntryKey>()
+        for (row in keys.indices.reversed()) {
+            val key = keys[row]
+            if (!removed[row] || key is EntryKey.Opened) continue
+            edits += QueueEdit.Remove(key, lanes[row])
+            gone += key
+        }
+        val newKeys = keys.filterIndexed { row, _ -> !removed[row] }
+        val old = state.edits
+        return state.copy(
+            openItems = openRows(state.openItems, newKeys),
+            edits = if (edits.isEmpty()) old else old.copy(journal = old.journal + edits, upNext = old.upNext.filter { it !in gone }),
+        )
+    }
+
+    /**
+     * The row, before the removal, of the entry that plays after the current one once [removed] rows are gone: the next
+     * entry in the play order ([QueueView.order] while shuffle is on, the list otherwise) that stays; null when none after
+     * it stays (§9.6).
+     */
+    fun nextKept(view: QueueView, removed: Set<Int>): Int? {
+        val order = view.order
+        if (order == null) return (view.current + 1 until view.keys.size).firstOrNull { it !in removed }
+        val position = order.indexOf(view.current)
+        return (position + 1 until order.size).map { order[it] }.firstOrNull { it !in removed }
     }
 
     /** The entries from [from] to [to] moved in the list to start at [newIndex], as Media3 moves them. */

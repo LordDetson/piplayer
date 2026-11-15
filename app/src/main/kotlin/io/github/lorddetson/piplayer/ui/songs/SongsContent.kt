@@ -56,6 +56,9 @@ import io.github.lorddetson.piplayer.covers.CoverRequest
 import io.github.lorddetson.piplayer.ui.covers.CoverActions
 import io.github.lorddetson.piplayer.ui.covers.LibraryCover
 import androidx.compose.foundation.shape.RoundedCornerShape
+import io.github.lorddetson.piplayer.ui.selection.RowSelection
+import io.github.lorddetson.piplayer.ui.selection.SelectionCheck
+import io.github.lorddetson.piplayer.ui.selection.selectableRow
 
 /** What a song list shows (docs/playback.md §2.1, §2.2, docs/library.md §6). */
 sealed interface SongsState {
@@ -108,6 +111,18 @@ class SongMenu(
     val openedDetails: ((uri: String) -> Unit)? = null,
 )
 
+/**
+ * The selection of a song list's rows (docs/library.md §20.2): whether it is [selecting], whether a song is selected,
+ * and [toggle], which a long press calls to start it and a tap while selecting.
+ */
+class SongSelection(val selecting: Boolean, val isSelected: (Long) -> Boolean, val toggle: (Long) -> Unit)
+
+/**
+ * What a selection's menu does with favorites (docs/library.md §20.3): the [state] of the selected songs by file ID, read
+ * off the main thread from the user database (null when it cannot be read), and making them favorites or not at once.
+ */
+class SelectionFavorites(val state: suspend (List<Long>) -> FavoriteBatch?, val set: (List<Long>, favorite: Boolean) -> Unit)
+
 /** What the song menu does with favorites (docs/library.md §15.2): whether a song is one, and making it one or not. */
 class FavoriteActions(val isFavorite: suspend (Song) -> Boolean, val set: (Song, favorite: Boolean) -> Unit)
 
@@ -138,6 +153,7 @@ fun SongsContent(
     headerSections: List<String?> = emptyList(),
     scanning: Boolean = false,
     onOpenLibrarySettings: (() -> Unit)? = null,
+    selection: SongSelection? = null,
     header: LazyListScope.() -> Unit = {},
 ) {
     when (state) {
@@ -194,7 +210,7 @@ fun SongsContent(
                     }
                     if (discRows == null) {
                         itemsIndexed(state.songs, key = { _, song -> song.id }) { row, song ->
-                            SongRow(song, playing = song.id == currentSongId, menu = menu, onClick = { onSongClick(row, song) })
+                            SongRow(song, playing = song.id == currentSongId, menu = menu, selection = selection, onClick = { onSongClick(row, song) })
                         }
                     } else {
                         items(discRows, key = { it.key }) { entry ->
@@ -204,6 +220,7 @@ fun SongsContent(
                                     entry.song,
                                     playing = entry.song.id == currentSongId,
                                     menu = menu,
+                                    selection = selection,
                                     onClick = { onSongClick(entry.row, entry.song) },
                                 )
                             }
@@ -320,9 +337,10 @@ internal fun PermissionCard(
 
 /** A song: its title, artist and length; the playing one is marked, and its menu goes to its album, artists and folder. */
 @Composable
-private fun SongRow(song: Song, playing: Boolean, menu: SongMenu?, onClick: () -> Unit) {
+private fun SongRow(song: Song, playing: Boolean, menu: SongMenu?, selection: SongSelection?, onClick: () -> Unit) {
     val artist = song.artist ?: stringResource(R.string.songs_unknown_artist)
     val playingText = stringResource(R.string.song_playing)
+    val row = selection?.let { RowSelection(it.selecting, it.selecting && it.isSelected(song.id)) { it.toggle(song.id) } }
     ListItem(
         headlineContent = {
             Text(
@@ -350,12 +368,16 @@ private fun SongRow(song: Song, playing: Boolean, menu: SongMenu?, onClick: () -
             }
         },
         leadingContent = {
-            LibraryCover(CoverRequest.Track(song.id), song.album, size = 48.dp, shape = RoundedCornerShape(6.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                SelectionCheck(row)
+                LibraryCover(CoverRequest.Track(song.id), song.album, size = 48.dp, shape = RoundedCornerShape(6.dp))
+            }
         },
-        trailingContent = menu?.let { { SongMenuButton(song, it) } },
+        // While selecting the menu gives way to the selection's (docs/library.md §20.2, 3).
+        trailingContent = menu?.takeUnless { row?.selecting == true }?.let { { SongMenuButton(song, it) } },
         modifier = Modifier
-            .clickable(onClickLabel = stringResource(R.string.songs_play), role = Role.Button, onClick = onClick)
-            .semantics { if (playing) stateDescription = playingText },
+            .selectableRow(row, stringResource(R.string.songs_play), onClick)
+            .semantics { if (playing && row?.selecting != true) stateDescription = playingText },
     )
 }
 

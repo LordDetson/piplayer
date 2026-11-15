@@ -31,6 +31,7 @@ import io.github.lorddetson.piplayer.library.lists.SongQuery
 import io.github.lorddetson.piplayer.library.songs.AudioPermission
 import io.github.lorddetson.piplayer.library.songs.Song
 import io.github.lorddetson.piplayer.settings.SettingsFiles
+import io.github.lorddetson.piplayer.ui.selection.isSelected
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 
@@ -107,6 +108,13 @@ fun SongsScreen(
     val state by viewModel.state.collectAsStateWithLifecycle()
     val passProgress by viewModel.passProgress.collectAsStateWithLifecycle()
     val scanning by viewModel.scanning.collectAsStateWithLifecycle()
+    // Every song list selects its songs (docs/library.md §20.1).
+    val selected by viewModel.selection.collectAsStateWithLifecycle()
+    val selection = SongSelection(
+        selecting = selected != null,
+        isSelected = { id -> selected?.selection?.isSelected(id) == true },
+        toggle = viewModel::toggleSelection,
+    )
 
     LifecycleStartEffect(viewModel) {
         viewModel.onStart(access.granted, access.deniedForGood)
@@ -135,6 +143,7 @@ fun SongsScreen(
         header = header,
         scanning = scanning,
         onOpenLibrarySettings = onOpenLibrarySettings,
+        selection = selection,
     )
 }
 

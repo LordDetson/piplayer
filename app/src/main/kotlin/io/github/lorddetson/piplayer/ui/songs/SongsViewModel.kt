@@ -32,6 +32,20 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import androidx.lifecycle.SavedStateHandle
+import io.github.lorddetson.piplayer.library.songs.Song
+import io.github.lorddetson.piplayer.ui.player.QueueTarget
+import io.github.lorddetson.piplayer.ui.selection.SavedSelections
+import io.github.lorddetson.piplayer.ui.selection.Selection
+import io.github.lorddetson.piplayer.ui.selection.SelectionHolder
+import io.github.lorddetson.piplayer.ui.selection.SelectionUi
+import io.github.lorddetson.piplayer.ui.selection.isSelected
+
+/**
+ * What a library list's selection names (docs/library.md §20.6): its [songs] in the list's order, and the [target] that
+ * is sent for them: the list itself for the whole list, the list and the songs left out for "all except", else the songs.
+ */
+class SelectedSongs(val songs: List<Song>, val target: QueueTarget)
 
 /**
  * A song list (docs/playback.md §2.1, §2.2, docs/library.md §1.4, §6): the Songs tab, or the songs of an album, artist
@@ -46,6 +60,8 @@ class SongsViewModel(
     application: Application,
     private val base: SongQuery = SongQuery.SONGS,
     val list: ListName = ListName.SONGS,
+    /** Keeps the selection for process death (docs/library.md §20.5). */
+    private val saved: SavedStateHandle? = null,
 ) : AndroidViewModel(application) {
 
     private val mutableState = MutableStateFlow<SongsState>(SongsState.Loading)
@@ -84,6 +100,32 @@ class SongsViewModel(
     /** A sort whose list has not reached the screen, for instance because the screen stopped during the read. */
     private var sortToShow = false
 
+    /** The selected songs with their count, or null while nothing is selected (docs/library.md §20.2). */
+    val selection: StateFlow<SelectionUi<Long>?> get() = holder.state
+
+    private val holder = SelectionHolder(SavedSelections.read(saved)) { SavedSelections.write(saved, it) }
+
+    /** Selects or deselects the song [id]; the first long press starts selection with it. */
+    fun toggleSelection(id: Long) = holder.toggle(id)
+
+    /** "Select all": every song the list shows, also those that join it (§20.2, 6). */
+    fun selectAll() = holder.selectAll()
+
+    /** Ends selection: "Deselect all", back, the close button, an action, a tab switch. */
+    fun endSelection() = holder.end()
+
+    /** What the selection names now, in the list's order; null while nothing is selected. */
+    fun selected(): SelectedSongs? {
+        val selection = holder.selection ?: return null
+        val loaded = mutableState.value as? SongsState.Loaded ?: return null
+        val songs = loaded.songs.filter { selection.isSelected(it.id) }
+        val target = when (selection) {
+            is Selection.AllExcept -> QueueTarget.Selected(loaded.query, selection.excluded.toList())
+            is Selection.Only -> QueueTarget.Songs(songs.map { it.id })
+        }
+        return SelectedSongs(songs, target)
+    }
+
     /** The list has been brought to the song it asked for; a later composition must not do that again. */
     fun onScrolled() {
         mutableState.update { state -> if (state is SongsState.Loaded) state.copy(scrollTo = null) else state }
@@ -95,7 +137,18 @@ class SongsViewModel(
 
     init {
         viewModelScope.launch { ListSorts(application).order(list).collect { mutableOrder.value = it } }
+        // The selection is judged only against a whole list of the search and key now chosen (docs/library.md §20.2, 8).
+        viewModelScope.launch {
+            mutableState.collect { state ->
+                if (state is SongsState.Loaded && state.complete && state.query.search == search.value.trim() && state.query.key == key.value) {
+                    holder.onList(state.songs.map { it.id }, listName(state.query))
+                }
+            }
+        }
     }
+
+    /** The name of a list for "all except": its key (the chips of Songs missing information) and its search. */
+    private fun listName(query: SongQuery) = query.key + "\n" + query.search
 
     /** The screen started: with the permission, the list is read and the library watched. */
     fun onStart(granted: Boolean, deniedForGood: Boolean) {

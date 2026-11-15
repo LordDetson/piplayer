@@ -385,4 +385,106 @@ class QueueEditingTest {
             .containsExactly(1L, 2L, 3L, 3L, 4L)
         assertThat(entries[2]).isEqualTo(QueueSlot.Added(3, nine))
     }
+
+    // Selected entries removed at once (docs/playback.md §9.6).
+
+    @Test
+    fun scatteredRowsGoAsRunsFromTheLast() {
+        assertThat(QueueEditing.runs(intArrayOf(7, 1, 2, 5, 9, 8, 3))).containsExactly(7..9, 5..5, 1..3)
+        assertThat(QueueEditing.runs(intArrayOf())).isEmpty()
+    }
+
+    /** The journal of removing [rows] one at a time, from the highest row. */
+    private fun oneByOne(start: QueueState, keys: List<EntryKey>, rows: IntArray): QueueState? {
+        var result: QueueState = start
+        val left = keys.toMutableList()
+        for (row in rows.sortedDescending()) {
+            result = QueueEditing.remove(result, QueueView(left.toList(), 0), row) ?: return null
+            left.removeAt(row)
+            var next = 0
+            for (i in left.indices) if (left[i] is Opened) left[i] = Opened(next++)
+        }
+        return result
+    }
+
+    @Test
+    fun removingScatteredRowsJournalsAsOneRemovalAtATime() {
+        val keys = songs(1, 2, 3, 4, 5, 6, 7, 8)
+        val rows = intArrayOf(6, 1, 2, 4)
+
+        val result = QueueEditing.removeRows(state(), QueueView(keys, current = 0), rows)
+
+        assertThat(result).isEqualTo(oneByOne(state(), keys, rows))
+        assertThat(result!!.edits.journal.map { (it as QueueEdit.Remove).entry }).containsExactly(Song(7), Song(5), Song(3), Song(2))
+    }
+
+    @Test
+    fun removingRowsNextToOpenedFilesAndASongThatStandsTwiceJournalsTheRightCopies() {
+        // Song 2 stands twice; the second copy, an opened file and the last song are removed.
+        val keys = listOf(Song(1), Song(2), Opened(0), Song(3), Song(2), Opened(1), Song(4))
+        val start = state(openItems = listOf(opened(2, "a"), opened(5, "b")))
+        val rows = intArrayOf(2, 4, 6)
+
+        val result = QueueEditing.removeRows(start, QueueView(keys, current = 0), rows)
+
+        assertThat(result).isEqualTo(oneByOne(start, keys, rows))
+        assertThat(result!!.openItems.map { it.file.title }).containsExactly("b")
+        assertThat(result.openItems.single().index).isEqualTo(3)
+        // The journal names the second copy of song 2 by its row among the entries it counts.
+        assertThat(result.edits.journal).contains(QueueEdit.Remove(Song(2), row = 3))
+    }
+
+    @Test
+    fun upNextEntriesAmongTheRemovedLeaveTheRun() {
+        val edits = QueueEdits(
+            added = listOf(AddedEntry(1, track(7)), AddedEntry(2, track(8))),
+            upNext = listOf(Added(1), Added(2)),
+            nextNumber = 3,
+        )
+        val keys = listOf(Song(1), Added(1), Added(2), Song(2), Song(3))
+
+        val result = QueueEditing.removeRows(state(edits = edits), QueueView(keys, current = 0), intArrayOf(1, 3))
+
+        assertThat(result!!.edits.upNext).containsExactly(Added(2))
+    }
+
+    @Test
+    fun removingEveryRowLeavesNoQueue() {
+        assertThat(QueueEditing.removeRows(state(), QueueView(songs(1, 2, 3), current = 1), intArrayOf(0, 1, 2))).isNull()
+    }
+
+    @Test
+    fun theQueueRebuiltAfterRemovingScatteredRowsEqualsTheEditedOne() {
+        val library = (1L..8L).map { LibrarySong(it, "content://$it", "s$it", null, null, null) }
+        val rows = intArrayOf(0, 3, 4, 7)
+
+        val result = QueueEditing.removeRows(state(), QueueView(library.map { Song(it.id) }, current = 1), rows)!!
+
+        val rebuilt = QueueRebuild.entries(library, result.edits, emptyMap(), songKeys = true)
+        assertThat(rebuilt.map { (it as QueueSlot.Library).song.id }).containsExactly(2L, 3L, 6L, 7L)
+    }
+
+    @Test
+    fun aRequestWithTheSongsLeftOutRemovedRebuildsToTheSelectedSongsInOrder() {
+        // "Play" of all but some: the list's request with the songs left out removed as edits.
+        val library = (1L..6L).map { LibrarySong(it, "content://$it", "s$it", null, null, null) }
+
+        val played = QueueEditing.removeRows(state(), QueueView(library.map { Song(it.id) }, current = 0), intArrayOf(0, 2, 5))!!
+
+        assertThat(played.edits.journal).hasSize(3)
+        val rebuilt = QueueRebuild.entries(library, played.edits, emptyMap(), songKeys = true)
+        assertThat(rebuilt.map { (it as QueueSlot.Library).song.id }).containsExactly(2L, 4L, 5L)
+    }
+
+    @Test
+    fun theNextEntryThatStaysFollowsThePlayOrder() {
+        val keys = songs(1, 2, 3, 4, 5, 6)
+        // Shuffle off: the list's order.
+        assertThat(QueueEditing.nextKept(QueueView(keys, current = 1), setOf(1, 2, 3))).isEqualTo(4)
+        assertThat(QueueEditing.nextKept(QueueView(keys, current = 1), setOf(1, 2, 3, 4, 5))).isNull()
+        // Shuffle on: rows in the order 4, 1, 5, 0, 3, 2; the current row 1 and the next one, 5, go.
+        val order = intArrayOf(4, 1, 5, 0, 3, 2)
+        assertThat(QueueEditing.nextKept(QueueView(keys, current = 1, order = order), setOf(1, 5))).isEqualTo(0)
+        assertThat(QueueEditing.nextKept(QueueView(keys, current = 1, order = order), setOf(1, 5, 0, 3, 2))).isNull()
+    }
 }

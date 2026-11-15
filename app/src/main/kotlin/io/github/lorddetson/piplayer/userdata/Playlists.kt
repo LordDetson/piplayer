@@ -120,6 +120,36 @@ class Playlists(private val database: UserDatabase, private val clock: () -> Lon
         }
     }
 
+    /**
+     * Removes the entries [entryIds] in one transaction and closes their gaps; the entries as they were, in their order,
+     * for [restoreAll] (docs/library.md §20.3). Entries that are gone already are left out.
+     */
+    suspend fun removeAll(entryIds: Collection<Long>): List<PlaylistEntryEntity> = database.withWriteTransaction {
+        val removed = entryIds.distinct().mapNotNull { dao.entry(it) }.sortedWith(compareBy({ it.playlistId }, { it.position }))
+        for (entry in removed) dao.deleteEntry(entry.id)
+        // One pass over each playlist closes every gap, rather than one shift per entry.
+        for (playlistId in removed.mapTo(LinkedHashSet()) { it.playlistId }) {
+            dao.entries(playlistId).forEachIndexed { position, entry -> if (entry.position != position) dao.setPosition(entry.id, position) }
+            dao.touch(playlistId, clock())
+        }
+        removed
+    }
+
+    /** Puts removed [entries] back at their positions in one transaction, each as [restore] does. */
+    suspend fun restoreAll(entries: List<PlaylistEntryEntity>) {
+        database.withWriteTransaction {
+            // In ascending positions, so that each goes where it stood before the ones after it come back.
+            for (entry in entries.sortedWith(compareBy({ it.playlistId }, { it.position }))) {
+                if (dao.playlist(entry.playlistId) == null || dao.entry(entry.id) != null) continue
+                val position = entry.position.coerceIn(0, dao.count(entry.playlistId))
+                val identity = entry.identityId?.let { database.identities().current(it, entry.hintContentKey) }
+                dao.shift(entry.playlistId, position, Int.MAX_VALUE, 1)
+                dao.addEntries(listOf(entry.copy(position = position, identityId = identity)))
+                dao.touch(entry.playlistId, clock())
+            }
+        }
+    }
+
     /** Moves the entry [entryId] to position [to] (kept within the playlist); false when nothing moved. */
     suspend fun move(entryId: Long, to: Int): Boolean = database.withWriteTransaction { moveTo(entryId) { to } }
 

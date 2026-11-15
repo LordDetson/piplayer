@@ -7,6 +7,7 @@ import io.github.lorddetson.piplayer.library.Library
 import io.github.lorddetson.piplayer.library.lists.LibraryLists
 import io.github.lorddetson.piplayer.library.playlists.ImportResult
 import io.github.lorddetson.piplayer.library.playlists.PlaylistFiles
+import io.github.lorddetson.piplayer.library.songs.SongList
 import io.github.lorddetson.piplayer.settings.LibrarySettings
 import io.github.lorddetson.piplayer.ui.player.QueueTarget
 import io.github.lorddetson.piplayer.userdata.PlaylistEntryEntity
@@ -47,6 +48,14 @@ class PlaylistChoices(context: Context) {
         true
     }
 
+    /** Removes the selected entries [entryIds] in one transaction; the entries as they were, or null when it failed. */
+    suspend fun removeAll(entryIds: Collection<Long>): List<PlaylistEntryEntity>? = safely(null) { playlists.removeAll(entryIds) }
+
+    suspend fun restoreAll(entries: List<PlaylistEntryEntity>): Boolean = safely(false) {
+        playlists.restoreAll(entries)
+        true
+    }
+
     /** Moves the entry to [to]; whether it moved, or null when the move failed (an end reached is no failure). */
     suspend fun move(entryId: Long, to: Int): Boolean? = safely(null) { playlists.move(entryId, to) }
 
@@ -60,6 +69,11 @@ class PlaylistChoices(context: Context) {
     private suspend fun fileIdsOf(target: QueueTarget): List<Long> {
         if (target is QueueTarget.Songs) return target.ids
         if (!Library.mayRead(app)) return emptyList()
+        // A selection of a list: the list as it is shown, without the songs left out (docs/library.md §20.6).
+        if (target is QueueTarget.Selected) {
+            val excluded = target.excluded.toHashSet()
+            return SongList.load(app, query = target.query).map { it.id }.filter { it !in excluded }
+        }
         val query = QueueTarget.queryOf(app, target)
         if (target is QueueTarget.Playlist) return Library.playlists(app).songs(target.id).map { it.id }
         val hidden = LibrarySettings(app).readHiddenFiles()

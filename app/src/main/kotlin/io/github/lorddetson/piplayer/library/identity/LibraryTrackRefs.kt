@@ -33,6 +33,23 @@ class LibraryTrackRefs(private val access: Access, private val user: UserDatabas
         return TrackRef(fileId, identity, file.contentKey, file.place(), file.durationMs)
     }
 
+    /**
+     * The references of the files [fileIds] that the library has, as [refOf] gives each, read in chunks rather than one
+     * file at a time (docs/library.md §20.3).
+     */
+    fun refsOf(fileIds: List<Long>): Map<Long, TrackRef> {
+        val files = fileIds.distinct().chunked(CHUNK).flatMap { chunk -> access.read { runBlocking { it.library().foundFiles(chunk) } } }
+        val keys = files.mapNotNullTo(LinkedHashSet()) { it.contentKey }
+        val identities = HashMap<String, Long>()
+        for (chunk in keys.chunked(CHUNK)) {
+            val found = runBlocking { user.identities().withKeys(chunk.map(Hex::bytes)) }
+            for (identity in found) identities[Hex.text(identity.contentKey)] = identity.id
+        }
+        return files.associate { file ->
+            file.fileId to TrackRef(file.fileId, file.contentKey?.let(identities::get), file.contentKey, file.place(), file.durationMs)
+        }
+    }
+
     /** The file ID [ref] names now; [savedLibraryId] is the library ID it was saved under. */
     fun resolve(ref: TrackRef, savedLibraryId: String?): Long? =
         TrackRefs.resolve(ref, sameLibrary = savedLibraryId == libraryId(), lookup)
@@ -56,6 +73,11 @@ class LibraryTrackRefs(private val access: Access, private val user: UserDatabas
     }
 
     private fun FoundFileRow.place() = Place(volume, relativePath, displayName)
+
+    private companion object {
+        /** Keys of one read: within SQLite's limit on bound values. */
+        const val CHUNK = 500
+    }
 
     private fun FoundFileRow.found() = FoundFile(fileId, place(), contentKey, durationMs)
 }

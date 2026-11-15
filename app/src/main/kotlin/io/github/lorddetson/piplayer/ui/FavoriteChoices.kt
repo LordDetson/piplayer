@@ -6,6 +6,7 @@ import io.github.lorddetson.piplayer.library.Library
 import io.github.lorddetson.piplayer.library.identity.Hex
 import io.github.lorddetson.piplayer.library.identity.IdentityAttacher
 import io.github.lorddetson.piplayer.library.identity.TrackRef
+import io.github.lorddetson.piplayer.ui.songs.FavoriteBatch
 import io.github.lorddetson.piplayer.userdata.UserData
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -55,6 +56,33 @@ class FavoriteChoices(context: Context) {
         // Checked again in the write transaction: a takeover may have deleted it since (docs/library.md §8.2).
         if (!favorites.set(identity, favorite, ref.contentKey?.let(Hex::bytes))) return@safely Result.NOT_READ
         Result.DONE
+    }
+
+    /** How many selected songs [fileIds] were written ([changed]) and how many are [notRead] yet (docs/library.md §20.3). */
+    data class BatchResult(val changed: Int, val notRead: Int)
+
+    /** The identities of the songs [fileIds], read in chunks; songs whose tags are not read yet have none. */
+    private suspend fun refsOf(fileIds: List<Long>): Map<Long, TrackRef> = withContext(Dispatchers.IO) {
+        if (Library.mayRead(app)) Library.trackRefs(app).refsOf(fileIds) else emptyMap()
+    }
+
+    /**
+     * Of the selected songs [fileIds], how many have their tags read and how many of those are not favorites, from the user
+     * database itself (docs/library.md §20.3); null when it cannot be read now.
+     */
+    suspend fun batchState(fileIds: List<Long>): FavoriteBatch? = safely(null) {
+        val refs = refsOf(fileIds)
+        val identities = fileIds.mapNotNull { refs[it]?.identityId }
+        val favorite = withContext(Dispatchers.IO) { favorites.favoriteIdentities(identities) }
+        FavoriteBatch(counted = identities.size, notFavorite = identities.count { it !in favorite })
+    }
+
+    /** Makes the selected songs [fileIds] favorites, or not, in one transaction; null when it failed. */
+    suspend fun setSongs(fileIds: List<Long>, favorite: Boolean): BatchResult? = safely(null) {
+        val refs = refsOf(fileIds)
+        val songs = fileIds.mapNotNull { id -> refs[id]?.let { ref -> ref.identityId?.let { it to ref.contentKey?.let(Hex::bytes) } } }
+        val written = withContext(Dispatchers.IO) { favorites.setAll(songs, favorite) }
+        BatchResult(changed = written, notRead = fileIds.size - written)
     }
 
     fun albumFlow(albumKey: String): Flow<Boolean> = favorites.isFavoriteAlbumFlow(albumKey).catch { emit(false) }

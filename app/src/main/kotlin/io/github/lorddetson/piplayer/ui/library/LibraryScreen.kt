@@ -1,6 +1,8 @@
 package io.github.lorddetson.piplayer.ui.library
 
 import androidx.compose.foundation.layout.Row
+import androidx.compose.runtime.SideEffect
+import androidx.lifecycle.createSavedStateHandle
 import androidx.compose.foundation.layout.size
 import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.semantics.toggleableState
@@ -99,6 +101,7 @@ import io.github.lorddetson.piplayer.ui.songs.NoMusic
 import io.github.lorddetson.piplayer.ui.songs.PermissionCard
 import io.github.lorddetson.piplayer.ui.songs.Scanning
 import io.github.lorddetson.piplayer.ui.songs.SongMenu
+import io.github.lorddetson.piplayer.ui.songs.SelectionFavorites
 import io.github.lorddetson.piplayer.ui.player.QueueTarget
 import io.github.lorddetson.piplayer.ui.songs.SongsScreen
 import io.github.lorddetson.piplayer.ui.songs.SongsState
@@ -151,6 +154,10 @@ class LibraryHost(
     val shuffle: (row: Int, song: Song?, list: SongQuery) -> Unit = { _, _, _ -> },
     /** Opens the page of the genre [key] (docs/library.md §19.3). */
     val openGenre: (key: String) -> Unit = {},
+    /** "Play" of selected songs (docs/library.md §20.3). */
+    val playSelection: (QueueTarget) -> Unit = {},
+    /** Favorites of selected songs (docs/library.md §20.3). */
+    val favoriteBatch: SelectionFavorites? = null,
 )
 
 /**
@@ -181,7 +188,15 @@ fun LibraryScreen(host: LibraryHost, onOpenSettings: () -> Unit) {
     var searching by rememberSaveable { mutableStateOf(false) }
     var search by rememberSaveable { mutableStateOf("") }
 
-    val songs = viewModel(key = "songs") { SongsViewModel(app) }
+    val songs = viewModel(key = "songs") { SongsViewModel(app, saved = createSavedStateHandle()) }
+    // The songs the Folders tab shows itself, while it shows some (docs/library.md §20.1).
+    var folderSongs by remember { mutableStateOf<SongsViewModel?>(null) }
+    val selecting = when (tab) {
+        LibraryTab.SONGS -> songs
+        LibraryTab.FOLDERS -> folderSongs
+        else -> null
+    }
+    val selected = selecting?.selection?.collectAsStateWithLifecycle()?.value
     val albums = viewModel(key = "albums") { AlbumsViewModel(app) }
     val artists = viewModel(key = "artists") { ArtistsViewModel(app) }
     val genres = viewModel(key = "genres") { GenresViewModel(app) }
@@ -214,7 +229,7 @@ fun LibraryScreen(host: LibraryHost, onOpenSettings: () -> Unit) {
     Scaffold(
         topBar = {
             Column {
-                LibraryTopBar(
+                if (selecting != null && selected != null) SongsSelectionBar(host, selecting, selected) else LibraryTopBar(
                     title = stringResource(R.string.app_name),
                     onBack = null,
                     searching = searching,
@@ -233,7 +248,18 @@ fun LibraryScreen(host: LibraryHost, onOpenSettings: () -> Unit) {
                 }
                 PrimaryScrollableTabRow(selectedTabIndex = tab.ordinal, modifier = Modifier.testTag(LibraryTags.TABS), edgePadding = 8.dp) {
                     LibraryTab.entries.forEach { entry ->
-                        Tab(selected = entry == tab, onClick = { tabName = entry.name }, text = { Text(stringResource(entry.label)) })
+                        Tab(
+                            selected = entry == tab,
+                            onClick = {
+                                // The selection belongs to the list it was made in (docs/library.md §20.2, 9).
+                                if (entry != tab) {
+                                    songs.endSelection()
+                                    folderSongs?.endSelection()
+                                }
+                                tabName = entry.name
+                            },
+                            text = { Text(stringResource(entry.label)) },
+                        )
                     }
                 }
             }
@@ -271,7 +297,7 @@ fun LibraryScreen(host: LibraryHost, onOpenSettings: () -> Unit) {
                 sections = { list -> list.map { it.section } },
                 tiles = { list -> artistTiles(list, host) },
             ) { list -> artistItems(list, host) }
-            LibraryTab.FOLDERS -> FolderContent(access, folders, folder = null, host, modifier, search, empty)
+            LibraryTab.FOLDERS -> FolderContent(access, folders, folder = null, host, modifier, search, empty, onSongs = { folderSongs = it })
             LibraryTab.PLAYLISTS -> host.playlists?.let { PlaylistsContent(host, it, search, modifier) }
             // No grid: genres have no cover (docs/library.md §19.2).
             LibraryTab.GENRES -> Groups(
@@ -628,7 +654,12 @@ internal fun FolderContent(
     modifier: Modifier,
     search: String,
     empty: TabEmptyStates? = null,
+    /** The holder of the folder's own songs while they show, null otherwise: the screen's selection bar follows it. */
+    onSongs: (SongsViewModel?) -> Unit = {},
 ) {
+    // Null unless the songs below say otherwise in the same composition.
+    var shownSongs: SongsViewModel? = null
+    SideEffect { onSongs(shownSongs) }
     if (!access.granted) return PermissionCard(access.deniedForGood, access.request, access.openSettings, modifier)
     val app = LocalContext.current.applicationContext as Application
     LifecycleStartEffect(viewModel, access.granted) {
@@ -665,7 +696,10 @@ internal fun FolderContent(
             ScrollThumb(listState, { page.entries.getOrNull(it)?.section }, Modifier.align(Alignment.TopEnd))
         }
     }
-    val songs = viewModel(key = "folder songs " + at.key) { SongsViewModel(app, SongQuery.folder(at.volume, at.relativePath), ListName.FOLDERS) }
+    val songs = viewModel(key = "folder songs " + at.key) {
+        SongsViewModel(app, SongQuery.folder(at.volume, at.relativePath), ListName.FOLDERS, createSavedStateHandle())
+    }
+    shownSongs = songs
     LaunchedEffect(songs, search) { songs.setSearch(search) }
     val order by songs.order.collectAsStateWithLifecycle()
     val songsState by songs.state.collectAsStateWithLifecycle()
