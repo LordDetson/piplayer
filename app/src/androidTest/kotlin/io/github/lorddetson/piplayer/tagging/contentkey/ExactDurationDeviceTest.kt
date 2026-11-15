@@ -1,6 +1,10 @@
 package io.github.lorddetson.piplayer.tagging.contentkey
 
+import android.media.MediaFormat
 import android.util.Log
+import androidx.annotation.OptIn
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.inspector.MediaExtractorCompat
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.github.lorddetson.piplayer.TestFiles
 import io.github.lorddetson.piplayer.identification.fingerprint.MediaCodecPcmSource
@@ -56,8 +60,12 @@ class ExactDurationDeviceTest {
         requireNotNull((result as TaggerResult.Replied).value) { "The walk of ${file.name} found no length" }
     }
 
-    /** The length of what the platform's decoder makes of [file]. */
-    private fun decodedMs(file: File): Long = TestFiles.open(file).use { descriptor ->
+    /**
+     * The length of what the platform's decoder makes of [file]. With [paddingBack], plus the encoder padding that the
+     * file's track says the decoder trims from the end of the stream: a file cut off before its end does not hold that
+     * padding, so the decoder takes it off audio that is there.
+     */
+    private fun decodedMs(file: File, paddingBack: Boolean = false): Long = TestFiles.open(file).use { descriptor ->
         var frames = 0L
         var rate = 0
         MediaCodecPcmSource(context, descriptor.fileDescriptor).decode { pcm, format ->
@@ -65,7 +73,21 @@ class ExactDurationDeviceTest {
             rate = format.sampleRate
             true
         }
+        if (paddingBack) frames += encoderPadding(file)
         frames * 1_000 / rate
+    }
+
+    /** The encoder padding of [file]'s first track, in samples, as Media3's extractor reports it to the decoder. */
+    @OptIn(UnstableApi::class)
+    private fun encoderPadding(file: File): Int = TestFiles.open(file).use { descriptor ->
+        val extractor = MediaExtractorCompat(context)
+        try {
+            extractor.setDataSource(descriptor.fileDescriptor)
+            val format = extractor.getTrackFormat(0)
+            if (format.containsKey(MediaFormat.KEY_ENCODER_PADDING)) format.getInteger(MediaFormat.KEY_ENCODER_PADDING) else 0
+        } finally {
+            extractor.release()
+        }
     }
 
     /** Removes the first frame of an MPEG-1 Layer III file that starts with one. */
@@ -206,7 +228,9 @@ class ExactDurationDeviceTest {
         val walked = walked(cut, plan)
 
         assertThat(plan).isEqualTo(DurationPlan(null, DurationCheck.WALK))
-        assertNear(walked, decodedMs(cut), AAC_FRAME_MS, "the walk")
+        // The fixture is AAC as ffmpeg writes it: since Media3 1.12.0-beta01 its padding is known (androidx/media#3489)
+        // and the decoder trims it from the cut end; the walk counts the samples that are there.
+        assertNear(walked, decodedMs(cut, paddingBack = true), AAC_FRAME_MS, "the walk")
         assertThat(walked).isBetween(8_000, 12_000)
     }
 
