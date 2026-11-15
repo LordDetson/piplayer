@@ -1,7 +1,9 @@
 package io.github.lorddetson.piplayer.identification.fingerprint
 
 import android.util.Log
+import androidx.test.platform.app.InstrumentationRegistry
 import io.github.lorddetson.piplayer.BuildConfig
+import io.github.lorddetson.piplayer.LiveNetwork
 import io.github.lorddetson.piplayer.TestFiles
 import io.github.lorddetson.piplayer.fakes.TestServices
 import io.github.lorddetson.piplayer.identification.acoustid.AcoustIdClient
@@ -29,8 +31,12 @@ import org.junit.runners.Parameterized
 /**
  * The whole fingerprint path on the device against the desktop fpcalc 1.6.2 on the same file (TI §11.2, M0): Media3's
  * extractor and the platform decoder instead of FFmpeg, speexdsp's resampler instead of swresample. At most 10 % of
- * the bits may differ, and the fingerprint must find the recording's AcoustID track. The recordings and fpcalc's
- * output come from scripts/prepare_fingerprint_samples.py (mode "files") through the prepareRecordings task.
+ * the bits may differ. The recordings and fpcalc's output come from scripts/prepare_fingerprint_samples.py (mode
+ * "files") through the prepareRecordings task.
+ *
+ * The fingerprint must also find the recording's AcoustID track, but that is a real call to AcoustID: it runs only with
+ * `-e liveNetwork true` and an AcoustID key in local.properties, never by default (worktrees copy local.properties, key
+ * included) and never on CI, which has no key.
  */
 @RunWith(Parameterized::class)
 class DeviceFingerprintTest(private val sample: String) {
@@ -54,14 +60,24 @@ class DeviceFingerprintTest(private val sample: String) {
 
         @JvmStatic
         @Parameterized.Parameters(name = "{0}")
-        fun samples(): List<Array<Any>> = index.keys.sorted().map { arrayOf(it) }
+        fun samples(): List<Array<Any>> = (index.keys + REQUIRED).sorted().map { arrayOf(it) }
+
+        /**
+         * The recordings TI §3.2 and §11.2 ask for, so that none drops out of the manifest unnoticed: the five CC
+         * recordings of M0 and, since M3, a 5.1 AAC file, a stereo AAC file and an MP3 without a LAME or Xing header,
+         * which the preparation script makes from them.
+         */
+        private val REQUIRED = setOf(
+            "goldberg-aria-da-capo", "grieg-morning-mood", "figaro-overture", "art-of-fugue-contrapunctus-1",
+            "radetzky-march", "figaro-overture-5.1-aac", "art-of-fugue-aac", "grieg-morning-mood-mp3-no-header",
+        )
 
         @JvmStatic
         @AfterClass
         fun forget() = results.clear()
     }
 
-    private val entry get() = index.getValue(sample)
+    private val entry get() = index[sample] ?: throw AssertionError("$sample is not prepared: check nativelib/fingerprint-samples.json")
 
     private fun fingerprint(): FingerprintResult = results.getOrPut(sample) {
         val file: File = TestFiles.copy("recordings/${entry.getString("file")}")
@@ -97,9 +113,13 @@ class DeviceFingerprintTest(private val sample: String) {
 
     @Test
     fun findsTheRecordingsAcoustIdTrack() {
+        assumeTrue(
+            "Calls AcoustID; run with -e ${LiveNetwork.ARGUMENT} true",
+            LiveNetwork.allowed(InstrumentationRegistry.getArguments()),
+        )
         assumeTrue("No AcoustID key in local.properties", BuildConfig.ACOUSTID_API_KEY.isNotBlank())
         val result = fingerprint()
-        // The test itself is the consent: it runs only with a key in local.properties (never on CI).
+        // The argument is the consent: the test runs only when asked, with a key in local.properties (never on CI).
         val gate = TestServices.openGate()
         val client = AcoustIdClient(
             HttpClients.create(UserAgent.of(BuildConfig.VERSION_NAME), gate),

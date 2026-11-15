@@ -113,7 +113,8 @@ jobs:
           (yes || true) | "$SDKMANAGER" --licenses > /dev/null
           "$SDKMANAGER" --install "platforms;android-37.0" "ndk;${NDK_VERSION}" "cmake;${CMAKE_VERSION}"
 
-      # Only the nativelib recordings (PCM) need ffmpeg. A static build from the imageio-ffmpeg wheel on PyPI: apt took
+      # The fingerprint recordings need ffmpeg: nativelib's as PCM, and the app's derived ones (5.1, AAC, an MP3 without
+      # a header) are encoded with its aac and libmp3lame. A static build from the imageio-ffmpeg wheel on PyPI: apt took
       # 14 to 16 minutes in 3 of 15 jobs, once without installing anything.
       - name: Install ffmpeg
         run: |

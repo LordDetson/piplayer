@@ -9,9 +9,15 @@ checks its size and hashes. Then, by mode:
 - "files" (app): copies the recordings themselves and runs fpcalc on each file, which decodes and resamples it with
   FFmpeg. The device decodes the same file with its own decoders and resampler, and the test compares the two.
 
+A sample with "derivedFrom" is not downloaded: ffmpeg makes it from the named recording with the sample's "ffmpeg"
+arguments, in mode "files" only (in mode "pcm" it would only repeat its source). It covers what no freely licensed
+recording offers (TI §3.2): 5.1 audio, AAC, an MP3 without a LAME or Xing header. It is the same recording at its full
+length, so it inherits the source's credits, licence and IDs, and fpcalc and the device read the same derived file, so
+an ffmpeg of another version only makes another reference.
+
 Usage: python scripts/prepare_fingerprint_samples.py --out <assets dir> [--mode pcm|files]
        [--manifest nativelib/fingerprint-samples.json] [--cache <dir>] [--fpcalc <path>] [--print-sha256]
-Needs ffmpeg on PATH (mode "pcm") and fpcalc 1.6.2 (FPCALC environment variable, --fpcalc, or the default under tools/).
+Needs ffmpeg on PATH and fpcalc 1.6.2 (FPCALC environment variable, --fpcalc, or the default under tools/).
 """
 import argparse
 import hashlib
@@ -28,6 +34,9 @@ USER_AGENT = "PiPlayer-tests/0.1 (https://github.com/LordDetson/piplayer) python
 SAMPLE_RATE = 11025
 SECONDS = 120
 DEFAULT_FPCALC = pathlib.Path("tools/fpcalc-1.6.2/chromaprint-fpcalc-1.6.2-windows-x86_64/fpcalc.exe")
+# What a derived sample takes over from its source; the download details and the format stay the source's own.
+INHERITED = ["title", "performer", "composer", "license", "licenseUrl", "pageUrl", "musicbrainzRecording",
+             "acoustidTrack"]
 
 
 def digest(path, algorithm):
@@ -87,11 +96,11 @@ def main():
     parser.add_argument("--print-sha256", action="store_true", help="print the SHA-256 of each cached recording")
     args = parser.parse_args()
 
-    if args.mode == "pcm" and shutil.which("ffmpeg") is None:
+    if shutil.which("ffmpeg") is None:
         sys.exit("ffmpeg is not on PATH")
     if not args.fpcalc.exists():
         sys.exit(f"fpcalc not found at {args.fpcalc}; set FPCALC or pass --fpcalc")
-    samples = json.loads(args.manifest.read_text(encoding="utf-8"))["samples"]
+    samples = resolve(json.loads(args.manifest.read_text(encoding="utf-8"))["samples"])
     args.cache.mkdir(parents=True, exist_ok=True)
     out = args.out / ("fingerprints" if args.mode == "pcm" else "recordings")
     if out.exists():
@@ -100,15 +109,43 @@ def main():
 
     index = []
     for sample in samples:
+        if "derivedFrom" in sample and args.mode == "pcm":
+            continue
         print(sample["id"])
-        source = fetch(sample, args.cache)
-        if args.print_sha256:
-            print(f"  sha256 {digest(source, 'sha256')}")
+        if "derivedFrom" in sample:
+            source = derive(sample, fetch(sample["source"], args.cache), out)
+        else:
+            source = fetch(sample, args.cache)
+            if args.print_sha256:
+                print(f"  sha256 {digest(source, 'sha256')}")
         if args.mode == "pcm":
             index.append(prepare_pcm(sample, source, out, args.fpcalc))
         else:
             index.append(prepare_file(sample, source, out, args.fpcalc))
     (out / "index.json").write_text(json.dumps(index, indent=1), encoding="utf-8")
+
+
+def resolve(samples):
+    """Gives each derived sample its source's entry and the details it inherits from it."""
+    by_id = {sample["id"]: sample for sample in samples}
+    resolved = []
+    for sample in samples:
+        if "derivedFrom" in sample:
+            source = by_id.get(sample["derivedFrom"])
+            if source is None or "derivedFrom" in source:
+                sys.exit(f"{sample['id']}: derivedFrom must name a downloaded sample")
+            sample = {**{key: source[key] for key in INHERITED if key in source}, **sample, "source": source}
+        resolved.append(sample)
+    return resolved
+
+
+def derive(sample, source, out):
+    """Makes the derived recording from its source's audio, without the source's tags and pictures."""
+    target = out / sample["file"]
+    subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-i", str(source), "-map", "0:a:0",
+                    *sample["ffmpeg"], "-map_metadata", "-1", "-fflags", "+bitexact", "-flags:a", "+bitexact",
+                    str(target)], check=True)
+    return target
 
 
 def fpcalc_raw(fpcalc, path, *options):
@@ -130,7 +167,8 @@ def prepare_pcm(sample, source, out, fpcalc):
 
 def prepare_file(sample, source, out, fpcalc):
     target = out / source.name
-    shutil.copyfile(source, target)
+    if source != target:  # a derived recording is made in place
+        shutil.copyfile(source, target)
     fingerprint = fpcalc_raw(fpcalc, target, "-length", str(SECONDS))
     (out / f"{sample['id']}.fpcalc.json").write_text(json.dumps(fingerprint), encoding="utf-8")
     print(f"  {target.stat().st_size} bytes, {len(fingerprint['fingerprint'])} fingerprint items")

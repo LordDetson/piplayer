@@ -1,5 +1,5 @@
 {
-  "comment": "Freely licensed recordings for the Chromaprint tests. They are not stored in git: scripts/prepare_fingerprint_samples.py downloads them, checks the hashes and builds 11025 Hz mono PCM plus the desktop fpcalc fingerprint as androidTest assets.",
+  "comment": "Freely licensed recordings for the Chromaprint tests. They are not stored in git: scripts/prepare_fingerprint_samples.py downloads them, checks the hashes and builds 11025 Hz mono PCM plus the desktop fpcalc fingerprint as androidTest assets. Samples with derivedFrom are made by ffmpeg from that recording at its full length (5.1, AAC and an MP3 without a LAME or Xing header, TI §3.2) and inherit its credits, licence and IDs; only the device comparison (mode files) uses them.",
   "samples": [
     {
       "id": "goldberg-aria-da-capo",
@@ -80,6 +80,54 @@
       "sha256": "2305a36c18dd189f56a2ddb7db573c1b78b23a4546651a503ad0730c753e1599",
       "musicbrainzRecording": "6cdea236-5c6e-45fe-98cd-f8bdffcdbc9c",
       "acoustidTrack": "8a3f8692-b3fb-4700-bdf7-6928c5ddc787"
+    },
+    {
+      "id": "figaro-overture-5.1-aac",
+      "derivedFrom": "figaro-overture",
+      "format": "AAC-LC 5.1 in MP4, 48 kHz, 384 kbit/s (upmixed from the stereo FLAC: centre and LFE from both channels, the LFE below 120 Hz, the surrounds at half level)",
+      "file": "figaro-overture-5.1-aac.m4a",
+      "ffmpeg": [
+        "-af",
+        "pan=5.1|FL=c0|FR=c1|FC=0.5*c0+0.5*c1|LFE=0.5*c0+0.5*c1|BL=0.5*c0|BR=0.5*c1,lowpass=f=120:c=LFE",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "384k"
+      ]
+    },
+    {
+      "id": "art-of-fugue-aac",
+      "derivedFrom": "art-of-fugue-contrapunctus-1",
+      "format": "AAC-LC stereo in MP4, 44.1 kHz, 256 kbit/s (from the 96 kHz FLAC)",
+      "file": "art-of-fugue-aac.m4a",
+      "ffmpeg": [
+        "-ar",
+        "44100",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "256k"
+      ]
+    },
+    {
+      "id": "grieg-morning-mood-mp3-no-header",
+      "derivedFrom": "grieg-morning-mood",
+      "format": "MP3 44.1 kHz CBR 192 kbit/s without a LAME or Xing header and without ID3 tags (from the Ogg Vorbis)",
+      "file": "grieg-morning-mood-mp3-no-header.mp3",
+      "ffmpeg": [
+        "-ar",
+        "44100",
+        "-c:a",
+        "libmp3lame",
+        "-b:a",
+        "192k",
+        "-write_xing",
+        "0",
+        "-id3v2_version",
+        "0",
+        "-write_id3v1",
+        "0"
+      ]
     }
   ]
 }
