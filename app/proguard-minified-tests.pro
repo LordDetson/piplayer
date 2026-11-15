@@ -57,7 +57,11 @@
 }
 -keep,allowobfuscation class io.github.lorddetson.piplayer.identification.IdentificationServices$Companion {
     public ** create(...);
+    public static ** create$default(...);
 }
+-keep,allowobfuscation interface io.github.lorddetson.piplayer.identification.release.ReleaseCache { public *; }
+-keep,allowobfuscation interface io.github.lorddetson.piplayer.identification.caa.FailureCache { public *; }
+-keep,allowobfuscation interface io.github.lorddetson.piplayer.identification.release.FolderReleaseHint { public *; }
 -keep,allowobfuscation class io.github.lorddetson.piplayer.identification.FingerprintStage$Available {
     public ** getAcoustId();
 }
