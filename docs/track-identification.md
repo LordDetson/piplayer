@@ -691,17 +691,55 @@ re-checked before release (M5); in M4a they also drive automatic preparation.
 - If the release has a usable front image (`cover-art-archive.front` is true and `darkened` is false): display
   `release/{id}/front-500` (lists: `front-250`), embed from `front-1200`, and fall back to this release's original
   front image when `front-1200` is missing.
-- Otherwise use the release group's front image (`release-group/{id}/front-500` and `front-1200`), marked in the
-  review and in the cover picker as taken from another edition.
-- Rewrite `http://` to `https://` before the first request (Android blocks cleartext). A 404 after a thumbnail
-  redirect falls back to the original image.
+- Otherwise use the release group's front image (`release-group/{id}/front-500` and `front-1200`, lists `front-250`,
+  the original `front`), marked in the review and in the cover picker as taken from another edition. Without a
+  release group ID there is no online cover.
+- When the flags are not known, as for the lazy covers below (the tags carry a release MBID and nothing was looked
+  up), the release's own images are asked for, and CAA's 404 answers a release without one. An ID that is not an MBID
+  gives no address and sends nothing (decided in M3).
+- Rewrite `http://` to `https://` before the first request (Android blocks cleartext). The rewrite applies to image
+  addresses taken from MusicBrainz or Cover Art Archive JSON, such as the links of the release index below; an
+  address with any other scheme is dropped. The configured base address is used as it is, so tests can point it at
+  a local fake (decided in M3).
+- A 404 after a thumbnail redirect falls back to the original image: CAA redirects a thumbnail (`front-250`,
+  `front-500`, `front-1200`) to the image host, which answers 404 when that thumbnail was never made (older uploads
+  have no 1200 px one). The original (`front`) is then asked for in a request of its own, through the limiter. A 404
+  from CAA itself, without a redirect, means the release or release group has no front image: the original is not
+  asked for (decided in M3).
+- The release index (M3, for the cover picker): `release/{id}` answers JSON, through a redirect to the image host,
+  that lists every image of the release with its ID, the front flag, its types, its comment, the address of the
+  original and the thumbnails (250, 500 and 1200 px; the older names `small` and `large` stand for 250 and 500 when
+  the numbered ones are missing). A 404 means the release has no images. A body that is not this JSON is retried as
+  MusicBrainz's is (§8).
+- An image answer is accepted when its body is a JPEG, PNG, GIF or WebP image of at most 32 MiB; its size in pixels
+  is read from the image header (JPEG, PNG and GIF; a WebP image has no size until it is decoded). A text page with
+  status 200 (a captive portal or a proxy) is retried as MusicBrainz's is; any other body fails the call (decided in
+  M3).
 - Online covers load only while online lookups are enabled: for identified albums, and lazily for albums whose tags
-  already carry a release MBID but have no local cover (M3).
+  already carry a release MBID but have no local cover (M3). A call blocked by the online gate, the provider's stop or
+  the network sends nothing and records no failure (§8).
 - Failures are cached (`api_cache`, §10.1) so lists do not retry them on every scroll: a 404 for 7 days, a 503 for
-  5 minutes, doubling on each further 503 up to 6 hours.
+  5 minutes, doubling on each further 503 up to 6 hours. Details (decided in M3):
+  - Entries are kept per image address. A live entry answers at once without a request. A success removes the entry
+    of its address. A 404 replaces a 503 entry, and the doubling counts the 503s of one address in a row, so an
+    expired 503 entry still doubles the next one.
+  - A 404 entry of a thumbnail sends the next request for it straight to the original. A 404 from CAA itself also
+    records the original's address, so neither is asked for again until the entry expires.
+  - A 503 is not retried in the same call: it pauses the Cover Art Archive limiter with the backoff of §9 (doubling
+    on each 503 in a row of that provider, never shorter than Retry-After) and records the failure.
+  - Network errors are retried as for the other providers (§9).
+  - The entries sit behind an interface: in memory in M3, keeping at most a few thousand addresses, and in
+    `api_cache` from the library database step on.
 - Embedded cover presets: **compatible** (baseline JPEG ≤ 1000 px, default), **car stereo** (baseline JPEG 600 px),
   **original**. Never replace an existing cover with a smaller one unless the user asks: "smaller" means a shorter
-  short side in pixels, and such a cover's checkbox starts unticked.
+  short side in pixels, and such a cover's checkbox starts unticked. An equal short side is not smaller. When the
+  size of the cover the user sees now is not known (decided in M3):
+  - a system thumbnail (its size is not kept) counts as not smaller, so the box starts ticked;
+  - an embedded picture has its header read on demand, as track details do (library.md §18.3), and only when the
+    proposed size is known; a header that cannot be read counts as no picture, since the user sees none;
+  - with no cover now, the box starts ticked;
+  - a proposed cover whose own size is not known starts unticked when there is a cover now, since it cannot be shown
+    not to be smaller.
 - Only the front cover is replaced: back covers, booklets and other picture types stay untouched. Several front
   pictures in one file are replaced by the one new front image, so one front image remains. MP4 `covr` has no picture
   types: its first image counts as the front and the others stay. The picture's MIME type matches the image data; the
@@ -1361,8 +1399,8 @@ tests, and a high-band error rate within the threshold of §11.4.
 | M0 | Rate limiter: never exceeds the configured rate under parallel callers; a pause holds back waiting callers; backoff with jitter on 503, 429, 502 and 504; Retry-After honoured; a rejected User-Agent is not retried; after giving up on a Retry-After over 120 s, later calls fail at once without a request until the pause is over |
 | M3 | Sending rules (§8): the app's online gate is closed by default; with the gate closed no client sends a request (AcoustID, MusicBrainz, a Cover Art Archive image and its redirect hop); a repeat the HTTP library makes by itself after the gate closed (a 408 or a 503 with Retry-After 0, also after `Connection: close`, or a dropped pooled connection) looks up and connects nothing; closing the gate during a backoff sends no further attempt; a blocked call is neither retried nor pauses the limiter; a network that is not validated, or a captive portal, fails at once without a request; a MusicBrainz 403 for the User-Agent and AcoustID error 4 stop that provider for the process, and a stop in one set of services does not reach another; a MusicBrainz 200 with an HTML body is retried, then reported as unavailable; dropped connections and failing DNS lookups are retried and given up, with the limiter paused only by the backoff; one limiter per provider at 1.1 s, 0.35 s and 1 s |
 | M3 | Online-lookup opt-in (§9, §10): the gate of the settings file is closed with an empty file and before the file is read; Enable opens it, Not now and turning the setting off close it, and turning off closes it before the write ends; a turn-off cancelled before its write keeps it closed until the file says off or Enable is stored; a settings file that cannot be read is read again; a build with a higher disclosure version finds it closed and asks for the disclosure, and Enable there opens it; a restored file opens it only with the current disclosure version; a change written by another writer through the process's settings file reaches the gate; an Enable the gate never sees stored leaves it closed, and overlapping answers report that they have ended once, after the last; turning the setting off while a lookup waits for its retry, or while a second lookup waits for the limiter, sends nothing more; the app's services use this gate; the protected-fields list keeps names it does not know |
-| M3 | Cover URLs: `http://` → `https://`; a release with a usable front image (`front-500`, `front-1200`, original); a release without one (release group images, marked as another edition); 404 after a redirect; failure TTLs (404: 7 days; 503: 5 minutes, doubling up to 6 hours) |
-| M3 | Cover size rule: a proposed cover whose short side is shorter than the existing cover's starts unticked |
+| M3 | Cover URLs (§5.2): `http://` → `https://` for addresses from MusicBrainz or CAA JSON only, never for the configured base address, and other schemes dropped; a release with a usable front image (`front-250`, `front-500`, `front-1200`, original); a release without one or a darkened one (release group images, marked as another edition, none without a release group ID); unknown flags ask the release; no address for an ID that is not an MBID; the release index on the fake CAA (images, thumbnails with the older names, the front flag, 404 as no images); a redirect with the User-Agent on each hop; 404 after a thumbnail redirect falls back to the original, a 404 without a redirect does not; a 503 pauses the CAA limiter and records a failure; a cached failure sends nothing; with the gate closed or the provider stopped nothing is sent and nothing is recorded; failure TTLs with an injected clock (404: 7 days; 503: 5 minutes, doubling on each further 503 of the address up to 6 hours; a success clears it); image sizes from JPEG, PNG and GIF headers |
+| M3 | Cover size rule: a proposed cover whose short side is shorter than the existing cover's starts unticked, an equal one ticked; with the current size unknown a system thumbnail counts as ticked, an embedded picture has its header read on demand (and not read when the rule does not need it), an unreadable header counts as no cover; no cover now starts ticked; a proposed cover of unknown size starts unticked over an existing cover |
 | M3 | Database-only undo: Apply followed by Undo restores the earlier merged values; stacked decisions (two identifications in a row, an edit on top of an identification) resolve as in §7.1; Undo right after Apply, Keep as-is and Skip; a later file change flags the field per location |
 | M3 | Size budget of `user.db` with generated data (§10.2): fails above 16 MB |
 | M4a | Batch album groups: groups with a release MBID or an album title match the library's album entities; files without an album tag are looked up one by one and merged when their recordings resolve to the same release; one release per group (most recordings); a warning for split groups and folders |
