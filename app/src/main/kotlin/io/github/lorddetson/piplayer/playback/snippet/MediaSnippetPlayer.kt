@@ -12,6 +12,7 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.ClippingMediaSource
 import io.github.lorddetson.piplayer.playback.PlaybackPlayer
 import kotlinx.coroutines.flow.StateFlow
 
@@ -127,16 +128,13 @@ internal class ExoSnippetOutput(private val context: Context) : SnippetOutput<Ur
                 }
             }
         })
-        val item = MediaItem.Builder()
-            .setUri(source)
-            .setClippingConfiguration(
-                MediaItem.ClippingConfiguration.Builder()
-                    .setStartPositionMs(window.startMs)
-                    .setEndPositionMs(window.endMs)
-                    .build(),
-            )
+        // Clipped here: the service's progressive sources do not apply an item's clipping configuration themselves.
+        val file = PlaybackPlayer.mediaSources(context).createMediaSource(MediaItem.fromUri(source))
+        val clipped = ClippingMediaSource.Builder(file)
+            .setStartPositionMs(window.startMs)
+            .setEndPositionMs(window.endMs)
             .build()
-        player.setMediaItem(item)
+        player.setMediaSource(clipped)
         player.prepare()
         player.play()
     }

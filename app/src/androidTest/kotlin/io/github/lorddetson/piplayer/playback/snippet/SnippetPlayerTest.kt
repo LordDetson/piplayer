@@ -198,7 +198,9 @@ class SnippetPlayerTest {
 
         assertThat(awaitEnd()).isEqualTo(SnippetEnd.FINISHED)
         assertThat(last).describedAs("the snippet's last position").isBetween(34_000L, 35_300L)
-        assertThat(playedFor).describedAs("how long the snippet played").isGreaterThan(14.seconds)
+        // The positions count from the window's start, so only the time played shows that the window was cut out:
+        // from 0 or to the file's end it would play 35 s or 40 s.
+        assertThat(playedFor).describedAs("how long the snippet played").isBetween(14.seconds, 22.seconds)
         assertResumesAt(before.positionMs, resumed)
         eventually("the snippet's focus request is gone") { transientRequests() == 0 }
         // The same playback goes on and counts again: a second of it adds a second.
