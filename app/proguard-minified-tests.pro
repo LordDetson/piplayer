@@ -3,8 +3,10 @@
 # its callers; everything below these entry points (the DTOs, their serializers, the parsing) is shrunk, optimized and
 # renamed as in the release build. The test APK follows the new names through the app's mapping.
 #
-# The entry points are named by hand. MinifiedTestRulesTest (JVM) fails when one of them is renamed or removed, or when
-# TestServices or IdentificationServices.create takes an app type missing here; repeat the minified run whenever
+# The entry points are named by hand. MinifiedTestRulesTest (JVM) fails when one of them is renamed or removed, when
+# TestServices or IdentificationServices.create takes an app type missing here, when TestServices' bytecode reaches an
+# app class or member not named here (also one built inside a body, or a $default bridge) or when MinifiedClientsTest
+# imports an app type missing here. It reads names, not what R8 does: repeat the minified run whenever
 # IdentificationServices.create, TestServices or the clients' calls change, since nothing on CI runs it.
 
 # The libraries the test APK shares with the app: AGP leaves them out of the test APK, so the tests, the test runner,
