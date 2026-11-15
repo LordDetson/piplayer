@@ -11,6 +11,15 @@
             android:name=".crash.NativeCrashService"
             android:exported="false"
             android:process=":crashtest_native" />
+        <!--
+            Hands out a WAV file through a reliable pipe, in a process of its own as a real document provider is, for
+            the fingerprint cache's tests (docs/track-identification.md §3.2).
+        -->
+        <provider
+            android:name=".identification.fingerprint.PipeTestProvider"
+            android:authorities="${applicationId}.pipetest"
+            android:exported="false"
+            android:process=":pipetest" />
     </application>
 
 </manifest>
