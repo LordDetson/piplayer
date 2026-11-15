@@ -61,7 +61,7 @@ class RetryingCaller(
         var attempt = 0
         while (true) {
             attempt++
-            // Before the limiter, so that a blocked call takes no slot.
+            // Before the limiter, so that a call blocked from the start takes no slot.
             guard.check()
             try {
                 limiter.acquire(maxWait = retryPolicy.longestWait)
@@ -69,7 +69,8 @@ class RetryingCaller(
                 throw paused(e.remaining)
             }
             val outcome = try {
-                // Again after the wait: the gate, a stop or the network may have changed during a backoff.
+                // Again after the wait, as the gate, a stop or the network may have changed during a backoff; a
+                // call blocked here has taken its slot, which only spaces the next caller as a sent one would.
                 guard.check()
                 http.newCall(request).await().use { response -> withContext(ioDispatcher) { handle(response) } }
             } catch (e: SendBlockedException) {

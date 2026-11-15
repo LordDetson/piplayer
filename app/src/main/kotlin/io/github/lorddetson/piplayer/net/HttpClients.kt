@@ -1,6 +1,7 @@
 package io.github.lorddetson.piplayer.net
 
 import java.io.IOException
+import java.net.ProtocolException
 import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
@@ -9,36 +10,79 @@ import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
+import okhttp3.Request
 import okhttp3.Response
+import okhttp3.ResponseBody.Companion.toResponseBody
 
 /** OkHttp clients for the metadata services. */
 object HttpClients {
 
     /**
      * A client that sends [userAgent] on every request, whatever the caller set, and sends nothing while [gate] is
-     * closed (TI §9): the gate is asked before the call opens a connection and again before the request of each
-     * redirect hop is written (the hop's connection may already be open), and a closed gate fails the call with
-     * [GateClosedException]. There is no client without a gate.
+     * closed (TI §9). The client follows redirects itself, so the gate is asked before every hop is looked up or
+     * connected (CAA to archive.org stays one call); a closed gate fails the call with [GateClosedException]. There is
+     * no client without a gate.
      */
-    fun create(userAgent: String, gate: OnlineGate): OkHttpClient {
-        val gateCheck = GateInterceptor(gate)
-        return OkHttpClient.Builder()
-            .addInterceptor(gateCheck)
-            .addInterceptor { chain ->
-                chain.proceed(chain.request().newBuilder().header("User-Agent", userAgent).build())
+    fun create(userAgent: String, gate: OnlineGate): OkHttpClient = OkHttpClient.Builder()
+        .addInterceptor(GateInterceptor(gate))
+        .addInterceptor { chain ->
+            chain.proceed(chain.request().newBuilder().header("User-Agent", userAgent).build())
+        }
+        // OkHttp's own repeats of a request on the same host (408, 421, a 503 with Retry-After 0) are asked here.
+        .addNetworkInterceptor(HopGate(gate))
+        .followRedirects(false)
+        .connectTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(30, TimeUnit.SECONDS)
+        .callTimeout(60, TimeUnit.SECONDS)
+        .build()
+}
+
+/**
+ * Asks [gate] before the request and before each redirect hop, which it follows itself, before anything about the
+ * hop's host is looked up. Only GET and HEAD are redirected (301, 302, 303, 307, 308), never from HTTPS to HTTP, at
+ * most [MAX_REDIRECTS] times; any other 3xx answer is handed back as it is.
+ */
+internal class GateInterceptor(val gate: OnlineGate) : Interceptor {
+
+    override fun intercept(chain: Interceptor.Chain): Response {
+        var request = chain.request()
+        var prior: Response? = null
+        var redirects = 0
+        while (true) {
+            if (!gate.isOpen()) throw GateClosedException()
+            val response = chain.proceed(request).let { answer ->
+                if (prior == null) answer else answer.newBuilder().priorResponse(prior).build()
             }
-            // Network interceptors run once per hop that goes out, redirects included; a refused hop ends the call
-            // without writing its request, also on a reused connection (HttpClientsTest).
-            .addNetworkInterceptor(gateCheck)
-            .connectTimeout(15, TimeUnit.SECONDS)
-            .readTimeout(30, TimeUnit.SECONDS)
-            .callTimeout(60, TimeUnit.SECONDS)
+            val next = redirectOf(response) ?: return response
+            response.close()
+            if (++redirects > MAX_REDIRECTS) throw ProtocolException("More than $MAX_REDIRECTS redirects")
+            // Kept without its body, as OkHttp keeps the hops it follows itself (Response.priorResponse).
+            prior = response.newBuilder().body("".toResponseBody(null)).networkResponse(null).cacheResponse(null).build()
+            request = next
+        }
+    }
+
+    private fun redirectOf(response: Response): Request? {
+        val request = response.request
+        if (response.code !in REDIRECTS || request.method != "GET" && request.method != "HEAD") return null
+        val url = response.header("Location")?.let(request.url::resolve) ?: return null
+        if (request.url.isHttps && !url.isHttps) return null
+        return request.newBuilder().url(url)
+            .apply { if (url.host != request.url.host) removeHeader("Authorization") }
             .build()
+    }
+
+    private companion object {
+        const val MAX_REDIRECTS = 20
+        val REDIRECTS = setOf(301, 302, 303, 307, 308)
     }
 }
 
-/** Fails a request with [GateClosedException] before it is written while [gate] is closed. */
-internal class GateInterceptor(val gate: OnlineGate) : Interceptor {
+/**
+ * The same gate for the requests OkHttp repeats on its own; a refused repeat ends the call without writing its
+ * request, also on a reused connection (HttpClientsTest).
+ */
+internal class HopGate(val gate: OnlineGate) : Interceptor {
     override fun intercept(chain: Interceptor.Chain): Response {
         if (!gate.isOpen()) throw GateClosedException()
         return chain.proceed(chain.request())

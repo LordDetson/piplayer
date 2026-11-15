@@ -3,14 +3,19 @@ package io.github.lorddetson.piplayer.net
 import io.github.lorddetson.piplayer.fakes.FakeCaa
 import io.github.lorddetson.piplayer.fakes.RecordingRequestLog
 import io.github.lorddetson.piplayer.fakes.TestServices
+import java.net.InetAddress
+import java.net.ProtocolException
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.test.runTest
 import mockwebserver3.Dispatcher
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
 import mockwebserver3.RecordedRequest
 import mockwebserver3.junit5.StartStop
+import okhttp3.Dns
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Timeout
@@ -138,7 +143,94 @@ class HttpClientsTest {
         assertThat(server.requestCount + other.requestCount).isZero()
     }
 
+    /** Resolves [ARCHIVE_HOST] to the loopback address, like archive.org for the image hop, and counts its lookups. */
+    private class ArchiveDns : Dns {
+        val archiveLookups = AtomicInteger()
+        override fun lookup(hostname: String): List<InetAddress> {
+            if (hostname == ARCHIVE_HOST) {
+                archiveLookups.incrementAndGet()
+                return listOf(InetAddress.getLoopbackAddress())
+            }
+            return Dns.SYSTEM.lookup(hostname)
+        }
+    }
+
+    private fun redirectToArchive(gate: InMemoryOnlineGate, closeOnRedirect: Boolean) {
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                if (closeOnRedirect) gate.set(OnlineConsent.NONE)
+                val location = other.url("/download/front.jpg").newBuilder().host(ARCHIVE_HOST).build()
+                return MockResponse.Builder().code(307).addHeader("Location", location).build()
+            }
+        }
+        other.enqueue(MockResponse.Builder().body("image").build())
+    }
+
+    @Test
+    fun `a redirect to another host is followed with the User-Agent`() {
+        val gate = TestServices.openGate()
+        val dns = ArchiveDns()
+        redirectToArchive(gate, closeOnRedirect = false)
+
+        val response = client(gate).newBuilder().dns(dns).build()
+            .newCall(Request.Builder().url(server.url("/front")).build()).execute()
+
+        response.use { assertThat(it.body.string()).isEqualTo("image") }
+        assertThat(dns.archiveLookups.get()).isEqualTo(1)
+        val hop = other.takeRequest()
+        assertThat(hop.headers["Host"]).startsWith(ARCHIVE_HOST)
+        assertThat(hop.headers["User-Agent"]).isEqualTo(userAgent)
+    }
+
+    @Test
+    fun `a closed gate stops a redirect before the new host is even looked up`() {
+        val gate = TestServices.openGate()
+        val dns = ArchiveDns()
+        redirectToArchive(gate, closeOnRedirect = true)
+
+        val error = runCatching {
+            client(gate).newBuilder().dns(dns).build().newCall(Request.Builder().url(server.url("/front")).build()).execute()
+        }.exceptionOrNull()
+
+        assertThat(error).isInstanceOf(GateClosedException::class.java)
+        assertThat(dns.archiveLookups.get()).isZero()
+        assertThat(other.requestCount).isZero()
+    }
+
+    @Test
+    fun `a redirected POST is not sent again`() {
+        server.enqueue(MockResponse.Builder().code(307).addHeader("Location", other.url("/v2/lookup")).build())
+        val request = Request.Builder().url(server.url("/v2/lookup")).post("fingerprint=x".toRequestBody()).build()
+
+        client().newCall(request).execute().use { assertThat(it.code).isEqualTo(307) }
+        assertThat(other.requestCount).isZero()
+    }
+
+    @Test
+    fun `a relative Location is followed on the same host`() {
+        server.enqueue(MockResponse.Builder().code(302).addHeader("Location", "/release/x/front-250.jpg").build())
+        server.enqueue(MockResponse.Builder().body("thumb").build())
+
+        client().newCall(Request.Builder().url(server.url("/release/x/front-250")).build()).execute()
+            .use { assertThat(it.body.string()).isEqualTo("thumb") }
+        server.takeRequest()
+        assertThat(server.takeRequest().target).isEqualTo("/release/x/front-250.jpg")
+    }
+
+    @Test
+    fun `an endless redirect ends the call`() {
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse =
+                MockResponse.Builder().code(302).addHeader("Location", server.url("/again")).build()
+        }
+        val error = runCatching { client().newCall(Request.Builder().url(server.url("/")).build()).execute() }
+            .exceptionOrNull()
+        assertThat(error).isInstanceOf(ProtocolException::class.java)
+        assertThat(server.requestCount).isLessThanOrEqualTo(21)
+    }
+
     private companion object {
         const val RELEASE = "44444444-4444-4444-8444-444444444444"
+        const val ARCHIVE_HOST = "archive.test"
     }
 }

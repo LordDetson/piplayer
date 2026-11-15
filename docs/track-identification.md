@@ -891,8 +891,9 @@ Phases (a) to (c) land in M4a, with accepted results saved in PiPlayer only; pha
     do not burst. The redirect to the image host (archive.org) belongs to the same call and takes no slot of its
     own. A 503 pauses the limiter with the backoff of §9 and is cached as a failure (§5.2).
 - Before every attempt, and again when the limiter lets the attempt go, a call checks the online gate (§9 Privacy),
-  the provider's stop and the network; the HTTP client checks the gate once more before each redirect hop. The
-  network must be Android's default network with both the INTERNET and the VALIDATED capability. A blocked call
+  the provider's stop and the network. The HTTP client follows redirects itself (GET and HEAD only, never from HTTPS
+  to HTTP) and checks the gate again before each hop, before the hop's host is even looked up. The network must be
+  Android's default network with both the INTERNET and the VALIDATED capability. A blocked call
   sends nothing and fails at once, saying why: online lookups are off, there is no network, the network shows a
   sign-in page first (captive portal), or the provider is stopped. It is never retried and never pauses the limiter,
   so a user who turns online lookups off during a backoff gets no further attempt.

@@ -43,6 +43,9 @@ class ProviderStatusStore {
 
     fun status(provider: ProviderId): StateFlow<ProviderStatus> = statuses.getValue(provider).asStateFlow()
 
+    /** The status now; read before every attempt, so it allocates nothing. */
+    fun current(provider: ProviderId): ProviderStatus = statuses.getValue(provider).value
+
     /** Stops [provider] for good; the first reason is kept. */
     fun stop(provider: ProviderId, reason: StopReason) {
         statuses.getValue(provider).compareAndSet(ProviderStatus.Active, ProviderStatus.Stopped(reason))
@@ -69,7 +72,7 @@ class ProviderAccess(
 
     override fun check() {
         if (!gate.isOpen()) throw GateClosedException()
-        (statuses.status(provider).value as? ProviderStatus.Stopped)?.let { throw ProviderStoppedException(provider, it.reason) }
+        (statuses.current(provider) as? ProviderStatus.Stopped)?.let { throw ProviderStoppedException(provider, it.reason) }
         when (connectivity.state()) {
             NetworkState.VALIDATED -> Unit
             NetworkState.NO_NETWORK -> throw NoNetworkException()

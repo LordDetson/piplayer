@@ -12,6 +12,7 @@ import io.github.lorddetson.piplayer.identification.provider.ProviderStatusStore
 import io.github.lorddetson.piplayer.identification.provider.identificationProviders
 import io.github.lorddetson.piplayer.net.Connectivity
 import io.github.lorddetson.piplayer.net.GateInterceptor
+import io.github.lorddetson.piplayer.net.HopGate
 import io.github.lorddetson.piplayer.net.HttpClients
 import io.github.lorddetson.piplayer.net.InMemoryOnlineGate
 import io.github.lorddetson.piplayer.net.OnlineGate
@@ -56,8 +57,11 @@ class IdentificationServices(
 ) {
 
     init {
-        require(http.interceptors.any { it is GateInterceptor && it.gate === gate }) {
-            "The HTTP client must check the services' own online gate (HttpClients.create)"
+        require(
+            http.interceptors.any { it is GateInterceptor && it.gate === gate } &&
+                http.networkInterceptors.any { it is HopGate && it.gate === gate },
+        ) {
+            "The HTTP client must check the services' own online gate on every hop (HttpClients.create)"
         }
     }
 
