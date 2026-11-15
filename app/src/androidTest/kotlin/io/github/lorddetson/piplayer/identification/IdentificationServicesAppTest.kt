@@ -1,9 +1,16 @@
 package io.github.lorddetson.piplayer.identification
 
+import androidx.datastore.preferences.core.edit
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.github.lorddetson.piplayer.PiPlayerApplication
 import io.github.lorddetson.piplayer.TestFiles
 import io.github.lorddetson.piplayer.fakes.TestServices
+import io.github.lorddetson.piplayer.net.OnlineConsent
+import io.github.lorddetson.piplayer.settings.IdentificationSettings
+import io.github.lorddetson.piplayer.settings.SettingsFiles
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.Test
@@ -22,10 +29,30 @@ class IdentificationServicesAppTest {
     fun theAppsServicesAreOneInstanceWithAClosedGate() {
         val services = IdentificationServices.of(app)
         assertThat(IdentificationServices.of(app)).isSameAs(services)
-        assertThat(services.gate.isOpen()).isFalse()
         // The gate is the persisted opt-in of the settings file (TI §9), not one of its own.
         assertThat(services.gate).isSameAs(app.onlineGate)
         assertThat(services.baseUrls).isEqualTo(ProviderBaseUrls.PRODUCTION)
+
+        // A new install: the settings file holds no consent, whatever an earlier manual run on this device left there.
+        val file = SettingsFiles.settings(app)
+        val kept = runBlocking { file.data.first() }
+        try {
+            runBlocking {
+                file.edit {
+                    it.remove(IdentificationSettings.ENABLED)
+                    it.remove(IdentificationSettings.VERSION)
+                }
+                withTimeout(5_000) { app.onlineGate.consent.first { it == OnlineConsent.NONE } }
+            }
+            assertThat(services.gate.isOpen()).isFalse()
+        } finally {
+            runBlocking {
+                file.edit { preferences ->
+                    kept[IdentificationSettings.ENABLED]?.let { preferences[IdentificationSettings.ENABLED] = it }
+                    kept[IdentificationSettings.VERSION]?.let { preferences[IdentificationSettings.VERSION] = it }
+                }
+            }
+        }
     }
 
     @Test
