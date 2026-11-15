@@ -17,10 +17,14 @@ contents, the same with the table removed (so the extractor has to build an inde
 header at all; plus raw AAC (ADTS), seeked by its average frame size, and raw AMR narrowband in one mode, seeked
 by the size of its first frame (docs/playback.md §1.3).
 
+A snippet fixture: 60 s of a quiet 440 Hz tone, long enough for a snippet from one third of the file (TI §6) and for
+a main player that must not end while the snippet tests watch it.
+
 The files are made by ffmpeg from synthetic sound, so they carry no third-party rights. The expected values live in
 the tests (app/src/androidTest/.../playback/); keep them in step.
 
-Run from the repository root: python scripts/generate_playback_fixtures.py
+Run from the repository root: python scripts/generate_playback_fixtures.py [name ...]
+Names given make only those files, so that adding a fixture leaves the others byte for byte as they are.
 """
 import base64
 import pathlib
@@ -52,6 +56,9 @@ SEEK_FIXTURES = [
     ("seek-aac-adts.aac", 44100, "stereo", ["-c:a", "aac", "-b:a", "64k", "-f", "adts"]),
     ("seek-amr-nb.amr", 8000, "mono", ["-c:a", "libopencore_amrnb", "-b:a", "12.2k", "-f", "amr"]),
 ]
+
+SNIPPET_FIXTURE = "snippet-60s.mp3"
+SNIPPET_SECONDS = 60
 
 FRONT_COVER = ("0x3D5AFE", 64, 3, "Cover (front)")
 BACK_COVER = ("0xFF0000", 32, 4, "Cover (back)")
@@ -113,6 +120,13 @@ def encode_segments(target, rate, layout, encoder):
              f"aformat=channel_layouts={layout}")
     ffmpeg(["-f", "lavfi", "-i", signal, "-f", "lavfi", "-i", noise, "-filter_complex", graph,
             *common_output_arguments(rate), *encoder, str(target)])
+
+
+def encode_snippet(target):
+    """A quiet 440 Hz tone of SNIPPET_SECONDS as a small constant-bitrate MP3 with an Info header."""
+    tone = f"aevalsrc=exprs='0.2*sin(2*PI*440*t)':channel_layout=mono:sample_rate=22050:duration={SNIPPET_SECONDS}"
+    ffmpeg(["-f", "lavfi", "-i", tone, *common_output_arguments(22050), "-c:a", "libmp3lame", "-b:a", "32k",
+            "-f", "mp3", str(target)])
 
 
 def cover_png(directory, picture):
@@ -192,23 +206,37 @@ def main():
     if shutil.which("ffmpeg") is None:
         sys.exit("ffmpeg is not on PATH")
     OUT.mkdir(parents=True, exist_ok=True)
+    wanted = set(sys.argv[1:])
+
+    def make(name):
+        return not wanted or name in wanted
+
     for name, rate, layout, encoder in FORMATS:
-        encode_tone(OUT / name, rate, layout, encoder)
+        if make(name):
+            encode_tone(OUT / name, rate, layout, encoder)
     for name, rate, layout, encoder in SEEK_FIXTURES:
-        encode_segments(OUT / name, rate, layout, encoder)
-    remove_xing_table(OUT / "seek-mp3-vbr-xing.mp3", OUT / "seek-mp3-vbr-xing-without-toc.mp3")
-    encode_tagged(OUT / "tagged-44100-stereo.mp3")
+        if make(name):
+            encode_segments(OUT / name, rate, layout, encoder)
+    if make("seek-mp3-vbr-xing-without-toc.mp3"):
+        remove_xing_table(OUT / "seek-mp3-vbr-xing.mp3", OUT / "seek-mp3-vbr-xing-without-toc.mp3")
+    if make("tagged-44100-stereo.mp3"):
+        encode_tagged(OUT / "tagged-44100-stereo.mp3")
+    if make(SNIPPET_FIXTURE):
+        encode_snippet(OUT / SNIPPET_FIXTURE)
     pictures = OUT / "pictures"
     pictures.mkdir(exist_ok=True)
     try:
         for name, cover, encoder in COVER_FIXTURES:
-            encode_with_pictures(OUT / name, cover, encoder, pictures)
+            if make(name):
+                encode_with_pictures(OUT / name, cover, encoder, pictures)
         for name, encoder in OGG_COVER_FIXTURES:
-            encode_ogg_with_cover(OUT / name, encoder, pictures)
+            if make(name):
+                encode_ogg_with_cover(OUT / name, encoder, pictures)
     finally:
         shutil.rmtree(pictures)
     for path in sorted(OUT.iterdir()):
-        print(f"{path.name}: {path.stat().st_size} bytes")
+        if make(path.name):
+            print(f"{path.name}: {path.stat().st_size} bytes")
 
 
 if __name__ == "__main__":
