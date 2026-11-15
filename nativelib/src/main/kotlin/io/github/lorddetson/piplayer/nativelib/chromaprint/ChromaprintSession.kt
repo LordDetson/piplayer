@@ -52,7 +52,8 @@ class ChromaprintSession(sampleRate: Int = Chromaprint.SAMPLE_RATE, channels: In
         }
     }
 
-    private companion object {
+    // Internal for Chromaprint.encode: the natives stay on this class, which the consumer rules keep for JNI_OnLoad.
+    internal companion object {
         @JvmStatic external fun nativeNew(algorithm: Int): Long
         @JvmStatic external fun nativeStart(handle: Long, sampleRate: Int, channels: Int): Boolean
         @JvmStatic external fun nativeFeed(handle: Long, samples: ShortArray, offset: Int, length: Int): Boolean
@@ -60,6 +61,7 @@ class ChromaprintSession(sampleRate: Int = Chromaprint.SAMPLE_RATE, channels: In
         @JvmStatic external fun nativeRawFingerprint(handle: Long): IntArray
         @JvmStatic external fun nativeEncodedFingerprint(handle: Long): String
         @JvmStatic external fun nativeFree(handle: Long)
+        @JvmStatic external fun nativeEncode(raw: IntArray, algorithm: Int): String?
     }
 }
 
@@ -90,8 +92,7 @@ object Chromaprint {
         require(algorithm in ALGORITHMS) { "Unknown Chromaprint algorithm $algorithm" }
         require(raw.size <= MAX_ITEMS) { "${raw.size} items are more than a fingerprint holds" }
         NativeLibrary.load()
-        return nativeEncode(raw, algorithm) ?: throw ChromaprintException("Chromaprint could not encode the fingerprint")
+        return ChromaprintSession.nativeEncode(raw, algorithm)
+            ?: throw ChromaprintException("Chromaprint could not encode the fingerprint")
     }
-
-    @JvmStatic private external fun nativeEncode(raw: IntArray, algorithm: Int): String?
 }

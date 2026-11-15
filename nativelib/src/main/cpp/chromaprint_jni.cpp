@@ -165,15 +165,9 @@ bool registerChromaprint(JNIEnv *env) {
       {"nativeRawFingerprint", "(J)[I", reinterpret_cast<void *>(rawFingerprint)},
       {"nativeEncodedFingerprint", "(J)Ljava/lang/String;", reinterpret_cast<void *>(encodedFingerprint)},
       {"nativeFree", "(J)V", reinterpret_cast<void *>(release)},
-  };
-  if (env->RegisterNatives(session, methods, sizeof(methods) / sizeof(methods[0])) != JNI_OK) return false;
-
-  jclass chromaprint = env->FindClass("io/github/lorddetson/piplayer/nativelib/chromaprint/Chromaprint");
-  if (chromaprint == nullptr) return false;
-  static const JNINativeMethod encoding[] = {
       {"nativeEncode", "([II)Ljava/lang/String;", reinterpret_cast<void *>(encode)},
   };
-  return env->RegisterNatives(chromaprint, encoding, sizeof(encoding) / sizeof(encoding[0])) == JNI_OK;
+  return env->RegisterNatives(session, methods, sizeof(methods) / sizeof(methods[0])) == JNI_OK;
 }
 
 }  // namespace piplayer

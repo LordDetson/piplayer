@@ -1,5 +1,6 @@
 package io.github.lorddetson.piplayer.identification.fingerprint
 
+import android.media.MediaCodecList
 import io.github.lorddetson.piplayer.TestFiles
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
@@ -14,7 +15,8 @@ import org.junit.runners.Parameterized
  * platform decoder decodes compressed formats, PCM in the container (WAV) needs none, and ALAC, which the Android
  * platform has no decoder for, is not fingerprintable: in 1.0 such a file is identified by text search only. The
  * fixtures are the 2 s tones of scripts/generate_decoding_fixtures.py, shorter than Chromaprint's first item (about
- * 2.7 s), so "fingerprinted" means that all of the audio reached Chromaprint at its rate and the fingerprint finished.
+ * 2.7 s), so "fingerprinted" means that all of the audio reached Chromaprint at its rate and the fingerprint finished;
+ * how long that audio is, per fixture, DecodingFixturesTest says.
  */
 @RunWith(Parameterized::class)
 class DecodingTableTest(private val row: Row) {
@@ -30,14 +32,7 @@ class DecodingTableTest(private val row: Row) {
         NOT_FINGERPRINTABLE,
     }
 
-    data class Row(
-        val format: String,
-        val fixture: String,
-        val mimeType: String,
-        val path: Path,
-        /** What the file itself lacks of the 2 s (DecodingFixturesTest says why). */
-        val shortBySeconds: Double = 0.0,
-    ) {
+    data class Row(val format: String, val fixture: String, val mimeType: String, val path: Path) {
         override fun toString() = format
     }
 
@@ -47,12 +42,6 @@ class DecodingTableTest(private val row: Row) {
         /** Rounding of the length to whole samples after resampling. */
         private const val SLACK_SECONDS = 0.001
 
-        /** Padding a format keeps at its end, at most two frames (the longest: raw AAC's priming and padding). */
-        private const val MAX_END_PADDING_SECONDS = 0.05
-
-        /** What [MediaCodecPcmSource] reports as the decoder of PCM stored in the container. */
-        private const val CONTAINER_PCM_DECODER = "none (PCM)"
-
         val TABLE = listOf(
             Row("MP3", "mp3-44100-stereo.mp3", "audio/mpeg", Path.PLATFORM_DECODER),
             Row("MP3 at 320k", "mp3-44100-320k-stereo.mp3", "audio/mpeg", Path.PLATFORM_DECODER),
@@ -61,9 +50,7 @@ class DecodingTableTest(private val row: Row) {
             Row("raw AMR-NB", "amr-nb-8000-mono.amr", "audio/3gpp", Path.PLATFORM_DECODER),
             Row("AMR-NB in 3GP", "amr-nb-8000-mono.3gp", "audio/3gpp", Path.PLATFORM_DECODER),
             Row("raw AMR-WB", "amr-wb-16000-mono.awb", "audio/amr-wb", Path.PLATFORM_DECODER),
-            Row(
-                "AMR-WB in 3GP", "amr-wb-16000-mono.3gp", "audio/amr-wb", Path.PLATFORM_DECODER, shortBySeconds = 0.005,
-            ),
+            Row("AMR-WB in 3GP", "amr-wb-16000-mono.3gp", "audio/amr-wb", Path.PLATFORM_DECODER),
             Row("Ogg Vorbis", "vorbis-48000-mono.ogg", "audio/vorbis", Path.PLATFORM_DECODER),
             Row("Vorbis in Matroska", "vorbis-44100-stereo.mka", "audio/vorbis", Path.PLATFORM_DECODER),
             Row("Opus in Ogg", "opus-48000-stereo.opus", "audio/opus", Path.PLATFORM_DECODER),
@@ -77,6 +64,11 @@ class DecodingTableTest(private val row: Row) {
         @JvmStatic
         @Parameterized.Parameters(name = "{0}")
         fun rows() = TABLE.map { arrayOf<Any>(it) }
+
+        private val decoders = MediaCodecList(MediaCodecList.REGULAR_CODECS).codecInfos.filterNot { it.isEncoder }
+
+        private fun decoderTakes(mimeType: String) =
+            decoders.any { info -> info.supportedTypes.any { it.equals(mimeType, ignoreCase = true) } }
     }
 
     private fun fingerprint(): FingerprintResult {
@@ -93,7 +85,8 @@ class DecodingTableTest(private val row: Row) {
 
     @Test
     fun takesItsPathToChromaprint() {
-        if (row.path == Path.NOT_FINGERPRINTABLE) {
+        // A phone whose maker adds a decoder the platform lacks decodes that format like the others.
+        if (row.path == Path.NOT_FINGERPRINTABLE && !decoderTakes(row.mimeType)) {
             assertThatThrownBy { fingerprint() }
                 .isInstanceOfSatisfying(DecodingException.UnsupportedFormat::class.java) { error ->
                     assertThat(error.mimeType).isEqualTo(row.mimeType)
@@ -104,15 +97,20 @@ class DecodingTableTest(private val row: Row) {
         val result = fingerprint()
 
         assertThat(result.source.mimeType).isEqualTo(row.mimeType)
-        if (row.path == Path.PLATFORM_DECODER) {
-            assertThat(result.source.decoderName).isNotBlank().isNotEqualTo(CONTAINER_PCM_DECODER)
+        val decoderNames = decoders.map { it.name }
+        if (row.path == Path.CONTAINER_PCM) {
+            assertThat(decoderNames).doesNotContain(result.source.decoderName)
         } else {
-            assertThat(result.source.decoderName).isEqualTo(CONTAINER_PCM_DECODER)
+            assertThat(decoderNames).contains(result.source.decoderName)
         }
         assertThat(result.source.endedEarly).isNull()
         assertThat(result.reachedEnd).isTrue()
-        assertThat(result.fedSeconds)
-            .isBetween(SECONDS - row.shortBySeconds - SLACK_SECONDS, SECONDS + MAX_END_PADDING_SECONDS)
+        DecodingFixturesTest.FIXTURES.singleOrNull { it.name == row.fixture }?.let { fixture ->
+            assertThat(result.fedSeconds).isBetween(
+                SECONDS - fixture.shortBySeconds - SLACK_SECONDS,
+                SECONDS + fixture.endPaddingSeconds + SLACK_SECONDS,
+            )
+        }
         // Too short for an item, but Chromaprint took all of it and finished.
         assertThat(result.fingerprint.raw).isEmpty()
     }

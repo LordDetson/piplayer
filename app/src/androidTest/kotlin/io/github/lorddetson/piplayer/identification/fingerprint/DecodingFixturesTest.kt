@@ -47,9 +47,8 @@ class DecodingFixturesTest(private val fixture: Fixture) {
         /** Rounding of the length to whole samples, here and after resampling. */
         private const val SLACK_SECONDS = 0.001
 
-        @JvmStatic
-        @Parameterized.Parameters(name = "{0}")
-        fun fixtures() = listOf(
+        /** Also the expected lengths of the decoding table (DecodingTableTest). */
+        val FIXTURES = listOf(
             Fixture("mp3-44100-stereo.mp3", "audio/mpeg", 44_100, 2),
             // Its average bitrate (worked out a little above 320 kbit/s) is more than the MP3 decoder declares.
             Fixture("mp3-44100-320k-stereo.mp3", "audio/mpeg", 44_100, 2),
@@ -77,7 +76,11 @@ class DecodingFixturesTest(private val fixture: Fixture) {
             Fixture("amr-wb-16000-mono.3gp", "audio/amr-wb", 16_000, 1, shortBySeconds = 0.005),
             Fixture("opus-48000-stereo.webm", "audio/opus", 48_000, 2, endPaddingSeconds = 0.025),
             Fixture("vorbis-44100-stereo.mka", "audio/vorbis", 44_100, 2, endPaddingSeconds = 0.047),
-        ).map { arrayOf<Any>(it) }
+        )
+
+        @JvmStatic
+        @Parameterized.Parameters(name = "{0}")
+        fun fixtures() = FIXTURES.map { arrayOf<Any>(it) }
     }
 
     private fun <T> withSource(block: (PcmSource) -> T): T {
