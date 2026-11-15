@@ -983,6 +983,10 @@ ends and the next begins.
   no late samples, so on alpha02 it leaves the ffmpeg AAC album out, and on beta01 it also runs that album, which has
   never played with the screen off before; its join must come out exact. The two journals are compared over the
   albums both runs share, and the ffmpeg AAC album is checked on its own.
+  `ScreenOffGaplessTest` was run on the local API 30 emulator on 15.11.2026: on alpha02 in the rollback state, 4 of 4
+  albums; on beta01, 5 of 5. Over the four albums both runs share, the journals agree: the same decoders, one audio
+  output per album, every song change automatic, no underrun. The ffmpeg AAC album on beta01 plays the same way and
+  its joins are exact. The quiet timing pass on both versions is still to run, on a quiet host.
 - A queue item replaced in place with new metadata for the same file (title, artist, album, length, cover URI) is not
   prepared again: no new load, decoder or audio output, no state change, song change or jump, and the position runs
   on. `SessionMetadataTest` checks it on each version, because the refresh after a decision (track-identification.md
