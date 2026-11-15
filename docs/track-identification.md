@@ -935,7 +935,10 @@ Rules:
   call that was already waiting when such a pause began. A 403 that rejects the User-Agent stops the client. In M0 the limiter keeps its state in memory; persisting the
   last request time (§8) comes with batches (M4a).
 - Each provider sits behind a `MetadataProvider` interface with policy flags: `commercialAllowed`, `mayPersist`,
-  `mayWriteToFile`, `maxDisplayAge`, `requiresSecret`, attribution text and per-item link, own rate limiter.
+  `mayWriteToFile`, `maxDisplayAge`, `requiresApiKey`, `requiresSecret`, attribution text and per-item link, own rate
+  limiter. `requiresApiKey` means an application key that ships in the APK and is not a secret (AcoustID, see
+  below). `requiresSecret` means a real secret, for example an OAuth consumer secret, which may not ship in the APK
+  and so has to come from the user or from a server; no provider of 1.0 needs one.
 - Only CC0 core fields are written into files as text; embedded covers follow §5.2. Attribution in About (M5):
   "Identification: AcoustID / Chromaprint · Metadata: MusicBrainz (CC0) · Covers: Cover Art Archive".
 - API keys shipped in the APK are not secrets (established open-source taggers publish theirs); document that forks
