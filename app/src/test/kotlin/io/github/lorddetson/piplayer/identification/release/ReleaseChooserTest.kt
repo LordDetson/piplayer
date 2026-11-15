@@ -154,13 +154,46 @@ class ReleaseChooserTest {
     }
 
     @Test
+    fun `a tagged release ID in upper case with spaces takes the release from the cache`() = runTest {
+        val services = services()
+        val chooser = ReleaseChooser(services.musicBrainz, cache)
+        chooser.choose(tagRanking(services), ReleaseRequest(tagReleaseId = FakeMusicBrainz.HARBOR_RELEASE))
+        val second = chooser.choose(
+            tagRanking(services),
+            ReleaseRequest(tagReleaseId = " ${FakeMusicBrainz.HARBOR_RELEASE.uppercase()} ", trackNumberTag = 11),
+        )
+        assertThat(second.suggested!!.source).isEqualTo(EditionSource.TAG)
+        assertThat(second.suggested.details.at).isEqualTo(TrackPosition(1, 11))
+        assertThat(log.entries.count { it.path.startsWith("/ws/2/release/") }).isEqualTo(1)
+    }
+
+    @Test
+    fun `a merged tagged release is looked up once for the whole album`() = runTest {
+        val merged = "49494949-4949-4949-8949-494949494949"
+        fake.on("release/$merged", FakeMusicBrainz.HARBOR_RELEASE_LOOKUP)
+        val services = services()
+        val chooser = ReleaseChooser(services.musicBrainz, cache)
+        repeat(3) { track ->
+            val choice = chooser.choose(tagRanking(services), ReleaseRequest(tagReleaseId = merged, trackNumberTag = track + 1))
+            assertThat(choice.suggested!!.release.id).isEqualTo(FakeMusicBrainz.HARBOR_RELEASE)
+        }
+        assertThat(log.entries.filter { it.path.startsWith("/ws/2/release/") }.map { it.path.substringBefore('?') })
+            .containsExactly("/ws/2/release/$merged")
+        assertThat(chooser.release(FakeMusicBrainz.HARBOR_RELEASE)!!.id).isEqualTo(FakeMusicBrainz.HARBOR_RELEASE)
+        assertThat(log.entries.count { it.path.startsWith("/ws/2/release/") }).isEqualTo(1)
+    }
+
+    @Test
     fun `the release group is browsed only when the edition picker opens`() = runTest {
         val chooser = chooser()
         val request = ReleaseRequest(country = "GB")
         val choice = chooser.choose(harborRanking(), request)
         assertThat(log.entries.filter { it.path.contains("release-group=") }).isEmpty()
 
-        val editions = chooser.editions(choice, request)
+        val list = chooser.editions(choice, request)
+        assertThat(list.capped).isFalse()
+        assertThat(list.totalCount).isEqualTo(3)
+        val editions = list.editions
         assertThat(log.entries.filter { it.path.contains("release-group=${FakeMusicBrainz.HARBOR_GROUP}") }).hasSize(1)
         assertThat(editions.map { it.release.id }).containsExactly(
             FakeMusicBrainz.HARBOR_RELEASE,
@@ -190,6 +223,21 @@ class ReleaseChooserTest {
         assertThat(choice.ranked.getValue("r0").first().release.id).isEqualTo("r0000")
         assertThat(lookups.browsed).containsExactly("r0")
         assertThat(lookups.looked).containsExactly("r0000")
+    }
+
+    @Test
+    fun `a capped release-group browse makes the picker's list partial`() = runTest {
+        val harbor = ReleaseFixtures.lookup("release-harbor-lights.json")
+        val details = ReleaseDetailsExtractor.extract(harbor, recording, null, 214_000)!!
+        val choice = ReleaseChoice(recording, null, emptyMap(), SuggestedEdition(harbor, details, EditionSource.TAG), emptyList())
+        val releases = (0 until 1_000).map { ReleaseFixtures.release("g%04d".format(it)) }
+        val lookups = FakeLookups(ReleaseList(releases, totalCount = 1_250, pages = 10, capped = true))
+
+        val list = ReleaseChooser(lookups, cache).editions(choice, ReleaseRequest())
+        assertThat(list.capped).isTrue()
+        assertThat(list.totalCount).isEqualTo(1_250)
+        assertThat(list.editions).hasSize(1_001)
+        assertThat(list.editions.first().release.id).isEqualTo(FakeMusicBrainz.HARBOR_RELEASE)
     }
 
     @Test

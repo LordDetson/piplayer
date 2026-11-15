@@ -1,5 +1,6 @@
 package io.github.lorddetson.piplayer.identification.release
 
+import io.github.lorddetson.piplayer.identification.musicbrainz.MusicBrainzClient
 import io.github.lorddetson.piplayer.identification.musicbrainz.MusicBrainzException
 import io.github.lorddetson.piplayer.identification.musicbrainz.MusicBrainzLookups
 import io.github.lorddetson.piplayer.identification.musicbrainz.RecordingDto
@@ -32,6 +33,18 @@ enum class EditionSource {
 
     /** The top of the release ranking (TI §4.2 step 2). */
     RANKING,
+}
+
+/**
+ * The edition picker's list (TI §4.2 step 6).
+ *
+ * @property capped the page cap stopped the release group's browse, so the list is partial and the picker says so.
+ * @property totalCount the number of releases MusicBrainz reports for the group; 0 when there is no suggested edition.
+ */
+data class EditionList(val editions: List<Edition>, val capped: Boolean, val totalCount: Int) {
+    companion object {
+        val NONE = EditionList(emptyList(), capped = false, totalCount = 0)
+    }
 }
 
 /** The suggested edition: the looked-up release and the file's track on it. */
@@ -127,15 +140,23 @@ class ReleaseChooser(
     }
 
     /** The edition picker's list (TI §4.2 step 6), browsed from the suggested release's group when it opens. */
-    suspend fun editions(choice: ReleaseChoice, request: ReleaseRequest): List<Edition> {
-        val suggested = choice.suggested ?: return emptyList()
-        val group = suggested.release.releaseGroup?.id
-            ?: return listOf(Edition(suggested.release, suggested = true, knownToContain = true))
-        val releases = lookups.releasesOfReleaseGroup(group, LookupPlan.MAX_RELEASE_PAGES).releases
+    suspend fun editions(choice: ReleaseChoice, request: ReleaseRequest): EditionList {
+        val suggested = choice.suggested ?: return EditionList.NONE
+        val group = suggested.release.releaseGroup?.id ?: return EditionList(
+            listOf(Edition(suggested.release, suggested = true, knownToContain = true)),
+            capped = false,
+            totalCount = 1,
+        )
+        val list = lookups.releasesOfReleaseGroup(group, LookupPlan.MAX_RELEASE_PAGES)
+        val releases = list.releases
         val known = choice.ranked[choice.recordingId].orEmpty().map { it.release.id }.toSet() + suggested.release.id
         // The suggested edition is listed even when the group's browse missed it (a capped or changed list).
         val all = if (releases.any { it.id == suggested.release.id }) releases else listOf(suggested.release) + releases
-        return EditionPicker.editions(all, suggested.release.id, known, context(request))
+        return EditionList(
+            EditionPicker.editions(all, suggested.release.id, known, context(request)),
+            capped = list.capped,
+            totalCount = list.totalCount,
+        )
     }
 
     /** Choosing [edition] in the picker: its tracklist (one lookup, cached) and how the file maps onto it. */
@@ -156,9 +177,15 @@ class ReleaseChooser(
         )
     }
 
-    /** A looked-up release, from the cache or with one lookup that then fills it. */
-    suspend fun release(releaseId: String): ReleaseDto? =
-        cache.get(releaseId) ?: lookups.lookupRelease(releaseId)?.also { cache.put(it) }
+    /**
+     * A looked-up release, from the cache or with one lookup that then fills it. The key is the MBID in its plain form
+     * (a tag may hold it in upper case or with spaces), and a release that answers with another ID (a merged one) is
+     * kept under the asked ID too, so every track of the album finds it (TI §5.1).
+     */
+    suspend fun release(releaseId: String): ReleaseDto? {
+        val key = MusicBrainzClient.plainMbid(releaseId) ?: releaseId
+        return cache.get(key) ?: lookups.lookupRelease(key)?.also { cache.put(it, requestedId = key) }
+    }
 
     private suspend fun context(request: ReleaseRequest) = ReleaseContext(
         albumTag = request.albumTag,

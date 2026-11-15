@@ -105,14 +105,14 @@ class MusicBrainzClient(
         return getOrNull(entity("recording", id, RECORDING_INC)) { body -> MusicBrainzJson.decodeFromString(body) }
     }
 
-    /** Stage 2 (TI §3): the recordings of [isrc]; none for a 404 or for text that is no ISRC, which sends nothing. */
+    /**
+     * Stage 2 (TI §3): `/isrc/{isrc}?inc=artists`, the recordings of [isrc] with their artist credits, so that an
+     * artist that disagrees with the tags shows in the reason; none for a 404 or for text that is no ISRC, which sends
+     * nothing.
+     */
     suspend fun lookupIsrc(isrc: String): List<RecordingDto> {
         val plain = plainIsrc(isrc) ?: return emptyList()
-        val url = baseUrl.newBuilder()
-            .addPathSegment("isrc")
-            .addPathSegment(plain)
-            .addQueryParameter("fmt", "json")
-            .build()
+        val url = entity("isrc", plain, ISRC_INC)
         return getOrNull(url) { body -> MusicBrainzJson.decodeFromString<IsrcResponse>(body).recordings }.orEmpty()
     }
 
@@ -212,7 +212,7 @@ class MusicBrainzClient(
         return get(url) { body -> MusicBrainzJson.decodeFromString(body) }
     }
 
-    /** `/{type}/{mbid}?inc=…&fmt=json`. */
+    /** `/{type}/{id}?inc=…&fmt=json`, for an MBID or an ISRC. */
     private fun entity(type: String, mbid: String, inc: String): HttpUrl = baseUrl.newBuilder()
         .addPathSegment(type)
         .addPathSegment(mbid)
@@ -270,6 +270,7 @@ class MusicBrainzClient(
         private val RETRIED_STATUSES = setOf(429, 502, 503, 504)
         private const val OFFICIAL = "official"
         private const val RECORDING_INC = "artist-credits+isrcs"
+        private const val ISRC_INC = "artists"
         private const val RELEASE_INC = "recordings+artist-credits+labels+release-groups+isrcs"
         private const val RECORDING_BROWSE_INC = "release-groups+media+labels"
         private const val GROUP_BROWSE_INC = "media+labels"

@@ -9,7 +9,11 @@ import io.github.lorddetson.piplayer.identification.musicbrainz.ReleaseDto
 interface ReleaseCache {
     suspend fun get(releaseId: String): ReleaseDto?
 
-    suspend fun put(release: ReleaseDto)
+    /**
+     * Keeps [release] under its own ID and, when it differs, under [requestedId], the ID it was looked up by (a merged
+     * release answers with the ID it was merged into, TI §5.1).
+     */
+    suspend fun put(release: ReleaseDto, requestedId: String = release.id)
 }
 
 /** The [maxEntries] most recently used releases of this process. */
@@ -25,8 +29,11 @@ class InMemoryReleaseCache(private val maxEntries: Int = DEFAULT_MAX_ENTRIES) : 
 
     override suspend fun get(releaseId: String): ReleaseDto? = synchronized(entries) { entries[releaseId] }
 
-    override suspend fun put(release: ReleaseDto) {
-        synchronized(entries) { entries[release.id] = release }
+    override suspend fun put(release: ReleaseDto, requestedId: String) {
+        synchronized(entries) {
+            entries[release.id] = release
+            if (requestedId != release.id) entries[requestedId] = release
+        }
     }
 
     companion object {

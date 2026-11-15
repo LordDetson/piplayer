@@ -9,6 +9,10 @@ import io.github.lorddetson.piplayer.identification.provider.ProviderStatus
 import io.github.lorddetson.piplayer.identification.provider.ProviderStatusStore
 import io.github.lorddetson.piplayer.identification.provider.ProviderStoppedException
 import io.github.lorddetson.piplayer.identification.provider.StopReason
+import io.github.lorddetson.piplayer.identification.score.HintField
+import io.github.lorddetson.piplayer.identification.score.RecordingScorer
+import io.github.lorddetson.piplayer.identification.score.StageFinding
+import io.github.lorddetson.piplayer.identification.score.TrackHint
 import io.github.lorddetson.piplayer.identification.text.MusicBrainzRef
 import io.github.lorddetson.piplayer.identification.text.QueryVariant
 import io.github.lorddetson.piplayer.identification.text.RecordingQuery
@@ -118,9 +122,23 @@ class MusicBrainzLookupsTest {
         val recordings = client().lookupIsrc(" gb-cee-86-00016 ")
 
         assertThat(requests.single().url.encodedPath).isEqualTo("/ws/2/isrc/GBCEE8600016")
+        assertThat(requests.single().url.queryParameter("inc")).isEqualTo("artists")
         assertThat(requests.single().url.queryParameter("fmt")).isEqualTo("json")
         assertThat(recordings.map { it.id }).containsExactly(live)
         assertThat(recordings.single().length).isEqualTo(280_893)
+    }
+
+    @Test
+    fun `an ISRC answer carries the credits, so an artist that disagrees with the tags shows in the reason`() = runTest {
+        serve()
+        val recordings = client().lookupIsrc(FakeMusicBrainz.KNOWN_ISRC)
+        assertThat(requests.single().url.queryParameter("inc")).isEqualTo("artists")
+        assertThat(recordings.single().creditString()).isEqualTo("The Quiet Harbors")
+
+        val hint = TrackHint("Paper Lanterns", "Someone Else Entirely", 214_000)
+        val best = RecordingScorer.rank(hint, listOf(StageFinding.Isrc(recordings.map { it.toCandidate() }))).best!!
+        assertThat(best.score).isEqualTo(RecordingScorer.ISRC_SCORE)
+        assertThat(best.reason.disagreement).containsExactly(HintField.ARTIST)
     }
 
     @Test
@@ -292,6 +310,14 @@ class MusicBrainzLookupsTest {
         val list = client().releasesOfReleaseGroup(FakeMusicBrainz.HARBOR_GROUP)
         assertThat(list.releases.map { it.status }).containsExactly("Official", "Official", "Promotion")
         assertThat(requests.single().url.queryParameter("status")).isNull()
+    }
+
+    @Test
+    fun `a release group's non-official releases follow the official ones whatever the server's order`() = runTest {
+        serve(fake.onBrowse("release-group", liveGroup, mapOf(0 to fixture("release-group-promo-first.json"))))
+        val list = client().releasesOfReleaseGroup(liveGroup)
+        assertThat(list.releases.map { it.status }).containsExactly("Official", "Official", "Promotion", null)
+        assertThat(list.releases.map { it.id.takeLast(2) }).containsExactly("03", "04", "01", "02")
     }
 
     // Pasted links and IDs (TI §3.3).

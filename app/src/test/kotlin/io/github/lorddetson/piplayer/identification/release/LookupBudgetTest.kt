@@ -123,4 +123,33 @@ class LookupBudgetTest {
         )
         assertSpacing()
     }
+
+    @Test
+    fun `a tagged recording without a length on MusicBrainz is not looked up a second time`() = runTest {
+        val services = services()
+        val recording = services.musicBrainz.lookupRecording(FakeMusicBrainz.HARBOR_RECORDING)!!.toCandidate().copy(lengthMs = null)
+        val ranking = RecordingScorer.rank(hint, listOf(StageFinding.TagRecordingId(recording)))
+        assertThat(ranking.band).isEqualTo(Band.MEDIUM)
+        val choice = ReleaseChooser(services.musicBrainz, InMemoryReleaseCache())
+            .choose(ranking, ReleaseRequest(tagReleaseId = FakeMusicBrainz.HARBOR_RELEASE, durationMs = 214_000))
+
+        assertThat(choice.suggested!!.source).isEqualTo(EditionSource.TAG)
+        assertThat(log.entries.map { it.path.substringBefore('?') }).containsExactly(
+            "/ws/2/recording/${FakeMusicBrainz.HARBOR_RECORDING}",
+            "/ws/2/release/${FakeMusicBrainz.HARBOR_RELEASE}",
+        )
+        assertSpacing()
+    }
+
+    @Test
+    fun `a text-search winner without a length costs no recording lookup`() = runTest {
+        val services = services()
+        val found = services.musicBrainz.lookupRecording(FakeMusicBrainz.HARBOR_RECORDING)!!.toCandidate().copy(lengthMs = null)
+        val ranking = RecordingScorer.rank(hint, listOf(StageFinding.TextSearch(listOf(found))))
+        assertThat(ranking.band).isEqualTo(Band.MEDIUM)
+        val before = log.size
+        ReleaseChooser(services.musicBrainz, InMemoryReleaseCache()).choose(ranking, ReleaseRequest(durationMs = 214_000))
+
+        assertThat(log.entries.drop(before)).noneMatch { it.path.startsWith("/ws/2/recording/") }
+    }
 }

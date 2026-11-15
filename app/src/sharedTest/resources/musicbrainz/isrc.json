@@ -7,7 +7,18 @@
       "length": 214000,
       "video": false,
       "disambiguation": "",
-      "first-release-date": "2019"
+      "first-release-date": "2019",
+      "artist-credit": [
+        {
+          "name": "The Quiet Harbors",
+          "joinphrase": "",
+          "artist": {
+            "id": "22222222-2222-4222-8222-222222222222",
+            "name": "The Quiet Harbors",
+            "sort-name": "Quiet Harbors, The"
+          }
+        }
+      ]
     }
   ]
 }

@@ -4,6 +4,7 @@ import io.github.lorddetson.piplayer.identification.score.Band
 import io.github.lorddetson.piplayer.identification.score.Bands
 import io.github.lorddetson.piplayer.identification.score.Ranking
 import io.github.lorddetson.piplayer.identification.score.RecordingMatch
+import io.github.lorddetson.piplayer.identification.score.Source
 
 /**
  * The request caps of one identification (TI §3, request budget): pure decisions about which MusicBrainz requests a
@@ -22,21 +23,29 @@ object LookupPlan {
 
     /**
      * The recordings whose releases are browsed, best first: the winner and the recordings less than the band gap
-     * below it, at most [MAX_BROWSED_RECORDINGS]; none when the best score is in the no-match band.
+     * below it that are not in the no-match band themselves, at most [MAX_BROWSED_RECORDINGS]; none when the best
+     * score is in the no-match band.
      */
     fun recordingsToBrowse(ranking: Ranking): List<String> {
         val best = ranking.best ?: return emptyList()
         if (ranking.band == Band.NO_MATCH) return emptyList()
         // Within the gap exactly when the best would not be high for it, with the tolerance of the bands.
         return ranking.matches
-            .filter { it === best || best.score - it.score < Bands.GAP - TOLERANCE }
+            .filter {
+                it === best || (best.score - it.score < Bands.GAP - TOLERANCE && it.score >= Bands.MEDIUM - TOLERANCE)
+            }
             .take(MAX_BROWSED_RECORDINGS)
             .map { it.recordingId }
     }
 
-    /** Whether [match] lacks a title, a credit or a length, so that it is worth one recording lookup. */
-    fun needsRecordingLookup(match: RecordingMatch): Boolean = match.candidate.let {
-        it.title.isBlank() || it.artistCredit.isBlank() || it.lengthMs == null
+    /**
+     * Whether [match] lacks a title or a credit (AcoustID knows some recordings by their ID only), so that it is worth
+     * one recording lookup. Never for a recording stage 1 already looked up, and not for a missing length alone: every
+     * MusicBrainz answer gives the same length, so a lookup would bring none either.
+     */
+    fun needsRecordingLookup(match: RecordingMatch): Boolean {
+        if (Source.TAG_RECORDING_ID in match.reason.foundBy) return false
+        return match.candidate.title.isBlank() || match.candidate.artistCredit.isBlank()
     }
 
     private const val TOLERANCE = 1e-9

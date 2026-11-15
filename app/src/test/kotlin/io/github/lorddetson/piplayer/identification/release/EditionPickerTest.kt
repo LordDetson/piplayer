@@ -49,6 +49,20 @@ class EditionPickerTest {
     }
 
     @Test
+    fun `a non-official edition the ranking puts first still follows the official ones`() {
+        val suggested = ReleaseFixtures.release("s", primary = "Album", date = "2010")
+        // The promo is an album from 1990, so the release ranking alone puts it ahead of the official single.
+        val promo = ReleaseFixtures.release("p", primary = "Album", date = "1990", status = "Promotion")
+        val bootleg = ReleaseFixtures.release("b", primary = "Album", date = "1991", status = "Bootleg")
+        val single = ReleaseFixtures.release("o", primary = "Single", date = "2005")
+        val group = listOf(promo, bootleg, suggested, single)
+        assertThat(ReleaseRanking.rank(listOf(promo, single), ReleaseContext()).first().release.id).isEqualTo("p")
+
+        val editions = EditionPicker.editions(group, "s", setOf("s"), ReleaseContext())
+        assertThat(editions.map { it.release.id }).containsExactly("s", "o", "p", "b")
+    }
+
+    @Test
     fun `an edition with the identified recording maps to its own track`() {
         val mapping = EditionPicker.map(harbor, recording, "Paper Lanterns", TrackPosition(1, 3), trackNumberTag = 11)
         assertThat((mapping as EditionMapping.SameRecording).track.at).isEqualTo(TrackPosition(1, 11))

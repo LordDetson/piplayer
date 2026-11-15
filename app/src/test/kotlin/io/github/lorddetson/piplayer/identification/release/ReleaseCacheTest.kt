@@ -16,6 +16,14 @@ class ReleaseCacheTest {
     }
 
     @Test
+    fun `a release answered for another ID is kept under both`() = runTest {
+        val cache = InMemoryReleaseCache()
+        cache.put(release("new"), requestedId = "old")
+        assertThat(cache.get("old")!!.id).isEqualTo("new")
+        assertThat(cache.get("new")!!.id).isEqualTo("new")
+    }
+
+    @Test
     fun `the least recently used release goes first when the cache is full`() = runTest {
         val cache = InMemoryReleaseCache(maxEntries = 2)
         cache.put(release("a"))
