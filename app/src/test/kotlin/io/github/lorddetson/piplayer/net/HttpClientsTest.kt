@@ -7,9 +7,15 @@ import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.ProtocolException
 import java.net.Proxy
+import java.time.Instant
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.Semaphore
+import java.util.concurrent.SynchronousQueue
+import java.util.concurrent.ThreadFactory
+import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
+import kotlin.time.Duration.Companion.hours
 import kotlinx.coroutines.test.runTest
 import mockwebserver3.Dispatcher
 import mockwebserver3.MockResponse
@@ -28,6 +34,9 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Timeout
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.Arguments
+import org.junit.jupiter.params.provider.MethodSource
 
 class HttpClientsTest {
 
@@ -403,8 +412,173 @@ class HttpClientsTest {
         assertThat(server.requestCount).isLessThanOrEqualTo(21)
     }
 
+    /**
+     * Runs OkHttp's asynchronous calls, as its own dispatcher does, and keeps what escaped a call's task: an exception
+     * that escapes is thrown on the "OkHttp Dispatcher" thread, which it kills (on Android, uncaught, the app).
+     */
+    private class DispatcherThreads(
+        val uncaught: MutableList<Throwable> = CopyOnWriteArrayList(),
+    ) : ThreadPoolExecutor(
+        0,
+        Int.MAX_VALUE,
+        60,
+        TimeUnit.SECONDS,
+        SynchronousQueue(),
+        ThreadFactory { task ->
+            Thread(task, "OkHttp Dispatcher").apply {
+                isDaemon = true
+                setUncaughtExceptionHandler { _, e -> uncaught += e }
+            }
+        },
+    ) {
+        val escaped: MutableList<Throwable> = CopyOnWriteArrayList()
+        private val ended = Semaphore(0)
+
+        /** Called on the task's own thread once it ended, before an escaped exception goes on up that thread. */
+        override fun afterExecute(task: Runnable?, thrown: Throwable?) {
+            if (thrown != null) escaped += thrown
+            ended.release()
+        }
+
+        /** Waits until [count] tasks have ended, so that what escaped them has been kept. */
+        fun awaitEnded(count: Int) {
+            assertThat(ended.tryAcquire(count, 10, TimeUnit.SECONDS)).describedAs("dispatcher tasks ended").isTrue()
+        }
+    }
+
+    /** Sends one GET through the client on [threads] and hands back its answer once its task has ended. */
+    private suspend fun answerOnDispatcher(threads: DispatcherThreads): Result<Response> {
+        val watched = client().newBuilder().dispatcher(okhttp3.Dispatcher(threads)).build()
+        val result = runCatching { watched.newCall(Request.Builder().url(server.url("/")).build()).await() }
+        threads.awaitEnded(1)
+        threads.shutdown()
+        return result
+    }
+
+    /** Longer than the longest pause any provider takes (1 hour), so the retries end and the pause is capped. */
+    private fun assertLongerThanAnyPause(retryAfter: String?) {
+        val wait = RetryAfter.parse(retryAfter, Instant.now())
+        assertThat(wait).describedAs("Retry-After %s", retryAfter).isNotNull()
+        assertThat(wait!!).isGreaterThan(1.hours)
+    }
+
+    @ParameterizedTest(name = "{0} with Retry-After {1}")
+    @MethodSource("tooLongForOkHttp")
+    @Timeout(value = 20, unit = TimeUnit.SECONDS)
+    fun `a numeric Retry-After too long for OkHttp kills no thread and still reads as longer than any pause`(
+        code: Int,
+        retryAfter: String,
+    ) = runTest {
+        server.enqueue(MockResponse.Builder().code(code).addHeader("Retry-After", retryAfter).body("busy").build())
+        val threads = DispatcherThreads()
+
+        val result = answerOnDispatcher(threads)
+
+        assertThat(threads.escaped + threads.uncaught).isEmpty()
+        result.getOrThrow().use { response ->
+            assertThat(response.code).isEqualTo(code)
+            assertThat(response.body.string()).isEqualTo("busy")
+            assertLongerThanAnyPause(response.header("Retry-After"))
+        }
+        assertThat(server.requestCount).isEqualTo(1)
+    }
+
+    @Test
+    @Timeout(value = 20, unit = TimeUnit.SECONDS)
+    fun `a Retry-After too long for OkHttp does not throw out of a call made on the caller's thread`() {
+        server.enqueue(MockResponse.Builder().code(503).addHeader("Retry-After", "99999999999999999999").build())
+
+        client().newCall(Request.Builder().url(server.url("/")).build()).execute().use { response ->
+            assertThat(response.code).isEqualTo(503)
+            assertLongerThanAnyPause(response.header("Retry-After"))
+        }
+    }
+
+    @Test
+    @Timeout(value = 20, unit = TimeUnit.SECONDS)
+    fun `a long run of digits of another script, which Android's regex counts as digits, kills no thread`() = runTest {
+        // Arabic-Indic digits: Android's regex (ICU) matches them with \d, as OkHttp's Retry-After check does, and
+        // Integer.valueOf reads them, so a long run of them throws there as a long run of ASCII digits does.
+        val digits = "\u0669".repeat(20)
+        server.enqueue(MockResponse.Builder().code(503).addHeaderLenient("Retry-After", digits).build())
+        val threads = DispatcherThreads()
+
+        val result = answerOnDispatcher(threads)
+
+        assertThat(threads.escaped + threads.uncaught).isEmpty()
+        result.getOrThrow().use { response ->
+            assertThat(response.code).isEqualTo(503)
+            assertLongerThanAnyPause(response.header("Retry-After"))
+        }
+    }
+
+    @ParameterizedTest(name = "{0} with Retry-After \"{1}\"")
+    @MethodSource("otherRetryAfters")
+    @Timeout(value = 20, unit = TimeUnit.SECONDS)
+    fun `any other Retry-After reaches the caller as the server sent it and kills no thread`(code: Int, retryAfter: String) =
+        runTest {
+            server.enqueue(MockResponse.Builder().code(code).addHeader("Retry-After", retryAfter).build())
+            val threads = DispatcherThreads()
+
+            val result = answerOnDispatcher(threads)
+
+            assertThat(threads.escaped + threads.uncaught).isEmpty()
+            result.getOrThrow().use { response ->
+                assertThat(response.code).isEqualTo(code)
+                assertThat(response.headers.values("Retry-After")).containsExactly(retryAfter)
+            }
+            assertThat(server.requestCount).isEqualTo(1)
+        }
+
+    @Test
+    @Timeout(value = 20, unit = TimeUnit.SECONDS)
+    fun `every Retry-After of an answer is read, and its other headers are kept as they came`() = runTest {
+        server.enqueue(
+            MockResponse.Builder().code(503)
+                .addHeader("Retry-After", "7")
+                .addHeader("Retry-After", "99999999999999999999")
+                .addHeaderLenient("X-Note", "caf\u00e9")
+                .build(),
+        )
+        val threads = DispatcherThreads()
+
+        val result = answerOnDispatcher(threads)
+
+        assertThat(threads.escaped + threads.uncaught).isEmpty()
+        result.getOrThrow().use { response ->
+            val values = response.headers.values("Retry-After")
+            assertThat(values).hasSize(2)
+            assertThat(values[0]).isEqualTo("7")
+            assertLongerThanAnyPause(values[1])
+            assertThat(response.header("X-Note")).isEqualTo("caf\u00e9")
+        }
+    }
+
     private companion object {
         const val RELEASE = "44444444-4444-4444-8444-444444444444"
         const val ARCHIVE_HOST = "archive.test"
+
+        /** The answers OkHttp reads Retry-After of (408, 503) and one it does not (429). */
+        val BUSY_CODES = listOf(408, 429, 503)
+
+        /** Just past Int.MAX_VALUE, past Long.MAX_VALUE, far past both, and just past Int.MAX_VALUE after zeros. */
+        @JvmStatic
+        fun tooLongForOkHttp(): List<Arguments> =
+            listOf("2147483648", "9223372036854775808", "99999999999999999999", "000000000002147483648")
+                .flatMap { value -> BUSY_CODES.map { code -> Arguments.of(code, value) } }
+
+        /** Values OkHttp reads as not a number or as a number it can hold; none of them makes it repeat the request. */
+        @JvmStatic
+        fun otherRetryAfters(): List<Arguments> = listOf(
+            "2147483647",
+            "00000000000000000007",
+            "-1",
+            "-99999999999999999999",
+            "1.5",
+            "soon",
+            "",
+            "Wed, 21 Oct 2015 07:28:00 GMT",
+            "Fri, 31 Dec 9999 23:59:59 GMT",
+        ).flatMap { value -> BUSY_CODES.map { code -> Arguments.of(code, value) } }
     }
 }

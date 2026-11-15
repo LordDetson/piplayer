@@ -311,8 +311,22 @@ class CoverArtArchiveClientTest {
     @Test
     fun `a 503 with a Retry-After of years pauses every CAA request for 1 hour`() = runTest {
         fake { withImages(RELEASE) }
-        // About 63 years; still an Int, as OkHttp's own 503 handling reads the header before the client sees it.
+        // About 63 years, a number OkHttp's own 503 handling can hold.
         caa.enqueue(MockResponse.Builder().code(503).addHeader("Retry-After", "2000000000").body("busy").build())
+        val client = client()
+
+        assertThat(client.cover(release(OTHER), CoverSize.LIST)).isInstanceOf(CaaResult.Busy::class.java)
+        val error = runCatching { client.cover(release(RELEASE), CoverSize.LIST) }.exceptionOrNull()
+
+        assertThat(error).isInstanceOf(CaaException.Paused::class.java)
+        assertThat((error as CaaException.Paused).remaining).isBetween(1.hours - 1.seconds, 1.hours)
+        assertThat(server.requestCount + archive.requestCount).isEqualTo(1)
+    }
+
+    @Test
+    fun `a 503 with a Retry-After too long for OkHttp to read pauses every CAA request for 1 hour`() = runTest {
+        fake { withImages(RELEASE) }
+        caa.enqueue(MockResponse.Builder().code(503).addHeader("Retry-After", "99999999999999999999").body("busy").build())
         val client = client()
 
         assertThat(client.cover(release(OTHER), CoverSize.LIST)).isInstanceOf(CaaResult.Busy::class.java)

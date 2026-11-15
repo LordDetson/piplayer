@@ -156,6 +156,21 @@ class MusicBrainzClientTest {
     }
 
     @Test
+    fun `a Retry-After too long for OkHttp to read ends the retries and pauses later calls for 1 hour`() = runTest {
+        server.enqueue(MockResponse.Builder().code(503).addHeader("Retry-After", "99999999999999999999").build())
+        server.enqueue(ok())
+        val client = client()
+
+        val first = runCatching { client.searchRecordings(query, 25) }.exceptionOrNull()
+        assertThat(first).isInstanceOf(MusicBrainzException.Unavailable::class.java)
+        val second = runCatching { client.searchRecordings(query, 25) }.exceptionOrNull()
+
+        assertThat(second).isInstanceOf(MusicBrainzException.Paused::class.java)
+        assertThat((second as MusicBrainzException.Paused).remaining).isBetween(3599.seconds, 3600.seconds)
+        assertThat(server.requestCount).isEqualTo(1)
+    }
+
+    @Test
     fun `a Retry-After of 120 s is still waited for, with its jitter`() = runTest {
         server.enqueue(MockResponse.Builder().code(503).addHeader("Retry-After", "120").build())
         server.enqueue(ok())

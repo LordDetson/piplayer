@@ -29,7 +29,7 @@ object HttpClients {
      * [GateClosedException]. So OkHttp's own repeats on the same host (408, 421, a 503 with Retry-After 0, a pooled
      * connection that dropped) look up, connect and send nothing while the gate is closed. The one gap is a SOCKS
      * proxy, whose sockets OkHttp makes itself; Android's system proxy is an HTTP proxy, which is gated. There is no
-     * client without a gate.
+     * client without a gate. A Retry-After OkHttp cannot read is passed on as [RetryAfterClamp] says.
      */
     fun create(userAgent: String, gate: OnlineGate, dns: Dns = Dns.SYSTEM): OkHttpClient = OkHttpClient.Builder()
         .addInterceptor(GateInterceptor(gate))
@@ -38,6 +38,8 @@ object HttpClients {
         }
         // Asked before a request is written on any connection, a pooled one included.
         .addNetworkInterceptor(HopGate(gate))
+        // Below OkHttp's own 408 and 503 handling, which reads Retry-After before any application interceptor.
+        .addNetworkInterceptor(RetryAfterClamp)
         .dns(GatedDns(gate, dns))
         .socketFactory(GatedSocketFactory(gate))
         .followRedirects(false)
@@ -101,6 +103,35 @@ internal class HopGate(val gate: OnlineGate) : Interceptor {
         if (!gate.isOpen()) throw GateClosedException()
         return chain.proceed(chain.request())
     }
+}
+
+/**
+ * Passes a Retry-After of digits too large for an Int on as [Int.MAX_VALUE] seconds (about 68 years), on every answer
+ * of every hop (TI §8). OkHttp's own handling of a 408 and a 503 reads a Retry-After of digits with Integer.valueOf,
+ * which throws NumberFormatException for a larger number: not an IOException, so an asynchronous call reports it and
+ * then throws it again on the dispatcher's thread, uncaught, which on Android ends the app. The clamped value is
+ * still longer than any pause (RetryAfter, RetryPolicy), so the retries end and the limiter pause keeps its cap; any
+ * other value, an HTTP date included, is left as the server sent it, which OkHttp reads as "not 0" without throwing.
+ * A digit is any Unicode decimal digit, as Android's regex and Integer.valueOf take them.
+ */
+internal object RetryAfterClamp : Interceptor {
+
+    private const val HEADER = "Retry-After"
+
+    override fun intercept(chain: Interceptor.Chain): Response {
+        val response = chain.proceed(chain.request())
+        val values = response.headers.values(HEADER)
+        if (values.none(::tooLarge)) return response
+        // Copied as they came, without the checks of Headers.Builder.add that a server's own headers may not pass.
+        val headers = response.headers.newBuilder().removeAll(HEADER)
+        values.forEach { value -> headers.addUnsafeNonAscii(HEADER, if (tooLarge(value)) LONGEST else value) }
+        return response.newBuilder().headers(headers.build()).build()
+    }
+
+    private val LONGEST = Int.MAX_VALUE.toString()
+
+    private fun tooLarge(value: String): Boolean =
+        value.isNotEmpty() && value.all(Char::isDigit) && value.toIntOrNull() == null
 }
 
 /** Looks a host up through [delegate] only while [gate] is open; a closed gate fails the lookup and so the call. */

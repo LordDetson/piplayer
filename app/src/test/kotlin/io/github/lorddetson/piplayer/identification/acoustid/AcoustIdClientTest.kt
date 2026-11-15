@@ -224,6 +224,21 @@ class AcoustIdClientTest {
     }
 
     @Test
+    fun `a Retry-After too long for OkHttp to read ends the retries and pauses later lookups for 1 hour`() = runTest {
+        server.enqueue(MockResponse.Builder().code(503).addHeader("Retry-After", "99999999999999999999").build())
+        server.enqueue(ok())
+        val client = client()
+
+        val first = runCatching { client.lookup(fingerprint, 214_400) }.exceptionOrNull()
+        assertThat(first).isInstanceOf(AcoustIdException.Unavailable::class.java)
+        val second = runCatching { client.lookup(fingerprint, 214_400) }.exceptionOrNull()
+
+        assertThat(second).isInstanceOf(AcoustIdException.Paused::class.java)
+        assertThat((second as AcoustIdException.Paused).remaining).isBetween(3599.seconds, 3600.seconds)
+        assertThat(server.requestCount).isEqualTo(1)
+    }
+
+    @Test
     fun `gives up after the last retry`() = runTest {
         repeat(4) { server.enqueue(error(503, 13, "service unavailable")) }
         val error = runCatching { client(maxRetries = 3).lookup(fingerprint, 214_400) }.exceptionOrNull()
