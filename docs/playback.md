@@ -954,8 +954,9 @@ ends and the next begins.
 - Versions: M1 moved from 1.11.1 to 1.12.0-alpha01, and alpha01 to alpha02 kept the journals of `GaplessTest` and
   `ScreenOffGaplessTest` byte for byte. M2a and M2b closed on 1.12.0-alpha02. M3 step 8 (15.11.2026) moved to
   1.12.0-beta01 (of 11.11.2026). Rollback: `media3` in `gradle/libs.versions.toml` back to 1.12.0-alpha02,
-  and the late samples of the ffmpeg AAC album back into `fixture.json` (the generator prints them as the rest of
-  the last frames).
+  and `app/src/androidTest/assets/gapless/fixture.json` restored from commit e952e5a, which gives the ffmpeg AAC
+  album back its late samples, `"late": [763, 488, 913, 921, 195]`. The fixtures are not generated again: the
+  generator encodes every album anew with whatever encoders are installed and can change the reviewed files.
 - The A/B of 1.12.0-beta01 (CI, API 30 and 36, 15.11.2026). On alpha02 all 986 app and 115 native tests passed, with
   no flaky rerun. With the new tests on alpha02, only the ffmpeg AAC album of `GaplessTest` failed, by 3 280 samples
   too many (the sum of its late samples), and the two new `SessionMetadataTest` tests passed. On beta01 the ffmpeg AAC
@@ -965,8 +966,13 @@ ends and the next begins.
   compares the walk of an MP4 cut off in the middle with what the decoder makes of it, and that fixture is AAC as
   ffmpeg writes it. The decoder now also trims the padding Media3 reports (512 samples, 11 ms) from the cut end, where
   the file holds audio rather than padding: 32 ms against a tolerance of one AAC frame (24 ms). The walk did not
-  change, and the test adds the trimmed padding back to the decoded length. The runs' journals are in CI artifacts that
+  change, and the test adds the trimmed padding back to the decoded length, after checking that it is at most one
+  AAC frame (1 024 samples), so a wrong padding value fails instead of moving the reference. On alpha02 that padding
+  should be 0; this form of the test has run on beta01 only. The runs' journals are in CI artifacts that
   need a sign-in, so the class results stand for them; `ScreenOffGaplessTest` is opt-in and does not run on CI.
+  Still to do on a local emulator before the move reaches `main`: the quiet timing pass and `ScreenOffGaplessTest`
+  on both versions, journals compared. `ScreenOffGaplessTest` takes the albums with no late samples, so on beta01 it
+  also runs the ffmpeg AAC album, which has never played with the screen off before; its join must come out exact.
 - A queue item replaced in place with new metadata for the same file (title, artist, album, length, cover URI) is not
   prepared again: no new load, decoder or audio output, no state change, song change or jump, and the position runs
   on. `SessionMetadataTest` checks it on each version, because the refresh after a decision (track-identification.md

@@ -230,6 +230,9 @@ class ExactDurationDeviceTest {
         assertThat(plan).isEqualTo(DurationPlan(null, DurationCheck.WALK))
         // The fixture is AAC as ffmpeg writes it: since Media3 1.12.0-beta01 its padding is known (androidx/media#3489)
         // and the decoder trims it from the cut end; the walk counts the samples that are there.
+        // The padding added back is at most one AAC frame (0 before beta01, 512 since), so a wrong padding value fails
+        // here instead of moving the reference of the walk.
+        assertThat(encoderPadding(cut)).isBetween(0, AAC_FRAME_SAMPLES)
         assertNear(walked, decodedMs(cut, paddingBack = true), AAC_FRAME_MS, "the walk")
         assertThat(walked).isBetween(8_000, 12_000)
     }
@@ -288,6 +291,7 @@ class ExactDurationDeviceTest {
         const val TAG = "ExactDurationTest"
         const val MP3_FRAME_MS = 27L
         const val AAC_FRAME_MS = 24L
+        const val AAC_FRAME_SAMPLES = 1_024
         const val FLAC_FRAME_MS = 100L
         const val WAV_SAMPLE_MS = 101L
     }
