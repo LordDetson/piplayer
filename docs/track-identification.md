@@ -881,11 +881,31 @@ re-checked before release (M5); in M4a they also drive automatic preparation.
   - Level 4 is used only while the tag pass has not read the file (`audio_file.tag_pass_at` is null). Once the file is
     read, an empty level-3 value stays empty and only level 5 can fill it. Media index placeholders such as
     `<unknown>` count as empty.
-  - Within levels 1 and 2 the newest decision that is not undone wins per field. A per-field revert is a decision
-    that hides the older level-1 and level-2 values of that field, so the file's value wins again.
+  - Within levels 1 and 2 the newest decision that is not undone wins per field, whatever its level: an
+    identification applied after an edit wins over the edit, and undoing it brings the edit back. Decisions are
+    ordered by the time they were made and, at the same time, by their row ID. A per-field revert is a decision
+    that hides the older level-1 and level-2 values of that field, so the file's value wins again; a newer decision
+    wins over it as over any other, and undoing the revert brings the hidden values back.
+  - A decided value may be empty, as when an edit clears a field. It wins as any value does, and then only the
+    file-name guess (level 5) can fill the title and the artist, as for a read file whose tag is empty.
+  - A field is decided as a whole (decided in M3): a decision stores every part of each field it sets, empty parts
+    included, so the parts of two decisions never mix within one field. The fields are those of the protected-fields
+    list (§10), and their parts are listed in §10.2: the artist, for example, is its credit as printed, the credited
+    names with their join phrases and the sort name, and the MusicBrainz IDs are the recording, release, release
+    group, release track, artist and album artist IDs. Apply stores every ticked field this way, empty where the
+    chosen release has no value; which fields the review proposes and ticks is decided there (§6).
+  - The level of each value is kept per field, so track details can show the source of every value (§6), and the
+    reasons of §1 use the decided values: a confirmed recording ID clears "No MusicBrainz recording ID", a decided
+    title clears "Title from the file name", and a decided cover counts as a cover.
   - One repository function resolves the winners and copies them into `track_display`, with the normalized search
     columns and the missing-information reasons (§1), on every change (decision, undo, tag pass, index sync) and at
-    start-up when the user database changed since the last mirror (§10.3).
+    start-up when the user database changed since the last mirror (§10.3). The decided values reach it through
+    `decided_mirror` (§10.1): a decision or an undo commits to the user database first, then the decided values of
+    the track's files are replaced and their display rows derived again in one library database transaction. The
+    sync, the tag pass and a new display version join `decided_mirror` on every write of a display row, so none of
+    them loses a decided value. A file whose content key the tag pass has just stored gets its decided values in a
+    mirror run right after that batch, as favorites do (library.md §15.4). Lists, Now Playing and the media session
+    follow a version that every mirror run that changed decided values raises (decided in M3).
 - **Merged values everywhere.** Every surface reads the merged values, never raw tags: lists, search, track details,
   Now Playing, the media session with its notification, lock screen, Bluetooth controllers and watches, and in v1.x
   car displays, voice requests and the widget. Track details resolve the fields that `track_display` does not hold by
@@ -905,14 +925,34 @@ re-checked before release (M5); in M4a they also drive automatic preparation.
   nothing visible, and undoing the newer one brings the older one's values back. In M3 the review card offers Undo
   right after Apply, Keep as-is or Skip, and track details offer "Undo identification" and a per-field revert; the
   change history per decision and per batch lands in M4b (batch history beyond per-file revert is below the cut
-  line). Undo of a change written into the file follows §7.2 step 10.
+  line). Undo of a change written into the file follows §7.2 step 10. Details (decided in M3):
+  - An undone decision stays stored with its `undone_at`, for that history; undoing it again changes nothing, and
+    there is no redo: applying the same result again makes a new decision.
+  - Undo and the decision it undoes belong to one track identity; a decision of an identity that is gone (deleted
+    by the attach pass, which never deletes an identity holding a decision, §10.2) cannot be undone, and nothing is
+    written.
+  - "Undo identification" in track details undoes the newest identification of the track that is not undone; an
+    older one then wins again where no newer decision hides it. A per-field revert is a decision of its own, so it
+    can be undone like any other.
+  - Every decision, undo and revert raises the change counter in the same user database transaction (§10.3).
 - **File changed after a decision.** For each decided field and file location, the reference value is the file's
   value at the decision or, after a verified write, the written value (§7.2 step 6); only values that differ from the
   decided value are stored (`file_state`, §10.2). If a later tag pass finds a file value that differs from the
   reference, the field is flagged in track details as changed in the file, with "Keep PiPlayer's value" and "Use the
   file's value" (a per-field revert). The comparison runs per file location, for written decisions as well as for
   database-only ones. Until the user chooses, the decision keeps winning. PiPlayer's own writes are not such changes
-  (§7.2 step 8).
+  (§7.2 step 8). Details (decided in M3):
+  - A reference is stored as a 4-byte hash (CRC-32 of the value's text, an empty value as 0), not as the value:
+    20 000 identified tracks would otherwise hold their old tags twice and break the size budget (§10.2). The hash
+    says whether a value changed, and the value the file holds now comes from the tag pass.
+  - The location a decision is made on keeps its references in the decision row; another location of the same
+    identity whose values at the decision differ from those gets `file_state` rows. A location without either, as
+    after a move, compares with the decision's references, so a moved file whose tags stayed the same is not
+    flagged.
+  - The reference of a field is that of the decision whose value wins the field now. A flag stays until the user
+    chooses: "Keep PiPlayer's value" clears it and takes the file's present value as the new reference of that
+    location, and "Use the file's value" is a per-field revert. The tag pass makes the comparison with the lapse of
+    Skip (§1).
 
 ### 7.2 File tags (opt-in per action or per batch; M4b)
 
@@ -1337,9 +1377,13 @@ whose first sync after the update runs as on a first launch (about 1.7 s on the 
   the precedence resolver; `missing_info_decision` is none, keep_as_is or skipped, and `badge_state` is the state of the
   metadata badge (§6). Both are written with the merged values from the mirrored decisions (`decided_mirror`), so a
   writer that replaces a display row keeps them, and both are none until the first decision is mirrored (M3).
+  `badge_state` in M3 (decided in M3): 0 from tags, when no decided value wins; 1 identified, when values of a
+  confirmed identification win and no edit does; 2 edited, when a value of the user's own edit wins. Both decided
+  states are saved in PiPlayer only until writing exists (M4b), which adds its states with their own codes.
 - `decided_mirror(file_id, field, value, level, decision_id)` (M3): the decided values of §7.1 as the precedence
-  resolver uses them: for each file and field the winning value of levels 1 and 2 (the field names of the
-  protected-fields list, §10; a value may be empty, as when an edit clears a field), its level and the user database's
+  resolver uses them: for each file and field part the winning value of levels 1 and 2 (the parts of the fields of
+  the protected-fields list by their names in §10.2, such as `title` or `artist_sort`; a value may be empty, as when
+  an edit clears a field; a list joined by U+001F), its level and the user database's
   decision it comes from. Like `track_mirror` it sits beside `track_display` rather than in it, because the writers of
   display rows (sync, tag pass, a new display version) replace them whole; they join it on every refresh. It is filled
   from the user database on each decision commit and at start-up when `user_meta.change_counter` differs from
@@ -1391,13 +1435,15 @@ used, never through a stored content URI, which goes stale after a media index r
   hint_display_name, hint_size, created_at, missing_since)`: the stable track identity that all user data refers to;
   the content key and the start form the track key. Every file with a known content key has one (M2a). Re-attachment
   (§3.1) updates the key, the length and the hints. `missing_since` is set while no file holds the key; an identity
-  without user data that has been missing for 30 days is deleted, one with user data never.
+  without user data that has been missing for 30 days is deleted, one with user data never. A decision is user data,
+  also an undone one, and so is a `file_state` row (M3).
 - `decision(id, identity_id, batch_uuid, kind, fields, release_choice_id, recording_mbid, release_track_mbid,
-  acoustid_id, confidence, reason, provider, fetched_at, license_class, file_size, file_mtime, created_at, undone_at,
-  lapsed_at)`: one row per track and decision. `kind` is apply, edit, revert_field, keep_as_is or skip; `fields` is the
+  acoustid_id, confidence, reason, provider, fetched_at, license_class, file_size, file_mtime, file_values, created_at,
+  undone_at, lapsed_at)`: one row per track and decision. `kind` is apply, edit, revert_field, keep_as_is or skip; `fields` is the
   set of ticked fields. Provenance is stored here, once per decision, not with each value. `acoustid_id` is the
   AcoustID track ID of a confirmed result, so it survives rebuilds and restores. A skip stores the file's size and
-  modification time, so that the tag pass can let it lapse (§1).
+  modification time, so that the tag pass can let it lapse (§1). `file_values` holds the references of §7.1 for the
+  location the decision was made on.
 - `release_choice(id, release_mbid, release_group_mbid, values, saved_cover_id, fetched_at)`: release-level values
   (album, album artist credit and list, album artist sort names and IDs, dates, label, catalog number, barcode,
   totals, disc subtitles, compilation flag), stored once per chosen release; decisions that chose the same release
@@ -1410,6 +1456,40 @@ used, never through a stored content URI, which goes stale after a media index r
   per-location state, stored only when needed: when the file's value at a decision differs from the decided value,
   or when the field changed in the file since (§7.1). Whether a field is written into a file is derived from
   `applied_change`.
+- The encodings of version 6 (decided in M3):
+  - `kind`: 1 apply, 2 edit, 3 revert_field, 4 keep_as_is, 5 skip. `fields`: a bit per field of the
+    protected-fields list (§10), in its order from bit 0 (`title`) to bit 15 (`cover`); a later field takes the next
+    bit, so an older build keeps the bits it does not know. `provider`: 1 MusicBrainz, 2 AcoustID, 3 Cover Art
+    Archive; `license_class`: 1 CC0, 2 restricted, 3 unknown. `confidence` in thousandths. `reason`: the match's
+    reason of §4.1 as a short text of its own (source and tier, the stages that found it, the fingerprint score, the
+    length difference, the title and artist similarities and the disagreements), about 25 bytes, which the review
+    and track details format for the locale. The times are milliseconds since 1970.
+  - The parts of the fields, by code and name (`track_metadata.field` and the hashes of `file_values` and
+    `file_state` take the code, `decided_mirror` and `release_choice.values` the name): field `title`: 1 `title`;
+    `artist`: 2 `artist` (the credit as printed), 3 `artist_credits` (the credited names with their join phrases),
+    4 `artist_sort`; `album`: 5 `album`; `album_artist`: 6 `album_artist`, 7 `album_artist_credits`, 8
+    `album_artist_sort`; `date`: 9 `date`; `original_date`: 10 `original_date`; `track_number`: 11 `track_number`, 12
+    `track_total`; `disc_number`: 13 `disc_number`, 14 `disc_total`; `disc_subtitle`: 15 `disc_subtitle`;
+    `compilation`: 16 `compilation`; `label`: 17 `label`; `catalog_number`: 18 `catalog_number`; `barcode`: 19
+    `barcode`; `isrc`: 20 `isrc`; `musicbrainz_ids`: 21 `recording_mbid`, 22 `release_mbid`, 23
+    `release_group_mbid`, 24 `release_track_mbid`, 25 `artist_ids`, 26 `album_artist_ids`; `cover`: 27 `cover` (a
+    `saved_cover` ID). Label, catalog number, ISRC and the artist IDs are lists.
+  - An identification stores the parts 1 to 4, 11, 13, 20 and 25 as `track_metadata` rows, the recording and
+    release track IDs in the decision's own columns, the other release-level parts in its `release_choice`, the
+    number of tracks and the disc subtitle there per disc, and its cover as the choice's `saved_cover_id`. An edit
+    stores every part of the fields it sets as `track_metadata` rows.
+  - A value is stored as UTF-8 text; an MBID as 16 bytes and a list of MBIDs as their bytes one after the other; a
+    list of texts, and a credit as its names and join phrases in turn, joined by U+001F; a number in decimal digits;
+    the compilation flag as `1` or `0`. An empty value is NULL. `release_choice.values` holds the release-level
+    parts by their names in §10, with `discs` holding the number of tracks and the disc subtitle per disc number.
+    Two decisions share a choice when everything but the discs is equal and no disc differs; a disc the row lacks is
+    added to it.
+  - `file_values` holds the references of §7.1 for each decided part whose value in the file differs from the decided
+    one: a 4-byte mask of the parts whose file value was empty (bit `code - 1`), then a field code byte and a 4-byte
+    hash for each other part, so a file without tags keeps all of them in 4 bytes. `file_state.field` is a part's
+    code and `value_at_decision` its hash.
+  - `track_metadata` and `file_state` have no row IDs (`WITHOUT ROWID`). Version 6 comes from version 5 by an
+    automatic migration; every table it adds starts empty.
 - `track_cover(identity_id, file_name, width, height, set_at)` and `album_cover(album_key, file_name, width, height,
   set_at)` (M2a): the user's own covers for a track and for an album, chosen from the device (library.md §13.2); the
   copies live in no-backup app storage.
@@ -1438,7 +1518,9 @@ used, never through a stored content URI, which goes stale after a media index r
 - Size budget: `user.db` stays under 16 MB for 20 000 identified tracks (about 2 000 albums) with a year of history,
   under the 25 MB backup quota with room for the WAL, which is checkpointed when the app goes to the background.
   Above 25 MB Auto Backup stops silently, so the budget is a release criterion. A test with generated data checks it
-  (M3) and fails above 16 MB. The estimate:
+  (M3) and fails above 16 MB. Until the write journal and the tag backups exist (M4b), the test fills the tables of
+  M3 and those before them at the volumes below and fails above 16 MB minus a fixed reserve of 1.5 MB for the M4b
+  tables; M4b adds its tables to the test and drops the reserve. The estimate:
 
   | Table | Assumption | Size |
   |-------|------------|------|
@@ -1459,6 +1541,15 @@ used, never through a stored content URI, which goes stale after a media index r
   - The decided values are also mirrored at start-up when `user_meta.change_counter` differs from
     `library_meta.mirrored_change_counter`, which the mirror sets to the counter it read once `decided_mirror` holds
     what the user database held at that value (M3).
+  - Details (decided in M3): the start-up run reads the counter and every decision in one user database
+    transaction, compares the decided values with `decided_mirror` and writes only the files whose values differ,
+    with their display rows, in one library database transaction. The run after a decision or an undo mirrors that
+    track's files alone and moves the stored counter to the decision's only when it stood one below, because
+    favorites and plays raise the same counter without changing a decided value; otherwise the next start-up run
+    compares all. The runs take one lock, and a run after a decision reads the track's decisions under it, so an
+    older run never writes over a newer decision. The attach pass asks for a whole run too, after its first pass of a
+    process and after each pass that wrote identities, since a takeover moves a key to another identity (library.md
+    §8.2). A whole run that finds every value mirrored writes nothing and leaves the display rows alone.
   - The folder rules have a counter of their own, `user_meta.rules_counter` (library.md §3.1), raised only with the
     rules; the sync applies the rules again when it differs from `library_meta.mirrored_rules_counter`, so that a
     favorite or a play does not make the sync apply the rules again.
@@ -1523,7 +1614,7 @@ tests, and a high-band error rate within the threshold of §11.4.
 | M3 | Cover URLs (§5.2): `http://` → `https://` for addresses from MusicBrainz or CAA JSON only, never for the configured base address, and other schemes dropped; a release with a usable front image (`front-250`, `front-500`, `front-1200`, original); a release without one or a darkened one (release group images, marked as another edition, none without a release group ID); unknown flags ask the release; a missing release front image (404) is followed by the release group's, marked as another edition, and a 503 of the release does not ask the release group; no address for an ID that is not an MBID; the release index on the fake CAA (images, thumbnails with the older names, the front flag, 404 as no images); index addresses on coverartarchive.org are moved onto the configured base address and fetched from the fake, addresses on other hosts are dropped; a redirect with the User-Agent on each hop; 404 after a thumbnail redirect falls back to the original, a 404 without a redirect, or after a redirect that stays on CAA, does not; a live 404 entry of a front original answers every thumbnail size without a request; an index image's thumbnail falls back to its own original after any 404; a 503 pauses the CAA limiter and records a failure, and one with a Retry-After over 120 s pauses it for that time, at most 1 hour, with later calls failing at once without a request; 429, 502 and 504 are retried and record nothing; a cached failure sends nothing; with the gate closed or the provider stopped nothing is sent and nothing is recorded; failure TTLs with an injected clock (404: 7 days; 503: 5 minutes, doubling on each further 503 of the address up to 6 hours, starting again at 5 minutes when the previous 503 entry expired more than 6 hours ago; a success clears it); image sizes from JPEG, PNG and GIF headers |
 | M3 | Cover size rule: a proposed cover whose short side is shorter than the existing cover's starts unticked, an equal one ticked; with the current size unknown a system thumbnail counts as ticked, an embedded picture has its header read on demand (and not read when the rule does not need it), an unreadable header counts as no cover; no cover now starts ticked; a proposed cover of unknown size starts ticked over a system thumbnail and over an embedded picture whose header cannot be read, and unticked over a cover of known size or a readable embedded picture |
 | M3 | Database-only undo: Apply followed by Undo restores the earlier merged values; stacked decisions (two identifications in a row, an edit on top of an identification) resolve as in §7.1; Undo right after Apply, Keep as-is and Skip; a later file change flags the field per location |
-| M3 | Size budget of `user.db` with generated data (§10.2): fails above 16 MB |
+| M3 | Decided values per field (§7.1, §10.2): a table of decisions (apply, edit, revert_field, undone or not, in either order) → winner, level and decision for every part of every field; an identification after an edit wins, a revert hides only older values and its undo brings them back, an empty edit wins and leaves the title to the file name; a field's parts never mix between decisions; every field of §1 resolves with its level from 1 to 5 (decided, tags, the index while unread, the file name); the reasons use the decided title, artist, album, cover and recording ID; the badge state follows the levels that win; the stored encodings of the parts, the reason and the file references round-trip; the file references flag a changed field per location, a move with the same tags flags nothing, and "Keep PiPlayer's value" takes the present value |
 | M3 | Identification outcomes: a call blocked by the online gate, by a missing validated network, by a captive portal or by a provider's stop maps to its own outcome (online lookups off, no network, sign-in needed, provider stopped with the reason) and other errors map to none; a run that found nothing above 0.50 in a build without an AcoustID key reports the missing key, with a key it reports no match, and a match keeps its band in either build; provenance takes the provider's license class (MusicBrainz CC0, Cover Art Archive and AcoustID restricted), the confidence and reason of the match and the release track and AcoustID track IDs; an apply request needs at least one ticked field and carries a cover only when the cover is ticked |
 | M4a | Batch album groups: groups with a release MBID or an album title match the library's album entities; files without an album tag are looked up one by one and merged when their recordings resolve to the same release; one release per group (most recordings); a warning for split groups and folders |
 | M4a | Work constraints: "unmetered only" → `UNMETERED`, "Use mobile data this time" → `NOT_ROAMING`, roaming allowed → `CONNECTED`, battery not low; the pause and resume rules for underruns and thermal status |
@@ -1548,7 +1639,7 @@ tests, and a high-band error rate within the threshold of §11.4.
 | M2a | Re-attachment (§3.1): a moved or renamed file and a media index rebuild with new IDs keep their track identity, which favorites, playlists and statistics refer to from M2b; a moved Ogg file whose comments an external tool rewrote keeps its content key and re-attaches by it |
 | M2a | `:tagger` isolation: a fixture that crashes the native reader and a call that hangs for more than 30 s are counted; the second time the file is marked unsafe; playback continues |
 | M2b | Legacy-encoding fixtures through the real reader: the Windows-1251 ID3v1, ID3v2 and RIFF INFO fixtures read in automatic mode and with the Windows-1251 choice, the KOI8-R and Shift_JIS fixtures with their own choice; a wrong choice shows other text, and Automatic brings the right text back without reading the file again; every code page of the list is supported by the device |
-| M2b | Deleting `library.db` keeps favorites, playlists, statistics and (from M3) decisions, which re-attach after the rebuild |
+| M2b | Deleting `library.db` keeps favorites, playlists, statistics and (from M3) decisions, which re-attach after the rebuild; from M3 the decided values come back into `track_display` once the keys come back, also after a rebuild of the library |
 | M2b | Playlist entries resolve after a move, a rename and a media index rebuild; an entry of a deleted file stays, unavailable, and comes back with the file; an M3U8 export imported again on the same device gives the same songs (library.md §16.7) |
 | M3 | Chromaprint additions: encoding a fingerprint's raw items gives the string of the session that computed them (on synthetic audio and on the five recordings; no items give an empty string; an unknown algorithm is refused). The device comparison with fpcalc gains three recordings that the preparation script makes from the CC samples at their full length: the FLAC overture upmixed to 5.1 AAC in MP4 (the decoder must hand all six channels on to the downmix, not a stereo downmix of its own), the 96 kHz FLAC as stereo AAC in MP4, and the Ogg Vorbis recording as a constant-bitrate MP3 without a LAME or Xing header; each within 10 % at offset 0 ± 1 (measured on the API 30 and 36 emulators with Media3 1.12.0-alpha02 and again on API 36 with 1.12.0-beta01: 1.1 %, under 0.01 % and 1.3 %, all at offset 0). The AcoustID lookup of the samples is a real call: it runs only with the instrumentation argument `-e liveNetwork true` and an AcoustID key, never by default (the test helper never passes the argument) and never on CI, which has no key |
 | M3 | Decoding table: every format the player plays (playback.md §1.7: MP3, also at 320 kbit/s, AAC in MP4 and raw (ADTS), AMR narrowband and wideband raw and in 3GP, Ogg Vorbis, Vorbis in Matroska, Opus in Ogg and WebM, FLAC, also in 5.1, and WAV) is read with `MediaExtractorCompat`, decoded by a platform decoder (WAV without one) and all of its audio reaches Chromaprint at 11 025 Hz; ALAC in MP4 is refused as an unsupported format, because the platform has no ALAC decoder, so in 1.0 an ALAC file is not fingerprinted and is identified by text search only (bundled decoders come in v1.x); on a phone whose maker adds an ALAC decoder the row expects the platform path instead, with the file's 2 s and at most one 4096-sample ALAC frame more. Every row must have an expected length, so none can drop out of the check unnoticed. The new formats are also decoding fixtures (row M0 above), each at its own rate and channel count, with the 1 kHz tone intact; raw AAC keeps its priming frame and padding (up to two frames more), and the 3GP AMR wideband fixture holds 1.995 s, because the 3GP edit list trims the encoder's delay that the encoder does not flush at the end |
@@ -1557,6 +1648,10 @@ tests, and a high-band error rate within the threshold of §11.4.
 | M3 | Session metadata: for a fixture whose embedded cover and tags differ from the saved values, and for an MP3 without a frame-count header, the MediaController's metadata, artwork and duration equal PiPlayer's values after Apply and after Undo, without preparing the file again |
 | M3 | Identification and privacy (§9): the disclosure names every service with what it receives, the background Cover Art Archive loads included, and its Enable and Not now buttons and links have labels and click actions for TalkBack; the settings section shows the setting as a switch, opens the disclosure when the current version is unanswered and turns off at once, lists the services and their terms links, changes the protected-fields list with checkboxes, takes a second tap before the first is stored as reversing it, puts the switch back to the gate when an answer was not stored, and shows each provider's status (stopped after a User-Agent rejection or an invalid key, unavailable without a key); the app's services use the settings file's gate, closed with no stored consent |
 | M3 | Library database version 13 (§10.1): an older library database is dropped and the new tables and columns are there (the content-key tables, `decided_mirror`, `release_cache`, `api_cache`, the identification columns of `fingerprint` and `track_display`, both counters of `library_meta`, no cover cache table); the release cache keeps a lookup under the asked and the answered MBID, survives reopening, and treats a row older than 30 days as missing and drops it on the next write; `api_cache` keeps a failure entry's kind, times and 503 count, keeps an expired entry for 6 hours so that the next 503 still doubles, then drops it, and the Cover Art Archive TTL rules hold through it; `decided_mirror` keeps one value per file and field, replaces a file's rows whole, clears, and the mirrored change counter moves apart from the rules counter; the app's services use these caches |
+| M3 | User database version 6 (§10.2): version 5, created from its committed schema with rows in every table, migrates to 6 and validates against the committed schema of 6, keeping its rows and counters, with the new tables empty; decisions, `file_state` rows and undone decisions keep their identities through the attach pass; apply, edit, revert and undo raise the change counter in their transaction, and two identifications of one release with the same values share one release choice |
+| M3 | Decided values in the library (§7.1, §10.3): a decision reaches `decided_mirror` and `track_display` (values, search text, reasons and badge state) for every file of the track, an undo takes them back; the sync, the tag pass and a new display version keep them; a file whose key comes later gets them after its tag pass batch; a process that dies between the two commits (the user database holds the decision, the library database not) shows the decision after the next start, and a start-up whose counters agree writes nothing |
+| M3 | Size budget of `user.db` (§10.2): generated data at the volumes of the estimate (20 000 identities, one identification each with every field but the cover ticked on a file without tags, titles of about 18 characters, 2 000 release choices, a year of plays, favorites and 5 000 playlist entries) stays under 16 MB minus the 1.5 MB reserve for the M4b tables, measured on the database file after a checkpoint (13.0 MB on the API 36 emulator in M3) |
+| M3 | Timing (library.md §1.7, on the generated library, quiet pass): with a decision on every fifth of its 20 000 files, the first sync, a full refresh of every display row and the start-up mirror of all decisions stay within the budgets that `GeneratedLibraryDecisionsTest` names, set from the same library without decisions before M3 added them (API 36 emulator: first sync at most 2.3 s and full refresh at most 2.5 s then; with the decisions 1.5 s and 1.8 s, the start-up mirror 1.5 s, and 0.8 s when it finds every value mirrored) |
 | M3 | Minified build (§9): every identification client decodes its service's answers in the R8 build. `MinifiedClientsTest` sends the fixtures of the AcoustID lookup and its error answer, the MusicBrainz search, the recording, ISRC (`inc=artists`) and release lookups, a pasted ID and the paged release browses of a recording and of a release group, and the Cover Art Archive front image and release index through the clients and the HTTPS fakes, compares the decoded values and checks that R8 renamed the DTOs. The normal run and CI run it against the debug build. The minified run uses AGP's own switch, not a self-test inside the app: `-Ppiplayer.minifiedTests=true` makes the `benchmark` build (the release build with R8, signed with the debug key) the tested build type, adds keep rules for the entry points that only the tests call and for the libraries the test APK shares with the app (`app/proguard-minified-tests.pro`, never part of a release), and compiles only this test, the test runner and the shared fakes into the test APK. The DTOs, their serializers and the parsing are shrunk, optimized and renamed as in a release, so the test reads the results through their `toString`. The libraries that the test APK shares with the app (the Kotlin standard library, coroutines, OkHttp, okio) are kept whole and are not processed by R8 in this run, so the check covers the app's clients, DTOs, serializers and parsing, not the HTTP stack under R8. A local run on the emulator, never on CI: `gradlew :app:installBenchmark :app:installBenchmarkAndroidTest -Ppiplayer.minifiedTests=true` with `ANDROID_SERIAL` set to the emulator (the install tasks serve every connected device), then the test helper with `MinifiedClientsTest --no-install -e minified true`; with that argument the run fails unless the build under test is the `benchmark` one, so a reinstalled debug build cannot pass for it. The test APK keeps the debug run's package, so the next normal run installs again instead of using `--no-install`. The keep rules name the entry points by hand: `MinifiedTestRulesTest` (JVM, so on every CI run) fails when one of them is renamed or removed, when the shared fakes or `IdentificationServices.create` take an app type the rules do not keep, when the shared fakes' bytecode reaches an app class or member the rules do not name (a type built only inside a body, or a `$default` bridge that a call leaving out a defaulted parameter compiles to), or when `MinifiedClientsTest` imports an app type the rules do not keep, other than the result type it checks for renaming. It reads names, not R8's behaviour, so the minified run is repeated whenever `IdentificationServices.create`, the shared fakes or the clients' calls change |
 | M4a | A 500-file batch started from a folder resumes after its process is killed in any phase, and its accepted results appear in every view and on system surfaces |
 | M4a | On the named physical device, not an emulator: playback during a 500-file batch has no audible effect and no more underruns than without the batch |
