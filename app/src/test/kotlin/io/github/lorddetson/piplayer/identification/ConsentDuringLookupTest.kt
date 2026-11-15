@@ -16,6 +16,7 @@ import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.testTimeSource
+import kotlinx.coroutines.withContext
 import mockwebserver3.Dispatcher
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
@@ -43,6 +44,15 @@ class ConsentDuringLookupTest {
 
     private val query = "recording:(paper lanterns)"
 
+    /**
+     * Turns lookups on and returns once the gate is open. The gate reads the file on another thread, and [runTest]
+     * would skip the virtual time of the wait for that read, so it waits on real time.
+     */
+    private suspend fun enableLookups() {
+        withContext(Dispatchers.Default) { gate.enable() }
+        assertThat(gate.isOpen()).describedAs("gate open after enable").isTrue()
+    }
+
     private fun TestScope.services() = TestServices.services(
         baseUrls = TestServices.baseUrls(server.url("/v2/"), server.url("/ws/2/")),
         gate = gate,
@@ -51,7 +61,7 @@ class ConsentDuringLookupTest {
 
     @Test
     fun `turning lookups off while a lookup waits for its retry sends nothing more`() = runTest {
-        gate.enable()
+        enableLookups()
         val services = services()
         server.dispatcher = object : Dispatcher() {
             override fun dispatch(request: RecordedRequest): MockResponse {
@@ -69,7 +79,7 @@ class ConsentDuringLookupTest {
 
     @Test
     fun `turning lookups off while a second lookup waits for the limiter keeps it from sending`() = runTest {
-        gate.enable()
+        enableLookups()
         val services = services()
         server.dispatcher = FakeMusicBrainz()
         assertThat(services.musicBrainz.searchRecordings(query, 25).recordings).hasSize(2)
