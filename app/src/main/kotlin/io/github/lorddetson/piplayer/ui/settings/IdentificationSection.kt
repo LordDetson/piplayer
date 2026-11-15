@@ -56,6 +56,11 @@ data class IdentificationPrivacyState(
     val acoustId: ProviderState = ProviderState.Ready,
     val musicBrainz: ProviderState = ProviderState.Ready,
     val coverArtArchive: ProviderState = ProviderState.Ready,
+    /**
+     * Grows each time the answers to the setting have all ended, stored or not; the switch then shows [lookupsOn]
+     * again, also when a failed answer left it unchanged.
+     */
+    val answersSettled: Int = 0,
 )
 
 /**
@@ -80,9 +85,9 @@ internal fun IdentificationSection(
             .semantics { heading() },
     )
     var disclosing by rememberSaveable { mutableStateOf(false) }
-    // The last answer shows until the stored state changes, so that a second tap before the first is stored reverses it
-    // instead of repeating it.
-    var shown by remember(state.lookupsOn) { mutableStateOf(state.lookupsOn) }
+    // The last answer shows until the gate changes or the answers have ended, so that a second tap before the first is
+    // stored reverses it instead of repeating it, and an answer that was not stored does not stay on the switch.
+    var shown by remember(state.lookupsOn, state.answersSettled) { mutableStateOf(state.lookupsOn) }
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier

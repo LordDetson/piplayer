@@ -127,9 +127,10 @@ class IdentificationSettings(
 /**
  * The app's online gate (TI §9): the consent in the `settings` file, kept in memory so that [isOpen] neither blocks
  * nor allocates. It is closed until the file has been read, and open only while the setting is on and the accepted
- * disclosure is at least [IdentificationSettings.disclosureVersion]. It follows every change of the file, also one
- * written elsewhere or restored from a backup. Since every request, redirect hop, host lookup and new connection asks
- * it (TI §8), a change reaches calls that are already waiting.
+ * disclosure is at least [IdentificationSettings.disclosureVersion]. It follows every change written through the
+ * process's `settings` file, also by another writer than this gate; a restore, which Android applies while the app is
+ * stopped, is read at the next start. Since every request, redirect hop, host lookup and new connection asks it
+ * (TI §8), a change reaches calls that are already waiting.
  *
  * Changes of the consent go through [enable], [notNow] and [turnOff]. The last two close the gate at once, before the
  * write starts. A close that may not have been stored (its write failed, as on a full disk, or was cancelled) keeps the
@@ -150,6 +151,19 @@ class DataStoreOnlineGate(val settings: IdentificationSettings, scope: Coroutine
     private val closeFailed = MutableStateFlow(false)
 
     private val writes = Mutex()
+
+    private val settledAnswers = MutableStateFlow(0)
+
+    /** Answers that have started and not finished, waiting for an earlier one included. */
+    private var answering = 0
+    private val answeringLock = Any()
+
+    /**
+     * How many times the consent answers ([enable], [notNow], [turnOff]) have all finished, stored or not; it grows when
+     * the last of overlapping answers ends. Settings shows the gate again each time, so a switch moved by an answer that
+     * was not stored goes back to what the gate is.
+     */
+    val settled: StateFlow<Int> = settledAnswers.asStateFlow()
 
     init {
         scope.launch {
@@ -178,7 +192,7 @@ class DataStoreOnlineGate(val settings: IdentificationSettings, scope: Coroutine
     suspend fun awaitLoaded(): OnlineConsent = stored.filterNotNull().first()
 
     /** The answer Enable; the gate is open when this returns, unless the write failed. */
-    suspend fun enable() {
+    suspend fun enable() = answer {
         writes.withLock {
             if (settings.enable()) {
                 seen { it.allows(settings.disclosureVersion) }
@@ -188,10 +202,22 @@ class DataStoreOnlineGate(val settings: IdentificationSettings, scope: Coroutine
     }
 
     /** The answer Not now; the gate is closed from the call on. */
-    suspend fun notNow() = close { settings.notNow() }
+    suspend fun notNow() = answer { close { settings.notNow() } }
 
     /** The setting off; the gate is closed from the call on. */
-    suspend fun turnOff() = close { settings.turnOff() }
+    suspend fun turnOff() = answer { close { settings.turnOff() } }
+
+    /** Runs one consent answer and grows [settled] when it was the last one running. */
+    private suspend fun answer(block: suspend () -> Unit) {
+        synchronized(answeringLock) { answering++ }
+        try {
+            block()
+        } finally {
+            synchronized(answeringLock) {
+                if (--answering == 0) settledAnswers.update { it + 1 }
+            }
+        }
+    }
 
     private suspend fun close(write: suspend () -> Boolean) {
         closing.update { it + 1 }

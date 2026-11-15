@@ -8,6 +8,7 @@ import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import io.github.lorddetson.piplayer.net.OnlineConsent
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -215,6 +216,59 @@ class IdentificationSettingsTest {
     }
 
     @Test
+    fun `an Enable the gate never sees stored leaves it closed and settles the answers`() = runBlocking<Unit> {
+        // The write is lost: the file keeps what it had. (A write that throws takes the same way out, but its log
+        // line needs Android.)
+        val lost = object : DataStore<Preferences> by file {
+            override suspend fun updateData(transform: suspend (t: Preferences) -> Preferences): Preferences =
+                file.data.first()
+        }
+        val gate = gate(IdentificationSettings(lost))
+        gate.awaitLoaded()
+        assertThat(gate.settled.value).isZero()
+
+        gate.enable()
+
+        assertThat(gate.isOpen()).isFalse()
+        assertThat(gate.open.first()).isFalse()
+        // Settings shows the gate again: the switch the tap moved goes back to off.
+        assertThat(gate.settled.value).isEqualTo(1)
+    }
+
+    @Test
+    fun `overlapping answers settle once, after the last of them`() = runBlocking<Unit> {
+        val writing = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        var hold = false
+        val held = object : DataStore<Preferences> by file {
+            override suspend fun updateData(transform: suspend (t: Preferences) -> Preferences): Preferences {
+                if (hold) {
+                    hold = false
+                    writing.complete(Unit)
+                    release.await()
+                }
+                return file.updateData(transform)
+            }
+        }
+        val gate = gate(IdentificationSettings(held))
+        gate.enable()
+        assertThat(gate.settled.value).isEqualTo(1)
+
+        hold = true
+        val off = async(Dispatchers.Default) { gate.turnOff() }
+        withTimeout(5_000) { writing.await() }
+        // A second tap while the first is being written: it waits for the first.
+        val on = async(Dispatchers.Default, start = CoroutineStart.UNDISPATCHED) { gate.enable() }
+        assertThat(gate.settled.value).describedAs("while the answers are being written").isEqualTo(1)
+
+        release.complete(Unit)
+        withTimeout(5_000) { off.await() }
+        withTimeout(5_000) { on.await() }
+        assertThat(gate.isOpen()).isTrue()
+        assertThat(gate.settled.value).isEqualTo(2)
+    }
+
+    @Test
     fun `a settings file that cannot be read is read again`() = runBlocking<Unit> {
         IdentificationSettings(file).enable()
         var reads = 0
@@ -263,7 +317,7 @@ class IdentificationSettingsTest {
     }
 
     @Test
-    fun `a change written by another writer of the file reaches the gate`() = runBlocking<Unit> {
+    fun `a change written by another writer through the same settings file reaches the gate`() = runBlocking<Unit> {
         val gate = gate()
         gate.enable()
 

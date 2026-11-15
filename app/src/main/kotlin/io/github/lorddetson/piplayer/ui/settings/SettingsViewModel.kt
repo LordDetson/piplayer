@@ -74,13 +74,23 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     private val onlineGate = (application as PiPlayerApplication).onlineGate
     private val identification = onlineGate.settings
 
-    /** The choices: the switch shows the gate itself, which closes at once on off and stays closed after a failed off. */
+    /**
+     * The choices: the switch shows the gate itself, which closes at once on off and stays closed after a failed off,
+     * and shows it again once the answers have ended. The gate is read when any of them changes, so that the end of an
+     * Enable never arrives with the gate as it was before.
+     */
     private val choices: Flow<IdentificationPrivacyState> = combine(
         onlineGate.open,
         identification.needsDisclosure,
         identification.protectedFields,
-    ) { open, needsDisclosure, protectedFields ->
-        IdentificationPrivacyState(lookupsOn = open, needsDisclosure = needsDisclosure, protectedFields = protectedFields)
+        onlineGate.settled,
+    ) { _, needsDisclosure, protectedFields, settled ->
+        IdentificationPrivacyState(
+            lookupsOn = onlineGate.isOpen(),
+            needsDisclosure = needsDisclosure,
+            protectedFields = protectedFields,
+            answersSettled = settled,
+        )
     }
 
     /** The providers' status, off the main thread: the first use of the services builds their HTTP client. */

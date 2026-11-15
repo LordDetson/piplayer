@@ -165,6 +165,39 @@ class IdentificationSectionTest {
     }
 
     @Test
+    fun anEnableThatWasNotStoredPutsTheSwitchBackToTheGate() {
+        state = IdentificationPrivacyState(lookupsOn = false, needsDisclosure = false)
+        show()
+
+        switch().performClick()
+        switch().assertIsOn()
+        // The answer has ended and the gate stayed closed, as when the settings file cannot be written.
+        state = state.copy(answersSettled = state.answersSettled + 1)
+        switch().assertIsOff()
+        assertThat(calls).containsExactly("enable")
+    }
+
+    @Test
+    fun anEnableInTheDisclosureThatWasNotStoredPutsTheSwitchBackToTheGate() {
+        show()
+
+        switch().performClick()
+        compose.waitUntilExactlyOneExists(disclosureTitle, timeoutMillis = 5_000)
+        compose.onNode(hasText(text(R.string.identification_enable)) and isButton).performClick()
+        switch().assertIsOn()
+        state = state.copy(answersSettled = state.answersSettled + 1)
+        switch().assertIsOff()
+
+        // A stored one keeps it on.
+        switch().performClick()
+        compose.waitUntilExactlyOneExists(disclosureTitle, timeoutMillis = 5_000)
+        compose.onNode(hasText(text(R.string.identification_enable)) and isButton).performClick()
+        state = state.copy(lookupsOn = true, needsDisclosure = false, answersSettled = state.answersSettled + 1)
+        switch().assertIsOn()
+        assertThat(calls).containsExactly("enable", "enable")
+    }
+
+    @Test
     fun theSectionListsWhatEachServiceReceivesWithLinksToTheirTerms() {
         show()
 
