@@ -44,7 +44,8 @@ data class ProviderBaseUrls(val acoustId: HttpUrl, val musicBrainz: HttpUrl, val
  * The network side of identification for one process (TI §8, §9): one HTTP client, one rate limiter per provider, the
  * online gate, the connectivity check and the providers' sticky stops. The app holds one instance in its main process
  * ([of]); tests build their own, so their limiters and stops never leak into each other. Every client made here sends
- * through [http], whose interceptor checks [gate] on every request and redirect hop.
+ * through [http], whose interceptor checks [gate] on every request and redirect hop. [acoustIdApiKey] is the build's
+ * AcoustID application key, empty in a build without one; it is kept out of every `toString` and log line.
  */
 class IdentificationServices(
     val http: OkHttpClient,
@@ -56,6 +57,7 @@ class IdentificationServices(
     val providerStatus: ProviderStatusStore,
     val retryPolicy: RetryPolicy = RetryPolicy(maxRetries = 3),
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+    private val acoustIdApiKey: String = "",
 ) {
 
     init {
@@ -96,7 +98,19 @@ class IdentificationServices(
         )
     }
 
-    /** An AcoustID client with the build's application key (TI §9), sharing the AcoustID limiter and stop. */
+    /**
+     * Whether stage 3 (TI §3.2) can run: a build without an AcoustID application key has no fingerprint lookup, sends
+     * nothing to AcoustID and identifies by the other stages, text search included (TI §9).
+     */
+    val fingerprintStage: FingerprintStage by lazy {
+        if (acoustIdApiKey.isBlank()) {
+            FingerprintStage.Unavailable(UnavailableReason.NoKey)
+        } else {
+            FingerprintStage.Available(acoustId(acoustIdApiKey))
+        }
+    }
+
+    /** An AcoustID client with an application key (TI §9), sharing the AcoustID limiter and stop. */
     fun acoustId(apiKey: String): AcoustIdClient = AcoustIdClient(
         http = http,
         limiter = limiter(ProviderId.ACOUSTID),
@@ -113,7 +127,8 @@ class IdentificationServices(
         /**
          * Services whose HTTP client checks the same [gate]. [configureHttp] adjusts the client, for example to trust a
          * test server's certificate; it may not take out the gate checks, replace the resolver or the socket factory,
-         * or turn on OkHttp's own redirects.
+         * or turn on OkHttp's own redirects. [acoustIdApiKey] is the application key of
+         * [IdentificationServices.fingerprintStage], empty for none.
          */
         fun create(
             userAgent: String,
@@ -125,6 +140,7 @@ class IdentificationServices(
             providerStatus: ProviderStatusStore = ProviderStatusStore(),
             retryPolicy: RetryPolicy = RetryPolicy(maxRetries = 3),
             ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+            acoustIdApiKey: String = "",
             configureHttp: OkHttpClient.Builder.() -> Unit = {},
         ): IdentificationServices = IdentificationServices(
             http = HttpClients.create(userAgent, gate).newBuilder().apply(configureHttp).build(),
@@ -136,17 +152,37 @@ class IdentificationServices(
             providerStatus = providerStatus,
             retryPolicy = retryPolicy,
             ioDispatcher = ioDispatcher,
+            acoustIdApiKey = acoustIdApiKey,
         )
 
         /**
-         * The app's services: the real hosts, and a gate that stays closed until the online-lookup opt-in exists (M3
-         * step 11), so nothing is sent while identification is dormant.
+         * The app's services: the real hosts, the build's [acoustIdApiKey] (empty for none), and a gate that stays closed
+         * until the online-lookup opt-in exists (M3 step 11), so nothing is sent while identification is dormant.
          */
-        fun production(userAgent: String, connectivity: Connectivity): IdentificationServices =
-            create(userAgent, InMemoryOnlineGate(), connectivity)
+        fun production(userAgent: String, connectivity: Connectivity, acoustIdApiKey: String): IdentificationServices =
+            create(userAgent, InMemoryOnlineGate(), connectivity, acoustIdApiKey = acoustIdApiKey)
 
         /** The services of the app's main process. */
         fun of(context: Context): IdentificationServices =
             (context.applicationContext as PiPlayerApplication).identificationServices
     }
+}
+
+/** Whether stage 3, the fingerprint lookup (TI §3.2), can run in this build, and if not, why. */
+sealed interface FingerprintStage {
+
+    /** Stage 3 looks fingerprints up through [acoustId]. Its `toString` names the state only, never the client's key. */
+    class Available(val acoustId: AcoustIdClient) : FingerprintStage {
+        override fun toString(): String = "FingerprintStage.Available"
+    }
+
+    /** Stage 3 is skipped for [reason], and identification goes on with the next stage. */
+    data class Unavailable(val reason: UnavailableReason) : FingerprintStage
+}
+
+/** Why a stage cannot run in this build. */
+sealed interface UnavailableReason {
+
+    /** The build has no AcoustID application key (TI §9), as in a fork that has not registered its own. */
+    data object NoKey : UnavailableReason
 }

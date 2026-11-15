@@ -9,8 +9,9 @@ plugins {
 }
 
 /**
- * The AcoustID application key, from -Pacoustid.apiKey or acoustid.apiKey in local.properties (never in git); empty
- * when neither is set, and then the spike skips the lookup.
+ * The AcoustID application key, from -Pacoustid.apiKey or acoustid.apiKey in local.properties (never in git), for every
+ * build type (TI §9). Empty when neither is set: the build then has no fingerprint lookup and identifies by text search
+ * only. A shipped key is not a secret, but the build never prints it.
  */
 val acoustIdApiKey: String = providers.gradleProperty("acoustid.apiKey")
     .orElse(
@@ -23,6 +24,21 @@ val acoustIdApiKey: String = providers.gradleProperty("acoustid.apiKey")
     .trim()
 // Checked so that the value can go into generated Java source as it is; the message never repeats the key.
 require(acoustIdApiKey.matches(Regex("[A-Za-z0-9]*"))) { "acoustid.apiKey may contain only letters and digits" }
+
+/**
+ * The contact in the User-Agent (TI §9): -Ppiplayer.contactUrl or piplayer.contactUrl in gradle.properties, else this
+ * repository. A fork sets its own URL or e-mail address (README, "Forks").
+ */
+val contactUrl: String = providers.gradleProperty("piplayer.contactUrl")
+    .orElse("https://github.com/LordDetson/piplayer")
+    .get()
+    .trim()
+// One token of printable ASCII without quotes, backslashes or parentheses: it goes into generated Java source as it is
+// and into the comment of the User-Agent, which a parenthesis would end. The contact is public, so the message shows it.
+require(contactUrl.matches(Regex("""[!#-'*-\[\]-~]+"""))) {
+    "piplayer.contactUrl must be one token of printable ASCII without spaces, quotes, backslashes or parentheses: " +
+        "'$contactUrl'"
+}
 
 val prepareRecordings = tasks.register<PrepareFingerprintSamples>("prepareRecordings") {
     manifest = rootProject.layout.projectDirectory.file("nativelib/fingerprint-samples.json")
@@ -115,6 +131,9 @@ android {
         versionName = "0.1.0"
         // Turns the crash dialog off (docs/playback.md §7.4).
         testInstrumentationRunner = "io.github.lorddetson.piplayer.PiPlayerTestRunner"
+        // Every build type carries the key, empty when there is none (TI §9); no flavors until M5.
+        buildConfigField("String", "ACOUSTID_API_KEY", "\"$acoustIdApiKey\"")
+        buildConfigField("String", "CONTACT_URL", "\"$contactUrl\"")
         ndk {
             // The native code (TagLib, Chromaprint) is built for these only; without the filter the APK would also
             // claim 32-bit ABIs through other libraries' .so files and crash there.
@@ -123,10 +142,6 @@ android {
     }
 
     buildTypes {
-        debug {
-            // Only the debug identification spike looks fingerprints up in M0.
-            buildConfigField("String", "ACOUSTID_API_KEY", "\"$acoustIdApiKey\"")
-        }
         release {
             // R8 and resource shrinking (docs/library.md §2.1).
             isMinifyEnabled = true
@@ -177,6 +192,8 @@ android {
             ).forEach { name ->
                 providers.gradleProperty(name).orNull?.let { test.systemProperty(name, it) }
             }
+            // A fork's contact, so that the User-Agent test compares BuildConfig with the value the fork set.
+            providers.gradleProperty("piplayer.contactUrl").orNull?.let { test.systemProperty("piplayer.contactUrl", it) }
         }
     }
 

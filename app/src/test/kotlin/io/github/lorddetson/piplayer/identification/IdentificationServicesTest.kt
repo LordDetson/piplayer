@@ -4,10 +4,14 @@ import io.github.lorddetson.piplayer.fakes.FakeAcoustId
 import io.github.lorddetson.piplayer.fakes.FakeMusicBrainz
 import io.github.lorddetson.piplayer.fakes.RecordingRequestLog
 import io.github.lorddetson.piplayer.fakes.TestServices
+import io.github.lorddetson.piplayer.identification.musicbrainz.toCandidate
 import io.github.lorddetson.piplayer.identification.provider.ProviderId
 import io.github.lorddetson.piplayer.identification.provider.ProviderStatus
 import io.github.lorddetson.piplayer.identification.provider.ProviderStoppedException
 import io.github.lorddetson.piplayer.identification.provider.StopReason
+import io.github.lorddetson.piplayer.identification.score.TrackHint
+import io.github.lorddetson.piplayer.identification.text.RecordingSearch
+import io.github.lorddetson.piplayer.identification.text.TextSearch
 import io.github.lorddetson.piplayer.net.GateClosedException
 import io.github.lorddetson.piplayer.net.HttpClients
 import io.github.lorddetson.piplayer.net.InMemoryOnlineGate
@@ -44,6 +48,7 @@ class IdentificationServicesTest {
         gate: io.github.lorddetson.piplayer.net.OnlineGate = TestServices.openGate(),
         connectivity: io.github.lorddetson.piplayer.net.Connectivity = TestServices.FakeConnectivity(),
         log: RecordingRequestLog? = null,
+        acoustIdApiKey: String = key,
     ): IdentificationServices {
         acoustIdServer.dispatcher = log?.wrap(acoustId) ?: acoustId
         musicBrainzServer.dispatcher = log?.wrap(musicBrainz) ?: musicBrainz
@@ -52,12 +57,13 @@ class IdentificationServicesTest {
             gate = gate,
             connectivity = connectivity,
             timeSource = testTimeSource,
+            acoustIdApiKey = acoustIdApiKey,
         )
     }
 
     @Test
     fun `the app's services use the real hosts and send nothing until the opt-in exists`() {
-        val services = IdentificationServices.production(TestServices.USER_AGENT, TestServices.FakeConnectivity())
+        val services = IdentificationServices.production(TestServices.USER_AGENT, TestServices.FakeConnectivity(), "")
         assertThat(services.gate.isOpen()).isFalse()
         assertThat(services.baseUrls).isEqualTo(ProviderBaseUrls.PRODUCTION)
         assertThat(ProviderBaseUrls.PRODUCTION.acoustId).isEqualTo("https://api.acoustid.org/v2/".toHttpUrl())
@@ -211,5 +217,64 @@ class IdentificationServicesTest {
         assertThat(acoustIdServer.requestCount).isEqualTo(1)
         // MusicBrainz is not affected.
         assertThat(services.musicBrainz.searchRecordings(query, 25).recordings).hasSize(2)
+    }
+
+    @Test
+    fun `without an application key the fingerprint stage is unavailable and AcoustID gets nothing`() = runTest {
+        for (blank in listOf("", "   ")) {
+            val services = services(acoustIdApiKey = blank)
+            assertThat(services.fingerprintStage).isEqualTo(FingerprintStage.Unavailable(UnavailableReason.NoKey))
+        }
+        assertThat(acoustIdServer.requestCount).isZero()
+    }
+
+    @Test
+    fun `without an application key text search still reaches MusicBrainz`() = runTest {
+        val log = RecordingRequestLog { testScheduler.currentTime }
+        val services = services(log = log, acoustIdApiKey = "")
+        assertThat(services.fingerprintStage).isInstanceOf(FingerprintStage.Unavailable::class.java)
+        val search = TextSearch(
+            RecordingSearch { query ->
+                services.musicBrainz.searchRecordings(query.query, query.limit).recordings.map { it.toCandidate() }
+            },
+        )
+
+        val result = search.search(TrackHint(title = "Paper Lanterns", artist = "The Quiet Harbors", durationMs = 214_400))
+
+        assertThat(result.candidates.map { it.candidate.recordingId }).contains("11111111-1111-4111-8111-111111111111")
+        assertThat(log.entries).isNotEmpty.allSatisfy { assertThat(it.path).startsWith("/ws/2/recording") }
+        assertThat(acoustIdServer.requestCount).isZero()
+    }
+
+    @Test
+    fun `with an application key the fingerprint stage looks up through the services' AcoustID limiter and stop`() = runTest {
+        val services = services(acoustIdApiKey = key)
+        val stage = services.fingerprintStage
+        assertThat(stage).isInstanceOf(FingerprintStage.Available::class.java)
+        stage as FingerprintStage.Available
+        acoustId.enqueue(FakeAcoustId.ERROR_4.response())
+
+        assertThat(runCatching { stage.acoustId.lookup(fingerprint, 214_400) }.exceptionOrNull())
+            .isInstanceOf(io.github.lorddetson.piplayer.identification.acoustid.AcoustIdException.InvalidApiKey::class.java)
+        assertThat(services.status(ProviderId.ACOUSTID).value).isEqualTo(ProviderStatus.Stopped(StopReason.INVALID_API_KEY))
+        assertThat(acoustIdServer.requestCount).isEqualTo(1)
+    }
+
+    @Test
+    fun `neither the services nor their fingerprint stage show the key`() = runTest {
+        val services = services(acoustIdApiKey = key)
+        val stage = services.fingerprintStage as FingerprintStage.Available
+        assertThat(services.toString()).doesNotContain(key)
+        assertThat(stage.toString()).doesNotContain(key)
+        assertThat(stage.acoustId.toString()).doesNotContain(key)
+    }
+
+    @Test
+    fun `the app's services take the build's key and treat an empty one as none`() {
+        val connectivity = TestServices.FakeConnectivity()
+        assertThat(IdentificationServices.production(TestServices.USER_AGENT, connectivity, "").fingerprintStage)
+            .isEqualTo(FingerprintStage.Unavailable(UnavailableReason.NoKey))
+        assertThat(IdentificationServices.production(TestServices.USER_AGENT, connectivity, key).fingerprintStage)
+            .isInstanceOf(FingerprintStage.Available::class.java)
     }
 }

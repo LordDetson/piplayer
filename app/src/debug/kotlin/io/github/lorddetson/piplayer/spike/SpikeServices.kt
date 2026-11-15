@@ -46,13 +46,18 @@ object SpikeServices {
     val hasAcoustIdKey: Boolean get() = BuildConfig.ACOUSTID_API_KEY.isNotBlank()
 
     fun services(context: Context): IdentificationServices = services ?: synchronized(this) {
-        services ?: create(UserAgent.of(BuildConfig.VERSION_NAME), AndroidConnectivity(context)).also { services = it }
+        services ?: create(UserAgent.forBuild(), AndroidConnectivity(context), BuildConfig.ACOUSTID_API_KEY)
+            .also { services = it }
     }
 
-    /** The spike's services at [baseUrls]; the wiring test points them at the fakes. */
+    /**
+     * The spike's services at [baseUrls], with the application key [acoustIdApiKey] (empty for none); the wiring test
+     * points them at the fakes.
+     */
     fun create(
         userAgent: String,
         connectivity: Connectivity,
+        acoustIdApiKey: String,
         baseUrls: ProviderBaseUrls = ProviderBaseUrls.PRODUCTION,
         timeSource: TimeSource.WithComparableMarks = TimeSource.Monotonic,
     ): IdentificationServices = IdentificationServices.create(
@@ -61,6 +66,7 @@ object SpikeServices {
         connectivity = connectivity,
         baseUrls = baseUrls,
         timeSource = timeSource,
+        acoustIdApiKey = acoustIdApiKey,
     )
 
     /** Runs the spike on [file], with [SpikeGate] open for the run only. */

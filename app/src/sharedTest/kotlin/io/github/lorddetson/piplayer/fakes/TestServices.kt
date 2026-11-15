@@ -53,9 +53,11 @@ object TestServices {
         statuses: ProviderStatusStore = ProviderStatusStore(),
         retryPolicy: RetryPolicy = RetryPolicy(maxRetries = 3),
         ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+        acoustIdApiKey: String = "",
         configureHttp: OkHttpClient.Builder.() -> Unit = {},
     ): IdentificationServices = IdentificationServices.create(
         userAgent = USER_AGENT,
+        acoustIdApiKey = acoustIdApiKey,
         gate = gate,
         connectivity = connectivity,
         baseUrls = baseUrls,

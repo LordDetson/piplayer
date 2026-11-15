@@ -51,7 +51,12 @@ class PiPlayerApplication : Application() {
 
     private val ownIdentificationServices: IdentificationServices by lazy {
         ProcessRole.current(this).requireMain("The identification services")
-        IdentificationServices.production(UserAgent.of(BuildConfig.VERSION_NAME), AndroidConnectivity(this))
+        // The key ships in every build and is empty without one (TI §9); it goes nowhere but the services.
+        IdentificationServices.production(
+            userAgent = UserAgent.forBuild(),
+            connectivity = AndroidConnectivity(this),
+            acoustIdApiKey = BuildConfig.ACOUSTID_API_KEY,
+        )
     }
 
     override fun attachBaseContext(base: Context) {

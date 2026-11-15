@@ -4,6 +4,7 @@ import io.github.lorddetson.piplayer.fakes.FakeAcoustId
 import io.github.lorddetson.piplayer.fakes.FakeMusicBrainz
 import io.github.lorddetson.piplayer.fakes.RecordingRequestLog
 import io.github.lorddetson.piplayer.fakes.TestServices
+import io.github.lorddetson.piplayer.identification.FingerprintStage
 import io.github.lorddetson.piplayer.identification.fingerprint.FingerprintResult
 import io.github.lorddetson.piplayer.identification.fingerprint.PcmEncoding
 import io.github.lorddetson.piplayer.identification.fingerprint.PcmFormat
@@ -59,9 +60,12 @@ class SpikeServicesWiringTest {
         val services = SpikeServices.create(
             userAgent = TestServices.USER_AGENT,
             connectivity = TestServices.FakeConnectivity(),
+            acoustIdApiKey = key,
             baseUrls = TestServices.baseUrls(acoustIdServer.url("/v2/"), musicBrainzServer.url("/ws/2/")),
             timeSource = testTimeSource,
         )
+        // The spike's services know the build's key like the app's, so their stage 3 agrees with the spike.
+        assertThat(services.fingerprintStage).isInstanceOf(FingerprintStage.Available::class.java)
         return SpikeServices.spike(services, key, fingerprinter)
     }
 

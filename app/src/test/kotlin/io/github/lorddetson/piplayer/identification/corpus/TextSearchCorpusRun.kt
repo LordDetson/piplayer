@@ -1,6 +1,5 @@
 package io.github.lorddetson.piplayer.identification.corpus
 
-import io.github.lorddetson.piplayer.BuildConfig
 import io.github.lorddetson.piplayer.fakes.TestServices
 import io.github.lorddetson.piplayer.identification.musicbrainz.MusicBrainzClient
 import io.github.lorddetson.piplayer.identification.musicbrainz.MusicBrainzException
@@ -68,7 +67,7 @@ class TextSearchCorpusRun {
         // Asked for explicitly with the corpus properties, so the gate is open for this run.
         val gate = TestServices.openGate()
         val client = MusicBrainzClient(
-            http = HttpClients.create(UserAgent.of(BuildConfig.VERSION_NAME), gate),
+            http = HttpClients.create(UserAgent.forBuild(), gate),
             limiter = RateLimiter(1_100.milliseconds),
             retryPolicy = RetryPolicy(maxRetries = 5),
             access = TestServices.access(ProviderId.MUSICBRAINZ, gate = gate),
