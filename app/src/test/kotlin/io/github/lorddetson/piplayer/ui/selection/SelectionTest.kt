@@ -199,4 +199,18 @@ class SelectionTest {
         fresh.onList(shown, "q")
         assertThat(fresh.state.value).isEqualTo(SelectionUi(Selection.Only(setOf(4L)), count = 1, everything = false))
     }
+
+    @Test
+    fun `select all on a restored selection before the first loaded list selects that list and does not end the selection`() {
+        // "Select all" is the person's own choice on the list now shown, not a restored selection made on another list.
+        for (saved in listOf(SavedSelection(false, listOf(2L), ""), SavedSelection(true, listOf(2L), "q"))) {
+            val holder = SelectionHolder(saved)
+            holder.selectAll()
+            assertThat(holder.state.value).isEqualTo(SelectionUi(Selection.AllExcept(emptySet(), ""), count = null, everything = false))
+
+            holder.onList(shown, "q")
+
+            assertThat(holder.state.value).isEqualTo(SelectionUi(Selection.AllExcept(emptySet(), "q"), count = 5, everything = true))
+        }
+    }
 }

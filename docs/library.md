@@ -1997,7 +1997,9 @@ open choices to the recommendations (14.11.2026); they are marked "decision".
    (playback.md §4.4). Decision: before the first loaded list (after a restore, §20.5, or a long press on a first page),
    an "only these" selection counts its keys, an "all except" one has no count yet and the title reads "Selected", and a
    tap on a row of an "all except" selection deselects it without ending selection, since what is left cannot be told
-   yet; the first loaded list judges it as above.
+   yet; the first loaded list judges it as above. "Select all" there selects the list that loads first, also when it
+   replaces a restored selection: it is the person's own choice, so it is not dropped as an "all except" of other chips
+   (§20.5).
 9. On the library screen a switch of tabs ends selection: the selection belongs to the list it was made in. The mini
    player and the header items of a page (an album on an artist page, a subfolder, "Play", "Shuffle", the chips) work as
    usual; a page opened from there and closed again finds its selection as it was (decision).

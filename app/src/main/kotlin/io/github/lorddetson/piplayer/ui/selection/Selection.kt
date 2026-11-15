@@ -130,7 +130,14 @@ class SelectionHolder<K : Any>(initial: SavedSelection<K>?, private val save: (S
         )
     }
 
-    fun selectAll() = set(selectAll(list))
+    /**
+     * "Select all" of the list shown. It is the person's own choice, not a restored selection: before the first loaded list
+     * it takes that list's name then, instead of being dropped as an "all except" of another list (§20.2, 8).
+     */
+    fun selectAll() {
+        restored = false
+        set(selectAll(list))
+    }
 
     /** Deselects everything, which ends selection: "Deselect all", back, the close button, an action, a tab switch. */
     fun end() = set(null)
