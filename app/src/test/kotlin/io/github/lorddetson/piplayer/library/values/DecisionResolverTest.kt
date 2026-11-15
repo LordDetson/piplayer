@@ -119,6 +119,18 @@ class DecisionResolverTest {
     }
 
     @Test
+    fun `decisions are ordered by row ID, so a later row made at an earlier time wins`() {
+        // The clock was set back between the two decisions, or the older one came from a device whose clock ran ahead.
+        val older = identification(1, 20, "Older row")
+        val later = identification(2, 10, "Later row")
+
+        assertThat(listOf(older, later).winners()[TITLE]).isEqualTo(Decided("Later row title", LEVEL_IDENTIFICATION, 2))
+        assertThat(listOf(older, edit(3, 5, mapOf(TITLE to "Mine"))).winners()[TITLE]?.decisionId).isEqualTo(3)
+        // Undoing the later row brings the older one back.
+        assertThat(listOf(older, later.copy(undone = true)).winners()[TITLE]?.decisionId).isEqualTo(1)
+    }
+
+    @Test
     fun `an edit of the artist sets every part of the field, empty where it gives none`() {
         val winners = listOf(identification(1, 10, "A"), edit(2, 20, mapOf(ARTIST to "Me"))).winners()
 

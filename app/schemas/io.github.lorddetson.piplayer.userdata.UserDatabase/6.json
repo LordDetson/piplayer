@@ -2,7 +2,7 @@
   "formatVersion": 1,
   "database": {
     "version": 6,
-    "identityHash": "2f5c15ecd034fd0105cabc7e58289552",
+    "identityHash": "45c96f8cbc925303268107b210124eab",
     "entities": [
       {
         "tableName": "library_folder_rule",
@@ -750,11 +750,17 @@
       },
       {
         "tableName": "file_state",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`identity_id` INTEGER NOT NULL, `volume_name` TEXT NOT NULL, `relative_path` TEXT NOT NULL, `display_name` TEXT NOT NULL, `field` INTEGER NOT NULL, `value_at_decision` BLOB, `changed_in_file` INTEGER NOT NULL, PRIMARY KEY(`identity_id`, `volume_name`, `relative_path`, `display_name`, `field`)) WITHOUT ROWID",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`identity_id` INTEGER NOT NULL, `decision_id` INTEGER NOT NULL, `volume_name` TEXT NOT NULL, `relative_path` TEXT NOT NULL, `display_name` TEXT NOT NULL, `field` INTEGER NOT NULL, `value_at_decision` BLOB, `changed_in_file` INTEGER NOT NULL, PRIMARY KEY(`identity_id`, `decision_id`, `volume_name`, `relative_path`, `display_name`, `field`)) WITHOUT ROWID",
         "fields": [
           {
             "fieldPath": "identityId",
             "columnName": "identity_id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "decisionId",
+            "columnName": "decision_id",
             "affinity": "INTEGER",
             "notNull": true
           },
@@ -798,6 +804,7 @@
           "autoGenerate": false,
           "columnNames": [
             "identity_id",
+            "decision_id",
             "volume_name",
             "relative_path",
             "display_name",
@@ -863,7 +870,7 @@
     ],
     "setupQueries": [
       "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
-      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '2f5c15ecd034fd0105cabc7e58289552')"
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '45c96f8cbc925303268107b210124eab')"
     ]
   }
 }

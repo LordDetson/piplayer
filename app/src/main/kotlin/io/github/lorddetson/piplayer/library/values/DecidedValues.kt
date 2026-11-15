@@ -150,7 +150,7 @@ data class Decided(val value: String?, val level: Int, val decisionId: Long)
 /**
  * One decision of a track as the resolver reads it (TI §7.1): its [fields] (the ticked, edited or reverted fields of
  * the protected-fields list) and the [values] of their parts, a missing or null value being empty. An [undone] decision
- * counts for nothing.
+ * counts for nothing. [id] orders the decisions; [createdAt] is for track details and the history only.
  */
 data class DecisionValues(
     val id: Long,
@@ -164,8 +164,11 @@ data class DecisionValues(
 /** Levels 1 and 2 of the precedence (TI §7.1): which decision wins each part of each field. */
 object DecisionResolver {
 
-    /** Newest first: by the time the decision was made, then by its row ID. */
-    val NEWEST_FIRST: Comparator<DecisionValues> = compareByDescending<DecisionValues> { it.createdAt }.thenByDescending { it.id }
+    /**
+     * Newest first: by row ID, the order of the commits. The time a decision was made orders nothing, so a clock set
+     * back cannot make a new decision lose to an older one (TI §7.1).
+     */
+    val NEWEST_FIRST: Comparator<DecisionValues> = compareByDescending { it.id }
 
     /**
      * The winners of [decisions]: per part, the newest decision that is not undone and sets or reverts the part's field.

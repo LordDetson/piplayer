@@ -105,12 +105,12 @@ object MergedValues {
         val (fileDisc, fileTrack) = if (read) tagValues?.discNumber to tagValues?.trackNumber else splitTrackNumber(indexValues?.trackNumber)
         val disc = if (DecidedField.DISC_NUMBER in decided) decided[DecidedField.DISC_NUMBER]?.value?.toIntOrNull() else fileDisc
         val track = if (DecidedField.TRACK_NUMBER in decided) decided[DecidedField.TRACK_NUMBER]?.value?.toIntOrNull() else fileTrack
-        val dateDecided = DecidedField.DATE in decided || DecidedField.ORIGINAL_DATE in decided
-        // A decided date hides the index's year as the tags' date does, also when it is empty.
-        val year = if (read || dateDecided) {
+        // The index's year is the date field's level 4 (TI §7.1): a decided date hides it as the tags' date does, also when it
+        // is empty, and a decided original date does not; that gives the year only when neither does.
+        val year = if (read || DecidedField.DATE in decided) {
             yearOf(pick(DecidedField.DATE) { tagValues?.date }) ?: yearOf(pick(DecidedField.ORIGINAL_DATE) { tagValues?.originalDate })
         } else {
-            indexValues?.year?.takeIf { it > 0 }
+            indexValues?.year?.takeIf { it > 0 } ?: yearOf(decided[DecidedField.ORIGINAL_DATE]?.value)
         }
         // A sort tag counts only while its field comes from the tags (docs/library.md §11.1); a decided field brings its own.
         val titleSortTag = tagValues?.titleSort.present().takeIf { DecidedField.TITLE !in decided && tagValues?.title != null }
@@ -227,11 +227,17 @@ object MergedValues {
             )
             for ((part, value) in fromIndex) if (part.group !in decidedFields) offer(part, value, DecisionKind.LEVEL_INDEX)
         }
-        // Level 5: the file-name guess, for what is still empty.
+        // Level 5: the file-name guess, for what is still empty; also for a decided title or artist that is empty (TI §7.1),
+        // as the lists show them.
         val parsed = FileNameParser.parse(displayName)
         val fileName = displayName.substringBeforeLast('.').ifEmpty { displayName }
-        if (ProtectedField.TITLE !in decidedFields) offer(DecidedField.TITLE, parsed?.title ?: fileName, DecisionKind.LEVEL_FILE_NAME)
-        if (ProtectedField.ARTIST !in decidedFields) offer(DecidedField.ARTIST, parsed?.artist, DecisionKind.LEVEL_FILE_NAME)
+        fun guess(part: DecidedField, value: String?) {
+            if (value == null) return
+            if (part.group !in decidedFields) offer(part, value, DecisionKind.LEVEL_FILE_NAME)
+            else if (result[part]?.value == null) result[part] = Sourced(value, DecisionKind.LEVEL_FILE_NAME)
+        }
+        guess(DecidedField.TITLE, parsed?.title ?: fileName)
+        guess(DecidedField.ARTIST, parsed?.artist)
         if (ProtectedField.TRACK_NUMBER !in decidedFields) {
             offer(DecidedField.TRACK_NUMBER, parsed?.trackNumber?.takeIf { it > 0 }?.toString(), DecisionKind.LEVEL_FILE_NAME)
         }

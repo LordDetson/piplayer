@@ -72,7 +72,7 @@ class Decisions(private val database: UserDatabase, private val clock: () -> Lon
             )
             // The whole result is kept; `fields` says which of it is decided.
             dao.addMetadata(rows(id, parts.filterKeys { !it.release && !it.decisionColumn }))
-            locations(identity, decided, atDecision)
+            locations(identity, id, decided, atDecision)
             committed(id, identity)
         }
 
@@ -101,7 +101,7 @@ class Decisions(private val database: UserDatabase, private val clock: () -> Lon
                 ),
             )
             dao.addMetadata(rows(id, parts))
-            locations(identity, parts, atDecision)
+            locations(identity, id, parts, atDecision)
             committed(id, identity)
         }
     }
@@ -116,8 +116,8 @@ class Decisions(private val database: UserDatabase, private val clock: () -> Lon
                 DecisionEntity(identityId = identity, kind = DecisionKind.REVERT_FIELD.code, fields = DecisionCodec.bits(fields), createdAt = clock()),
             )
             dao.addMetadata(parts.map { TrackMetadataEntity(id, it.code, null) })
-            // "Use the file's value" settles a flag of these parts (TI §7.1).
-            dao.deleteFileStates(identity, parts.map { it.code })
+            // "Use the file's value" settles a flag of these parts while the revert stands, since nothing of them is decided
+            // then; the older decisions keep their file states, which an undo of the revert brings back (TI §7.1).
             committed(id, identity)
         }
     }
@@ -130,11 +130,10 @@ class Decisions(private val database: UserDatabase, private val clock: () -> Lon
         committed(decisionId, decision.identityId)
     }
 
-    /** The newest identification of [identityId] that is not undone, which "Undo identification" undoes. */
+    /** The newest identification of [identityId] that is not undone, by row ID (TI §7.1), which "Undo identification" undoes. */
     suspend fun newestIdentification(identityId: Long): Long? = dao.decisionsOf(identityId)
         .filter { it.kind == DecisionKind.APPLY.code && it.undoneAt == null }
-        .maxWithOrNull(compareBy<DecisionEntity> { it.createdAt }.thenBy { it.id })
-        ?.id
+        .maxOfOrNull { it.id }
 
     /** Every decision of [identityId] as the resolver reads it, undone ones too, oldest first. */
     suspend fun decisionsOf(identityId: Long): List<DecisionValues> {
@@ -165,16 +164,19 @@ class Decisions(private val database: UserDatabase, private val clock: () -> Lon
     /**
      * The decided parts of the track of [identityId] whose value at [location] changed in the file since the decision
      * (TI §7.1), with [LocationValues.values] the file's values now; they are flagged in `file_state` and stay flagged
-     * until the user chooses. The flagged parts, those flagged before included.
+     * until the user chooses. Each part compares with the references of the decision that wins it now. The flagged
+     * parts, those flagged before included.
      */
     suspend fun fileChanged(identityId: Long, location: LocationValues): Set<DecidedField> = database.withWriteTransaction {
         val decisions = dao.decisionsOf(identityId).filter { it.undoneAt == null }
         val winners = DecisionResolver.resolve(values(decisions, metadataOf(decisions), choicesOf(decisions)))
         val ofDecision = decisions.associate { it.id to FileReferences.decode(it.fileValues) }
+        // The location's rows of the decision that wins each part; the rows of other decisions wait for theirs to win.
         val here = dao.fileStates(identityId).filter { it.at(location) }
-            .mapNotNull { row -> DecidedField.ofCode(row.field)?.let { it to row } }.toMap()
+            .mapNotNull { row -> DecidedField.ofCode(row.field)?.takeIf { winners[it]?.decisionId == row.decisionId }?.let { it to row } }
+            .toMap()
         val references = here.mapValues { (_, row) -> int(row.valueAtDecision) }
-        val flaggedBefore = here.filterValues { it.changedInFile }.keys.filterTo(HashSet()) { it in winners }
+        val flaggedBefore = here.filterValues { it.changedInFile }.keys
         val changed = FileReferences.changed(winners, ofDecision, references, location.values)
         val newly = changed - flaggedBefore
         if (newly.isNotEmpty()) {
@@ -182,18 +184,27 @@ class Decisions(private val database: UserDatabase, private val clock: () -> Lon
                 newly.map { part ->
                     val winner = winners.getValue(part)
                     val reference = references[part] ?: ofDecision[winner.decisionId]?.get(part) ?: FileReferences.hash(winner.value)
-                    state(identityId, location, part, reference, changed = true)
+                    state(identityId, winner.decisionId, location, part, reference, changed = true)
                 },
             )
         }
         changed + flaggedBefore
     }
 
-    /** "Keep PiPlayer's value" for [parts] at [location]: clears their flags and takes the present values as references. */
+    /**
+     * "Keep PiPlayer's value" for [parts] at [location]: clears their flags and takes the present values as the
+     * references of the decisions that win them. Parts no decision wins are left alone.
+     */
     suspend fun keepPiPlayersValue(identityId: Long, location: LocationValues, parts: Set<DecidedField>) {
         if (parts.isEmpty()) return
         database.withWriteTransaction {
-            dao.saveFileStates(parts.map { state(identityId, location, it, FileReferences.hash(location.values[it]), changed = false) })
+            val decisions = dao.decisionsOf(identityId).filter { it.undoneAt == null }
+            val winners = DecisionResolver.resolve(values(decisions, metadataOf(decisions), choicesOf(decisions)))
+            val rows = parts.mapNotNull { part ->
+                val winner = winners[part] ?: return@mapNotNull null
+                state(identityId, winner.decisionId, location, part, FileReferences.hash(location.values[part]), changed = false)
+            }
+            if (rows.isNotEmpty()) dao.saveFileStates(rows)
         }
     }
 
@@ -228,13 +239,13 @@ class Decisions(private val database: UserDatabase, private val clock: () -> Lon
     }
 
     /**
-     * The references of the locations after the first one (TI §7.1): a `file_state` row for each decided part whose
-     * value there differs from the reference the decision keeps. The rows of these parts that earlier decisions left go.
+     * The references of the locations after the first one (TI §7.1): a `file_state` row of [decisionId] for each decided
+     * part whose value there differs from the reference the decision keeps. The rows of older decisions stay: they count
+     * again when an undo lets their decision win again.
      */
-    private suspend fun locations(identity: Long, decided: Map<DecidedField, String?>, atDecision: List<LocationValues>) {
+    private suspend fun locations(identity: Long, decisionId: Long, decided: Map<DecidedField, String?>, atDecision: List<LocationValues>) {
         val parts = decided.keys.filter { it != DecidedField.COVER }
         if (parts.isEmpty()) return
-        dao.deleteFileStates(identity, parts.map { it.code })
         val first = atDecision.firstOrNull() ?: return
         val reference = FileReferences.of(decided, first.values)
         val rows = atDecision.drop(1).flatMap { location ->
@@ -242,7 +253,7 @@ class Decisions(private val database: UserDatabase, private val clock: () -> Lon
             parts.mapNotNull { part ->
                 val mine = here[part] ?: FileReferences.hash(decided[part])
                 val decision = reference[part] ?: FileReferences.hash(decided[part])
-                if (mine == decision) null else state(identity, location, part, mine, changed = false)
+                if (mine == decision) null else state(identity, decisionId, location, part, mine, changed = false)
             }
         }
         if (rows.isNotEmpty()) dao.saveFileStates(rows)
@@ -296,9 +307,10 @@ class Decisions(private val database: UserDatabase, private val clock: () -> Lon
     private fun FileStateEntity.at(location: LocationValues) =
         volumeName == location.volume && relativePath == location.relativePath && displayName == location.displayName
 
-    private fun state(identity: Long, location: LocationValues, part: DecidedField, reference: Int, changed: Boolean) = FileStateEntity(
-        identity, location.volume, location.relativePath, location.displayName, part.code, bytes(reference), changed,
-    )
+    private fun state(identity: Long, decisionId: Long, location: LocationValues, part: DecidedField, reference: Int, changed: Boolean) =
+        FileStateEntity(
+            identity, decisionId, location.volume, location.relativePath, location.displayName, part.code, bytes(reference), changed,
+        )
 
     private fun bytes(hash: Int) = ByteBuffer.allocate(Int.SIZE_BYTES).putInt(hash).array()
 

@@ -190,7 +190,10 @@ class DecisionsTest {
         identity(4)
         decisions.apply(request(key(1)))
         decisions.undo(checkNotNull(decisions.apply(request(key(2)))).decisionId)
-        dao.saveFileStates(listOf(FileStateEntity(flagged, "external_primary", "Music/", "3.mp3", DecidedField.TITLE.code, null, true)))
+        // A file state alone holds its identity too.
+        dao.saveFileStates(
+            listOf(FileStateEntity(flagged, 99, "external_primary", "Music/", "3.mp3", DecidedField.TITLE.code, null, true)),
+        )
 
         assertThat(database.user().identitiesHoldingData()).containsExactlyInAnyOrder(decided, undone, flagged)
     }
@@ -215,6 +218,76 @@ class DecisionsTest {
 
         decisions.keepPiPlayersValue(identity, changedCopy, setOf(DecidedField.TITLE))
         assertThat(decisions.fileChanged(identity, changedCopy)).isEmpty()
+    }
+
+    @Test
+    fun aDecisionMadeAfterTheClockWasSetBackStillWinsAndIsTheOneUndone() = runBlocking<Unit> {
+        val identity = identity(1)
+        decisions.apply(request(key(1), details(title = "Older")))
+        // The clock is set back an hour: by hand, by a network time correction, or the older decision came from a backup
+        // of a device whose clock ran ahead.
+        now -= 3_600_000
+        val newer = checkNotNull(decisions.apply(request(key(1), details(title = "Newer"))))
+
+        assertThat(decisions.decidedOf(listOf(identity)).getValue(identity)[DecidedField.TITLE]?.value).isEqualTo("Newer")
+        assertThat(decisions.newestIdentification(identity)).isEqualTo(newer.decisionId)
+        assertThat(decisions.decisionsOf(identity).map { it.id }.last()).isEqualTo(newer.decisionId)
+        decisions.undo(newer.decisionId)
+        assertThat(decisions.decidedOf(listOf(identity)).getValue(identity)[DecidedField.TITLE]?.value).isEqualTo("Older")
+    }
+
+    /** The decided location and a copy whose title differs, both as the tag pass reads them. */
+    private val here = Decisions.LocationValues(
+        "external_primary", "Music/", "1.mp3", mapOf(DecidedField.TITLE to "track01", DecidedField.ARTIST to "Ann"),
+    )
+    private val copy = Decisions.LocationValues(
+        "external_primary", "Copy/", "1.mp3", mapOf(DecidedField.TITLE to "copy title", DecidedField.ARTIST to "Ann"),
+    )
+
+    @Test
+    fun undoingARevertGivesASecondLocationItsReferencesBack() = runBlocking<Unit> {
+        val identity = identity(1)
+        decisions.apply(request(key(1), fields = setOf(ProtectedField.TITLE, ProtectedField.ARTIST)), atDecision = listOf(here, copy))
+        assertThat(decisions.fileChanged(identity, copy)).isEmpty()
+
+        val revert = checkNotNull(decisions.revert(identity, setOf(ProtectedField.TITLE)))
+        assertThat(decisions.fileChanged(identity, copy)).isEmpty()
+        decisions.undo(revert.decisionId)
+
+        // Neither file changed: the copy's title is the one it had at the identification.
+        assertThat(decisions.fileChanged(identity, copy)).isEmpty()
+        assertThat(decisions.fileChanged(identity, here)).isEmpty()
+        // A real change is flagged again.
+        assertThat(decisions.fileChanged(identity, copy.copy(values = copy.values + (DecidedField.TITLE to "retagged"))))
+            .containsExactly(DecidedField.TITLE)
+    }
+
+    @Test
+    fun undoingANewerDecisionGivesASecondLocationTheOlderOnesReferencesBack() = runBlocking<Unit> {
+        val identity = identity(1)
+        decisions.apply(request(key(1), fields = setOf(ProtectedField.TITLE, ProtectedField.ARTIST)), atDecision = listOf(here, copy))
+        val edit = checkNotNull(decisions.edit(identity, mapOf(DecidedField.TITLE to "Mine"), atDecision = listOf(here, copy)))
+        assertThat(decisions.fileChanged(identity, copy)).isEmpty()
+
+        decisions.undo(edit.decisionId)
+
+        assertThat(decisions.fileChanged(identity, copy)).isEmpty()
+        assertThat(decisions.fileChanged(identity, here)).isEmpty()
+    }
+
+    @Test
+    fun aFlagUnderARevertComesBackWithItsUndo() = runBlocking<Unit> {
+        val identity = identity(1)
+        decisions.apply(request(key(1), fields = setOf(ProtectedField.TITLE, ProtectedField.ARTIST)), atDecision = listOf(here, copy))
+        val retagged = copy.copy(values = copy.values + (DecidedField.TITLE to "retagged"))
+        assertThat(decisions.fileChanged(identity, retagged)).containsExactly(DecidedField.TITLE)
+
+        // "Use the file's value": nothing of the title is decided, so nothing of it is flagged.
+        val revert = checkNotNull(decisions.revert(identity, setOf(ProtectedField.TITLE)))
+        assertThat(decisions.fileChanged(identity, retagged)).isEmpty()
+
+        decisions.undo(revert.decisionId)
+        assertThat(decisions.fileChanged(identity, retagged)).containsExactly(DecidedField.TITLE)
     }
 
     @Test

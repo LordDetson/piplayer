@@ -113,6 +113,22 @@ class DecidedMergeTest {
     }
 
     @Test
+    fun `a decided original date alone keeps the index's year of an unread file`() {
+        // Only the original date was ticked: the date field is not decided, and the index's year is its level-4 value.
+        assertThat(merge(tags = null, read = false, overrides = identified(ORIGINAL_DATE to null)).year).isEqualTo(1985)
+        assertThat(merge(tags = null, read = false, overrides = identified(ORIGINAL_DATE to "1977")).year).isEqualTo(1985)
+    }
+
+    @Test
+    fun `a decided original date gives an unread file its year when neither the date nor the index does`() {
+        val values = MergedValues.of(
+            "x.mp3", index.copy(year = null), tags = null, read = false, overrides = identified(ORIGINAL_DATE to "1977"),
+        )
+
+        assertThat(values.year).isEqualTo(1977)
+    }
+
+    @Test
     fun `a decided original date gives the year when no date is decided or tagged`() {
         val values = merge(tags = emptyTags, overrides = identified(DATE to null, ORIGINAL_DATE to "1977"))
 
@@ -232,6 +248,25 @@ class DecidedMergeTest {
         val parts = MergedValues.parts("x.mp3", index = null, tags = tags, read = true, overrides = decided(LEVEL_USER_EDIT, ALBUM to null))
 
         assertThat(parts[ALBUM]).isEqualTo(Sourced(null, LEVEL_USER_EDIT))
+    }
+
+    @Test
+    fun `a cleared title and artist are the file-name guess in the parts, as the lists show them`() {
+        val overrides = decided(LEVEL_USER_EDIT, TITLE to null, ARTIST to null, ARTIST_CREDITS to null, ARTIST_SORT to null)
+        val name = "05 Name Artist - Name Title.mp3"
+
+        val parts = MergedValues.parts(name, index, tags, read = true, overrides = overrides)
+        val shown = merge(overrides = overrides, displayName = name)
+
+        assertThat(parts[TITLE]).isEqualTo(Sourced("Name Title", LEVEL_FILE_NAME))
+        assertThat(parts[ARTIST]).isEqualTo(Sourced("Name Artist", LEVEL_FILE_NAME))
+        assertThat(parts[TITLE]?.value).isEqualTo(shown.title)
+        assertThat(parts[ARTIST]?.value).isEqualTo(shown.artist)
+        // The tags do not come back: the other parts of the cleared artist stay decided and empty.
+        assertThat(parts[ARTIST_SORT]).isEqualTo(Sourced(null, LEVEL_USER_EDIT))
+        // An unread file too: the index does not fill a decided title.
+        val unread = MergedValues.parts(name, index, tags = null, read = false, overrides = overrides)
+        assertThat(unread[TITLE]).isEqualTo(Sourced("Name Title", LEVEL_FILE_NAME))
     }
 
     @Test

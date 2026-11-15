@@ -12,6 +12,7 @@ import io.github.lorddetson.piplayer.library.values.DecisionKind
 import io.github.lorddetson.piplayer.settings.ProtectedField
 import io.github.lorddetson.piplayer.userdata.DecisionFixtures.details
 import java.io.File
+import java.nio.ByteBuffer
 import kotlin.random.Random
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
@@ -23,8 +24,11 @@ import org.junit.runner.RunWith
  * The size budget of `user.db` (TI §10.2; §11.2 M3 "Size budget of user.db"): generated data at the volumes of the
  * estimate stays under 16 MB minus the reserve for the tables of M4b, measured on the file after a checkpoint. The rows
  * are made by the codecs the repository stores with, so their sizes are those of real decisions: every field but the
- * cover ticked, on files without tags (whose references all fit the mask, TI §10.2), titles of about 18 characters and
- * artists of about 12. Measured on the API 36 emulator in M3: 13.0 MB.
+ * cover ticked, titles of about 18 characters and artists of about 12. Half of the decisions are made on files without
+ * tags, whose references all fit the mask, and half on files whose tags differ from the decided values in 8 parts, which
+ * take 5 bytes each (TI §10.2); a tenth of the tracks has a second location whose values differ in 4 parts, as
+ * `file_state` rows. Measured on the API 36 emulator in M3 before the references and `file_state` rows were added:
+ * 13.0 MB.
  */
 @RunWith(AndroidJUnit4::class)
 class UserDatabaseSizeTest {
@@ -91,14 +95,15 @@ class UserDatabaseSizeTest {
                     ),
                 )
             }
-            // One identification per track as Decisions.apply stores it: the per-track rows, and the references of a
-            // file without tags, whose every decided part differs from its file value.
+            // One identification per track as Decisions.apply stores it: the per-track rows and the references of the
+            // location it was made on, then the file_state rows of a second location.
             val ticked = ProtectedField.entries.toSet() - ProtectedField.COVER
             val fields = DecisionCodec.bits(ticked)
             val reason = DecisionCodec.reason(DecisionFixtures.reason)
             for (i in 1..TRACKS) {
                 val parts = DecisionContent.ofRelease(details(title = words(3), artist = words(2), recording = i, track = i % 12 + 1))
-                val references = FileReferences.of(parts.filterKeys { it.group in ticked }, DecisionContent.ofTags(null))
+                val atDecision = if (i % 2 == 0) taggedDifferently(i) else DecisionContent.ofTags(null)
+                val references = FileReferences.of(parts.filterKeys { it.group in ticked }, atDecision)
                 val id = decisions.add(
                     DecisionEntity(
                         identityId = i.toLong(), kind = DecisionKind.APPLY.code, fields = fields,
@@ -112,6 +117,15 @@ class UserDatabaseSizeTest {
                     parts.filterKeys { !it.release && !it.decisionColumn }
                         .map { (part, text) -> TrackMetadataEntity(id, part.code, DecisionCodec.encode(part, text)) },
                 )
+                if (i % 10 == 0) {
+                    val path = "Music/${words(2)}/${words(3)}/"
+                    val name = "%02d %s.mp3".format(i % 20 + 1, words(3))
+                    decisions.saveFileStates(
+                        SECOND_LOCATION_PARTS.map { part ->
+                            FileStateEntity(i.toLong(), id, "external_primary", path, name, part.code, hash(words(3)), false)
+                        },
+                    )
+                }
             }
             // A year of listening: play events of 90 days, statistics, favorites, members, own covers and playlists.
             val plays = database.plays()
@@ -148,6 +162,20 @@ class UserDatabaseSizeTest {
         }
     }
 
+    /** The values of a tagged file at the decision that differ from the decided ones in 8 parts. */
+    private fun taggedDifferently(i: Int): Map<DecidedField, String?> = mapOf(
+        DecidedField.TITLE to words(3),
+        DecidedField.ARTIST to words(2),
+        DecidedField.ARTIST_SORT to words(2),
+        DecidedField.ALBUM to words(3),
+        DecidedField.ALBUM_ARTIST to words(2),
+        DecidedField.DATE to "2003",
+        DecidedField.TRACK_NUMBER to (i % 12 + 2).toString(),
+        DecidedField.DISC_NUMBER to "2",
+    )
+
+    private fun hash(value: String) = ByteBuffer.allocate(Int.SIZE_BYTES).putInt(FileReferences.hash(value)).array()
+
     private companion object {
         const val TAG = "UserDatabaseSize"
         const val TRACKS = 20_000
@@ -158,6 +186,9 @@ class UserDatabaseSizeTest {
         const val FAVORITE_ALBUMS = 200
         const val PLAYLISTS = 50
         const val PLAYLIST_ENTRIES = 5_000
+
+        /** The parts a second location's values differ in. */
+        val SECOND_LOCATION_PARTS = listOf(DecidedField.TITLE, DecidedField.ARTIST, DecidedField.ALBUM, DecidedField.TRACK_NUMBER)
 
         /** TI §10.2: under 16 MB, and 1.5 MB of it kept for the write journal and tag backups of M4b. */
         const val BUDGET_BYTES = 16_000_000L

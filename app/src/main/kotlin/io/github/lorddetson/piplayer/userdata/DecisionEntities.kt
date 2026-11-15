@@ -85,16 +85,18 @@ data class TrackMetadataEntity(
 }
 
 /**
- * The "changed in the file" state of one part at one location of a track (TI §7.1, §10.2): its reference
- * ([valueAtDecision], a 4-byte hash) when it differs from the decision's, and whether the part [changedInFile].
+ * The "changed in the file" state of one part at one location of a track for the decision [decisionId] (TI §7.1,
+ * §10.2): its reference ([valueAtDecision], a 4-byte hash) when it differs from the decision's, and whether the part
+ * [changedInFile]. Only the rows of the decision that wins a part count, so no decision deletes another's.
  */
 @Entity(
     tableName = "file_state",
-    primaryKeys = ["identity_id", "volume_name", "relative_path", "display_name", "field"],
+    primaryKeys = ["identity_id", "decision_id", "volume_name", "relative_path", "display_name", "field"],
     withoutRowId = true,
 )
 data class FileStateEntity(
     @ColumnInfo(name = "identity_id") val identityId: Long,
+    @ColumnInfo(name = "decision_id") val decisionId: Long,
     @ColumnInfo(name = "volume_name") val volumeName: String,
     @ColumnInfo(name = "relative_path") val relativePath: String,
     @ColumnInfo(name = "display_name") val displayName: String,
@@ -103,10 +105,11 @@ data class FileStateEntity(
     @ColumnInfo(name = "changed_in_file") val changedInFile: Boolean,
 ) {
     override fun equals(other: Any?): Boolean = other is FileStateEntity && identityId == other.identityId &&
-        volumeName == other.volumeName && relativePath == other.relativePath && displayName == other.displayName &&
+        decisionId == other.decisionId && volumeName == other.volumeName && relativePath == other.relativePath &&
+        displayName == other.displayName &&
         field == other.field && valueAtDecision.contentEquals(other.valueAtDecision) && changedInFile == other.changedInFile
 
-    override fun hashCode(): Int = (identityId.hashCode() * 31 + displayName.hashCode()) * 31 + field
+    override fun hashCode(): Int = ((identityId.hashCode() * 31 + decisionId.hashCode()) * 31 + displayName.hashCode()) * 31 + field
 }
 
 /** An accepted cover (TI §5.2, §10.2): the image file lives in no-backup app storage at [path]. */
@@ -151,8 +154,8 @@ interface DecisionDao {
     @Query("UPDATE decision SET undone_at = :at WHERE id = :id AND undone_at IS NULL")
     suspend fun markUndone(id: Long, at: Long): Int
 
-    /** Every decision of [identityId], undone ones too, oldest first. */
-    @Query("SELECT * FROM decision WHERE identity_id = :identityId ORDER BY created_at, id")
+    /** Every decision of [identityId], undone ones too, oldest first: by row ID, the order of the commits (TI §7.1). */
+    @Query("SELECT * FROM decision WHERE identity_id = :identityId ORDER BY id")
     suspend fun decisionsOf(identityId: Long): List<DecisionEntity>
 
     /** Whether any decision may decide values, so that the mirror of a library without one costs nothing. */
@@ -209,9 +212,6 @@ interface DecisionDao {
 
     @Upsert
     suspend fun saveFileStates(rows: List<FileStateEntity>)
-
-    @Query("DELETE FROM file_state WHERE identity_id = :identityId AND field IN (:fields)")
-    suspend fun deleteFileStates(identityId: Long, fields: List<Int>)
 
     @Insert
     suspend fun addSavedCover(cover: SavedCoverEntity): Long
