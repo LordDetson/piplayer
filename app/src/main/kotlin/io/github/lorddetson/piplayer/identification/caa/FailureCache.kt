@@ -67,8 +67,9 @@ class FailureTtlPolicy(private val clock: Clock) {
 
 /**
  * The failed image addresses of Cover Art Archive (TI §5.2), so lists do not ask for them on every scroll. Expired
- * entries may be kept: [FailureTtlPolicy.busy] reads them. In memory in M3 ([InMemoryFailureCache]); `api_cache` in
- * the library database from M3 step 9 on.
+ * entries may be kept: [FailureTtlPolicy.busy] reads them. The app keeps them in the library database's `api_cache`
+ * ([RoomFailureCache]); JVM tests keep them in memory ([InMemoryFailureCache]). Calls may block their thread for a short
+ * query, so callers stay off the main thread.
  */
 interface FailureCache {
     fun get(key: String): FailureEntry?

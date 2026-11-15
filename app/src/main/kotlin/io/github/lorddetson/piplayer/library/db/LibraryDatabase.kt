@@ -76,11 +76,14 @@ data class AudioFileEntity(
     @ColumnInfo(name = "duration_source") val durationSource: String? = null,
 )
 
-/** The user database's change counter that the folder rules of `audio_file` mirror (docs/library.md §3.4). */
+/** The one row of what the library database last mirrored and derived (TI §10.1, docs/library.md §3.1). */
 @Entity(tableName = "library_meta")
 data class LibraryMetaEntity(
     @PrimaryKey val id: Int = 1,
-    @ColumnInfo(name = "mirrored_user_counter") val mirroredUserCounter: Long,
+    /** The user database's `rules_counter` the folder rules of `audio_file` were last applied at (docs/library.md §3.4). */
+    @ColumnInfo(name = "mirrored_rules_counter", defaultValue = "0") val mirroredRulesCounter: Long = 0,
+    /** The user database's `change_counter` at which `decided_mirror` was last filled (TI §10.3). */
+    @ColumnInfo(name = "mirrored_change_counter", defaultValue = "0") val mirroredChangeCounter: Long = 0,
     /** The version of the rules `track_display` was derived by (`TrackDisplayWriter.VERSION`). */
     @ColumnInfo(name = "display_version", defaultValue = "0") val displayVersion: Int = 0,
     /** A random ID made with the database; file IDs mean something only under it (docs/library.md §8.4). */
@@ -97,11 +100,17 @@ data class FingerprintEntity(
     @PrimaryKey @ColumnInfo(name = "content_key") val contentKey: String,
     /** The raw items as 4-byte big-endian integers. */
     val fingerprint: ByteArray,
+    /** The file's format, which re-attachment step 4 compares (TI §3.1). */
     val format: String?,
     @ColumnInfo(name = "computed_at") val computedAt: Long,
+    /** The AcoustID track ID of the best result of a lookup (TI §3.2); null before one. */
+    @ColumnInfo(name = "acoustid_id") val acoustIdId: String? = null,
+    /** How the audio was decoded for the fingerprint (TI §3.2); null when not recorded. */
+    @ColumnInfo(name = "decoder_path") val decoderPath: String? = null,
 ) {
     override fun equals(other: Any?): Boolean = other is FingerprintEntity && contentKey == other.contentKey &&
-        fingerprint.contentEquals(other.fingerprint) && format == other.format && computedAt == other.computedAt
+        fingerprint.contentEquals(other.fingerprint) && format == other.format && computedAt == other.computedAt &&
+        acoustIdId == other.acoustIdId && decoderPath == other.decoderPath
 
     override fun hashCode(): Int = contentKey.hashCode()
 }
@@ -150,7 +159,20 @@ data class TrackDisplayEntity(
     @ColumnInfo(name = "album_sort", typeAffinity = ColumnInfo.BLOB) val albumSort: ByteArray? = null,
     @ColumnInfo(name = "album_artist_sort", typeAffinity = ColumnInfo.BLOB) val albumArtistSort: ByteArray? = null,
     @ColumnInfo(name = "file_sort", typeAffinity = ColumnInfo.BLOB) val fileSort: ByteArray,
-)
+    /** Keep as-is or Skip from the mirrored decisions (TI §1): [DECISION_NONE] until one is mirrored. */
+    @ColumnInfo(name = "missing_info_decision", defaultValue = "0") val missingInfoDecision: Int = DECISION_NONE,
+    /** The metadata badge (TI §6) from the mirrored decisions: [BADGE_NONE], the file's own values, until one is mirrored. */
+    @ColumnInfo(name = "badge_state", defaultValue = "0") val badgeState: Int = BADGE_NONE,
+) {
+    companion object {
+        const val DECISION_NONE = 0
+        const val DECISION_KEEP_AS_IS = 1
+        const val DECISION_SKIPPED = 2
+
+        /** No decision wins: the values come from the file (the badge's "from tags"); M3 step 12 adds the others. */
+        const val BADGE_NONE = 0
+    }
+}
 
 /**
  * An artist of a file as lists group it (docs/library.md §6.2): each artist of its tags once read, otherwise the displayed
@@ -225,10 +247,17 @@ data class VolumeSyncStateEntity(
         FingerprintEntity::class,
         TrackMirrorEntity::class,
         AlbumMirrorEntity::class,
+        LookupJobEntity::class,
+        CandidateEntity::class,
+        IdentificationTraceEntity::class,
+        ReleaseCacheEntity::class,
+        ApiCacheEntity::class,
+        DecidedMirrorEntity::class,
     ],
     // 10: the mirror of favorites and plays (docs/library.md §15.4). 11: the smart lists' date added and indexes (§17.4).
-    // 12: the genres of display rows (§19.5).
-    version = 12,
+    // 12: the genres of display rows (§19.5). 13: identification (TI §10.1): the content-key tables, the release cache,
+    // api_cache, decided_mirror, the identification columns of fingerprint and track_display, and both mirrored counters.
+    version = 13,
     exportSchema = false,
 )
 abstract class LibraryDatabase : RoomDatabase() {
@@ -236,6 +265,12 @@ abstract class LibraryDatabase : RoomDatabase() {
     abstract fun library(): LibraryDao
 
     abstract fun mirror(): MirrorDao
+
+    /** The release cache and `api_cache` (TI §10.1). */
+    abstract fun identificationCache(): IdentificationCacheDao
+
+    /** The decided values beside `track_display` (TI §10.1). */
+    abstract fun decided(): DecidedMirrorDao
 
     companion object {
         const val FILE_NAME = "library.db"

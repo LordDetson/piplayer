@@ -9,6 +9,7 @@ import androidx.annotation.VisibleForTesting
 import io.github.lorddetson.piplayer.crash.CrashReports
 import io.github.lorddetson.piplayer.identification.IdentificationServices
 import io.github.lorddetson.piplayer.library.Library
+import io.github.lorddetson.piplayer.library.db.LibraryAccess
 import io.github.lorddetson.piplayer.library.sort.SortKeys
 import io.github.lorddetson.piplayer.net.AndroidConnectivity
 import io.github.lorddetson.piplayer.net.UserAgent
@@ -62,6 +63,7 @@ class PiPlayerApplication : Application() {
             connectivity = AndroidConnectivity(this),
             acoustIdApiKey = BuildConfig.ACOUSTID_API_KEY,
             gate = onlineGate,
+            library = LibraryAccess.app(this),
         )
     }
 

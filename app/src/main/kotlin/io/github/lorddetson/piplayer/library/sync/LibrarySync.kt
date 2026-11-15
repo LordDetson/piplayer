@@ -187,9 +187,9 @@ class LibrarySync(
         if (stored.isNotEmpty()) markKnown()
         // The folder rules as the user database has them now; read first, so that a change during the sync is
         // applied by the next one (docs/library.md §3.4).
-        val userCounter = rules.counter()
+        val rulesCounter = rules.counter()
         matcher = FolderRuleMatcher(rules.rules())
-        val rulesChanged = userCounter != dao.mirroredUserCounter()
+        val rulesChanged = rulesCounter != dao.mirroredRulesCounter()
         val attached = index.volumes()
         // One collation for every key this sync makes; a change of language meanwhile asks for the next sync.
         val collation = SortKeys.current()
@@ -234,7 +234,7 @@ class LibrarySync(
                         val rule = matcher.stateFor(folder.volume, folder.relativePath).stored
                         if (folder.rule != rule) dao.setFolderRule(folder.volume, folder.relativePath, rule)
                     }
-                    dao.setMirroredUserCounter(userCounter)
+                    dao.setMirroredRulesCounter(rulesCounter)
                 }
             }
         }

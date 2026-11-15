@@ -17,6 +17,7 @@ import kotlin.time.Duration
 import kotlin.time.Duration.Companion.hours
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import okhttp3.HttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -98,7 +99,7 @@ class CoverArtArchiveClient(
     private val failures: FailureCache,
     private val baseUrl: HttpUrl,
     private val clock: Clock = Clock.systemUTC(),
-    ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
     private val backoff: RetryPolicy = RetryPolicy(maxRetries = Int.MAX_VALUE),
     private val maxImageBytes: Long = MAX_IMAGE_BYTES,
 ) {
@@ -194,8 +195,9 @@ class CoverArtArchiveClient(
         }
     }
 
-    /** The live failure entry of [url], if any. */
-    private fun recorded(url: HttpUrl): FailureEntry? = ttl.live(failures.get(url.toString()))
+    /** The live failure entry of [url], if any, read on the I/O dispatcher: the app keeps its entries in a database. */
+    private suspend fun recorded(url: HttpUrl): FailureEntry? =
+        withContext(ioDispatcher) { ttl.live(failures.get(url.toString())) }
 
     private fun FailureEntry.toResult(): CaaResult<Nothing> = when (kind) {
         FailureKind.NOT_FOUND -> CaaResult.NotFound

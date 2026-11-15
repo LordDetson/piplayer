@@ -5,7 +5,9 @@ import androidx.annotation.VisibleForTesting
 import io.github.lorddetson.piplayer.PiPlayerApplication
 import io.github.lorddetson.piplayer.identification.acoustid.AcoustIdClient
 import io.github.lorddetson.piplayer.identification.caa.CoverArtArchiveClient
+import io.github.lorddetson.piplayer.identification.caa.FailureCache
 import io.github.lorddetson.piplayer.identification.caa.InMemoryFailureCache
+import io.github.lorddetson.piplayer.identification.caa.RoomFailureCache
 import io.github.lorddetson.piplayer.identification.musicbrainz.MusicBrainzClient
 import io.github.lorddetson.piplayer.identification.provider.CoverArtArchiveProvider
 import io.github.lorddetson.piplayer.identification.provider.ProviderAccess
@@ -13,6 +15,13 @@ import io.github.lorddetson.piplayer.identification.provider.ProviderId
 import io.github.lorddetson.piplayer.identification.provider.ProviderStatus
 import io.github.lorddetson.piplayer.identification.provider.ProviderStatusStore
 import io.github.lorddetson.piplayer.identification.provider.identificationProviders
+import io.github.lorddetson.piplayer.identification.release.FolderReleaseHint
+import io.github.lorddetson.piplayer.identification.release.InMemoryReleaseCache
+import io.github.lorddetson.piplayer.identification.release.NoFolderReleaseHint
+import io.github.lorddetson.piplayer.identification.release.ReleaseCache
+import io.github.lorddetson.piplayer.identification.release.ReleaseChooser
+import io.github.lorddetson.piplayer.identification.release.RoomReleaseCache
+import io.github.lorddetson.piplayer.library.db.LibraryAccess
 import io.github.lorddetson.piplayer.net.Connectivity
 import io.github.lorddetson.piplayer.net.GateInterceptor
 import io.github.lorddetson.piplayer.net.GatedDns
@@ -49,6 +58,9 @@ data class ProviderBaseUrls(val acoustId: HttpUrl, val musicBrainz: HttpUrl, val
  * ([of]); tests build their own, so their limiters and stops never leak into each other. Every client made here sends
  * through [http], whose interceptor checks [gate] on every request and redirect hop. [acoustIdApiKey] is the build's
  * AcoustID application key, empty in a build without one; it is kept out of every `toString` and log line.
+ * [releaseCache] and [failureCache] are the release lookups (TI §5.1) and the Cover Art Archive failure entries (TI §5.2)
+ * of these services, in the library database for the app ([production]) and in memory by default.
+ * [folderReleaseHint] is the one place the folder hint of the release ranking is bound (TI §4.2): [releases] uses it.
  */
 class IdentificationServices(
     val http: OkHttpClient,
@@ -61,6 +73,9 @@ class IdentificationServices(
     val retryPolicy: RetryPolicy = RetryPolicy(maxRetries = 3),
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
     private val acoustIdApiKey: String = "",
+    val releaseCache: ReleaseCache = InMemoryReleaseCache(),
+    val failureCache: FailureCache = InMemoryFailureCache(),
+    val folderReleaseHint: FolderReleaseHint = NoFolderReleaseHint,
 ) {
 
     init {
@@ -103,8 +118,7 @@ class IdentificationServices(
 
     /**
      * The Cover Art Archive client (TI §5.2), one per services instance like the other clients, so the 503s in a row
-     * and the failure entries belong to the provider. The entries stay in memory until the library database holds them
-     * (`api_cache`, M3 step 9).
+     * and the failure entries belong to the provider. The entries are kept in [failureCache].
      */
     val coverArtArchive: CoverArtArchiveClient by lazy {
         CoverArtArchiveClient(
@@ -112,12 +126,18 @@ class IdentificationServices(
             limiter = limiter(ProviderId.COVER_ART_ARCHIVE),
             retryPolicy = retryPolicy,
             access = access(ProviderId.COVER_ART_ARCHIVE),
-            failures = InMemoryFailureCache(),
+            failures = failureCache,
             baseUrl = baseUrls.coverArtArchive,
             clock = clock,
             ioDispatcher = ioDispatcher,
         )
     }
+
+    /**
+     * Release choice and release details (TI §4.2, §5.1) for these services: lookups through [musicBrainz], kept in
+     * [releaseCache], with [folderReleaseHint] as the first key of the ranking.
+     */
+    val releases: ReleaseChooser by lazy { ReleaseChooser(musicBrainz, releaseCache, folderReleaseHint) }
 
     /**
      * Whether stage 3 (TI §3.2) can run: a build without an AcoustID application key has no fingerprint lookup, sends
@@ -154,7 +174,8 @@ class IdentificationServices(
          * Services whose HTTP client checks the same [gate]. [configureHttp] adjusts the client, for example to trust a
          * test server's certificate; it may not take out the gate checks, replace the resolver or the socket factory,
          * or turn on OkHttp's own redirects. [acoustIdApiKey] is the application key of
-         * [IdentificationServices.fingerprintStage], empty for none.
+         * [IdentificationServices.fingerprintStage], empty for none. The caches default to memory and the folder hint to
+         * none.
          */
         fun create(
             userAgent: String,
@@ -167,6 +188,9 @@ class IdentificationServices(
             retryPolicy: RetryPolicy = RetryPolicy(maxRetries = 3),
             ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
             acoustIdApiKey: String = "",
+            releaseCache: ReleaseCache = InMemoryReleaseCache(),
+            failureCache: FailureCache = InMemoryFailureCache(),
+            folderReleaseHint: FolderReleaseHint = NoFolderReleaseHint,
             configureHttp: OkHttpClient.Builder.() -> Unit = {},
         ): IdentificationServices = IdentificationServices(
             http = HttpClients.create(userAgent, gate).newBuilder().apply(configureHttp).build(),
@@ -179,19 +203,37 @@ class IdentificationServices(
             retryPolicy = retryPolicy,
             ioDispatcher = ioDispatcher,
             acoustIdApiKey = acoustIdApiKey,
+            releaseCache = releaseCache,
+            failureCache = failureCache,
+            folderReleaseHint = folderReleaseHint,
         )
 
         /**
          * The app's services: the real hosts, the build's [acoustIdApiKey] (empty for none), and the user's persisted
          * opt-in as the gate (TI §9), closed until the user enables online lookups. The type keeps any other gate, such
-         * as an open one of a test, out of the app's services.
+         * as an open one of a test, out of the app's services. The release cache and the failure entries live in the
+         * library database that [library] reaches (TI §10.1), which nothing opens before a cache is used; the folder
+         * hint is bound here too (none until M3 step 16 reads the decisions).
          */
         fun production(
             userAgent: String,
             connectivity: Connectivity,
             acoustIdApiKey: String,
             gate: DataStoreOnlineGate,
-        ): IdentificationServices = create(userAgent, gate, connectivity, acoustIdApiKey = acoustIdApiKey)
+            library: LibraryAccess,
+        ): IdentificationServices {
+            val clock = Clock.systemUTC()
+            return create(
+                userAgent = userAgent,
+                gate = gate,
+                connectivity = connectivity,
+                clock = clock,
+                acoustIdApiKey = acoustIdApiKey,
+                releaseCache = RoomReleaseCache(library, clock),
+                failureCache = RoomFailureCache(library),
+                folderReleaseHint = NoFolderReleaseHint,
+            )
+        }
 
         /** The services of the app's main process. */
         fun of(context: Context): IdentificationServices =

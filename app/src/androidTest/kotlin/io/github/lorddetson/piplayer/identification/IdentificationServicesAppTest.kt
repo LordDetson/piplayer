@@ -5,6 +5,11 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.github.lorddetson.piplayer.PiPlayerApplication
 import io.github.lorddetson.piplayer.TestFiles
 import io.github.lorddetson.piplayer.fakes.TestServices
+import io.github.lorddetson.piplayer.identification.caa.FailureTtlPolicy
+import io.github.lorddetson.piplayer.identification.caa.RoomFailureCache
+import io.github.lorddetson.piplayer.identification.musicbrainz.ReleaseDto
+import io.github.lorddetson.piplayer.identification.release.RoomReleaseCache
+import io.github.lorddetson.piplayer.library.Library
 import io.github.lorddetson.piplayer.net.OnlineConsent
 import io.github.lorddetson.piplayer.settings.IdentificationSettings
 import io.github.lorddetson.piplayer.settings.SettingsFiles
@@ -52,6 +57,27 @@ class IdentificationServicesAppTest {
                     kept[IdentificationSettings.VERSION]?.let { preferences[IdentificationSettings.VERSION] = it }
                 }
             }
+        }
+    }
+
+    @Test
+    fun theAppsServicesKeepTheirCachesInTheLibraryDatabase() = runBlocking<Unit> {
+        val services = IdentificationServices.of(app)
+        assertThat(services.releaseCache).isInstanceOf(RoomReleaseCache::class.java)
+        assertThat(services.failureCache).isInstanceOf(RoomFailureCache::class.java)
+
+        val release = ReleaseDto(id = "0e1d7c2b-5a4f-4c3e-9b8a-7d6c5b4a3f21", title = "Cache check")
+        val address = "https://coverartarchive.org/release/${release.id}/front-500"
+        val dao = Library.database(app).identificationCache()
+        try {
+            services.releaseCache.put(release)
+            services.failureCache.put(address, FailureTtlPolicy(java.time.Clock.systemUTC()).notFound())
+            assertThat(dao.release(release.id)).isNotNull()
+            assertThat(dao.api(address)!!.status).isEqualTo(404)
+            assertThat(services.releaseCache.get(release.id)).isEqualTo(release)
+        } finally {
+            dao.dropRelease(release.id)
+            services.failureCache.remove(address)
         }
     }
 

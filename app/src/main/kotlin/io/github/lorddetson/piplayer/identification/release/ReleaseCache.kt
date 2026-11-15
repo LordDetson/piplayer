@@ -3,8 +3,8 @@ package io.github.lorddetson.piplayer.identification.release
 import io.github.lorddetson.piplayer.identification.musicbrainz.ReleaseDto
 
 /**
- * Looked-up releases by release MBID, so one lookup serves every track of an album (TI §5.1). In memory for now; the
- * library database's `release_cache` takes over in M3 step 9.
+ * Looked-up releases by release MBID, so one lookup serves every track of an album (TI §5.1). The app keeps them in the
+ * library database's `release_cache` ([RoomReleaseCache]); JVM tests keep them in memory ([InMemoryReleaseCache]).
  */
 interface ReleaseCache {
     suspend fun get(releaseId: String): ReleaseDto?

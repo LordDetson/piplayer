@@ -75,14 +75,25 @@ interface LibraryDao {
     @Query("UPDATE audio_file SET folder_rule = :rule WHERE volume_name = :volume AND relative_path = :relativePath")
     suspend fun setFolderRule(volume: String, relativePath: String, rule: Int)
 
-    @Query("SELECT COALESCE((SELECT mirrored_user_counter FROM library_meta WHERE id = 1), 0)")
-    suspend fun mirroredUserCounter(): Long
+    /** The user database's `rules_counter` the folder rules were last applied at (docs/library.md §3.1). */
+    @Query("SELECT COALESCE((SELECT mirrored_rules_counter FROM library_meta WHERE id = 1), 0)")
+    suspend fun mirroredRulesCounter(): Long
 
     @Query(
-        "INSERT INTO library_meta (id, mirrored_user_counter) VALUES (1, :counter) " +
-            "ON CONFLICT(id) DO UPDATE SET mirrored_user_counter = :counter",
+        "INSERT INTO library_meta (id, mirrored_rules_counter) VALUES (1, :counter) " +
+            "ON CONFLICT(id) DO UPDATE SET mirrored_rules_counter = :counter",
     )
-    suspend fun setMirroredUserCounter(counter: Long)
+    suspend fun setMirroredRulesCounter(counter: Long)
+
+    /** The user database's `change_counter` at which the decided values were last mirrored (TI §10.3); 0 before. */
+    @Query("SELECT COALESCE((SELECT mirrored_change_counter FROM library_meta WHERE id = 1), 0)")
+    suspend fun mirroredChangeCounter(): Long
+
+    @Query(
+        "INSERT INTO library_meta (id, mirrored_change_counter) VALUES (1, :counter) " +
+            "ON CONFLICT(id) DO UPDATE SET mirrored_change_counter = :counter",
+    )
+    suspend fun setMirroredChangeCounter(counter: Long)
 
     @Query("SELECT * FROM audio_file")
     suspend fun files(): List<AudioFileEntity>
@@ -131,7 +142,7 @@ interface LibraryDao {
     suspend fun displayVersion(): Int
 
     @Query(
-        "INSERT INTO library_meta (id, mirrored_user_counter, display_version) VALUES (1, 0, :version) " +
+        "INSERT INTO library_meta (id, mirrored_rules_counter, display_version) VALUES (1, 0, :version) " +
             "ON CONFLICT(id) DO UPDATE SET display_version = :version",
     )
     suspend fun setDisplayVersion(version: Int)
@@ -141,7 +152,7 @@ interface LibraryDao {
     suspend fun collation(): String?
 
     @Query(
-        "INSERT INTO library_meta (id, mirrored_user_counter, collation) VALUES (1, 0, :collation) " +
+        "INSERT INTO library_meta (id, mirrored_rules_counter, collation) VALUES (1, 0, :collation) " +
             "ON CONFLICT(id) DO UPDATE SET collation = :collation",
     )
     suspend fun setCollation(collation: String)
@@ -325,14 +336,14 @@ interface LibraryDao {
     suspend fun storedLibraryId(): String?
 
     @Query(
-        "INSERT INTO library_meta (id, mirrored_user_counter, library_id) VALUES (1, 0, :libraryId) " +
+        "INSERT INTO library_meta (id, mirrored_rules_counter, library_id) VALUES (1, 0, :libraryId) " +
             "ON CONFLICT(id) DO UPDATE SET library_id = COALESCE(library_id, :libraryId)",
     )
     suspend fun keepLibraryId(libraryId: String)
 
     /** Gives the library [libraryId]: a rebuild keeps the one it had (docs/library.md §8.5). */
     @Query(
-        "INSERT INTO library_meta (id, mirrored_user_counter, library_id) VALUES (1, 0, :libraryId) " +
+        "INSERT INTO library_meta (id, mirrored_rules_counter, library_id) VALUES (1, 0, :libraryId) " +
             "ON CONFLICT(id) DO UPDATE SET library_id = :libraryId",
     )
     suspend fun setLibraryId(libraryId: String)
@@ -349,7 +360,7 @@ interface LibraryDao {
     suspend fun lastGivenFileId(): Long
 
     @Query(
-        "INSERT INTO library_meta (id, mirrored_user_counter, last_file_id) VALUES (1, 0, :fileId) " +
+        "INSERT INTO library_meta (id, mirrored_rules_counter, last_file_id) VALUES (1, 0, :fileId) " +
             "ON CONFLICT(id) DO UPDATE SET last_file_id = MAX(last_file_id, :fileId)",
     )
     suspend fun raiseLastFileId(fileId: Long)

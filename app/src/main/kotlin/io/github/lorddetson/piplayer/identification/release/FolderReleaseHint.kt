@@ -2,7 +2,9 @@ package io.github.lorddetson.piplayer.identification.release
 
 /**
  * The releases already confirmed for other files of a folder, the first key of the release ranking (TI §4.2 step 2,
- * album consistency). The real hint reads the decisions (M3 step 16); until then [NoFolderReleaseHint] stands in.
+ * album consistency). It is bound in one place, [io.github.lorddetson.piplayer.identification.IdentificationServices],
+ * whose release choice uses it. The real hint reads the decisions (M3 step 16); until then [NoFolderReleaseHint] stands
+ * in.
  */
 fun interface FolderReleaseHint {
 

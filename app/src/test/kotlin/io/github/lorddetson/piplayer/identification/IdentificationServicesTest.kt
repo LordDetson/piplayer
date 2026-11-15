@@ -4,7 +4,22 @@ import io.github.lorddetson.piplayer.fakes.FakeAcoustId
 import io.github.lorddetson.piplayer.fakes.FakeMusicBrainz
 import io.github.lorddetson.piplayer.fakes.RecordingRequestLog
 import io.github.lorddetson.piplayer.fakes.TestServices
+import io.github.lorddetson.piplayer.identification.caa.CaaResult
+import io.github.lorddetson.piplayer.identification.caa.CoverEntity
+import io.github.lorddetson.piplayer.identification.caa.CoverSize
+import io.github.lorddetson.piplayer.identification.caa.CoverSource
+import io.github.lorddetson.piplayer.identification.caa.CoverUrls
+import io.github.lorddetson.piplayer.identification.caa.FailureKind
+import io.github.lorddetson.piplayer.identification.caa.InMemoryFailureCache
+import io.github.lorddetson.piplayer.identification.caa.RoomFailureCache
 import io.github.lorddetson.piplayer.identification.musicbrainz.toCandidate
+import io.github.lorddetson.piplayer.identification.release.FolderReleaseHint
+import io.github.lorddetson.piplayer.identification.release.InMemoryReleaseCache
+import io.github.lorddetson.piplayer.identification.release.NoFolderReleaseHint
+import io.github.lorddetson.piplayer.identification.release.ReleaseFixtures
+import io.github.lorddetson.piplayer.identification.release.RoomReleaseCache
+import io.github.lorddetson.piplayer.library.db.LibraryAccess
+import io.github.lorddetson.piplayer.library.db.LibraryDatabase
 import io.github.lorddetson.piplayer.identification.provider.ProviderId
 import io.github.lorddetson.piplayer.identification.provider.ProviderStatus
 import io.github.lorddetson.piplayer.identification.provider.ProviderStoppedException
@@ -30,7 +45,10 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.testTimeSource
+import mockwebserver3.Dispatcher
+import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
+import mockwebserver3.RecordedRequest
 import mockwebserver3.junit5.StartStop
 import okhttp3.Dns
 import okhttp3.HttpUrl.Companion.toHttpUrl
@@ -46,6 +64,18 @@ class IdentificationServicesTest {
 
     @StartStop
     private val musicBrainzServer = MockWebServer()
+
+    @StartStop
+    private val caaServer = MockWebServer()
+
+    /** A library database that a JVM test cannot open; the app's services must not open it before a cache is used. */
+    private var libraryUses = 0
+    private val noLibrary = object : LibraryAccess {
+        override fun <T> use(block: (LibraryDatabase) -> T): T {
+            libraryUses++
+            error("No library database in a JVM test")
+        }
+    }
 
     private val acoustId = FakeAcoustId()
     private val musicBrainz = FakeMusicBrainz()
@@ -81,7 +111,7 @@ class IdentificationServicesTest {
     @Test
     fun `the app's services use the real hosts and the persisted opt-in, closed until the user enables it`() {
         val services =
-            IdentificationServices.production(TestServices.USER_AGENT, TestServices.FakeConnectivity(), "", persistedGate)
+            IdentificationServices.production(TestServices.USER_AGENT, TestServices.FakeConnectivity(), "", persistedGate, noLibrary)
         assertThat(services.gate).isSameAs(persistedGate)
         assertThat(services.gate.isOpen()).isFalse()
         runBlocking { persistedGate.awaitLoaded() }
@@ -297,9 +327,68 @@ class IdentificationServicesTest {
     @Test
     fun `the app's services take the build's key and treat an empty one as none`() {
         val connectivity = TestServices.FakeConnectivity()
-        assertThat(IdentificationServices.production(TestServices.USER_AGENT, connectivity, "", persistedGate).fingerprintStage)
+        assertThat(IdentificationServices.production(TestServices.USER_AGENT, connectivity, "", persistedGate, noLibrary).fingerprintStage)
             .isEqualTo(FingerprintStage.Unavailable(UnavailableReason.NoKey))
-        assertThat(IdentificationServices.production(TestServices.USER_AGENT, connectivity, key, persistedGate).fingerprintStage)
+        assertThat(IdentificationServices.production(TestServices.USER_AGENT, connectivity, key, persistedGate, noLibrary).fingerprintStage)
             .isInstanceOf(FingerprintStage.Available::class.java)
+    }
+
+    @Test
+    fun `the app's services keep their caches in the library database and open it only when a cache is used`() {
+        val services =
+            IdentificationServices.production(TestServices.USER_AGENT, TestServices.FakeConnectivity(), "", persistedGate, noLibrary)
+        assertThat(services.releaseCache).isInstanceOf(RoomReleaseCache::class.java)
+        assertThat(services.failureCache).isInstanceOf(RoomFailureCache::class.java)
+        assertThat(services.coverArtArchive).isNotNull()
+        assertThat(services.releases).isNotNull()
+        assertThat(libraryUses).isZero()
+        // The decisions' hint is bound in M3 step 16; until then no folder knows a release.
+        assertThat(services.folderReleaseHint).isSameAs(NoFolderReleaseHint)
+    }
+
+    @Test
+    fun `services made for tests keep their caches in memory`() = runTest {
+        val services = services()
+        assertThat(services.releaseCache).isInstanceOf(InMemoryReleaseCache::class.java)
+        assertThat(services.failureCache).isInstanceOf(InMemoryFailureCache::class.java)
+        assertThat(services.folderReleaseHint).isSameAs(NoFolderReleaseHint)
+        assertThat(services.releaseCache).isNotSameAs(services().releaseCache)
+        assertThat(services.failureCache).isNotSameAs(services().failureCache)
+    }
+
+    @Test
+    fun `the release choice of the services reads their release cache before it looks a release up`() = runTest {
+        val services = services()
+        val id = "11111111-2222-3333-4444-555555555555"
+        services.releaseCache.put(ReleaseFixtures.release(id))
+        assertThat(services.releases).isSameAs(services.releases)
+        assertThat(services.releases.release(id.uppercase())!!.id).isEqualTo(id)
+        assertThat(musicBrainzServer.requestCount).isZero()
+    }
+
+    @Test
+    fun `the Cover Art Archive client records its failures in the services' failure cache and a folder hint is bound`() = runTest {
+        caaServer.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest) = MockResponse.Builder().code(404).build()
+        }
+        val failures = InMemoryFailureCache()
+        val hint = FolderReleaseHint { setOf("22222222-3333-4444-5555-666666666666") }
+        val caaBase = caaServer.url("/")
+        val services = IdentificationServices.create(
+            userAgent = TestServices.USER_AGENT,
+            gate = TestServices.openGate(),
+            connectivity = TestServices.FakeConnectivity(),
+            baseUrls = TestServices.baseUrls(acoustIdServer.url("/v2/"), musicBrainzServer.url("/ws/2/"), caaBase),
+            timeSource = testTimeSource,
+            failureCache = failures,
+            folderReleaseHint = hint,
+        )
+        val source = CoverSource(CoverEntity.RELEASE, "11111111-2222-3333-4444-555555555555")
+
+        assertThat(services.coverArtArchive.cover(source, CoverSize.ORIGINAL)).isEqualTo(CaaResult.NotFound)
+        assertThat(services.failureCache).isSameAs(failures)
+        assertThat(failures.get(CoverUrls.image(caaBase, source, CoverSize.ORIGINAL).toString())?.kind)
+            .isEqualTo(FailureKind.NOT_FOUND)
+        assertThat(services.folderReleaseHint).isSameAs(hint)
     }
 }
