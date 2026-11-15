@@ -971,8 +971,11 @@ ends and the next begins.
   should be 0; this form of the test has run on beta01 only. The runs' journals are in CI artifacts that
   need a sign-in, so the class results stand for them; `ScreenOffGaplessTest` is opt-in and does not run on CI.
   Still to do on a local emulator before the move reaches `main`: the quiet timing pass and `ScreenOffGaplessTest`
-  on both versions, journals compared. `ScreenOffGaplessTest` takes the albums with no late samples, so on beta01 it
-  also runs the ffmpeg AAC album, which has never played with the screen off before; its join must come out exact.
+  on both versions, journals compared. The alpha02 leg runs in the rollback state above, alpha02 together with the
+  `fixture.json` of e952e5a, never alpha02 with the fixtures of beta01. `ScreenOffGaplessTest` takes the albums with
+  no late samples, so on alpha02 it leaves the ffmpeg AAC album out, and on beta01 it also runs that album, which has
+  never played with the screen off before; its join must come out exact. The two journals are compared over the
+  albums both runs share, and the ffmpeg AAC album is checked on its own.
 - A queue item replaced in place with new metadata for the same file (title, artist, album, length, cover URI) is not
   prepared again: no new load, decoder or audio output, no state change, song change or jump, and the position runs
   on. `SessionMetadataTest` checks it on each version, because the refresh after a decision (track-identification.md
