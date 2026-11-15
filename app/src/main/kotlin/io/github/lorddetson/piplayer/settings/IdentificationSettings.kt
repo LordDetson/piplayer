@@ -134,8 +134,9 @@ class IdentificationSettings(
  *
  * Changes of the consent go through [enable], [notNow] and [turnOff]. The last two close the gate at once, before the
  * write starts. A close that may not have been stored (its write failed, as on a full disk, or was cancelled) keeps the
- * gate closed until the file says off or an [enable] is stored, so it never opens against the user's last answer. A
- * file that cannot be read is read again, with growing pauses; the gate keeps what it last read meanwhile.
+ * gate closed until it reads off from the file or an [enable] is stored, so it never opens against the user's last
+ * answer. The file hands over only its latest state, so an off overtaken by the next write is not read and the gate
+ * stays closed. A file that cannot be read is read again, with growing pauses; the gate keeps what it last read meanwhile.
  */
 class DataStoreOnlineGate(val settings: IdentificationSettings, scope: CoroutineScope) : OnlineGate {
 

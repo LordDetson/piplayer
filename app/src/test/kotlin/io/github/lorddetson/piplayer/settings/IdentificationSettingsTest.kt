@@ -180,6 +180,9 @@ class IdentificationSettingsTest {
 
         // For example a restore: first the file says off, then on again with the current disclosure.
         IdentificationSettings(file).turnOff()
+        // The file hands over only its latest state, so an off overtaken by the next write is never read; the gate
+        // then stays closed, the safe way. Wait until the gate has read the off.
+        eventually { gate.consent.value?.enabled == false }
         IdentificationSettings(file).enable()
 
         eventually { gate.isOpen() }
