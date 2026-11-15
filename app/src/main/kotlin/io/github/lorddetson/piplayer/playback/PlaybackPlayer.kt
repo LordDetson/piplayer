@@ -20,11 +20,15 @@ object PlaybackPlayer {
     /** Previous goes back to the start of the song after this much of it, otherwise to the previous song (§3.6). */
     const val MAX_SEEK_TO_PREVIOUS_MS = 3_000L
 
-    fun builder(context: Context): ExoPlayer.Builder =
+    /**
+     * The service's player; the snippet player (TI §6) is built the same way with [handleAudioFocus] off, because it
+     * requests its own transient focus.
+     */
+    fun builder(context: Context, handleAudioFocus: Boolean = true): ExoPlayer.Builder =
         ExoPlayer.Builder(context, PlaybackRenderers(context), mediaSources(context))
             .setAudioAttributes(
                 AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MUSIC).build(),
-                /* handleAudioFocus= */ true,
+                handleAudioFocus,
             )
             .setHandleAudioBecomingNoisy(true)
             .setWakeMode(C.WAKE_MODE_LOCAL)

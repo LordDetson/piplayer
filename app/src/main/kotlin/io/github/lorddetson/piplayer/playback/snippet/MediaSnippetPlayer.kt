@@ -7,15 +7,12 @@ import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import androidx.annotation.OptIn
-import androidx.media3.common.AudioAttributes
-import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import io.github.lorddetson.piplayer.playback.PlaybackPlayer
-import io.github.lorddetson.piplayer.playback.PlaybackRenderers
 import kotlinx.coroutines.flow.StateFlow
 
 /** The snippet player on Media3 and the platform's audio focus (TI §6). */
@@ -38,13 +35,16 @@ internal class MediaSnippetPlayer(context: Context, main: Player) : SnippetPlaye
 
 /**
  * The main player behind its controller. It counts as playing when it would go on if nothing paused it, also while it
- * buffers, as the playback service counts it when it is swiped away.
+ * buffers, as the playback service counts it when it is swiped away. Held back by another app's short interruption (a
+ * prompt, a call) it does not count: Media3 resumes it when the interruption ends, and a pause and play from here would
+ * lose that resume (TI §6).
  */
 internal class PlayerMainPlayback(private val player: Player) : MainPlayback {
 
     override val isPlaying: Boolean
         get() = player.playWhenReady &&
-            (player.playbackState == Player.STATE_READY || player.playbackState == Player.STATE_BUFFERING)
+            (player.playbackState == Player.STATE_READY || player.playbackState == Player.STATE_BUFFERING) &&
+            player.playbackSuppressionReason != Player.PLAYBACK_SUPPRESSION_REASON_TRANSIENT_AUDIO_FOCUS_LOSS
 
     override fun pause() = player.pause()
 
@@ -90,29 +90,27 @@ internal class AudioManagerSnippetFocus(context: Context) : SnippetFocus {
 }
 
 /**
- * A short-lived ExoPlayer for each snippet, with the playback service's renderers and extractors so that it plays what
- * the main player plays. It has no media session and does not handle audio focus: Media3 would request a full
- * `AUDIOFOCUS_GAIN`, and the main player would lose its focus for good (TI §6). The window's end is a clipping end, so
- * the player itself reports the end of the snippet.
+ * A short-lived ExoPlayer for each snippet, built as the playback service's player so that it plays what the main
+ * player plays, but with no media session and without Media3's focus handling: that would request a full
+ * `AUDIOFOCUS_GAIN`, and the main player would lose its focus for good (TI §6). The window is the item's clipping, so
+ * the snippet lasts exactly its 15 s and the player itself reports its end; a file that cannot seek to the window's
+ * start fails.
  */
 @OptIn(UnstableApi::class)
 internal class ExoSnippetOutput(private val context: Context) : SnippetOutput<Uri> {
 
     private val handler = Handler(Looper.getMainLooper())
     private var player: ExoPlayer? = null
+    private var window: SnippetWindow? = null
 
-    override val positionMs: Long get() = player?.currentPosition ?: 0
+    /** The clipped item's position counts from the window's start. */
+    override val positionMs: Long get() = player?.let { it.currentPosition + (window?.startMs ?: 0) } ?: 0
 
     override fun start(source: Uri, window: SnippetWindow, events: SnippetOutput.Events) {
         stop()
-        val player = ExoPlayer.Builder(context, PlaybackRenderers(context), PlaybackPlayer.mediaSources(context))
-            .setAudioAttributes(
-                AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MUSIC).build(),
-                /* handleAudioFocus= */ false,
-            )
-            .setHandleAudioBecomingNoisy(true)
-            .build()
+        val player = PlaybackPlayer.builder(context, handleAudioFocus = false).build()
         this.player = player
+        this.window = window
         // Reported a moment later, so that the controller never releases the player inside the player's own callback.
         player.addListener(object : Player.Listener {
             override fun onPlaybackStateChanged(playbackState: Int) {
@@ -131,9 +129,14 @@ internal class ExoSnippetOutput(private val context: Context) : SnippetOutput<Ur
         })
         val item = MediaItem.Builder()
             .setUri(source)
-            .setClippingConfiguration(MediaItem.ClippingConfiguration.Builder().setEndPositionMs(window.endMs).build())
+            .setClippingConfiguration(
+                MediaItem.ClippingConfiguration.Builder()
+                    .setStartPositionMs(window.startMs)
+                    .setEndPositionMs(window.endMs)
+                    .build(),
+            )
             .build()
-        player.setMediaItem(item, window.startMs)
+        player.setMediaItem(item)
         player.prepare()
         player.play()
     }
@@ -145,5 +148,6 @@ internal class ExoSnippetOutput(private val context: Context) : SnippetOutput<Ur
     override fun stop() {
         player?.release()
         player = null
+        window = null
     }
 }

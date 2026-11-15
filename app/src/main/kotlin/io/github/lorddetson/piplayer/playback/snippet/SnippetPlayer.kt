@@ -24,7 +24,10 @@ interface SnippetPlayer {
      */
     fun play(uri: Uri, durationMs: Long?)
 
-    /** Ends the snippet as when the card closes: the main player resumes if it was playing. Nothing when none plays. */
+    /**
+     * Ends the snippet as when the card closes: the main player resumes if it was playing. Nothing when none plays. It
+     * is also the release: the card calls it whenever it goes away, and nothing of the snippet stays afterwards.
+     */
     fun stop()
 
     companion object {

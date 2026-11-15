@@ -207,6 +207,13 @@ def main():
         sys.exit("ffmpeg is not on PATH")
     OUT.mkdir(parents=True, exist_ok=True)
     wanted = set(sys.argv[1:])
+    known = ({name for name, *_ in FORMATS + SEEK_FIXTURES + COVER_FIXTURES + OGG_COVER_FIXTURES}
+             | {"seek-mp3-vbr-xing-without-toc.mp3", "tagged-44100-stereo.mp3", SNIPPET_FIXTURE})
+    if wanted - known:
+        sys.exit(f"unknown fixtures: {', '.join(sorted(wanted - known))}")
+    # The file without a table of contents is made from the one with it, so it follows it.
+    if "seek-mp3-vbr-xing.mp3" in wanted:
+        wanted.add("seek-mp3-vbr-xing-without-toc.mp3")
 
     def make(name):
         return not wanted or name in wanted

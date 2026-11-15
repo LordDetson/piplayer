@@ -804,7 +804,10 @@ re-checked before release (M5); in M4a they also drive automatic preparation.
     main player is not resumed. Headphones unplugged during the snippet stop it the same way. A short prompt that
     allows ducking only lowers the snippet's volume until focus comes back.
   - If the focus request is refused (during a call), the snippet does not play and the main player is resumed if it
-    was playing. A file the snippet player cannot play ends the snippet as its end does.
+    was playing. A file the snippet player cannot play, or cannot seek to the snippet's start, ends the snippet as its
+    end does.
+  - A main player held back by another app's short interruption (a prompt, a call) does not count as playing: the
+    snippet leaves it to its own focus handling, which resumes it when the interruption ends.
   - The main player's queue, position and play statistics do not change; its notification keeps showing the main
     track, paused while the snippet plays. With ReplayGain (v1.x) the snippet uses the same gain as playback.
 - Batch review in the Fix tab (M4a): one card per album when several tracks share a release; queue counters; ETA.
