@@ -1,5 +1,7 @@
 package io.github.lorddetson.piplayer.identification.acoustid
 
+import io.github.lorddetson.piplayer.identification.provider.ProviderAccess
+import io.github.lorddetson.piplayer.identification.provider.StopReason
 import io.github.lorddetson.piplayer.net.CallOutcome
 import io.github.lorddetson.piplayer.net.RateLimiter
 import io.github.lorddetson.piplayer.net.RetryAfter
@@ -27,7 +29,7 @@ import okio.buffer
 /** Failures of the AcoustID web service that callers can tell apart. */
 sealed class AcoustIdException(message: String, cause: Throwable? = null) : IOException(message, cause) {
 
-    /** The application key was refused (error 4): a build or setup error, so the client must not keep trying. */
+    /** The application key was refused (error 4): a build or setup error, so AcoustID stops for the session. */
     class InvalidApiKey(serverMessage: String) :
         AcoustIdException("AcoustID refused the application key: $serverMessage")
 
@@ -51,19 +53,21 @@ sealed class AcoustIdException(message: String, cause: Throwable? = null) : IOEx
  * AcoustID `/v2/lookup` client (TI §3.2). The fingerprint goes in a gzip-compressed form POST, so the application key
  * never appears in a URL. All requests go through one [limiter] for api.acoustid.org; busy answers (429 and error 14,
  * 500, 502, 503, 504 and the proxy's 520 to 524) and network errors are retried by [retryPolicy] as pauses of that
- * limiter. Answers are read and parsed on [ioDispatcher].
+ * limiter. [access] is checked before every attempt; error 4 (invalid application key) stops AcoustID through it for
+ * the rest of the process (TI §3.2). Answers are read and parsed on [ioDispatcher].
  */
 class AcoustIdClient(
     http: OkHttpClient,
     limiter: RateLimiter,
     retryPolicy: RetryPolicy,
+    private val access: ProviderAccess,
     private val apiKey: String,
     private val baseUrl: HttpUrl = DEFAULT_BASE_URL.toHttpUrl(),
     private val clock: Clock = Clock.systemUTC(),
     ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) {
 
-    private val caller = RetryingCaller(http, limiter, retryPolicy, ioDispatcher)
+    private val caller = RetryingCaller(http, limiter, retryPolicy, ioDispatcher, access)
 
     init {
         require(apiKey.isNotBlank()) { "An AcoustID application key is required" }
@@ -106,7 +110,10 @@ class AcoustIdClient(
         if (response.isSuccessful && answer?.status == "ok") return CallOutcome.Success(answer)
         val error = answer?.error
         return when {
-            error?.code == INVALID_API_KEY -> CallOutcome.Fail(AcoustIdException.InvalidApiKey(error.message))
+            error?.code == INVALID_API_KEY -> {
+                access.stop(StopReason.INVALID_API_KEY)
+                CallOutcome.Fail(AcoustIdException.InvalidApiKey(error.message))
+            }
             error?.code == TOO_MANY_REQUESTS || response.code in RETRIED_STATUSES -> {
                 val serverNow = response.headers.getInstant("Date") ?: clock.instant()
                 CallOutcome.Retry(

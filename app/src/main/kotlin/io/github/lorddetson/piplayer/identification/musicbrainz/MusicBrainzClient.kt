@@ -1,5 +1,7 @@
 package io.github.lorddetson.piplayer.identification.musicbrainz
 
+import io.github.lorddetson.piplayer.identification.provider.ProviderAccess
+import io.github.lorddetson.piplayer.identification.provider.StopReason
 import io.github.lorddetson.piplayer.net.CallOutcome
 import io.github.lorddetson.piplayer.net.RateLimiter
 import io.github.lorddetson.piplayer.net.RetryAfter
@@ -20,7 +22,7 @@ import okhttp3.Response
 /** Failures of the MusicBrainz web service that callers can tell apart. */
 sealed class MusicBrainzException(message: String, cause: Throwable? = null) : IOException(message, cause) {
 
-    /** The server refused the User-Agent: a build or configuration error, so the client must not keep trying. */
+    /** The server refused the User-Agent: a build or configuration error, so MusicBrainz stops for the session. */
     class UserAgentRejected(message: String) : MusicBrainzException(message)
 
     /** The server stayed busy or unreachable through every retry. */
@@ -42,19 +44,21 @@ sealed class MusicBrainzException(message: String, cause: Throwable? = null) : I
 /**
  * MusicBrainz ws/2 client. All requests go through one [limiter] for musicbrainz.org; busy answers (503, 429, 502,
  * 504), successful answers whose body is not MusicBrainz's JSON and network errors are retried by [retryPolicy] as
- * pauses of that limiter (see [RetryingCaller]). Answers are read and parsed on [ioDispatcher], so the client can be
- * called from any thread.
+ * pauses of that limiter (see [RetryingCaller]). [access] is checked before every attempt; a 403 that refuses the
+ * User-Agent stops MusicBrainz through it for the rest of the process (TI §9). Answers are read and parsed on
+ * [ioDispatcher], so the client can be called from any thread.
  */
 class MusicBrainzClient(
     http: OkHttpClient,
     limiter: RateLimiter,
     retryPolicy: RetryPolicy,
+    private val access: ProviderAccess,
     private val baseUrl: HttpUrl = DEFAULT_BASE_URL.toHttpUrl(),
     private val clock: Clock = Clock.systemUTC(),
     ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) {
 
-    private val caller = RetryingCaller(http, limiter, retryPolicy, ioDispatcher)
+    private val caller = RetryingCaller(http, limiter, retryPolicy, ioDispatcher, access)
 
     suspend fun searchRecordings(query: String, limit: Int): RecordingSearchResponse {
         val url = baseUrl.newBuilder()
@@ -84,8 +88,10 @@ class MusicBrainzClient(
         }
         val who = response.header("X-RateLimit-Who")
         return when {
-            response.code == 403 && who?.startsWith("ua-") == true ->
+            response.code == 403 && who?.startsWith("ua-") == true -> {
+                access.stop(StopReason.USER_AGENT_REJECTED)
                 CallOutcome.Fail(MusicBrainzException.UserAgentRejected("MusicBrainz refused the User-Agent ($who)"))
+            }
             response.code !in RETRIED_STATUSES -> CallOutcome.Fail(MusicBrainzException.Http(response.code))
             else -> {
                 val serverNow = response.headers.getInstant("Date") ?: clock.instant()

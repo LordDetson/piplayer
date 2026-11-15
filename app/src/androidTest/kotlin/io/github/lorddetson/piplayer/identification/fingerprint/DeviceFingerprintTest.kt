@@ -3,7 +3,10 @@ package io.github.lorddetson.piplayer.identification.fingerprint
 import android.util.Log
 import io.github.lorddetson.piplayer.BuildConfig
 import io.github.lorddetson.piplayer.TestFiles
+import io.github.lorddetson.piplayer.fakes.TestServices
 import io.github.lorddetson.piplayer.identification.acoustid.AcoustIdClient
+import io.github.lorddetson.piplayer.identification.provider.ProviderId
+import io.github.lorddetson.piplayer.net.AndroidConnectivity
 import io.github.lorddetson.piplayer.net.HttpClients
 import io.github.lorddetson.piplayer.net.RateLimiter
 import io.github.lorddetson.piplayer.net.RetryPolicy
@@ -96,10 +99,13 @@ class DeviceFingerprintTest(private val sample: String) {
     fun findsTheRecordingsAcoustIdTrack() {
         assumeTrue("No AcoustID key in local.properties", BuildConfig.ACOUSTID_API_KEY.isNotBlank())
         val result = fingerprint()
+        // The test itself is the consent: it runs only with a key in local.properties (never on CI).
+        val gate = TestServices.openGate()
         val client = AcoustIdClient(
-            HttpClients.create(UserAgent.of(BuildConfig.VERSION_NAME)),
+            HttpClients.create(UserAgent.of(BuildConfig.VERSION_NAME), gate),
             RateLimiter(AcoustIdClient.MIN_INTERVAL),
             RetryPolicy(maxRetries = 3),
+            TestServices.access(ProviderId.ACOUSTID, gate = gate, connectivity = AndroidConnectivity(TestFiles.targetContext)),
             BuildConfig.ACOUSTID_API_KEY,
         )
         val durationMs = (result.source.durationUs ?: error("$sample: no duration")) / 1_000

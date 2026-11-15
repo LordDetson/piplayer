@@ -40,23 +40,29 @@ class OwnFilesSpikeRun {
             delete()
         }
 
-        val spike = SpikeServices.spike()
-        out.bufferedWriter().use { writer ->
-            files.forEachIndexed { index, file ->
-                val path = file.relativeTo(folder).path
-                val line = try {
-                    val report = runBlocking { OpenedFile.open(context, file).use { spike.run(it) } }
-                    Json.encodeToString(SpikeRecord.serializer(), SpikeReports.record(report).copy(file = path))
-                } catch (e: Exception) {
-                    buildJsonObject {
-                        put("file", path)
-                        put("error", "${e.javaClass.simpleName}: ${e.message}")
-                    }.toString()
+        val spike = SpikeServices.spike(context)
+        // The run itself is the opt-in (ownFiles=true), so the spike's gate is open for it.
+        val gate = SpikeGate.open()
+        try {
+            out.bufferedWriter().use { writer ->
+                files.forEachIndexed { index, file ->
+                    val path = file.relativeTo(folder).path
+                    val line = try {
+                        val report = runBlocking { OpenedFile.open(context, file).use { spike.run(it) } }
+                        Json.encodeToString(SpikeRecord.serializer(), SpikeReports.record(report).copy(file = path))
+                    } catch (e: Exception) {
+                        buildJsonObject {
+                            put("file", path)
+                            put("error", "${e.javaClass.simpleName}: ${e.message}")
+                        }.toString()
+                    }
+                    writer.appendLine(line)
+                    writer.flush()
+                    Log.i(TAG, "${index + 1}/${files.size} $path")
                 }
-                writer.appendLine(line)
-                writer.flush()
-                Log.i(TAG, "${index + 1}/${files.size} $path")
             }
+        } finally {
+            gate.close()
         }
     }
 

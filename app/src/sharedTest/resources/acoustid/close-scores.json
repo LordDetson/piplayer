@@ -1,0 +1,29 @@
+{
+  "results": [
+    {
+      "id": "a1d2e3f4-0516-4273-8495-a6b7c8d9e0f1",
+      "recordings": [
+        {
+          "artists": [{"id": "a1b2c3d4-0000-4000-8000-000000000001", "name": "The Quiet Harbors"}],
+          "duration": 214.4,
+          "id": "b0e4d1f2-1111-4111-8111-000000000001",
+          "title": "Paper Lanterns"
+        }
+      ],
+      "score": 0.93
+    },
+    {
+      "id": "b2e3f405-1627-4384-95a6-b7c8d9e0f1a2",
+      "recordings": [
+        {
+          "artists": [{"id": "a1b2c3d4-0000-4000-8000-000000000003", "name": "Northern Lights Choir"}],
+          "duration": 213.0,
+          "id": "b0e4d1f2-1111-4111-8111-000000000004",
+          "title": "Paper Lanterns"
+        }
+      ],
+      "score": 0.88
+    }
+  ],
+  "status": "ok"
+}

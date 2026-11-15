@@ -147,6 +147,13 @@ android {
     sourceSets {
         // The benchmark build is the release build, with the release versions of the debug-only classes.
         getByName("benchmark") { kotlin.directories.add("src/release/kotlin") }
+        // The fakes and fixtures of the online services, shared by the JVM and the instrumented tests.
+        listOf("test", "androidTest").forEach { name ->
+            getByName(name) {
+                kotlin.directories.add("src/sharedTest/kotlin")
+                resources.directories.add("src/sharedTest/resources")
+            }
+        }
     }
 
     compileOptions {
@@ -222,6 +229,8 @@ dependencies {
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.okhttp.mockwebserver3)
     testImplementation(libs.okhttp.mockwebserver3.junit5)
+    // The test servers' own certificate (src/sharedTest), trusted only by the test clients.
+    testImplementation(libs.okhttp.tls)
 
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
@@ -230,6 +239,9 @@ dependencies {
     androidTestImplementation(libs.androidx.test.ext.junit)
     androidTestImplementation(libs.androidx.test.espresso.core)
     androidTestImplementation(libs.assertj.core)
+    // The fakes of the online services (src/sharedTest), served over HTTPS: cleartext stays blocked.
+    androidTestImplementation(libs.okhttp.mockwebserver3)
+    androidTestImplementation(libs.okhttp.tls)
     // The M0 Room spike (library search) also measures the platform's SQLite.
     androidTestImplementation(libs.androidx.sqlite.framework)
     androidTestImplementation(libs.room3.testing)

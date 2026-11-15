@@ -21,6 +21,11 @@ sealed interface CallOutcome<out T> {
     data class Fail(val error: IOException) : CallOutcome<Nothing>
 }
 
+/** Checked before every attempt of a call; throws a [SendBlockedException] when nothing may be sent now. */
+fun interface CallGuard {
+    fun check()
+}
+
 /**
  * Sends the requests of one service through the [limiter] of its host and retries busy answers and network errors as
  * [retryPolicy] allows (TI §9). Every wait is a pause of the shared limiter, so it holds back every caller and not
@@ -28,19 +33,24 @@ sealed interface CallOutcome<out T> {
  * that would have to wait longer than a retry ever waits (the policy's `longestWait`: a Retry-After of up to 120 s
  * plus its jitter) sends nothing and fails at once with the error from `paused`; the pause stays for everyone. Answers are read on
  * [ioDispatcher], so a client can be called from any thread.
+ *
+ * [guard] is asked before every attempt, and again once the limiter lets the attempt go, so that turning online
+ * lookups off, a provider's stop or a lost network ends a call that is waiting out a backoff. A [SendBlockedException]
+ * from the guard or from the client's gate fails the call as it is: it is never retried and never pauses the limiter.
  */
 class RetryingCaller(
     private val http: OkHttpClient,
     private val limiter: RateLimiter,
     private val retryPolicy: RetryPolicy,
     private val ioDispatcher: CoroutineDispatcher,
+    private val guard: CallGuard,
     private val maxGiveUpPause: Duration = 1.hours,
 ) {
 
     /**
      * Sends [request] until [handle] makes a success or a failure of an answer; a network error counts as busy. When
      * no retry is left, the error from [giveUp] is thrown; when the limiter is paused for too long, the one from
-     * [paused].
+     * [paused]; when nothing may be sent, the guard's or the gate's [SendBlockedException].
      */
     suspend fun <T> execute(
         request: Request,
@@ -51,13 +61,20 @@ class RetryingCaller(
         var attempt = 0
         while (true) {
             attempt++
+            // Before the limiter, so that a blocked call takes no slot.
+            guard.check()
             try {
                 limiter.acquire(maxWait = retryPolicy.longestWait)
             } catch (e: RateLimitPauseException) {
                 throw paused(e.remaining)
             }
             val outcome = try {
+                // Again after the wait: the gate, a stop or the network may have changed during a backoff.
+                guard.check()
                 http.newCall(request).await().use { response -> withContext(ioDispatcher) { handle(response) } }
+            } catch (e: SendBlockedException) {
+                // Nothing was sent (the client's gate also refuses redirect hops): no retry and no pause.
+                CallOutcome.Fail(e)
             } catch (e: IOException) {
                 CallOutcome.Retry(e)
             }

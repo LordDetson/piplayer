@@ -5,9 +5,13 @@ import android.app.Application
 import android.content.Context
 import android.content.res.Configuration
 import android.os.Bundle
+import androidx.annotation.VisibleForTesting
 import io.github.lorddetson.piplayer.crash.CrashReports
+import io.github.lorddetson.piplayer.identification.IdentificationServices
 import io.github.lorddetson.piplayer.library.Library
 import io.github.lorddetson.piplayer.library.sort.SortKeys
+import io.github.lorddetson.piplayer.net.AndroidConnectivity
+import io.github.lorddetson.piplayer.net.UserAgent
 import kotlin.concurrent.thread
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.withTimeoutOrNull
@@ -38,6 +42,18 @@ class PiPlayerApplication : Application() {
 
     val crashReports: CrashReports by lazy { CrashReports.forApp(this) }
 
+    /**
+     * The identification network services of the main process (TI §8, §9), or the ones a test installed. They are
+     * dormant until M3 wires them in, and their online gate stays closed until the opt-in exists.
+     */
+    val identificationServices: IdentificationServices
+        get() = installedIdentificationServices ?: ownIdentificationServices
+
+    private val ownIdentificationServices: IdentificationServices by lazy {
+        ProcessRole.current(this).requireMain("The identification services")
+        IdentificationServices.production(UserAgent.of(BuildConfig.VERSION_NAME), AndroidConnectivity(this))
+    }
+
     override fun attachBaseContext(base: Context) {
         super.attachBaseContext(base)
         // First, so that a crash anywhere later in the process is reported (docs/playback.md §7.1).
@@ -62,6 +78,11 @@ class PiPlayerApplication : Application() {
 
     companion object {
         private val started = CompletableDeferred<Unit>()
+
+        /** Services a test puts in place of the app's own (like [CrashReports.promptEnabled]); null for the app's. */
+        @Volatile
+        @VisibleForTesting
+        internal var installedIdentificationServices: IdentificationServices? = null
 
         /**
          * Waits until [onCreate] has run, at most [timeoutMs]; whether it has. Android publishes content providers before

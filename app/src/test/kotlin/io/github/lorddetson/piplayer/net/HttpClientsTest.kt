@@ -1,24 +1,38 @@
 package io.github.lorddetson.piplayer.net
 
+import io.github.lorddetson.piplayer.fakes.FakeCaa
+import io.github.lorddetson.piplayer.fakes.RecordingRequestLog
+import io.github.lorddetson.piplayer.fakes.TestServices
+import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.test.runTest
+import mockwebserver3.Dispatcher
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
+import mockwebserver3.RecordedRequest
 import mockwebserver3.junit5.StartStop
 import okhttp3.Request
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.Timeout
 
 class HttpClientsTest {
 
     @StartStop
     private val server = MockWebServer()
 
+    /** A second host, like archive.org behind Cover Art Archive. */
+    @StartStop
+    private val other = MockWebServer()
+
     private val userAgent = UserAgent.of("0.1.0")
+    private val gate = TestServices.openGate()
+
+    private fun client(gate: OnlineGate = this.gate) = HttpClients.create(userAgent, gate)
 
     @Test
     fun `every request carries the app's User-Agent`() {
         server.enqueue(MockResponse.Builder().body("ok").build())
-        HttpClients.create(userAgent).newCall(Request.Builder().url(server.url("/")).build()).execute().close()
+        client().newCall(Request.Builder().url(server.url("/")).build()).execute().close()
         assertThat(server.takeRequest().headers["User-Agent"]).isEqualTo(userAgent)
     }
 
@@ -26,22 +40,105 @@ class HttpClientsTest {
     fun `a User-Agent set by the caller is replaced`() {
         server.enqueue(MockResponse.Builder().body("ok").build())
         val request = Request.Builder().url(server.url("/")).header("User-Agent", "okhttp/5.5.0").build()
-        HttpClients.create(userAgent).newCall(request).execute().close()
+        client().newCall(request).execute().close()
         assertThat(server.takeRequest().headers.values("User-Agent")).containsExactly(userAgent)
     }
 
     @Test
     fun `a hung answer cannot hold a call forever`() {
-        assertThat(HttpClients.create(userAgent).callTimeoutMillis).isPositive()
+        assertThat(client().callTimeoutMillis).isPositive()
     }
 
     @Test
     fun `await returns the response of the call`() = runTest {
         server.enqueue(MockResponse.Builder().code(201).body("created").build())
-        val response = HttpClients.create(userAgent).newCall(Request.Builder().url(server.url("/")).build()).await()
+        val response = client().newCall(Request.Builder().url(server.url("/")).build()).await()
         response.use {
             assertThat(it.code).isEqualTo(201)
             assertThat(it.body.string()).isEqualTo("created")
         }
+    }
+
+    @Test
+    fun `nothing is sent while the gate is closed`() = runTest {
+        server.enqueue(MockResponse.Builder().body("ok").build())
+        val closed = client(InMemoryOnlineGate())
+        val request = Request.Builder().url(server.url("/")).build()
+
+        assertThat(runCatching { closed.newCall(request).execute() }.exceptionOrNull())
+            .isInstanceOf(GateClosedException::class.java)
+        assertThat(runCatching { closed.newCall(request).await() }.exceptionOrNull())
+            .isInstanceOf(GateClosedException::class.java)
+        assertThat(server.requestCount).isZero()
+    }
+
+    @Test
+    fun `the gate is asked again before a redirect hop`() {
+        val gate = TestServices.openGate()
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                gate.set(OnlineConsent.NONE)
+                return MockResponse.Builder().code(307).addHeader("Location", other.url("/image.jpg")).build()
+            }
+        }
+        other.enqueue(MockResponse.Builder().body("image").build())
+
+        val error = runCatching { client(gate).newCall(Request.Builder().url(server.url("/front")).build()).execute() }
+            .exceptionOrNull()
+        assertThat(error).isInstanceOf(GateClosedException::class.java)
+        assertThat(server.requestCount).isEqualTo(1)
+        assertThat(other.requestCount).isZero()
+    }
+
+    @Test
+    @Timeout(value = 20, unit = TimeUnit.SECONDS)
+    fun `a hop refused on a reused connection ends the call instead of trying again`() {
+        val gate = TestServices.openGate()
+        val client = client(gate)
+        server.enqueue(MockResponse.Builder().body("warm").build())
+        client.newCall(Request.Builder().url(server.url("/warm")).build()).execute().close()
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                gate.set(OnlineConsent.NONE)
+                return MockResponse.Builder().code(307).addHeader("Location", server.url("/next")).build()
+            }
+        }
+
+        val error = runCatching { client.newCall(Request.Builder().url(server.url("/first")).build()).execute() }
+            .exceptionOrNull()
+        assertThat(error).isInstanceOf(GateClosedException::class.java)
+        assertThat(server.requestCount).isEqualTo(2)
+    }
+
+    @Test
+    fun `a Cover Art Archive image comes through the redirect with the User-Agent on both hops`() {
+        val log = RecordingRequestLog()
+        val caa = FakeCaa { other.url("/") }.withImages(RELEASE)
+        server.dispatcher = log.wrap(caa)
+        other.dispatcher = log.wrap(caa.archive)
+
+        val response = client().newCall(Request.Builder().url(server.url("/release/$RELEASE/front-250")).build()).execute()
+        val bytes = response.use { it.body.bytes() }
+
+        assertThat(bytes).isEqualTo(FakeCaa.FRONT_250.fixture.bytes())
+        assertThat(log.entries.map { it.userAgent }).containsExactly(userAgent, userAgent)
+        assertThat(log.to("${other.hostName}:${other.port}")).hasSize(1)
+    }
+
+    @Test
+    fun `no Cover Art Archive host is asked while the gate is closed`() {
+        val caa = FakeCaa { other.url("/") }.withImages(RELEASE)
+        server.dispatcher = caa
+        other.dispatcher = caa.archive
+
+        val error = runCatching {
+            client(InMemoryOnlineGate()).newCall(Request.Builder().url(server.url("/release/$RELEASE/front-250")).build()).execute()
+        }.exceptionOrNull()
+        assertThat(error).isInstanceOf(GateClosedException::class.java)
+        assertThat(server.requestCount + other.requestCount).isZero()
+    }
+
+    private companion object {
+        const val RELEASE = "44444444-4444-4444-8444-444444444444"
     }
 }

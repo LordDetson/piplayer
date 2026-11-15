@@ -8,18 +8,18 @@ import android.system.ErrnoException
 import android.system.Os
 import android.system.OsConstants
 import io.github.lorddetson.piplayer.BuildConfig
-import io.github.lorddetson.piplayer.identification.acoustid.AcoustIdClient
+import io.github.lorddetson.piplayer.identification.IdentificationServices
+import io.github.lorddetson.piplayer.identification.ProviderBaseUrls
+import io.github.lorddetson.piplayer.identification.fingerprint.FingerprintResult
 import io.github.lorddetson.piplayer.identification.fingerprint.MediaCodecPcmSource
 import io.github.lorddetson.piplayer.identification.fingerprint.NativeFingerprinting
 import io.github.lorddetson.piplayer.identification.fingerprint.PcmSource
-import io.github.lorddetson.piplayer.identification.musicbrainz.MusicBrainzClient
 import io.github.lorddetson.piplayer.identification.musicbrainz.toCandidate
 import io.github.lorddetson.piplayer.identification.text.RecordingSearch
 import io.github.lorddetson.piplayer.identification.text.TextSearch
 import io.github.lorddetson.piplayer.nativelib.taglib.TagReadResult
-import io.github.lorddetson.piplayer.net.HttpClients
-import io.github.lorddetson.piplayer.net.RateLimiter
-import io.github.lorddetson.piplayer.net.RetryPolicy
+import io.github.lorddetson.piplayer.net.AndroidConnectivity
+import io.github.lorddetson.piplayer.net.Connectivity
 import io.github.lorddetson.piplayer.net.UserAgent
 import io.github.lorddetson.piplayer.tagging.TagRead
 import io.github.lorddetson.piplayer.tagging.TagReadGuard
@@ -30,29 +30,61 @@ import io.github.lorddetson.piplayer.tagging.outsideTarget
 import java.io.Closeable
 import java.io.File
 import java.io.FileNotFoundException
-import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.TimeSource
 
-/** The spike's network clients, with one rate limiter per host for the whole process (TI §9). */
+/**
+ * The spike's network side: services of its own, with one rate limiter per provider (TI §8, §9), behind [SpikeGate],
+ * which is open only while a spike run goes on. The app's services stay dormant behind their closed gate, so in a
+ * debug process only these ever send.
+ */
 object SpikeServices {
 
-    private val http by lazy { HttpClients.create(UserAgent.of(BuildConfig.VERSION_NAME)) }
-    private val musicBrainzLimiter = RateLimiter(1_100.milliseconds)
-    private val acoustIdLimiter = RateLimiter(AcoustIdClient.MIN_INTERVAL)
+    @Volatile
+    private var services: IdentificationServices? = null
 
     /** True when the build carries an AcoustID application key (local.properties, never git). */
     val hasAcoustIdKey: Boolean get() = BuildConfig.ACOUSTID_API_KEY.isNotBlank()
 
-    fun spike(): IdentificationSpike {
-        val musicBrainz = MusicBrainzClient(http, musicBrainzLimiter, RetryPolicy(maxRetries = 3))
+    fun services(context: Context): IdentificationServices = services ?: synchronized(this) {
+        services ?: create(UserAgent.of(BuildConfig.VERSION_NAME), AndroidConnectivity(context)).also { services = it }
+    }
+
+    /** The spike's services at [baseUrls]; the wiring test points them at the fakes. */
+    fun create(
+        userAgent: String,
+        connectivity: Connectivity,
+        baseUrls: ProviderBaseUrls = ProviderBaseUrls.PRODUCTION,
+        timeSource: TimeSource.WithComparableMarks = TimeSource.Monotonic,
+    ): IdentificationServices = IdentificationServices.create(
+        userAgent = userAgent,
+        gate = SpikeGate,
+        connectivity = connectivity,
+        baseUrls = baseUrls,
+        timeSource = timeSource,
+    )
+
+    /** Runs the spike on [file], with [SpikeGate] open for the run only. */
+    suspend fun run(context: Context, file: SpikeFile, onStage: (SpikeStage) -> Unit): SpikeReport =
+        SpikeGate.open().use { spike(context).run(file, onStage) }
+
+    /** The spike over the app's build: its AcoustID key and the native fingerprinting. Open [SpikeGate] to run it. */
+    fun spike(context: Context): IdentificationSpike {
+        val calculator = NativeFingerprinting.calculator()
+        return spike(services(context), BuildConfig.ACOUSTID_API_KEY) { source -> calculator.fingerprint(source) }
+    }
+
+    /** The spike over [services]; the AcoustID stage is skipped when [apiKey] is blank. */
+    fun spike(
+        services: IdentificationServices,
+        apiKey: String,
+        fingerprinter: suspend (PcmSource) -> FingerprintResult,
+    ): IdentificationSpike {
+        val musicBrainz = services.musicBrainz
         val search = RecordingSearch { query ->
             musicBrainz.searchRecordings(query.query, query.limit).recordings.map { it.toCandidate() }
         }
-        val acoustId = BuildConfig.ACOUSTID_API_KEY.takeIf { it.isNotBlank() }?.let { key ->
-            val client = AcoustIdClient(http, acoustIdLimiter, RetryPolicy(maxRetries = 3), key)
-            AcoustIdLookup(client::lookup)
-        }
-        val calculator = NativeFingerprinting.calculator()
-        return IdentificationSpike({ source -> calculator.fingerprint(source) }, acoustId, TextSearch(search))
+        val acoustId = apiKey.takeIf { it.isNotBlank() }?.let { key -> AcoustIdLookup(services.acoustId(key)::lookup) }
+        return IdentificationSpike(fingerprinter, acoustId, TextSearch(search))
     }
 }
 

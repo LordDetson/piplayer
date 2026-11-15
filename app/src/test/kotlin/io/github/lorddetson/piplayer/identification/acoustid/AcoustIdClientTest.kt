@@ -1,9 +1,24 @@
 package io.github.lorddetson.piplayer.identification.acoustid
 
+import io.github.lorddetson.piplayer.fakes.FakeAcoustId
+import io.github.lorddetson.piplayer.fakes.TestServices
+import io.github.lorddetson.piplayer.identification.provider.ProviderAccess
+import io.github.lorddetson.piplayer.identification.provider.ProviderId
+import io.github.lorddetson.piplayer.identification.provider.ProviderStatus
+import io.github.lorddetson.piplayer.identification.provider.ProviderStatusStore
+import io.github.lorddetson.piplayer.identification.provider.ProviderStoppedException
+import io.github.lorddetson.piplayer.identification.provider.StopReason
+import io.github.lorddetson.piplayer.net.Connectivity
+import io.github.lorddetson.piplayer.net.GateClosedException
 import io.github.lorddetson.piplayer.net.HttpClients
+import io.github.lorddetson.piplayer.net.InMemoryOnlineGate
+import io.github.lorddetson.piplayer.net.NetworkState
+import io.github.lorddetson.piplayer.net.NoNetworkException
+import io.github.lorddetson.piplayer.net.OnlineGate
 import io.github.lorddetson.piplayer.net.RateLimiter
 import io.github.lorddetson.piplayer.net.RetryPolicy
 import io.github.lorddetson.piplayer.net.UserAgent
+import java.io.IOException
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
@@ -22,8 +37,10 @@ import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.testTimeSource
 import mockwebserver3.MockResponse
+import mockwebserver3.Dispatcher
 import mockwebserver3.MockWebServer
 import mockwebserver3.RecordedRequest
+import mockwebserver3.SocketEffect
 import mockwebserver3.junit5.StartStop
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import org.assertj.core.api.Assertions.assertThat
@@ -45,10 +62,14 @@ class AcoustIdClientTest {
         maxRetries: Int = 3,
         interval: Duration = 10.milliseconds,
         ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+        gate: OnlineGate = TestServices.openGate(),
+        connectivity: Connectivity = TestServices.FakeConnectivity(),
+        statuses: ProviderStatusStore = ProviderStatusStore(),
     ) = AcoustIdClient(
-        http = HttpClients.create(UserAgent.of("0.1.0")),
+        http = HttpClients.create(UserAgent.of("0.1.0"), gate),
         limiter = RateLimiter(interval, testTimeSource),
         retryPolicy = RetryPolicy(maxRetries = maxRetries, random = Random(1)),
+        access = ProviderAccess(ProviderId.ACOUSTID, gate, connectivity, statuses),
         apiKey = key,
         baseUrl = server.url("/v2/"),
         clock = Clock.fixed(Instant.parse("2026-10-19T12:00:00Z"), ZoneOffset.UTC),
@@ -261,5 +282,82 @@ class AcoustIdClientTest {
         client.lookup(fingerprint, 214_400)
         client.lookup(fingerprint, 214_400)
         assertThat(testScheduler.currentTime).isGreaterThanOrEqualTo(350)
+    }
+
+    @Test
+    fun `nothing is sent while online lookups are off`() = runTest {
+        server.enqueue(ok())
+        val error = runCatching { client(gate = InMemoryOnlineGate()).lookup(fingerprint, 214_400) }.exceptionOrNull()
+        assertThat(error).isInstanceOf(GateClosedException::class.java)
+        assertThat(server.requestCount).isZero()
+    }
+
+    @Test
+    fun `a network that is not validated sends nothing`() = runTest {
+        server.enqueue(ok())
+        val offline = TestServices.FakeConnectivity(NetworkState.NO_NETWORK)
+        val error = runCatching { client(connectivity = offline).lookup(fingerprint, 214_400) }.exceptionOrNull()
+        assertThat(error).isInstanceOf(NoNetworkException::class.java)
+        assertThat(server.requestCount).isZero()
+        assertThat(testScheduler.currentTime).isZero()
+    }
+
+    @Test
+    fun `an invalid application key stops AcoustID for the session`() = runTest {
+        server.enqueue(FakeAcoustId.ERROR_4.response())
+        server.enqueue(ok())
+        val statuses = ProviderStatusStore()
+        val client = client(statuses = statuses)
+
+        val first = runCatching { client.lookup(fingerprint, 214_400) }.exceptionOrNull()
+        assertThat(first).isInstanceOf(AcoustIdException.InvalidApiKey::class.java)
+        assertThat(statuses.status(ProviderId.ACOUSTID).value).isEqualTo(ProviderStatus.Stopped(StopReason.INVALID_API_KEY))
+
+        val later = runCatching { client.lookup(fingerprint, 214_400) }.exceptionOrNull()
+        assertThat(later).isInstanceOf(ProviderStoppedException::class.java)
+        assertThat(later!!.message).doesNotContain(key)
+        assertThat(server.requestCount).isEqualTo(1)
+    }
+
+    @Test
+    fun `other final errors do not stop AcoustID`() = runTest {
+        server.enqueue(error(400, 3, "invalid fingerprint"))
+        server.enqueue(ok())
+        val statuses = ProviderStatusStore()
+        val client = client(statuses = statuses)
+        assertThat(runCatching { client.lookup(fingerprint, 214_400) }.exceptionOrNull())
+            .isInstanceOf(AcoustIdException.Service::class.java)
+        assertThat(statuses.status(ProviderId.ACOUSTID).value).isEqualTo(ProviderStatus.Active)
+        assertThat(client.lookup(fingerprint, 214_400).results).hasSize(2)
+    }
+
+    @Test
+    fun `error 14 from the shared fixture is retried`() = runTest {
+        server.enqueue(FakeAcoustId.ERROR_14.response())
+        server.enqueue(ok())
+        assertThat(client().lookup(fingerprint, 214_400).results).hasSize(2)
+        assertThat(server.requestCount).isEqualTo(2)
+    }
+
+    @Test
+    fun `dropped connections are retried and given up, and only the backoff pauses the limiter`() = runTest {
+        var dropping = true
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse =
+                if (dropping) MockResponse.Builder().onResponseStart(SocketEffect.CloseSocket()).build() else ok()
+        }
+        val client = client(interval = AcoustIdClient.MIN_INTERVAL)
+
+        val error = runCatching { client.lookup(fingerprint, 214_400) }.exceptionOrNull()
+        assertThat(error).isInstanceOf(AcoustIdException.Unavailable::class.java)
+        assertThat((error as AcoustIdException.Unavailable).attempts).isEqualTo(4)
+        assertThat(error.cause).isInstanceOf(IOException::class.java)
+        assertThat(error.message).doesNotContain(key)
+        val gaveUpAt = testScheduler.currentTime
+        assertThat(gaveUpAt).isBetween(3_500, 7_000)
+
+        dropping = false
+        client.lookup(fingerprint, 214_400)
+        assertThat(testScheduler.currentTime - gaveUpAt).isLessThanOrEqualTo(350)
     }
 }

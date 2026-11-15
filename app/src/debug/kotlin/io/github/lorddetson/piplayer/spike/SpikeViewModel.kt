@@ -48,7 +48,7 @@ class SpikeViewModel(application: Application) : AndroidViewModel(application) {
             mutableState.value = try {
                 val report = withContext(Dispatchers.IO) {
                     OpenedFile.open(getApplication(), uri).use { file ->
-                        SpikeServices.spike().run(file) { stage ->
+                        SpikeServices.run(getApplication(), file) { stage ->
                             mutableState.value = State.Running(file.displayName, stage)
                         }
                     }

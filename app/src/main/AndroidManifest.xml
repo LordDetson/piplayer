@@ -4,6 +4,8 @@
 
     <!-- Identification looks recordings up in AcoustID and MusicBrainz. -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Lookups send nothing without a validated network (docs/track-identification.md §8). -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- The playback service runs in the foreground while it plays (WAKE_LOCK comes with Media3). -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
