@@ -474,12 +474,13 @@ PiPlayer never adds an ID3v1 tag to a file that has none; §7.5 lists the TagLib
   also `/ws/2/` links and links with a query, a fragment or more path after the ID (`/release/<mbid>/disc/1`), give a
   recording or release lookup; the ID is compared in lower case. A `://` inside the query or fragment of a link without
   the scheme (`musicbrainz.org/recording/<mbid>?returnto=https://...`) does not make it a scheme, and a label glued to
-  the link without a space (`Link:https://musicbrainz.org/...`, `Link:musicbrainz.org/...`) is not part of it. A bare MBID could name either, so it is looked up as a
-  recording first and then as a release. Links and IDs are also found among other pasted words, without the brackets,
-  quotes or punctuation around them; a recording or release link wins over a bare MBID, which wins over another
-  MusicBrainz link. Any other `musicbrainz.org` link (artist, release group, work, track, a search page, a malformed ID
-  or escape) is refused with a hint to paste a recording or release link, and is never sent as search text. A link to
-  another site is plain text.
+  the link without a space (`Link:https://musicbrainz.org/...`, `Link:musicbrainz.org/...`) is not part of it. After a
+  scheme the host ends at an optional port, so `https://example.com:musicbrainz.org/...` is a link to another site. A
+  bare MBID could name either, so it is looked up as a recording first and then as a release. Links and IDs are also
+  found among other pasted words, without the brackets, quotes or punctuation around them; a recording or release link
+  wins over a bare MBID, which wins over another MusicBrainz link. Any other `musicbrainz.org` link (artist, release
+  group, work, track, a search page, a malformed ID or escape) is refused with a hint to paste a recording or release
+  link, and is never sent as search text. A link to another site is plain text.
 - MusicBrainz's own `score` is never shown as confidence (it is relative and full of ties).
 - The query builder is first checked in M0, on the JVM, against a list of real track titles (§11.4); the variants and
   their order are tuned there and in M3.

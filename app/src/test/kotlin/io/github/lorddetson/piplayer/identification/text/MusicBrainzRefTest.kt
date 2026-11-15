@@ -26,6 +26,7 @@ class MusicBrainzRefTest {
             "https://musicbrainz.org/release/b1a9c0e9-d987-4042-ae91-78d6a3267d69|release",
             "https://musicbrainz.org/release/b1a9c0e9-d987-4042-ae91-78d6a3267d69/disc/1#disc1|release",
             "www.musicbrainz.org/release/b1a9c0e9-d987-4042-ae91-78d6a3267d69|release",
+            "https://musicbrainz.org:443/release/b1a9c0e9-d987-4042-ae91-78d6a3267d69|release",
             "b1a9c0e9-d987-4042-ae91-78d6a3267d69|any",
             "  B1A9C0E9-D987-4042-AE91-78D6A3267D69  |any",
             // Punctuation around a pasted link or ID is not part of it.
@@ -91,6 +92,9 @@ class MusicBrainzRefTest {
             "x:ftp://musicbrainz.org/recording/b1a9c0e9-d987-4042-ae91-78d6a3267d69",
             "https://example.com/?u=https://musicbrainz.org/recording/b1a9c0e9-d987-4042-ae91-78d6a3267d69",
             "example.com/musicbrainz.org/recording/b1a9c0e9-d987-4042-ae91-78d6a3267d69",
+            // With a scheme the host ends at the first ':'; what follows is a port, never a host after a label.
+            "https://example.com:musicbrainz.org/recording/b1a9c0e9-d987-4042-ae91-78d6a3267d69",
+            "Link:http://example.com:musicbrainz.org/release/b1a9c0e9-d987-4042-ae91-78d6a3267d69",
             "",
         ],
     )

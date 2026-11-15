@@ -53,7 +53,8 @@ sealed interface MusicBrainzRef {
             val separator = word.indexOf("://")
             val pathStart = word.indexOfFirst { it == '/' || it == '?' || it == '#' }
             // A "://" after the first '/', '?' or '#' belongs to the path, query or fragment of a link without a scheme.
-            val rest = if (separator >= 0 && separator < pathStart) {
+            val hasScheme = separator >= 0 && separator < pathStart
+            val rest = if (hasScheme) {
                 val scheme = schemeAtEnd.find(word.substring(0, separator))?.value?.lowercase(Locale.ROOT)
                 if (scheme !in schemes) return null
                 word.substring(separator + 3)
@@ -62,8 +63,10 @@ sealed interface MusicBrainzRef {
             }
             val authorityEnd = rest.indexOfFirst { it == '/' || it == '?' || it == '#' }.takeIf { it >= 0 } ?: rest.length
             val authority = rest.substring(0, authorityEnd).substringAfterLast('@').lowercase(Locale.ROOT)
-            // The host, before an optional port or after a label glued on with ':' ("Link:musicbrainz.org/...").
-            authority.split(':').firstOrNull { it == HOST || it.endsWith(".$HOST") } ?: return null
+            // With a scheme the host ends at an optional port. Without one a label can come glued on with ':'
+            // ("Link:musicbrainz.org/..."), so any part between the colons can be the host.
+            val hosts = if (hasScheme) listOf(authority.substringBefore(':')) else authority.split(':')
+            hosts.firstOrNull { it == HOST || it.endsWith(".$HOST") } ?: return null
             var parts = rest.substring(authorityEnd).substringBefore('?').substringBefore('#')
                 .split('/').filter { it.isNotEmpty() }
             if (parts.size >= 2 && parts[0] == "ws" && parts[1] == "2") parts = parts.drop(2)
