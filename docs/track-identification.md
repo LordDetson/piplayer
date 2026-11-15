@@ -285,7 +285,10 @@ apps do not change it.
   (the file's value at a decision, the "changed in the file" flag, written tags, undo snapshots) is kept per file
   location (§10.2), and a playlist entry plays the first available location.
 - A file opened from another app gets the same key, so its result attaches to the file once it appears in the media
-  index (or, v1.x, in a granted folder).
+  index (or, v1.x, in a granted folder). For the same reason the working rows of identification (the lookup job with
+  its "retry later" time, the candidates and the trace) are kept by content key, not by file ID: neither a file opened
+  from another app nor a library file that the tag pass has not read yet has a key in the library before stage 0
+  computes it (§10.1, decided in M3).
 
 **Duration.** One exact duration per file, measured once by the background tag pass and stored with its source. The
 same value is used for AcoustID (`duration`, rounded to the nearest second), text search (`dur:`), scoring, lists,
@@ -683,8 +686,8 @@ re-checked before release (M5); in M4a they also drive automatic preparation.
   first release date (the original year, §4.2 step 3) are kept as written. The track length is the release track's
   length, otherwise the recording's; when it differs from the file's exact duration by more than 7 s, the review
   shows it (§4.2). The release's `cover-art-archive` object (front, darkened, count) is kept for §5.2.
-- The release cache sits behind an interface, so the same lookup serves every track of the album: in memory in M3, and
-  the `release_cache` table of §10.1 from the library database step on.
+- The release cache sits behind an interface, so the same lookup serves every track of the album: the app keeps it in
+  the `release_cache` table of §10.1, where a lookup stays for 30 days; JVM tests use one in memory.
 
 ### 5.2 Cover
 
@@ -744,8 +747,8 @@ re-checked before release (M5); in M4a they also drive automatic preparation.
   - Network errors and the answers 429, 502 and 504 are retried as for the other providers (§9) and record nothing;
     other error statuses fail the call at once and record nothing.
   - The app holds one client per process, so the 503s in a row and the entries belong to the provider.
-  - The entries sit behind an interface: in memory in M3, keeping at most a few thousand addresses, and in
-    `api_cache` from the library database step on.
+  - The entries sit behind an interface: the app keeps them in `api_cache` (§10.1), and JVM tests in memory, keeping
+    at most a few thousand addresses.
 - Embedded cover presets: **compatible** (baseline JPEG ≤ 1000 px, default), **car stereo** (baseline JPEG 600 px),
   **original**. Never replace an existing cover with a smaller one unless the user asks: "smaller" means a shorter
   short side in pixels, and such a cover's checkbox starts unticked. An equal short side is not smaller. When the
@@ -1221,8 +1224,9 @@ Rules:
 Two database files (§12 D6). Only the main process opens them; `:tagger` never does (§7.2 step 11). Room cannot join
 across files, so neither file refers to the other's row IDs: links go through the track key (the content key of §3.1
 plus the track's start offset in the file, 0 until CUE sheets arrive), file locations (volume, relative path and
-display name) and batch UUIDs. Each file keeps a change counter, and the library database stores the user database's
-counter value it last mirrored (§10.3).
+display name) and batch UUIDs. The user database keeps two counters in `user_meta`: `change_counter`, raised by every
+write that the library database mirrors, and `rules_counter`, raised only by the folder rules. The library database's
+`library_meta` stores the value of each that it last mirrored (§10.3).
 
 Where things live:
 
@@ -1254,7 +1258,8 @@ Where things live:
 Everything that can be rebuilt from the media index and file tags, or safely lost (batch state, candidates, traces,
 caches). Rebuilding the library means deleting this file and filling it again from the media index, the tag pass and
 the user database; user data is not touched. A rebuild cancels running batch phases (a) to (c); decisions already
-made live in the user database.
+made live in the user database. A new schema version rebuilds it the same way (library.md §1.1); M3 brings version 13,
+whose first sync after the update runs as on a first launch (about 1.7 s on the owner's phone).
 
 - `audio_file(id, media_store_id, volume_name, relative_path, display_name, document_uri, size, mtime,
   generation_modified, date_added, mime_type, <media kinds>, format, codec, sample_rate, bit_depth, channels, bitrate, duration_ms, duration_source,
@@ -1295,21 +1300,49 @@ made live in the user database.
   An index on (`title_sort`, `search_text`) (the collator's key of the title since M2a step 11, library.md §11.1) lets
   a search walk the titles in order and stop at the first page of 50.
   `missing_info_reasons` is the set of §1 reasons, written by
-  the precedence resolver; `missing_info_decision` is none, keep_as_is or skipped.
+  the precedence resolver; `missing_info_decision` is none, keep_as_is or skipped, and `badge_state` is the state of the
+  metadata badge (§6). Both are written with the merged values from the mirrored decisions (`decided_mirror`), so a
+  writer that replaces a display row keeps them, and both are none until the first decision is mirrored (M3).
+- `decided_mirror(file_id, field, value, level, decision_id)` (M3): the decided values of §7.1 as the precedence
+  resolver uses them: for each file and field the winning value of levels 1 and 2 (the field names of the
+  protected-fields list, §10; a value may be empty, as when an edit clears a field), its level and the user database's
+  decision it comes from. Like `track_mirror` it sits beside `track_display` rather than in it, because the writers of
+  display rows (sync, tag pass, a new display version) replace them whole; they join it on every refresh. It is filled
+  from the user database on each decision commit and at start-up when `user_meta.change_counter` differs from
+  `library_meta.mirrored_change_counter` (§10.3).
+- `library_meta(mirrored_rules_counter, mirrored_change_counter, display_version, library_id, last_file_id, collation)`:
+  one row. `mirrored_rules_counter` is the user database's `rules_counter` that the folder rules of `audio_file` were
+  last applied with (library.md §3.4), and `mirrored_change_counter` (M3) is its `change_counter` that `decided_mirror`
+  was last filled at; the other columns belong to the sync (library.md §8.4, §11.1).
 - `display_genre(file_id, position, genre_key, name, search_text, sort_key)` (M2b): each genre of a file as lists group
   it, from the merged values, beside `display_artist` (library.md §19.1, §19.5).
 - `fingerprint(content_key, fingerprint, format, acoustid_id, decoder_path, computed_at)`: a cache for identification
   and re-attachment, kept by content key, so the fingerprint of a file that left the media index stays available for
-  re-attachment (§3.1); rows that no file or identity refers to are dropped after 30 days. M2a creates it without
-  `acoustid_id` and `decoder_path`, which identification adds (M3).
-- `lookup_job(file_id, batch_uuid, phase, status, attempts, next_attempt_at, last_error)` and
-  `candidate(file_id, source, recording_mbid, release_mbid, score, reason, payload_json)`.
-- `identification_trace(file_id, run_id, started_at, stage, provider, http_status, result_count, best_score,
-  elapsed_ms, note)`: a per-file trace of the last 3 runs, shown in track details and offered in problem reports
-  without file names and tag values by default (§9).
-- `release_cache(release_mbid, payload_json, fetched_at)` and `api_cache(key, status, body, fetched_at, ttl)`, which
-  also holds the failure entries of §5.2.
-- `cover_cache(release_mbid, path, width, height, bytes)`, with the files in the cache directory.
+  re-attachment (§3.1); rows that no file or identity refers to are dropped after 30 days. `format` is the file's
+  format, which re-attachment step 4 compares. M2a creates it without `acoustid_id` (the AcoustID track ID of the best
+  result, §3.2) and `decoder_path` (how the audio was decoded, §3.2), which identification adds in version 13 (M3).
+- `lookup_job(content_key, batch_uuid, phase, status, attempts, next_attempt_at, last_error)`: one row per content
+  key, with the "retry later" time of §3.2.
+- `candidate(content_key, position, source, recording_mbid, release_mbid, score, reason, payload_json)`: the ranked
+  candidates of the last run, `position` 0 for the best.
+- `identification_trace(content_key, run_id, position, started_at, stage, provider, http_status, result_count,
+  best_score, elapsed_ms, note)`: a trace of the last 3 runs, one row per step of a run in `position` order, shown in
+  track details and offered in problem reports without file names and tag values by default (§9).
+- These three are keyed by the content key (§3.1), not by the file ID (decided in M3): a file opened from another app
+  has no file ID, and a library file that the tag pass has not read yet gets its key at stage 0 (§3.1), before any
+  lookup. So the rows serve every file that is identified, a file that enters the media index later finds its results
+  by its key, and byte-identical copies share them as they share an identity. A file whose key changes (its audio was
+  re-encoded) starts without them.
+- `release_cache(release_mbid, payload_json, fetched_at)`: the release lookups of §5.1 as JSON, under the MBID they
+  were asked for and, when MusicBrainz answered with another (a merged release), under that one too. A row older than
+  30 days counts as missing, so a later lookup brings MusicBrainz's corrections, and the next write drops such rows.
+- `api_cache(key, status, body, fetched_at, ttl, busy_in_a_row)`: answers of the online services with their time to
+  live. In M3 it holds only the failure entries of §5.2: the image or index address as the key, status 404 or 503, no
+  body, the TTL in milliseconds and, for a 503, the count of the address's 503s in a row. An expired row stays while
+  §5.2 still reads it (until 6 hours after it expired) and is dropped by the next write after that.
+- There is no cover cache table (decided in M3): online covers are pictures of the cover disk cache (library.md §13.3)
+  under their own source key, their failures live in `api_cache`, and accepted covers are `saved_cover` files of the
+  user database (§10.2).
 
 ### 10.2 User database (`user.db`): backed up whole
 
@@ -1382,15 +1415,21 @@ used, never through a stored content URI, which goes stale after a media index r
 
 ### 10.3 Mirror and backup rules
 
-- Mirrored into the library database on every change and at start-up when the user database's change counter differs
-  from the one the library database last mirrored: the merged values of decided fields, favorites (tracks and
-  albums), play counts, last played times, the badge state and the Keep as-is/Skip state; the resolver recomputes the
-  missing-information reasons at the same time. The folder rules have a counter of their own (`user_meta.rules_counter`,
-  library.md §3.1) that the sync follows, so that a favorite or a play does not make the sync apply the rules again.
-  The mirror of favorites and plays (M2b) compares no counters: its full run is cheap, and the first attach pass of each
-  process asks for one (library.md §15.4). Writes that change nothing mirrored (the listened time of a counted play, own covers, album
-  members, folding old play events, playlists) do not raise the counter. Playlists are not mirrored at all: the playlist
-  page and the queue resolve their entries against the library database by content key and place (library.md §16.5).
+- Mirrored into the library database on every change: the decided values (`decided_mirror`, with the badge state and
+  the Keep as-is/Skip state they give), favorites (tracks and albums), play counts and last played times; the resolver
+  recomputes the missing-information reasons at the same time. Every write of such data raises
+  `user_meta.change_counter` in the same transaction.
+  - The decided values are also mirrored at start-up when `user_meta.change_counter` differs from
+    `library_meta.mirrored_change_counter`, which the mirror sets to the counter it read once `decided_mirror` holds
+    what the user database held at that value (M3).
+  - The folder rules have a counter of their own, `user_meta.rules_counter` (library.md §3.1), raised only with the
+    rules; the sync applies the rules again when it differs from `library_meta.mirrored_rules_counter`, so that a
+    favorite or a play does not make the sync apply the rules again.
+  - The mirror of favorites and plays (M2b) compares no counters: its full run is cheap, and the first attach pass of
+    each process asks for one (library.md §15.4).
+  - Writes that change nothing mirrored (the listened time of a counted play, own covers, album members, folding old
+    play events, playlists) do not raise the counter. Playlists are not mirrored at all: the playlist page and the
+    queue resolve their entries against the library database by content key and place (library.md §16.5).
 - A change that touches both files commits the user database first and the library database in its own transaction
   afterwards. If the process dies in between, the start-up mirror and the tag pass bring the library database up to
   date (§7.2 step 7).
@@ -1447,6 +1486,7 @@ tests, and a high-band error rate within the threshold of §11.4.
 | M3 | Cover size rule: a proposed cover whose short side is shorter than the existing cover's starts unticked, an equal one ticked; with the current size unknown a system thumbnail counts as ticked, an embedded picture has its header read on demand (and not read when the rule does not need it), an unreadable header counts as no cover; no cover now starts ticked; a proposed cover of unknown size starts ticked over a system thumbnail and over an embedded picture whose header cannot be read, and unticked over a cover of known size or a readable embedded picture |
 | M3 | Database-only undo: Apply followed by Undo restores the earlier merged values; stacked decisions (two identifications in a row, an edit on top of an identification) resolve as in §7.1; Undo right after Apply, Keep as-is and Skip; a later file change flags the field per location |
 | M3 | Size budget of `user.db` with generated data (§10.2): fails above 16 MB |
+| M3 | Identification outcomes: a call blocked by the online gate, by a missing validated network, by a captive portal or by a provider's stop maps to its own outcome (online lookups off, no network, sign-in needed, provider stopped with the reason) and other errors map to none; a run that found nothing above 0.50 in a build without an AcoustID key reports the missing key, with a key it reports no match, and a match keeps its band in either build; provenance takes the provider's license class (MusicBrainz CC0, Cover Art Archive and AcoustID restricted), the confidence and reason of the match and the release track and AcoustID track IDs; an apply request needs at least one ticked field and carries a cover only when the cover is ticked |
 | M4a | Batch album groups: groups with a release MBID or an album title match the library's album entities; files without an album tag are looked up one by one and merged when their recordings resolve to the same release; one release per group (most recordings); a warning for split groups and folders |
 | M4a | Work constraints: "unmetered only" → `UNMETERED`, "Use mobile data this time" → `NOT_ROAMING`, roaming allowed → `CONNECTED`, battery not low; the pause and resume rules for underruns and thermal status |
 | M4b | Tag diff: only decided keys change, and the full property map goes back with TagLib's own strings for unchanged keys; "fill empty only" fields are untouched when non-empty; protected data never appears in an identification diff |
@@ -1477,6 +1517,7 @@ tests, and a high-band error rate within the threshold of §11.4.
 | M3 | Snippet, through the main player's MediaController: a playing main player pauses for the snippet and resumes at the same position when the snippet ends after 15 s of playback from one third of a 60 s file or when the card closes; a main player paused before the snippet stays paused; a file shorter than 45 s plays from its start and the snippet ends with it; while the snippet plays, the audio focus stack holds its `GAIN_TRANSIENT` request, and afterwards the request is gone; queue, position and statistics (the play counter's listened time and playback, with no play recorded) do not change; a focus loss for good (another player) and a transient one (a call that then ends) stop the snippet without resuming the main player; a file the snippet player cannot read ends the snippet and resumes the main player. Through the playback service: a sleep timer finishing the track when the snippet starts still finishes it after the resume, and a countdown that ends during the snippet leaves the main player paused with the timer off; another controller playing the main player during the hold ends the hold, so that a user pause then turns off a sleep timer that is finishing the track and a later end of the hold with a resume leaves the main player paused; a swipe from recents during the hold keeps the service and the card closing then resumes the main player, while a hold that ends without a resume after the swipe stops the service |
 | M3 | Session metadata: for a fixture whose embedded cover and tags differ from the saved values, and for an MP3 without a frame-count header, the MediaController's metadata, artwork and duration equal PiPlayer's values after Apply and after Undo, without preparing the file again |
 | M3 | Identification and privacy (§9): the disclosure names every service with what it receives, the background Cover Art Archive loads included, and its Enable and Not now buttons and links have labels and click actions for TalkBack; the settings section shows the setting as a switch, opens the disclosure when the current version is unanswered and turns off at once, lists the services and their terms links, changes the protected-fields list with checkboxes, takes a second tap before the first is stored as reversing it, puts the switch back to the gate when an answer was not stored, and shows each provider's status (stopped after a User-Agent rejection or an invalid key, unavailable without a key); the app's services use the settings file's gate, closed with no stored consent |
+| M3 | Library database version 13 (§10.1): an older library database is dropped and the new tables and columns are there (the content-key tables, `decided_mirror`, `release_cache`, `api_cache`, the identification columns of `fingerprint` and `track_display`, both counters of `library_meta`, no cover cache table); the release cache keeps a lookup under the asked and the answered MBID, survives reopening, and treats a row older than 30 days as missing and drops it on the next write; `api_cache` keeps a failure entry's kind, times and 503 count, keeps an expired entry for 6 hours so that the next 503 still doubles, then drops it, and the Cover Art Archive TTL rules hold through it; `decided_mirror` keeps one value per file and field, replaces a file's rows whole, clears, and the mirrored change counter moves apart from the rules counter; the app's services use these caches |
 | M4a | A 500-file batch started from a folder resumes after its process is killed in any phase, and its accepted results appear in every view and on system surfaces |
 | M4a | On the named physical device, not an emulator: playback during a 500-file batch has no audible effect and no more underruns than without the batch |
 | M4b | Tag round trip for MP3 (ID3v2.3 with APIC, ID3v2.4, ID3v2.2), FLAC (PICTURE), M4A AAC/ALAC (`covr`), Ogg Vorbis, Opus, WAV: write → re-read → compare property maps → audio bytes unchanged → content key unchanged → ID3v2 version preserved (v2.2 written as v2.3). Also: no ID3v1 created on a file without one; an APE tag in an MP3 preserved; a v2.3 file with `TSST` and `TSOP` (`TSST` as its own diff line, `TSOP` kept); back cover preserved; gapless info and comment frames with a description untouched |

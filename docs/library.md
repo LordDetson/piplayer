@@ -209,8 +209,12 @@ The data model it implements is sketched in track-identification.md §10 (TI bel
 - Since version 4 `user_meta` also has `rules_counter`, which goes up only with the folder rules: the sync applies the
   rules again when it changes (§3.4), so that a favorite or a play does not make the sync walk the rules and read the
   lists again. `change_counter` goes up with every write the library database mirrors (folder rules, favorites,
-  favorite albums, plays) and is what the mirror of §15.4 follows; the migration to version 4 copies it into
-  `rules_counter`, so that the rules already mirrored are not applied again.
+  favorite albums, plays, and from M3 decisions) and is what the mirror of §15.4 follows; the migration to version 4
+  copies it into `rules_counter`, so that the rules already mirrored are not applied again.
+- The library database keeps the values it last mirrored in `library_meta` (TI §10.1, §10.3):
+  `mirrored_rules_counter`, the `rules_counter` the sync last applied the folder rules at (§3.4), and from library
+  database version 13 (M3) `mirrored_change_counter`, the `change_counter` at which the decided values were last
+  mirrored. Before version 13 the first was called `mirrored_user_counter`, although it held the rules counter.
 
 ### 3.2 Settings files
 
@@ -759,8 +763,10 @@ saved queue that refers to identities is in playback.md §4.
 
 ### 8.3 The fingerprint cache
 
-- `library.db` gets `fingerprint(content_key, fingerprint, computed_at)`, the cache of TI §10.1 without the columns of
-  identification (M3). A row whose key no file and no identity holds is dropped after 30 days.
+- `library.db` gets `fingerprint(content_key, fingerprint, format, computed_at)`, the cache of TI §10.1 without the
+  columns of identification: the raw items of Chromaprint as 4-byte big-endian integers and the file's format, which
+  step 4 compares. Library database version 13 (M3) adds `acoustid_id` and `decoder_path`. A row whose key no file and
+  no identity holds is dropped after 30 days.
 - Step 4 runs only for missing identities that hold user data and whose old key has a cached fingerprint. Candidates are
   attached files of the same format, with a length within 1 s, whose identity holds no user data and is newer than the
   missing one: the file came after the identity went missing, so step 6 of the pass may already have given it a new
