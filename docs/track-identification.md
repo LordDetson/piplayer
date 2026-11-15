@@ -141,13 +141,29 @@ Cheapest and most reliable source first; stop as soon as a stage gives a confide
 | # | Stage | Input | Output |
 |---|-------|-------|--------|
 | 0 | Local read | file URI | existing tags (TagLib, legacy encodings decoded), exact duration, size, content key, embedded cover details; normally already done by the background tag pass |
-| 1 | Known IDs | MusicBrainz recording/release IDs in tags | recording + release directly |
-| 2 | ISRC | ISRC tag | `/ws/2/isrc/{isrc}` → recordings (can clash: always check the duration; an artist/title disagreement is shown in the reason, §4.1) |
+| 1 | Known IDs | MusicBrainz recording/release IDs in tags | recording + release directly: `/ws/2/recording/{mbid}?inc=artist-credits+isrcs` (a 404 means the ID is unknown and the stage finds nothing); with a release ID too, the release lookup of §5.1, and when that release contains the winning recording it is the suggested edition and the ranking of §4.2 is skipped, otherwise the ranking runs as usual |
+| 2 | ISRC | ISRC tag | `/ws/2/isrc/{isrc}` → recordings (a 404 means none; can clash: always check the duration; an artist/title disagreement is shown in the reason, §4.1) |
 | 3 | Fingerprint | first 120 s of decoded audio (§3.2) | Chromaprint fingerprint → AcoustID lookup → recordings with score |
 | 4 | Text search | tags + parsed filename + duration | MusicBrainz Lucene recording search |
 | 5 | Release choice | recording MBID(s) | ranked releases (§4.2) |
 | 6 | Release details | chosen release MBID | full album data (one lookup per album, cached) |
 | 7 | Cover | release / release group MBID | Cover Art Archive front image |
+
+Request budget for one file (M3; MusicBrainz requests are at least 1.1 s apart, §8):
+
+- stage 1: one recording lookup, plus one release lookup when the tags carry a release ID (it also serves stage 6);
+- stage 2: one ISRC lookup; stage 3: one AcoustID lookup; stage 4: at most the four automatic variants of §3.3;
+- when the winning recording lacks a title, a credit or a length (AcoustID knows some recordings by their ID only, and
+  the ISRC answer has no credits), one recording lookup for it;
+- stage 5: release browse pages (§4.2) only for the winning recording and for recordings within the band gap (less
+  than 0.10 below the best, the gap that keeps the best out of the high band, §4.1), at most three recordings in score
+  order, at most 10 pages each, and nothing when the best score is below 0.50; a failed browse of a recording other
+  than the winner is skipped and traced; the browse of a release group waits until the edition picker opens;
+- stage 6: one release lookup, for the chosen release only.
+
+So a high-band fingerprint hit costs at most three requests plus the release pages, and a file found by text alone at
+most four searches plus one release page and one release lookup when one recording leads by the band gap. Paging
+hundreds of releases takes 5 to 10 s, so the progress shows the pages.
 
 ### 3.1 Stage 0: local read
 
@@ -578,14 +594,27 @@ re-checked before release (M5); in M4a they also drive automatic preparation.
 
 ### 4.2 Release (edition) choice for a recording
 
-1. Get all releases of the recording with one browse request:
+0. When the file's tags carry a release MBID and its release lookup (§5.1) shows that the release contains the
+   recording, that release is the suggested edition and steps 1 and 2 are skipped for it: ranking would replace a
+   correctly tagged edition. A tagged release without the recording, or one MusicBrainz does not know, is ignored and
+   the ranking runs as usual (decided in M3).
+1. Get all releases of the recording with browse requests:
    `/ws/2/release?recording=<mbid>&status=official&inc=release-groups+media+labels&limit=100`
-   (page by the number of releases actually returned). Fall back to non-official only if nothing is left.
+   (page by the number of releases actually returned: the next offset is the previous one plus the releases received,
+   until the reported release count is reached or a page comes back empty). Fall back to non-official only if nothing
+   is left: when the recording has no official release, the same browse without `status`. The ranking runs over every
+   page, up to 10 pages (1 000 releases); beyond that it ranks the releases it has and the trace records that the list
+   was capped (decided in M3). The browse names neither the track nor its medium, so the keys below look at the whole
+   release.
 2. Rank by these keys, in order:
    1. a release already confirmed for other files in the same folder (album consistency);
    2. agreement with the file's existing tags: the album tag matches the release title (similarity at least 0.9),
-      and the medium's track count equals the track total tag;
-   3. release type, by this rank (with several secondary types, the lowest-ranked one counts):
+      and the track count of one of the release's media equals the track total tag; a release that agrees on both
+      ranks ahead of one that agrees on one, which ranks ahead of one that agrees on none (a missing tag agrees with
+      nothing);
+   3. release type, by this rank (with several secondary types, the lowest-ranked one counts; "any type" includes a
+      release group without a primary type; Soundtrack with a primary type other than Album ranks as that type alone,
+      but never ahead of rank 4; a secondary type MusicBrainz adds later ranks with rank 10):
       1. Album without secondary types;
       2. Single without secondary types;
       3. EP without secondary types;
@@ -596,16 +625,20 @@ re-checked before release (M5); in M4a they also drive automatic preparation.
       8. any type + Compilation;
       9. any type + DJ-mix;
       10. any type + Spokenword, Interview, Audiobook, Audio drama or Field recording, and releases without a type;
-   4. format: Digital Media and CD rank equal, ahead of other formats;
-   5. country: the user's country (from the locale), then worldwide (`XW`), then the others;
-   6. date: earlier first, releases without a date last; then the release MBID, so the order is stable.
+   4. format of the first medium: Digital Media and CD rank equal, ahead of other formats; CD includes its MusicBrainz
+      variants (SHM-CD, Blu-spec CD, HDCD, Enhanced CD, Copy Control CD, 8cm CD and the like), and a medium without a
+      format counts as another format;
+   5. country: the user's country (from the locale), then worldwide (`XW`), then the others; every release event's
+      country counts, not only the first;
+   6. date: earlier first, releases without a date last; a year alone sorts before full dates of the same year (the
+      dates are compared as written); then the release MBID, so the order is stable.
 
    Track durations are not part of the ranking: after the release lookup (§5.1) the track's length on the release is
    compared with the file's, and a difference over 7 s is shown in the review.
 3. Do **not** simply take the oldest release (vinyl first pressings can have other lengths and covers). Store the
    release group's first release date separately as "original year".
-4. If the recording appears on several tracks of the release, take the one whose position matches the file's track
-   number tag, otherwise the first.
+4. If the recording appears on several tracks of the release, take the one whose position on its medium matches the
+   file's track number tag, otherwise the first in disc and track order.
 5. Batch mode: one release per album group (§8; files without an album tag are looked up one by one and grouped
    afterwards): the release that contains the most recordings of the group, ties broken by the ranking of step 2.
    Files whose recording is not on it get their own best release, and the album card in the review shows a split
@@ -613,10 +646,13 @@ re-checked before release (M5); in M4a they also drive automatic preparation.
 6. The review screen pre-selects the top-ranked edition, labeled "Suggested edition". The edition picker ("Choose
    edition") lists **every** edition in the release group, loaded when the picker opens:
    `/ws/2/release?release-group=<mbid>&inc=media+labels&limit=100` (paged as in step 1, all statuses, official
-   first), with type, format, country, date, label and track count, the suggested one first. An edition that is not
-   among the recording's releases from step 1 uses another recording of the song or lacks it: choosing it loads its
-   tracklist (§5.1) and maps the file to the track with the same position and a similar title (similarity at least
-   0.9), whose recording ID then replaces the identified one. If no track qualifies, the edition is marked "does not
+   first), with type, format, country, date, label and track count, the suggested one first and the others in the
+   order of step 2, official ones first. An edition that is not among the recording's releases from step 1 uses
+   another recording of the song or lacks it: choosing it loads its tracklist (§5.1) and maps the file to the track
+   with the same position and a similar title (title similarity of §4.1 at least 0.9), whose recording ID then
+   replaces the identified one. The position is the disc and track position of the identified track on the suggested
+   edition, or the file's track number tag on the first disc when that is unknown. A loaded edition that turns out to
+   contain the identified recording uses it as in step 4. If no track qualifies, the edition is marked "does not
    contain this song" and cannot be chosen.
 
 ## 5. Release details and cover
@@ -631,6 +667,17 @@ re-checked before release (M5); in M4a they also drive automatic preparation.
   and the number of media, label, catalog number, barcode, ISRCs, the release track ID. The compilation flag is set
   when the release is credited to the special Various Artists artist (MBID
   `89ad4ac3-39f7-470e-963a-56509c546377`). Writing follows §7.5.
+- Details of the extraction (decided in M3): each credit keeps the name as credited, the artist's own name, its MBID,
+  its sort name and its join phrase; the credit as printed joins the credited names with their join phrases, and the
+  sort credit joins the sort names the same way (the credited name stands in for a missing sort name). A blank medium
+  title gives no disc subtitle. Labels and catalog numbers keep every distinct value in the release's order;
+  MusicBrainz's `[none]` catalog number and an empty barcode (a release known to have none) give no value. The ISRCs
+  are those of the track's recording. The track is chosen as in §4.2 step 4. The release date and the release group's
+  first release date (the original year, §4.2 step 3) are kept as written. The track length is the release track's
+  length, otherwise the recording's; when it differs from the file's exact duration by more than 7 s, the review
+  shows it (§4.2). The release's `cover-art-archive` object (front, darkened, count) is kept for §5.2.
+- The release cache sits behind an interface, so the same lookup serves every track of the album: in memory in M3, and
+  the `release_cache` table of §10.1 from the library database step on.
 
 ### 5.2 Cover
 
@@ -1270,7 +1317,7 @@ tests, and a high-band error rate within the threshold of §11.4.
 | M0 | PCM conversion: 8-, 16-, 24-, 32-bit and float input, stereo and 5.1 downmix, rounding and clipping to 16-bit; the fingerprint path stops at 120 s, skips the resampler at 11 025 Hz, flushes it at the end of a short file and starts a new one when the format changes |
 | M3 | Recording scoring (§4.1): identifier tiers (a tag recording ID within 7 s; an ISRC within 2 s, and the similarity tier for an ISRC with several recordings or a length outside the window; AcoustID score × duration credit), duration credit, the 0.85 cap for text, the duration penalty on every tier (for the identifier tiers checked on the penalty step itself, since today's windows and credit never let it show in a score) and the title/artist penalty on the similarity tier only, an identifier hit's disagreement shown in its reason, merging by recording with the highest score and a field one stage lacks (an AcoustID recording known by its ID only) taken from another stage's copy, the band boundaries, and a score of at least 0.90 with a runner-up gap below 0.10 landing in the medium band |
 | M3 | Text search input (§3.3): the hint from decoded tags, the file-name guess and the exact duration, tags winning per field; track positions from the medium, never the printed number (vinyl "A4", numbering across discs); a manual query is marked manual with limit 50; pasted MusicBrainz links and IDs become recording or release lookups (also a link without the scheme whose query holds another link, and one with a label glued on), other MusicBrainz links are refused |
-| M3 | Release ranking on recorded MusicBrainz JSON fixtures (for example a track with hundreds of same-title recordings, video recordings and compilations): the folder preference, the full type order, Digital Media equal to CD, date order, a recording on two tracks of one release; fixtures stripped of CC BY-NC-SA `tags`/`genres` before committing |
+| M3 | Release ranking on recorded MusicBrainz JSON fixtures (for example a track with hundreds of same-title recordings, video recordings and compilations): the folder preference, the full type order, Digital Media equal to CD, date order, a recording on two tracks of one release; a tagged release MBID that contains the recording is kept without ranking; paging by the number of releases returned, a best release on the second page and the 10-page cap; the request budget of §3 (a high-band fingerprint hit, a text-only file) with MusicBrainz requests at least 1.1 s apart; the release details of §5.1, also for a Various Artists compilation; fixtures stripped of CC BY-NC-SA `tags`/`genres` before committing |
 | M3 | Edition picker: every release of the group is listed; an edition without the identified recording maps the file by position and title or is marked "does not contain this song" |
 | M0 | Rate limiter: never exceeds the configured rate under parallel callers; a pause holds back waiting callers; backoff with jitter on 503, 429, 502 and 504; Retry-After honoured; a rejected User-Agent is not retried; after giving up on a Retry-After over 120 s, later calls fail at once without a request until the pause is over |
 | M3 | Sending rules (§8): the app's online gate is closed by default; with the gate closed no client sends a request (AcoustID, MusicBrainz, a Cover Art Archive image and its redirect hop); a repeat the HTTP library makes by itself after the gate closed (a 408 or a 503 with Retry-After 0, also after `Connection: close`, or a dropped pooled connection) looks up and connects nothing; closing the gate during a backoff sends no further attempt; a blocked call is neither retried nor pauses the limiter; a network that is not validated, or a captive portal, fails at once without a request; a MusicBrainz 403 for the User-Agent and AcoustID error 4 stop that provider for the process, and a stop in one set of services does not reach another; a MusicBrainz 200 with an HTML body is retried, then reported as unavailable; dropped connections and failing DNS lookups are retried and given up, with the limiter paused only by the backoff; one limiter per provider at 1.1 s, 0.35 s and 1 s |
