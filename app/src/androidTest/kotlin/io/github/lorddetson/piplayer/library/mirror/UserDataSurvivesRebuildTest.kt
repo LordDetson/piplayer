@@ -13,6 +13,7 @@ import io.github.lorddetson.piplayer.library.values.DecisionResolver
 import io.github.lorddetson.piplayer.ui.GrantAudioPermission
 import io.github.lorddetson.piplayer.userdata.DecisionFixtures
 import io.github.lorddetson.piplayer.userdata.UserData
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -153,11 +154,13 @@ class UserDataSurvivesRebuildTest {
         Library.reopen(context, index)
         LibraryRule.startAsANewProcess()
         ready()
-        Library.identities(context).awaitIdle()
-        Library.decisionMirror(context).awaitIdle()
+        // The start-up run is asked for once the library knows its files, on a thread of its own: it stores the counter
+        // in the transaction that writes the values.
+        val counter = UserData.database(context).user().changeCounter()
+        withTimeout(30_000) {
+            while (Library.database(context).library().mirroredChangeCounter() != counter) delay(20)
+        }
 
         assertThat(display(2).title).isEqualTo("Decided")
-        assertThat(Library.database(context).library().mirroredChangeCounter())
-            .isEqualTo(UserData.database(context).user().changeCounter())
     }
 }
