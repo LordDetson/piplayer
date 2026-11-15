@@ -54,14 +54,18 @@ class QueueEditingTest {
             controller.stop()
             controller.clearMediaItems()
             controller.shuffleModeEnabled = false
+            controller.repeatMode = Player.REPEAT_MODE_OFF
         }
-        controller.waitUntil("the player is empty") { mediaItemCount == 0 && !shuffleModeEnabled }
+        controller.waitUntil("the player is empty") { mediaItemCount == 0 && !shuffleModeEnabled && repeatMode == Player.REPEAT_MODE_OFF }
         runBlocking { store.clear() }
     }
 
     @After
     fun cleanUp() {
-        onMain { controller.shuffleModeEnabled = false }
+        onMain {
+            controller.shuffleModeEnabled = false
+            controller.repeatMode = Player.REPEAT_MODE_OFF
+        }
         controller.stopAndRelease()
         runBlocking { store.clear() }
     }
@@ -291,8 +295,9 @@ class QueueEditingTest {
             controller.stop()
             controller.clearMediaItems()
             controller.shuffleModeEnabled = false
+            controller.repeatMode = Player.REPEAT_MODE_OFF
         }
-        controller.waitUntil("the player is empty") { mediaItemCount == 0 && !shuffleModeEnabled }
+        controller.waitUntil("the player is empty") { mediaItemCount == 0 && !shuffleModeEnabled && repeatMode == Player.REPEAT_MODE_OFF }
 
         ActivityScenario.launch(MainActivity::class.java).use {
             controller.waitUntil("the edited queue is back") { mediaItemCount == 7 && currentMediaItem?.mediaId == "1" }
@@ -479,6 +484,69 @@ class QueueEditingTest {
         assertThat(ids()).isEqualTo(list)
         assertThat(played()).isEqualTo(order)
         assertThat(onMain { controller.currentMediaItem?.mediaId }).isEqualTo("1")
+    }
+
+    private fun start30(at: Long) {
+        songs.songs = (1L..30L).map { SongSourceRule.song(it, "Song %02d".format(it), LONG_FIXTURE) }
+        controller.tap(QueueRequest(startSongId = at, startRow = at.toInt() - 1), "Song %02d".format(at))
+        controller.waitUntil("song $at plays of 30") { isPlaying && currentMediaItem?.mediaId == "$at" && mediaItemCount == 30 }
+    }
+
+    @Test
+    fun entriesInManyRunsWithTheCurrentOneHandOverToTheUpNextEntryWhichLeavesTheRun() {
+        start30(at = 1)
+        add(26, 27, 28, 29, 30, next = true)
+        controller.waitUntil("five songs are up next") { mediaItemCount == 35 }
+        eventually("the run is saved") { store.readQueueBlocking()?.upNext?.size == 5 }
+        // The current entry, the third up-next entry and every other song after the run: more runs than are removed one by
+        // one, and the next entry that stays is the first of the run.
+        val rows = intArrayOf(0, 3, 7, 9, 11, 13, 15, 17, 19, 21)
+
+        assertThat(removeEntries(*rows).resultCode).isEqualTo(SessionResult.RESULT_SUCCESS)
+
+        controller.waitUntil("the first up-next entry plays") { mediaItemCount == 25 && currentMediaItem?.mediaId == "26/a1" && isPlaying }
+        eventually("the saved run leaves out the entry that plays") {
+            store.readQueueBlocking()?.upNext == listOf(EntryKey.Added(2), EntryKey.Added(4), EntryKey.Added(5))
+        }
+    }
+
+    @Test
+    fun withNoEntryAfterTheRemovedCurrentOneTheFirstThatStaysWaitsPausedWhenRunsAreRemovedOneByOne() {
+        start30(at = 30)
+
+        removeEntries(1, 29)
+
+        controller.waitUntil("song 1 waits paused at its start") {
+            mediaItemCount == 28 && currentMediaItem?.mediaId == "1" && !playWhenReady && playbackState == Player.STATE_READY
+        }
+        assertThat(onMain { controller.currentPosition }).isLessThan(1_000)
+    }
+
+    @Test
+    fun withNoEntryAfterTheRemovedCurrentOneTheFirstThatStaysWaitsPausedWhenManyRunsAreRemoved() {
+        start30(at = 30)
+
+        removeEntries(*(1 until 30 step 2).toList().toIntArray())
+
+        controller.waitUntil("song 1 waits paused at its start") {
+            mediaItemCount == 15 && currentMediaItem?.mediaId == "1" && !playWhenReady && playbackState == Player.STATE_READY
+        }
+        assertThat(onMain { controller.currentPosition }).isLessThan(1_000)
+    }
+
+    @Test
+    fun withRepeatAllTheRemovedLastEntryGivesWayToTheFirstThatStaysWhichPlaysOnBothWays() {
+        start30(at = 30)
+        onMain { controller.repeatMode = Player.REPEAT_MODE_ALL }
+        controller.waitUntil("repeat all is on") { repeatMode == Player.REPEAT_MODE_ALL }
+
+        val many = removeEntries(*(1 until 30 step 2).toList().toIntArray())
+        controller.waitUntil("song 1 plays on after many runs") { mediaItemCount == 15 && currentMediaItem?.mediaId == "1" && isPlaying }
+
+        assertThat(undo(many).resultCode).isEqualTo(SessionResult.RESULT_SUCCESS)
+        controller.waitUntil("song 30 plays again") { mediaItemCount == 30 && currentMediaItem?.mediaId == "30" && isPlaying }
+        removeEntries(1, 29)
+        controller.waitUntil("song 1 plays on after two runs") { mediaItemCount == 28 && currentMediaItem?.mediaId == "1" && isPlaying }
     }
 
     @Test

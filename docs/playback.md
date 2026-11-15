@@ -1123,7 +1123,13 @@ controllers within 0.25 s (the median of 5 runs, `@TimingTest`).
 - Removing every entry ("Select all" with nothing deselected) empties the queue and forgets the saved one, as removing the
   last entry does, and "Undo" puts the whole queue back and saves it again.
 - Removing the current song plays the next entry that stays, in the order the queue plays (the shuffle order while
-  shuffle is on); playing or paused stays as it was.
+  shuffle is on); playing or paused stays as it was. Decision: when no entry after it stays, the queue goes to the first
+  entry that stays in that order: with repeat all or one the queue goes round and that entry plays on, playing or paused
+  as it was; with repeat off it waits there paused at its start, as a queue that reached its end waits for play. Both
+  ways of removing (run by run and around the playing entry) land on the same entry in the same state, and an undo
+  leaves playing or paused as it is then.
+- An up-next entry that becomes current by such a removal leaves the up-next run (§9.1) in both ways of removing, so the
+  saved run never holds the entry that plays.
 - The message says "Removed <N> songs" with "Undo". Undo puts every removed entry back where it was, in the list and in
   the play order as it was, and the current song back at its position if it was removed, as long as the queue has not
   changed since; it follows the rules of one removal (§9.2): a newer message replaces it, and an undo that does not fit
@@ -1143,10 +1149,13 @@ controllers within 0.25 s (the median of 5 runs, `@TimingTest`).
 Checks. JVM tests: rows grouped into runs, from the last; the journal after removing scattered rows equals the journal of
 one removal at a time, also next to opened files, a song that stands twice and up-next entries (which leave the run);
 removing every row gives no queue; the rebuilt queue equals the edited one; the next entry that stays after removing the
-current one, with shuffle off and on; the request with the songs left out removed rebuilds to the selected songs in
+current one, with shuffle off and on, and with none after it that stays the first that stays, paused only with repeat
+off; the request with the songs left out removed rebuilds to the selected songs in
 order. Instrumented tests on the emulators, through the service: scattered entries removed with shuffle off and on, the
 current one among them, up-next entries among them; entries in more than 8 runs under shuffle, the playing one staying
-current, and their undo with the play order; all of them, undone; undo of all, refused after another edit; a row
+current, and their undo with the play order; entries in more than 8 runs with the current one among them handing over to
+an up-next entry, which leaves the saved run; the current last entry removed with none after it that stays, run by run and
+in more than 8 runs, waiting paused on the first that stays with repeat off and playing on with repeat all; all of them, undone; undo of all, refused after another edit; a row
 that no longer shows its media ID removes nothing; "Play" of only these and of all but some, with shuffle off and on,
 restored after the process is gone; "Add to queue" of all but some; both commands not offered to and refused from
 another controller. Timing (`@TimingTest`, median of 5, local emulator): removing 1 000 scattered entries of a

@@ -130,6 +130,21 @@ object QueueEditing {
         return (position + 1 until order.size).map { order[it] }.firstOrNull { it !in removed }
     }
 
+    /** Where the queue goes when its current entry is removed: the entry at [row] before the removal, paused or not. */
+    data class Landing(val row: Int, val pauses: Boolean)
+
+    /**
+     * Where the queue goes when its current entry is among [removed] rows (§9.6): the next entry that stays ([nextKept]),
+     * playing or paused as before; with none after it, the first entry that stays in the play order, which plays on with
+     * [repeat] (all or one: the queue goes round) and waits paused at its start without. Null when no entry stays.
+     */
+    fun landing(view: QueueView, removed: Set<Int>, repeat: Boolean): Landing? {
+        nextKept(view, removed)?.let { return Landing(it, pauses = false) }
+        val order = view.order
+        val first = if (order != null) order.firstOrNull { it !in removed } else view.keys.indices.firstOrNull { it !in removed }
+        return first?.let { Landing(it, pauses = !repeat) }
+    }
+
     /** The entries from [from] to [to] moved in the list to start at [newIndex], as Media3 moves them. */
     fun moveRange(state: QueueState, view: QueueView, from: Int, to: Int, newIndex: Int): QueueState {
         var result = state

@@ -1185,7 +1185,13 @@ class PlaybackSessionCallback(
         val order = player.playOrder?.indices()
         val current = player.currentMediaItemIndex
         val currentGoes = current in removed
-        val next = if (currentGoes) QueueEditing.nextKept(QueueView(Collections.nCopies(count, EntryKey.Added(0)), current, order), removed) else null
+        // With the current entry among them, where the queue goes: the same in both ways of removing below (§9.6).
+        val landing = if (currentGoes) {
+            val view = QueueView(Collections.nCopies(count, EntryKey.Added(0)), current, order)
+            QueueEditing.landing(view, removed, repeat = player.repeatMode != Player.REPEAT_MODE_OFF)
+        } else {
+            null
+        }
         val positionMs = player.currentPosition
         val items = sorted.map { player.getMediaItemAt(it) }
         // Known before the removal, so that removed files keep their grants for an undo.
@@ -1193,9 +1199,13 @@ class PlaybackSessionCallback(
         val runs = QueueEditing.runs(sorted)
         if (runs.size <= MAX_RUNS || sorted.size == count) {
             for (run in runs) player.removeMediaItems(run.first, run.last + 1)
-            if (next != null && player.mediaItemCount > 0) {
-                val row = next - sorted.count { it < next }
-                if (player.currentMediaItemIndex != row) player.seekToDefaultPosition(row)
+            if (landing != null && player.mediaItemCount > 0) {
+                val row = landing.row - sorted.count { it < landing.row }
+                if (landing.pauses) player.pause()
+                // With nothing after the removed entry the player may have ended: the seek starts it again.
+                if (player.currentMediaItemIndex != row || landing.pauses || player.playbackState == Player.STATE_ENDED) {
+                    player.seekToDefaultPosition(row)
+                }
             }
         } else {
             // Many runs: each removal would make the player build its whole timeline anew, too much for a long queue.
@@ -1205,11 +1215,8 @@ class PlaybackSessionCallback(
             val view = state?.let { viewOf(player, it) }
             val after = if (state != null && view != null) QueueEditing.removeRows(state, QueueView(view.keys, view.current), sorted) else null
             val kept = (0 until count).filter { it !in removed }
-            val anchor = when {
-                !currentGoes -> current
-                next != null -> next
-                else -> order?.firstOrNull { it !in removed } ?: kept.first()
-            }
+            val anchor = landing?.row ?: current
+            if (landing?.pauses == true) player.pause()
             if (anchor != current) player.seekToDefaultPosition(anchor)
             val newRow = IntArray(count) { -1 }
             kept.forEachIndexed { index, row -> newRow[row] = index }
@@ -1217,6 +1224,9 @@ class PlaybackSessionCallback(
             player.keepAround(anchor, kept.map { player.getMediaItemAt(it) }, newRow[anchor])
             order?.filter { it !in removed }?.map { newRow[it] }?.toIntArray()?.let { player.setPlayOrder(StartFirstShuffleOrder.of(it)) }
             if (after != null) edited(after)
+            // The seek to the anchor came before the removal was journalled: the entry that plays now leaves the up-next
+            // run only once the queue is the one after the removal.
+            onTransition()
         }
         val removal = Removal(before, sorted, items, null, version, order, current.takeIf { currentGoes }, positionMs)
         lastRemoval = removal

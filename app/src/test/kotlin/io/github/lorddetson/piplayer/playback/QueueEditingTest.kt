@@ -487,4 +487,23 @@ class QueueEditingTest {
         assertThat(QueueEditing.nextKept(QueueView(keys, current = 1, order = order), setOf(1, 5))).isEqualTo(0)
         assertThat(QueueEditing.nextKept(QueueView(keys, current = 1, order = order), setOf(1, 5, 0, 3, 2))).isNull()
     }
+
+    @Test
+    fun aRemovedCurrentEntryWithNoneAfterItThatStaysGoesToTheFirstThatStaysPausedUnlessRepeatGoesRound() {
+        val keys = songs(1, 2, 3, 4, 5, 6)
+        // An entry after it stays: it plays on, whatever the repeat mode.
+        assertThat(QueueEditing.landing(QueueView(keys, current = 1), setOf(1, 2), repeat = false))
+            .isEqualTo(QueueEditing.Landing(3, pauses = false))
+        // The last row goes with the one before it: the first that stays, paused with repeat off, playing on with repeat.
+        assertThat(QueueEditing.landing(QueueView(keys, current = 5), setOf(0, 4, 5), repeat = false))
+            .isEqualTo(QueueEditing.Landing(1, pauses = true))
+        assertThat(QueueEditing.landing(QueueView(keys, current = 5), setOf(0, 4, 5), repeat = true))
+            .isEqualTo(QueueEditing.Landing(1, pauses = false))
+        // Shuffle on, rows in the order 4, 1, 5, 0, 3, 2: the current row 2 is the last; the first that stays plays first.
+        val order = intArrayOf(4, 1, 5, 0, 3, 2)
+        assertThat(QueueEditing.landing(QueueView(keys, current = 2, order = order), setOf(2, 3, 4), repeat = false))
+            .isEqualTo(QueueEditing.Landing(1, pauses = true))
+        // Nothing stays: no landing (the queue goes).
+        assertThat(QueueEditing.landing(QueueView(keys, current = 0), (0..5).toSet(), repeat = true)).isNull()
+    }
 }
