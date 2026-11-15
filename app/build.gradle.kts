@@ -51,8 +51,15 @@ require(contactUrl.matches(Regex("""[!#-'*-\[\]-~]+"""))) {
  *
  * ```
  * ANDROID_SERIAL=<emulator> gradlew :app:installBenchmark :app:installBenchmarkAndroidTest -Ppiplayer.minifiedTests=true
- * python <main folder>/tools/instrumented/run_instrumented.py <emulator> MinifiedClientsTest --no-install
+ * python <main folder>/tools/instrumented/run_instrumented.py <emulator> MinifiedClientsTest --no-install -e minified true
  * ```
+ *
+ * `-e minified true` makes MinifiedClientsTest fail when the build under test is not the benchmark one, and the helper
+ * refuses it without --no-install, which would reinstall the debug build. The test APK keeps the debug run's package, so
+ * the next normal run must install again (the helper refuses --no-install while the device holds the benchmark test
+ * APK). The keep rules name the entry points by hand: MinifiedTestRulesTest (a JVM test) fails when one is renamed or
+ * removed or when TestServices or IdentificationServices.create takes a new app type, and the minified run is repeated
+ * whenever IdentificationServices.create, TestServices or the clients' calls change.
  */
 val minifiedTests: Boolean = providers.gradleProperty("piplayer.minifiedTests").map { it.toBoolean() }.getOrElse(false)
 val minifiedTestRules = "proguard-minified-tests.pro"
@@ -228,6 +235,9 @@ android {
             }
             // A fork's contact, so that the User-Agent test compares BuildConfig with the value the fork set.
             providers.gradleProperty("piplayer.contactUrl").orNull?.let { test.systemProperty("piplayer.contactUrl", it) }
+            // MinifiedTestRulesTest reads the keep rules of the minified run, so a change to them reruns the tests.
+            test.inputs.file(minifiedTestRules).withPropertyName("minifiedTestRules")
+                .withPathSensitivity(PathSensitivity.NONE)
         }
     }
 

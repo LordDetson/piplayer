@@ -2,10 +2,16 @@
 # They keep, under new names, the app code that only the tests call, so that R8 can neither drop it nor fold it into
 # its callers; everything below these entry points (the DTOs, their serializers, the parsing) is shrunk, optimized and
 # renamed as in the release build. The test APK follows the new names through the app's mapping.
+#
+# The entry points are named by hand. MinifiedTestRulesTest (JVM) fails when one of them is renamed or removed, or when
+# TestServices or IdentificationServices.create takes an app type missing here; repeat the minified run whenever
+# IdentificationServices.create, TestServices or the clients' calls change, since nothing on CI runs it.
 
 # The libraries the test APK shares with the app: AGP leaves them out of the test APK, so the tests, the test runner,
 # MockWebServer and okhttp-tls use the app's copies, also their internals. Kept whole and by name, since the test APK
 # reached renamed OkHttp internals by their old names; the app's own code and kotlinx.serialization are not among them.
+# So R8 does not process these libraries in this run: the check covers the app's clients, DTOs, serializers and parsing,
+# not the HTTP stack, the coroutines or the Kotlin standard library as R8 shrinks and optimizes them in a release.
 -keep class kotlin.** { *; }
 -keep class kotlinx.coroutines.** { *; }
 -keep class okhttp3.** { *; }
