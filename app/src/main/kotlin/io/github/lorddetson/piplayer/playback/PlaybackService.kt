@@ -127,6 +127,7 @@ class PlaybackService : MediaLibraryService() {
         // Own covers and folder images for the session (docs/library.md §13.6).
         sessionCovers = SessionCovers(sessionPlayer, { SessionCovers.pictureOf(this, it) }, Covers.own(this).version, mainScope)
             .also { it.start() }
+        removeTaskForTests = { onTaskRemoved(null) }
         isRunningForTests = true
     }
 
@@ -199,16 +200,22 @@ class PlaybackService : MediaLibraryService() {
         val player = session?.player
         val playing = player != null && player.playWhenReady &&
             (player.playbackState == Player.STATE_READY || player.playbackState == Player.STATE_BUFFERING)
-        if (!playing && controls?.taskRemoved() != true) pauseAllPlayersAndStopSelf()
+        if (!playing && controls?.taskRemoved() != true) stopAfterSwipe()
     }
 
     /** A snippet's hold that kept the service after a swipe from recents ended without a resume (TI §6). */
+    private fun stopAfterHold() = stopAfterSwipe()
+
     @OptIn(UnstableApi::class)
-    private fun stopAfterHold() = pauseAllPlayersAndStopSelf()
+    private fun stopAfterSwipe() {
+        swipeStopsForTests++
+        pauseAllPlayersAndStopSelf()
+    }
 
     override fun onDestroy() {
         Library.passGate.setPlaying(false)
         playbackLooperForTests = null
+        removeTaskForTests = null
         passBatches?.cancel()
         passBatches = null
         sessionCovers?.stop()
@@ -368,6 +375,18 @@ class PlaybackService : MediaLibraryService() {
         @VisibleForTesting
         @Volatile
         var isRunningForTests = false
+            private set
+
+        /** Swipes PiPlayer away from recents as the system would, on the main thread; null while no service runs. */
+        @VisibleForTesting
+        @Volatile
+        var removeTaskForTests: (() -> Unit)? = null
+            private set
+
+        /** How often a swipe from recents, or a snippet's hold that one kept, has stopped the service in this process. */
+        @VisibleForTesting
+        @Volatile
+        var swipeStopsForTests = 0
             private set
     }
 }
