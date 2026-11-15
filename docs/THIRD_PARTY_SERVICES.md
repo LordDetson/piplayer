@@ -2,7 +2,7 @@
 
 PiPlayer plays and manages your music without a network. Only track identification talks to online services, and only
 after you turn online lookups on and accept the disclosure in the app. Until then the app sends nothing (see
-[track-identification.md](track-identification.md) §9, "Privacy").
+[track-identification.md](track-identification.md) §9, "Privacy", and the [privacy policy](PRIVACY.md)).
 
 This page lists every service PiPlayer talks to, where its terms are, when PiPlayer's maintainer last read them and
 what the service receives. It is updated whenever a service is added or its terms change, and every term is read

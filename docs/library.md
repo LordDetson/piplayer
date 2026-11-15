@@ -216,7 +216,8 @@ The data model it implements is sketched in track-identification.md §10 (TI bel
 
 - Settings live in DataStore in the main process, in two files (TI §10):
     - `settings`, backed up: the theme, the hidden-file choices (§3.5), the sleep timer's last choice and, from M2b,
-      the legacy encoding (`legacy_encoding`, §5.7);
+      the legacy encoding (`legacy_encoding`, §5.7) and, from M3, the identification and privacy settings
+      (`online_lookups_enabled`, `disclosure_version`, `protected_fields`, TI §10);
     - `device_state`, not backed up: "stop after current track" (playback.md §6.4), whether the audio permission was
       denied before (playback.md §2.2) and, from M2b, the legacy encoding the library was last decoded with (§5.7).
 - The three SharedPreferences files of M1 (`player`, `playback_controls`, `songs`) move into them under the same keys

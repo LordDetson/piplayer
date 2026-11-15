@@ -1094,12 +1094,30 @@ Rules:
   AcoustID limit counts per IP address (§8).
 - Public 0.x pre-releases on GitHub may use online identification: AcoustID (2026-11-05) and MetaBrainz (2026-10-30)
   confirmed the terms in writing.
-- Privacy: online lookup is opt-in with a clear explanation. The opt-in is one setting plus the version of the
-  disclosure the user accepted (`disclosure_version`), with no switch per service. The online gate built on it is
-  closed by default, also before the setting exists, and closes again when the disclosure version rises. The HTTP
-  client checks it on every request and every redirect hop, and before every host lookup and new connection (§8), so
-  nothing leaves the device while it is closed. Every online service is disclosed in the app before its first use, in
-  the privacy policy and in Play Data safety, which must declare what is **shared** with whom:
+- Privacy: online lookup is opt-in with a clear explanation. The opt-in is one setting, `online_lookups_enabled`,
+  plus `disclosure_version`, the version of the in-app disclosure the user last answered, with no switch per service
+  (§10 lists the keys). The online gate built on them is open only while the setting is on and `disclosure_version`
+  is at least the version this build shows. It is closed by default and while the settings file has not been read
+  yet, and it closes again when a build raises the disclosure version (a new service, or more data shared). The HTTP
+  client checks it on every request and every redirect hop, and before every host lookup and new connection (§8),
+  so a change of the gate also stops calls that are already waiting for the limiter, a backoff or a redirect, and
+  nothing leaves the device while it is closed. Turning the setting off closes the gate at once, before the settings
+  file is written.
+- The disclosure is one screen, shown before the first online lookup and again whenever the disclosure version
+  rises, with two answers. **Enable** turns the setting on and records the version. **Not now** records the version
+  with the setting off, so the screen does not come back before every identification, and identification stays
+  local: it uses what the file already holds (stage 0) and reports that online lookups are off, without sending
+  anything. Turning the setting on later in Settings shows the disclosure first when the user has not answered the
+  current version. Settings, "Identification and privacy", holds the setting, the same list of services with links
+  to their terms, the protected-fields list (§6) and each provider's status for this session (stopped after a
+  User-Agent rejection or an invalid key, §8, or unavailable in a build without an AcoustID key). The disclosure and
+  the section link to [PRIVACY.md](PRIVACY.md) and [THIRD_PARTY_SERVICES.md](THIRD_PARTY_SERVICES.md).
+- The settings file is backed up (§10.3), so a restore carries the consent to the new device or the reinstalled
+  app, like every other setting: the user gave it, and it describes what the app sends, not the device. A restored
+  consent opens the gate only when its `disclosure_version` is at least the version of the installed build;
+  otherwise the build shows its disclosure before the first online lookup, as after an update.
+- Every online service is disclosed in the app before its first use, in the privacy policy and in Play Data safety,
+  which must declare what is **shared** with whom:
   - AcoustID: fingerprints and durations;
   - MusicBrainz: existing tags, parsed file names, durations and IDs;
   - Cover Art Archive: release and release group IDs, also in the background while albums without a local cover are
@@ -1131,6 +1149,16 @@ Where things live:
   mode, ID3v1 policy, unmetered-only, protected-fields list, cover preset and the other options) is backed up;
   `device_state` (rate-limiter last-request times, and from M2a "stop after current track" and the permission flag
   of library.md §3.2) is not.
+- The identification and privacy keys of `settings` (M3):
+  - `online_lookups_enabled` (boolean, absent means off): the online-lookup setting of §9;
+  - `disclosure_version` (integer, absent means 0, never answered): the disclosure version the user last answered,
+    by Enable or Not now (§9). The first disclosure is version 1;
+  - `protected_fields` (set of strings, absent means empty): the fields identification never proposes to change
+    (§6). The names are `title`, `artist` (the track's artists with their credits and sort names), `album`,
+    `album_artist` (likewise), `date`, `original_date`, `track_number` (number and total), `disc_number` (number and
+    total), `disc_subtitle`, `compilation`, `label`, `catalog_number`, `barcode`, `isrc`, `musicbrainz_ids` and
+    `cover`. A name this build does not know is kept when the list changes, so a newer build's choice survives a
+    downgrade or a restore into an older build.
 - Library folder rules are user decisions and live in the user database.
 - The persisted queue lives in its own DataStore file, `playback_state`, and in `queue.bin` under the no-backup files
   (playback.md §4.8), which the backup rules leave out: it refers to tracks by file ID, identity, content key and
@@ -1328,6 +1356,7 @@ tests, and a high-band error rate within the threshold of §11.4.
 | M3 | Edition picker: every release of the group is listed; an edition without the identified recording maps the file by position and title or is marked "does not contain this song" |
 | M0 | Rate limiter: never exceeds the configured rate under parallel callers; a pause holds back waiting callers; backoff with jitter on 503, 429, 502 and 504; Retry-After honoured; a rejected User-Agent is not retried; after giving up on a Retry-After over 120 s, later calls fail at once without a request until the pause is over |
 | M3 | Sending rules (§8): the app's online gate is closed by default; with the gate closed no client sends a request (AcoustID, MusicBrainz, a Cover Art Archive image and its redirect hop); a repeat the HTTP library makes by itself after the gate closed (a 408 or a 503 with Retry-After 0, also after `Connection: close`, or a dropped pooled connection) looks up and connects nothing; closing the gate during a backoff sends no further attempt; a blocked call is neither retried nor pauses the limiter; a network that is not validated, or a captive portal, fails at once without a request; a MusicBrainz 403 for the User-Agent and AcoustID error 4 stop that provider for the process, and a stop in one set of services does not reach another; a MusicBrainz 200 with an HTML body is retried, then reported as unavailable; dropped connections and failing DNS lookups are retried and given up, with the limiter paused only by the backoff; one limiter per provider at 1.1 s, 0.35 s and 1 s |
+| M3 | Online-lookup opt-in (§9, §10): the gate of the settings file is closed with an empty file and before the file is read; Enable opens it, Not now and turning the setting off close it, and turning off closes it before the write ends; a build with a higher disclosure version finds it closed and asks for the disclosure, and Enable there opens it; a restored file opens it only with the current disclosure version; a change written by another writer of the file reaches the gate; turning the setting off while a lookup waits for its retry, or while a second lookup waits for the limiter, sends nothing more; the app's services use this gate; the protected-fields list keeps names it does not know |
 | M3 | Cover URLs: `http://` → `https://`; a release with a usable front image (`front-500`, `front-1200`, original); a release without one (release group images, marked as another edition); 404 after a redirect; failure TTLs (404: 7 days; 503: 5 minutes, doubling up to 6 hours) |
 | M3 | Cover size rule: a proposed cover whose short side is shorter than the existing cover's starts unticked |
 | M3 | Database-only undo: Apply followed by Undo restores the earlier merged values; stacked decisions (two identifications in a row, an edit on top of an identification) resolve as in §7.1; Undo right after Apply, Keep as-is and Skip; a later file change flags the field per location |
@@ -1361,6 +1390,7 @@ tests, and a high-band error rate within the threshold of §11.4.
 | M3 | Decoding table: every format the player plays (playback.md §1.7: MP3, also at 320 kbit/s, AAC in MP4 and raw (ADTS), AMR narrowband and wideband raw and in 3GP, Ogg Vorbis, Vorbis in Matroska, Opus in Ogg and WebM, FLAC, also in 5.1, and WAV) is read with `MediaExtractorCompat`, decoded by a platform decoder (WAV without one) and all of its audio reaches Chromaprint at 11 025 Hz; ALAC in MP4 is refused as an unsupported format, because the platform has no ALAC decoder, so in 1.0 an ALAC file is not fingerprinted and is identified by text search only (bundled decoders come in v1.x); on a phone whose maker adds an ALAC decoder the row expects the platform path instead, with the file's 2 s and at most one 4096-sample ALAC frame more. Every row must have an expected length, so none can drop out of the check unnoticed. The new formats are also decoding fixtures (row M0 above), each at its own rate and channel count, with the 1 kHz tone intact; raw AAC keeps its priming frame and padding (up to two frames more), and the 3GP AMR wideband fixture holds 1.995 s, because the 3GP edit list trims the encoder's delay that the encoder does not flush at the end |
 | M3 | Snippet: a playing main player pauses for the snippet and resumes at the same position; a main player paused before the snippet stays paused; queue, position and statistics do not change; a focus loss during the snippet stops it without resuming the main player |
 | M3 | Session metadata: for a fixture whose embedded cover and tags differ from the saved values, and for an MP3 without a frame-count header, the MediaController's metadata, artwork and duration equal PiPlayer's values after Apply and after Undo, without preparing the file again |
+| M3 | Identification and privacy (§9): the disclosure names every service with what it receives, the background Cover Art Archive loads included, and its Enable and Not now buttons and links have labels and click actions for TalkBack; the settings section shows the setting as a switch, opens the disclosure when the current version is unanswered and turns off at once, lists the services and their terms links, changes the protected-fields list with checkboxes and shows each provider's status (stopped after a User-Agent rejection or an invalid key, unavailable without a key) |
 | M4a | A 500-file batch started from a folder resumes after its process is killed in any phase, and its accepted results appear in every view and on system surfaces |
 | M4a | On the named physical device, not an emulator: playback during a 500-file batch has no audible effect and no more underruns than without the batch |
 | M4b | Tag round trip for MP3 (ID3v2.3 with APIC, ID3v2.4, ID3v2.2), FLAC (PICTURE), M4A AAC/ALAC (`covr`), Ogg Vorbis, Opus, WAV: write → re-read → compare property maps → audio bytes unchanged → content key unchanged → ID3v2 version preserved (v2.2 written as v2.3). Also: no ID3v1 created on a file without one; an APE tag in an MP3 preserved; a v2.3 file with `TSST` and `TSOP` (`TSST` as its own diff line, `TSOP` kept); back cover preserved; gapless info and comment frames with a description untouched |

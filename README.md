@@ -18,7 +18,8 @@ Early design. There is no app code yet; the first specification is in
 - [Cover Art Archive](https://coverartarchive.org/) for album covers
 
 What each service receives, and where its terms are, is listed in
-[docs/THIRD_PARTY_SERVICES.md](docs/THIRD_PARTY_SERVICES.md).
+[docs/THIRD_PARTY_SERVICES.md](docs/THIRD_PARTY_SERVICES.md). Nothing is sent until you turn online lookups on; the
+[privacy policy](docs/PRIVACY.md) explains what happens then.
 
 ## Forks
 
