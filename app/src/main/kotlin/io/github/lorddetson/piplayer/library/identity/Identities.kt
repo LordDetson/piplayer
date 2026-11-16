@@ -96,6 +96,7 @@ object IdentityMatcher {
         identities: List<Identity>,
         holdingData: Set<Long>,
         now: Long,
+        unread: Set<Place> = emptySet(),
     ): AttachPlan {
         val filesByKey = files.groupBy { it.contentKey }
         val heldKeys = identities.mapTo(HashSet()) { it.contentKey }

@@ -50,7 +50,12 @@ class FingerprintStep(
      * The takeovers for [identities] over [files], after the other steps have run: only identities in [holdingData]
      * look for a file, and only files whose identity is not in it may be taken.
      */
-    suspend fun takeovers(files: List<KeyedFile>, identities: List<Identity>, holdingData: Set<Long>): List<Takeover> {
+    suspend fun takeovers(
+        files: List<KeyedFile>,
+        identities: List<Identity>,
+        holdingData: Set<Long>,
+        unread: Set<Place> = emptySet(),
+    ): List<Takeover> {
         val owners = identities.associateBy { it.contentKey }
         val attachedKeys = files.keys()
         val missing = identities.filter { it.id in holdingData && it.contentKey !in attachedKeys && it.missingSince != null }

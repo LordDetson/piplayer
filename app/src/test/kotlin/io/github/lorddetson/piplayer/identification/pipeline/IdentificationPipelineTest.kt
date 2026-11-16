@@ -191,6 +191,22 @@ class IdentificationPipelineTest {
     }
 
     @Test
+    fun `a library file's target carries the exact length of stage 0 for Apply, a walked one too`() = runTest {
+        val pipeline = pipeline()
+        val walk = file(duration = StageDuration.Pending(DurationPlan(null, DurationCheck.WALK)))
+        local.file = walk.copy(target = IdentificationTarget.LibraryFile(7, KEY))
+        local.walked = 201_400
+        acoustId.on(SESSION, ID_ONLY)
+
+        val walked = pipeline.run(FileRef.Library(7))
+        local.file = file().copy(target = IdentificationTarget.LibraryFile(7, KEY))
+        val stored = pipeline.run(FileRef.Library(7))
+
+        assertThat(walked.file!!.target).isEqualTo(IdentificationTarget.LibraryFile(7, KEY, durationMs = 201_400))
+        assertThat(stored.file!!.target).isEqualTo(IdentificationTarget.LibraryFile(7, KEY, durationMs = DURATION_MS))
+    }
+
+    @Test
     fun `a FLAC end check that finds no earlier end keeps the header length`() = runTest {
         val pipeline = pipeline()
         local.file = file(duration = StageDuration.Pending(DurationPlan(DURATION_MS, DurationCheck.FLAC_END)))

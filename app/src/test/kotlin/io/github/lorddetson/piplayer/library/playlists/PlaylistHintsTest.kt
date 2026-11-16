@@ -58,6 +58,29 @@ class PlaylistHintsTest {
     }
 
     @Test
+    fun step5LeavesAMissingIdentityThatWaitsForTheReadOfTheFileAtItsHint() {
+        val gone = Place("external_primary", "Music/Gone/", "x.mp3")
+        val identity = missing(7, "aa", hint = gone)
+        val target = file(1, "bb", moved)
+
+        val found = PlaylistHints.takeovers(listOf(target), listOf(identity, owner(100, target)), setOf(7L), mapOf(7L to listOf(hint(old))), unread = setOf(gone))
+
+        assertThat(found).isEmpty()
+    }
+
+    @Test
+    fun step5AWaitingIdentityStillKeepsAnotherFromTakingTheFileItCouldTake() {
+        val gone = Place("external_primary", "Music/Gone/", "x.mp3")
+        val identities = listOf(missing(7, "aa", hint = gone), missing(8, "dd", hint = null))
+        val target = file(1, "bb", moved)
+        val hints = mapOf(7L to listOf(hint(old)), 8L to listOf(hint(moved)))
+
+        val found = PlaylistHints.takeovers(listOf(target), identities + owner(100, target), setOf(7L, 8L), hints, unread = setOf(gone))
+
+        assertThat(found).isEmpty()
+    }
+
+    @Test
     fun step5ByThePlaceOfTheEntryWithTheLength() {
         val identity = missing(7, "aa", hint = null)
 

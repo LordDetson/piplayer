@@ -191,6 +191,53 @@ class IdentityMatcherTest {
     }
 
     @Test
+    fun step3LeavesAMissingIdentityThatWaitsForTheReadOfTheFileAtItsHint() {
+        // Apply gave the identity the key stage 0 computed for the unread file at its hint, which the library holds no key
+        // for yet; a file elsewhere carries the identity's recording MBID.
+        val elsewhere = file(1, "bb", place = moved, durationMs = 199_500, mbid = "m1")
+        val waiting = identity(7, "aa", mbid = "m1", missingSince = now - 1_000)
+
+        val result = IdentityMatcher.plan(listOf(elsewhere), listOf(waiting), emptySet(), now, unread = setOf(music))
+
+        assertThat(result.updated).isEmpty()
+        assertThat(result.created).containsExactly(elsewhere)
+    }
+
+    @Test
+    fun aWaitingIdentityIsMarkedMissingAndStillCountsForTheUniquenessOfStep3() {
+        val elsewhere = file(1, "cc", place = moved, mbid = "m1")
+        val waiting = identity(7, "aa", mbid = "m1")
+        val other = identity(8, "bb", hint = moved.copy(displayName = "x.mp3"), mbid = "m1", missingSince = now - 1_000)
+
+        val result = IdentityMatcher.plan(listOf(elsewhere), listOf(waiting, other), emptySet(), now, unread = setOf(music))
+
+        assertThat(result.updated).containsExactly(waiting.copy(missingSince = now))
+        assertThat(result.created).containsExactly(elsewhere)
+    }
+
+    @Test
+    fun step2StillGivesAWaitingIdentityTheFileAtItsHint() {
+        // The file at the hint changed in place and is unread: the library still holds its old key, which no identity holds.
+        val stale = file(1, "old")
+        val waiting = identity(7, "aa", durationMs = 200_300, missingSince = now - 1_000)
+
+        val result = IdentityMatcher.plan(listOf(stale), listOf(waiting), emptySet(), now, unread = setOf(music))
+
+        assertThat(result.updated).containsExactly(waiting.following(stale))
+        assertThat(result.created).isEmpty()
+    }
+
+    @Test
+    fun anUnreadFileElsewhereMakesNoIdentityWait() {
+        val f = file(1, "bb", place = moved, durationMs = 199_500, mbid = "m1")
+        val id = identity(7, "aa", mbid = "m1", missingSince = now - 1_000)
+
+        val result = IdentityMatcher.plan(listOf(f), listOf(id), emptySet(), now, unread = setOf(moved.copy(displayName = "02.mp3")))
+
+        assertThat(result.updated).containsExactly(id.following(f))
+    }
+
+    @Test
     fun step3IgnoresAnAttachedFileWithTheMbid() {
         val attached = file(1, "aa", mbid = "m1")
         val holder = identity(5, "aa", mbid = "m1").following(attached)

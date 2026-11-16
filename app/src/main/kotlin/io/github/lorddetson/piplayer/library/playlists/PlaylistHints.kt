@@ -110,6 +110,7 @@ object PlaylistHints {
         identities: List<Identity>,
         holdingData: Set<Long>,
         hints: Map<Long, List<EntryHint>>,
+        unread: Set<Place> = emptySet(),
     ): List<Takeover> {
         if (hints.isEmpty()) return emptyList()
         val held = files.mapTo(HashSet()) { it.contentKey }

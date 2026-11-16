@@ -243,8 +243,9 @@ class IdentificationPipelineDeviceTest {
         val result = pipeline(services(), libraryClient).run(FileRef.Library(fileId))
 
         val file = result.file!!
-        // The key, the tags and the folder are the library's: a read of the file would give its own key and no tags.
-        assertThat(file.target).isEqualTo(IdentificationTarget.LibraryFile(fileId, STORED_KEY))
+        // The key, the tags and the folder are the library's: a read of the file would give its own key and no tags. The
+        // target carries the walked length for Apply.
+        assertThat(file.target).isEqualTo(IdentificationTarget.LibraryFile(fileId, STORED_KEY, durationMs = result.durationMs))
         assertThat(file.tags!!.title).isEqualTo("Paper Lanterns")
         assertThat(result.hint!!.title).isEqualTo("Paper Lanterns")
         assertThat(result.hint.artist).isEqualTo("The Quiet Harbors")

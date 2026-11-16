@@ -359,6 +359,104 @@ class ApplyIdentityTest {
     }
 
     @Test
+    fun applyMatchesAnUnreadFileByStage0sExactLengthWhenTheIndexsLengthIsOff() = runBlocking<Unit> {
+        // A VBR MP3 without a header: the index's length is 3.5 s off, stage 0 walked the frames for the exact one.
+        index.volume().rows = listOf(row(1, path = "Music/Record/", name = "01.mp3", durationMs = 203_500))
+        sync.sync()
+        val missing = user.identities().add(
+            TrackIdentityEntity(
+                contentKey = Hex.bytes(key(9)), durationMs = 200_000, recordingMbid = null,
+                hintVolumeName = FakeMediaIndex.PRIMARY, hintRelativePath = "Music/Record/", hintDisplayName = "01.mp3",
+                hintSize = 1, createdAt = now - 10_000, missingSince = now - 5_000,
+            ),
+        )
+        val exact = request(key(1), fileId = fileId(1)).let { request ->
+            request.copy(target = IdentificationTarget.LibraryFile(fileId(1), key(1), durationMs = 200_200))
+        }
+
+        val applied = checkNotNull(decisions.apply(exact))
+
+        assertThat(applied.identityId).isEqualTo(missing)
+        val taken = checkNotNull(user.identities().identity(missing))
+        assertThat(Hex.text(taken.contentKey)).isEqualTo(key(1))
+        assertThat(taken.durationMs).isEqualTo(200_200)
+        assertThat(user.identities().identities()).hasSize(1)
+    }
+
+    @Test
+    fun anAttachPassBeforeTheTagPassReadsTheFileLeavesApplysIdentityWithItsKeyRatherThanMovingItByItsRecordingMbid() =
+        runBlocking<Unit> {
+            val recording = "4e000000-1111-4222-8333-000000000006"
+            // File 5 lies elsewhere and its tags carry the recording MBID of the missing identity below; no pass has given
+            // it an identity yet.
+            index.volume().rows = listOf(row(5, path = "Music/Elsewhere/", name = "05.mp3", generation = 5))
+            sync.sync()
+            readByThePass { id -> if (id == 5L) mapOf("MUSICBRAINZ_TRACKID" to listOf(recording)) else emptyMap() }
+            // File 1 lies at the place the missing identity names; the tag pass has not read it, so the library has no key.
+            index.volume().rows = listOf(
+                row(5, path = "Music/Elsewhere/", name = "05.mp3", generation = 5),
+                row(1, path = "Music/Record/", name = "01.mp3", durationMs = 60_000, generation = 10),
+            )
+            sync.sync()
+            val missing = user.identities().add(
+                TrackIdentityEntity(
+                    contentKey = Hex.bytes(key(9)), durationMs = 60_300, recordingMbid = Hex.mbidBytes(recording),
+                    hintVolumeName = FakeMediaIndex.PRIMARY, hintRelativePath = "Music/Record/", hintDisplayName = "01.mp3",
+                    hintSize = 1, createdAt = now - 10_000, missingSince = now - 5_000,
+                ),
+            )
+            val applied = checkNotNull(decisions.apply(request(key(1), details(title = "Decided title"), fileId = fileId(1))))
+            assertThat(applied.identityId).isEqualTo(missing)
+
+            // A pass before the tag pass reads file 1 sees the identity as missing: it waits for the read and stays with
+            // file 1's key, and file 5 gets an identity of its own.
+            now += 60_000
+            attacher.attach()
+
+            val waiting = checkNotNull(user.identities().identity(missing))
+            assertThat(Hex.text(waiting.contentKey)).isEqualTo(key(1))
+            assertThat(waiting.hintRelativePath).isEqualTo("Music/Record/")
+            assertThat(identityWithKey(5)?.id).isNotNull().isNotEqualTo(missing)
+
+            // Once the tag pass has read file 1, the next pass attaches the identity by its key.
+            readByThePass()
+            attacher.attach()
+
+            val attached = checkNotNull(user.identities().identity(missing))
+            assertThat(Hex.text(attached.contentKey)).isEqualTo(key(1))
+            assertThat(attached.missingSince).isNull()
+            assertThat(display(1).title).isEqualTo("Decided title")
+            assertThat(display(5).title).isEqualTo("Tag 5")
+        }
+
+    @Test
+    fun anIdentityHintedAtAFileTheTagPassCouldNotReadDoesNotWait() = runBlocking<Unit> {
+        val recording = "4e000000-1111-4222-8333-000000000007"
+        index.volume().rows = listOf(row(5, path = "Music/Elsewhere/", name = "05.mp3", generation = 5))
+        sync.sync()
+        readByThePass { id -> if (id == 5L) mapOf("MUSICBRAINZ_TRACKID" to listOf(recording)) else emptyMap() }
+        index.volume().rows = listOf(
+            row(5, path = "Music/Elsewhere/", name = "05.mp3", generation = 5),
+            row(1, path = "Music/Record/", name = "01.mp3", durationMs = 60_000, generation = 10),
+        )
+        sync.sync()
+        // The tag pass tried file 1 and could not read it.
+        library.library().markFailed(fileId(1), "read", readerVersion = 1)
+        val missing = user.identities().add(
+            TrackIdentityEntity(
+                contentKey = Hex.bytes(key(9)), durationMs = 60_300, recordingMbid = Hex.mbidBytes(recording),
+                hintVolumeName = FakeMediaIndex.PRIMARY, hintRelativePath = "Music/Record/", hintDisplayName = "01.mp3",
+                hintSize = 1, createdAt = now - 10_000, missingSince = now - 5_000,
+            ),
+        )
+
+        attacher.attach()
+
+        // Step 3 gives the missing identity file 5's key by the recording MBID, as for any missing identity.
+        assertThat(Hex.text(checkNotNull(user.identities().identity(missing)).contentKey)).isEqualTo(key(5))
+    }
+
+    @Test
     fun applyOnALibraryFileThatIsGoneWritesNothing() = runBlocking<Unit> {
         index.volume().rows = listOf(row(1))
         sync.sync()

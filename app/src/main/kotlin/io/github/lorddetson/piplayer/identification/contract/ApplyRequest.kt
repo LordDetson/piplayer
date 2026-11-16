@@ -15,10 +15,19 @@ sealed interface IdentificationTarget {
     /** The track's start in the file, 0 until CUE sheets arrive. */
     val startMs: Long
 
-    /** A file of the library, by its file ID (docs/library.md §8.4). */
-    data class LibraryFile(val fileId: Long, override val contentKey: String, override val startMs: Long = 0) : IdentificationTarget {
+    /**
+     * A file of the library, by its file ID (docs/library.md §8.4), with [durationMs], the exact length stage 0 found
+     * (TI §3.1), which Apply matches the file by (TI §10.2 "An identity at Apply"); null when stage 0 found none.
+     */
+    data class LibraryFile(
+        val fileId: Long,
+        override val contentKey: String,
+        override val startMs: Long = 0,
+        val durationMs: Long? = null,
+    ) : IdentificationTarget {
         init {
             checkKey(contentKey, startMs)
+            require(durationMs == null || durationMs > 0) { "A length is positive: $durationMs" }
         }
     }
 

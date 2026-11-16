@@ -45,6 +45,17 @@ class FingerprintStepTest {
     }
 
     @Test
+    fun aMissingIdentityThatWaitsForTheReadOfTheFileAtItsHintTakesNothing() = runTest {
+        val f = file(1, "new")
+        val fake = Fake(mutableMapOf("old" to intArrayOf(5)), mapOf(1L to intArrayOf(5)))
+
+        val result = FingerprintStep(fake, same).takeovers(listOf(f), listOf(missing, newIdentity(9, f)), setOf(7L), unread = setOf(old))
+
+        assertThat(result).isEmpty()
+        assertThat(fake.computed).isEmpty()
+    }
+
+    @Test
     fun aCachedCandidateIsNotComputedAgain() = runTest {
         val f = file(1, "new")
         val fake = Fake(mutableMapOf("old" to intArrayOf(5), "new" to intArrayOf(5)), emptyMap())
