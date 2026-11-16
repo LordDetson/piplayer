@@ -1676,8 +1676,9 @@ Every smart list is a list of the library: it holds visible songs only (§3.5), 
       such as `cover.jpg`) comes later, with the batch over this list (M4a): it is a new background job of one thumbnail
       decode per album that would run after every tag pass. Until then folder images count as no cover, which is why the
       chip is off by default.
-    - Keep as-is and Skip (TI §1) belong to identification: they come with M3 and M4a, together with the
-      `missing_info_decision` column. M2b has neither.
+    - Keep as-is and Skip (TI §1) belong to identification: they come with M3, together with the
+      `missing_info_decision` column (M2b has neither), and batches that include skipped songs come with M4a. A song
+      kept as it is leaves the list and its number; a skipped song stays, with "Skipped" after its reasons in its row.
 
 ### 17.2 Where they show
 
