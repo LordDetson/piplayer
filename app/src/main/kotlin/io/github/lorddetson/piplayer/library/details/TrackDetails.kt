@@ -77,8 +77,11 @@ enum class LengthSource {
     ESTIMATE,
 }
 
-/** Where the cover shown comes from (docs/library.md §18.3). */
-enum class CoverSource { SONG_OWN, ALBUM_OWN, EMBEDDED, THUMBNAIL, NONE }
+/**
+ * Where the cover shown comes from (docs/library.md §18.3): [SAVED] is a decided cover saved in PiPlayer, [CAA] the lazy
+ * Cover Art Archive cover (§13.1).
+ */
+enum class CoverSource { SONG_OWN, ALBUM_OWN, SAVED, EMBEDDED, THUMBNAIL, CAA, NONE }
 
 /** Why the tags of a file are not read (docs/library.md §5.3). */
 enum class TagState { NOT_READ, UNSUPPORTED, FAILED, CANNOT_READ }

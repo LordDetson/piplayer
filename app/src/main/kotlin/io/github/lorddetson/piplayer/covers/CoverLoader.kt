@@ -223,6 +223,12 @@ class CoverLoader<I : Any>(
         if (bytes != null) store.write(diskKey, bytes) else if (image == null && source is CoverStep.Embedded) store.write(diskKey, null)
     }
 
+    /**
+     * The picture of the one [step] for a view [px] wide, through the disk cache as [load] reads it, or null when the step
+     * has none (docs/library.md §18.3).
+     */
+    suspend fun step(step: CoverStep, px: Int): I? = TODO("M3 step 19")
+
     /** Own covers or the library changed: what memory holds may be stale. */
     fun invalidate() {
         synchronized(memoryLock) {

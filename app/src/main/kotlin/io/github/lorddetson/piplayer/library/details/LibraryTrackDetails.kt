@@ -2,7 +2,9 @@ package io.github.lorddetson.piplayer.library.details
 
 import android.content.ContentUris
 import android.provider.MediaStore
+import io.github.lorddetson.piplayer.covers.CoverStep
 import io.github.lorddetson.piplayer.covers.OwnCovers
+import io.github.lorddetson.piplayer.covers.SavedCovers
 import io.github.lorddetson.piplayer.library.db.AudioFileEntity
 import io.github.lorddetson.piplayer.library.db.CoverFileRow
 import io.github.lorddetson.piplayer.library.db.MediaIndexEntryEntity
@@ -26,6 +28,9 @@ interface PictureProbe {
 
     /** Whether Android has a thumbnail for the file at [uri]. */
     suspend fun hasThumbnail(uri: String): Boolean
+
+    /** Whether the lazy Cover Art Archive [step] gives a picture, as the loader would load it (§18.3). */
+    suspend fun online(step: CoverStep.Caa): Boolean = false
 }
 
 /**
@@ -38,6 +43,10 @@ class LibraryTrackDetails(
     private val user: UserDatabase,
     private val own: OwnCovers,
     private val probe: PictureProbe,
+    /** The saved covers, whose files a decided cover needs (TI §5.2); none without them. */
+    private val saved: SavedCovers? = null,
+    /** Whether online lookups are on, without which the plan has no Cover Art Archive step (§13.1). */
+    private val online: () -> Boolean = { false },
 ) {
 
     /** What the library database holds of one file, read at once. */

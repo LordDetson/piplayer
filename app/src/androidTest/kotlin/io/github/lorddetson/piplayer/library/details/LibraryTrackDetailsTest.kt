@@ -3,7 +3,15 @@ package io.github.lorddetson.piplayer.library.details
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.github.lorddetson.piplayer.TestFiles
 import io.github.lorddetson.piplayer.covers.CoverCopy
+import io.github.lorddetson.piplayer.covers.CoverPlan
+import io.github.lorddetson.piplayer.covers.CoverRequest
+import io.github.lorddetson.piplayer.covers.CoverStep
+import io.github.lorddetson.piplayer.covers.LibraryCoverFacts
 import io.github.lorddetson.piplayer.covers.OwnCovers
+import io.github.lorddetson.piplayer.covers.SavedCoverIndex
+import io.github.lorddetson.piplayer.covers.SavedCovers
+import io.github.lorddetson.piplayer.library.db.DecidedMirrorEntity
+import io.github.lorddetson.piplayer.library.db.replaceDecided
 import io.github.lorddetson.piplayer.library.FakeMediaIndex
 import io.github.lorddetson.piplayer.library.FakeMediaIndex.Companion.row
 import io.github.lorddetson.piplayer.library.FakeRules
@@ -67,7 +75,13 @@ class LibraryTrackDetailsTest {
     private val access = object : LibraryTrackRefs.Access {
         override fun <T> read(block: (LibraryDatabase) -> T): T = block(database)
     }
-    private val details = LibraryTrackDetails(access, user, own, probe)
+    private val savedBase = File(context.cacheDir, "details-saved-covers")
+    private val saved = SavedCovers(user, SavedCovers.directory(savedBase))
+
+    /** Whether online lookups are on, as the details and their plan see it. */
+    @Volatile
+    private var online = false
+    private val details = LibraryTrackDetails(access, user, own, probe, saved) { online }
 
     private val recording = "8f3471b5-7e6a-48da-86a9-c1c07a0f47ae"
     private val key = "%064x".format(77)
@@ -76,7 +90,13 @@ class LibraryTrackDetailsTest {
     private class FakeProbe : PictureProbe {
         var embedded: PictureSize? = null
         var thumbnail = false
+        var caa = false
         val asked: MutableList<String> = Collections.synchronizedList(mutableListOf())
+
+        override suspend fun online(step: CoverStep.Caa): Boolean {
+            asked += "caa ${step.release.release}"
+            return caa
+        }
 
         override suspend fun embedded(uri: String): PictureSize? {
             asked += "embedded $uri"
@@ -93,6 +113,7 @@ class LibraryTrackDetailsTest {
     fun fill() {
         ownDir.deleteRecursively()
         ownDir.mkdirs()
+        savedBase.deleteRecursively()
         index.volume().rows = listOf(
             row(1, "Index title", path = "Music/Ann/Red/", name = "03 Song.flac", artist = "Index artist", album = "Index album",
                 durationMs = 205_000, year = 1999, trackNumber = 3),
@@ -107,6 +128,7 @@ class LibraryTrackDetailsTest {
         database.close()
         user.close()
         ownDir.deleteRecursively()
+        savedBase.deleteRecursively()
     }
 
     private fun fileOf(mediaStoreId: Long) = runBlocking { database.library().files() }.single { it.mediaStoreId == mediaStoreId }.id
@@ -121,6 +143,7 @@ class LibraryTrackDetailsTest {
         coverPresent: Boolean = false,
         coverBytes: Long? = null,
         tagEncoding: String? = null,
+        release: String? = null,
     ): Long {
         val fileId = fileOf(mediaStoreId)
         val tags = TrackTags.from(
@@ -130,7 +153,7 @@ class LibraryTrackDetailsTest {
                 "ALBUM" to listOf("Red"),
                 "DATE" to listOf("2003-05-12"),
                 "MUSICBRAINZ_TRACKID" to listOf(recording),
-            ),
+            ) + listOfNotNull(release?.let { "MUSICBRAINZ_ALBUMID" to listOf(it) }),
         )
         runBlocking {
             val dao = database.library()
@@ -331,4 +354,146 @@ class LibraryTrackDetailsTest {
     }
 
     private fun albumKey(fileId: Long) = checkNotNull(LibraryLists(database).links(fileId)?.albumKey)
+
+    // M3 (docs/library.md §13.1, §18.3): the decided cover, Cover Art Archive and the plan the details share with the loader.
+
+    /** A JPEG header with a start of frame of [width] by [height] pixels. */
+    private fun jpeg(width: Int, height: Int) = byteArrayOf(
+        0xFF.toByte(), 0xD8.toByte(),
+        0xFF.toByte(), 0xC0.toByte(), 0x00, 0x11, 0x08,
+        (height shr 8).toByte(), height.toByte(), (width shr 8).toByte(), width.toByte(),
+        0x03, 0x01, 0x22, 0x00, 0x02, 0x11, 0x01, 0x03, 0x11, 0x01,
+        0x00, 0xFF.toByte(), 0xD9.toByte(),
+    )
+
+    /** Saves a cover of [width] by [height] and decides it for [fileId], as the decision mirror would (TI §7.1). */
+    private fun decideCover(fileId: Long, width: Int = 640, height: Int = 480): Long = runBlocking {
+        val id = checkNotNull(saved.save(jpeg(width, height), DECIDED_RELEASE, SavedCovers.Source.RELEASE))
+        decide(fileId, "cover" to id.toString())
+        id
+    }
+
+    private fun decide(fileId: Long, vararg values: Pair<String, String?>) = runBlocking {
+        val rows = database.decided().valuesOf(listOf(fileId)).filter { row -> values.none { it.first == row.field } } +
+            values.map { (field, value) -> DecidedMirrorEntity(fileId, field, value, DecidedMirrorEntity.LEVEL_IDENTIFICATION, 1) }
+        database.replaceDecided(listOf(fileId), rows)
+    }
+
+    @Test
+    fun aDecidedCoverComesBeforeTheEmbeddedPictureAsSavedInPiPlayerWithItsStoredSize() {
+        val fileId = readTags(coverPresent = true, coverBytes = 48_213)
+        probe.embedded = PictureSize(600, 600)
+        decideCover(fileId, 640, 480)
+
+        val details = read(fileId)
+
+        assertThat(details.value(COVER_SOURCE)).isEqualTo(DetailValue.Cover(CoverSource.SAVED))
+        assertThat(details.value(COVER_SIZE)).isEqualTo(DetailValue.Pixels(640, 480, jpeg(640, 480).size.toLong()))
+        assertThat(probe.asked).isEmpty()
+    }
+
+    @Test
+    fun theOwnCoversStillComeBeforeADecidedCover() {
+        val fileId = readTags(coverPresent = true, coverBytes = 48_213)
+        addIdentity()
+        decideCover(fileId)
+        File(ownDir, "album.jpg").writeBytes(byteArrayOf(1))
+        runBlocking { own.setAlbum(albumKey(fileId), CoverCopy("album.jpg", 800, 700)) }
+
+        assertThat(read(fileId).value(COVER_SOURCE)).isEqualTo(DetailValue.Cover(CoverSource.ALBUM_OWN))
+    }
+
+    @Test
+    fun aDecidedCoverWhoseFileIsGoneOrThatIsEmptyDoesNotCount() {
+        val fileId = readTags(coverPresent = true, coverBytes = 48_213)
+        probe.embedded = PictureSize(600, 600)
+        decideCover(fileId)
+        savedBase.deleteRecursively()
+
+        assertThat(read(fileId).value(COVER_SOURCE)).isEqualTo(DetailValue.Cover(CoverSource.EMBEDDED))
+
+        // An identification that saved no cover decides it empty: it never hides the file's picture.
+        decide(fileId, "cover" to null)
+        assertThat(read(fileId).value(COVER_SOURCE)).isEqualTo(DetailValue.Cover(CoverSource.EMBEDDED))
+    }
+
+    @Test
+    fun coverArtArchiveComesLastWithoutASizeAndOnlyWhileOnlineLookupsAreOn() {
+        val fileId = readTags(coverPresent = false, release = TAG_RELEASE)
+        probe.caa = true
+
+        assertThat(read(fileId).value(COVER_SOURCE)).isEqualTo(DetailValue.Cover(CoverSource.NONE))
+        assertThat(probe.asked).noneMatch { it.startsWith("caa") }
+
+        online = true
+        probe.asked.clear()
+        val details = read(fileId)
+
+        assertThat(details.value(COVER_SOURCE)).isEqualTo(DetailValue.Cover(CoverSource.CAA))
+        assertThat(details.value(COVER_SIZE)).isNull()
+        assertThat(probe.asked).containsExactly("thumbnail content://media/external/audio/media/1", "caa $TAG_RELEASE")
+    }
+
+    @Test
+    fun theDecidedReleaseComesBeforeTheTagsOnesAndADecidedFieldWithoutAReleaseHasNone() {
+        val fileId = readTags(coverPresent = false, release = TAG_RELEASE)
+        online = true
+        decide(fileId, "release_mbid" to DECIDED_RELEASE)
+
+        read(fileId)
+        assertThat(probe.asked).contains("caa $DECIDED_RELEASE").doesNotContain("caa $TAG_RELEASE")
+
+        probe.asked.clear()
+        decide(fileId, "release_mbid" to null)
+        read(fileId)
+        assertThat(probe.asked).noneMatch { it.startsWith("caa") }
+    }
+
+    @Test
+    fun theSourceIsAlwaysTheFirstStepOfTheLoadersPlanThatHasAPicture() {
+        val fileId = readTags(coverPresent = true, coverBytes = 1_000, release = TAG_RELEASE)
+        online = true
+        val facts = LibraryCoverFacts(access, user)
+        val savedIndex = SavedCoverIndex { id -> runBlocking { saved.file(id)?.name } }
+        var decided = false
+        for (case in 0 until 16) {
+            val withSaved = case and 1 != 0
+            probe.embedded = if (case and 2 != 0) PictureSize(500, 500) else null
+            probe.thumbnail = case and 4 != 0
+            probe.caa = case and 8 != 0
+            if (withSaved && !decided) {
+                decideCover(fileId)
+                decided = true
+            } else if (!withSaved && decided) {
+                decide(fileId, "cover" to null)
+                decided = false
+            }
+
+            val steps = runBlocking { CoverPlan.of(CoverRequest.Track(fileId), facts, own, savedIndex, online) }
+            val expected = steps.firstOrNull { step ->
+                when (step) {
+                    is CoverStep.Own -> File(ownDir, step.fileName).isFile
+                    is CoverStep.Saved -> true
+                    is CoverStep.Embedded -> probe.embedded != null
+                    is CoverStep.Thumbnail -> probe.thumbnail
+                    is CoverStep.Caa -> probe.caa
+                }
+            }?.let { step ->
+                when (step) {
+                    is CoverStep.Own -> CoverSource.SONG_OWN
+                    is CoverStep.Saved -> CoverSource.SAVED
+                    is CoverStep.Embedded -> CoverSource.EMBEDDED
+                    is CoverStep.Thumbnail -> CoverSource.THUMBNAIL
+                    is CoverStep.Caa -> CoverSource.CAA
+                }
+            } ?: CoverSource.NONE
+
+            assertThat(read(fileId).value(COVER_SOURCE)).describedAs("case $case: $steps").isEqualTo(DetailValue.Cover(expected))
+        }
+    }
+
+    private companion object {
+        const val TAG_RELEASE = "3a6f1a2b-1111-4222-8333-000000000001"
+        const val DECIDED_RELEASE = "3a6f1a2b-1111-4222-8333-000000000002"
+    }
 }

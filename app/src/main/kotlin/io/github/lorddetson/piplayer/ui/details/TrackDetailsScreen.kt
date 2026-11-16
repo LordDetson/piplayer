@@ -347,8 +347,10 @@ private fun tagStateLabel(state: TagState) = when (state) {
 private fun coverLabel(source: CoverSource) = when (source) {
     CoverSource.SONG_OWN -> R.string.details_cover_song_own
     CoverSource.ALBUM_OWN -> R.string.details_cover_album_own
+    CoverSource.SAVED -> R.string.details_cover_saved
     CoverSource.EMBEDDED -> R.string.details_cover_embedded
     CoverSource.THUMBNAIL -> R.string.details_cover_thumbnail
+    CoverSource.CAA -> R.string.details_cover_caa
     CoverSource.NONE -> R.string.details_cover_none
 }
 

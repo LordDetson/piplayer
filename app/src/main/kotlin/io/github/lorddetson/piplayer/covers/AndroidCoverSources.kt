@@ -25,8 +25,10 @@ import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
+import io.github.lorddetson.piplayer.net.OnlineGate
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
@@ -117,8 +119,22 @@ object BitmapCodec : ImageCodec<Bitmap> {
     }
 }
 
-/** The sources of covers on the device: own copies in [ownDir], embedded pictures and system thumbnails. */
-class AndroidCoverSources(private val context: Context, private val ownDir: File) : CoverSources<Bitmap> {
+/**
+ * The sources of covers on the device: own copies in [ownDir], embedded pictures and system thumbnails, the decided
+ * covers of [saved] and the lazy Cover Art Archive covers of [caa] (docs/library.md §13.1); a source left out gives none.
+ */
+class AndroidCoverSources(
+    private val context: Context,
+    private val ownDir: File,
+    private val saved: SavedCovers? = null,
+    private val caa: CaaCoverSource<Bitmap>? = null,
+) : CoverSources<Bitmap> {
+
+    companion object {
+        /** The lazy Cover Art Archive step on the device: [fronts] behind [gate], decoded as bitmaps for each step. */
+        fun caa(fronts: CaaFronts, gate: OnlineGate, gateOpen: Flow<Boolean>): CaaCoverSource<Bitmap> =
+            CaaCoverSource(fronts, gate, gateOpen) { bytes, size -> withContext(Dispatchers.Default) { BitmapCodec.decode(bytes, size) } }
+    }
 
     override suspend fun load(step: CoverStep, size: Int): Bitmap? = when (step) {
         is CoverStep.Own -> withContext(Dispatchers.IO) { BitmapCodec.decode(File(ownDir, step.fileName), size) }
@@ -126,6 +142,8 @@ class AndroidCoverSources(private val context: Context, private val ownDir: File
             withContext(Dispatchers.Default) { BitmapCodec.decode(bytes, size) }
         }
         is CoverStep.Thumbnail -> thumbnail(step.file.uri.toUri(), size)?.let { BitmapCodec.scaled(it, size) }
+        is CoverStep.Saved -> null
+        is CoverStep.Caa -> null
     }
 
     /** The system thumbnail of [uri], or null when Android has none; a load cut short cancels the request. */

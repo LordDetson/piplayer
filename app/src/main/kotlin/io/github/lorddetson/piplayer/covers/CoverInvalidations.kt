@@ -23,13 +23,24 @@ object CoverInvalidations {
         passRunning: Flow<Boolean>,
         identityChanges: Flow<Long> = emptyFlow(),
         hiddenFiles: Flow<Any> = emptyFlow(),
-    ): Flow<Unit> = merge(
-        revisions.distinctUntilChanged().drop(1).map { },
+        decisions: Flow<Long> = emptyFlow(),
+        online: Flow<Boolean> = emptyFlow(),
+    ): Flow<CoverChange> = merge(
+        revisions.distinctUntilChanged().drop(1).map { CoverChange.MEMORY },
         passRunning.distinctUntilChanged()
             .scan(false to false) { (_, was), now -> was to now }
             .filter { (was, now) -> was && !now }
-            .map { },
-        identityChanges.distinctUntilChanged().drop(1).map { },
-        hiddenFiles.distinctUntilChanged().drop(1).map { },
+            .map { CoverChange.MEMORY },
+        identityChanges.distinctUntilChanged().drop(1).map { CoverChange.MEMORY },
+        hiddenFiles.distinctUntilChanged().drop(1).map { CoverChange.MEMORY },
     )
+}
+
+/** What a change asks of the loader (docs/library.md §13.3): to empty its memory, and whether the covers on screen load again. */
+enum class CoverChange {
+    /** The memory may be stale; views on screen keep what they show until they are drawn anew. */
+    MEMORY,
+
+    /** The memory may be stale, and the covers on screen load again, each keeping its picture until the new one is there. */
+    RELOAD,
 }

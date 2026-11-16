@@ -9,9 +9,14 @@ sealed interface CoverRequest {
     data class Artist(val key: String) : CoverRequest
 }
 
+/** A release by its MBID, with its release group's when known: what the lazy Cover Art Archive step asks for (TI §5.2). */
+data class CoverRelease(val release: String, val releaseGroup: String? = null)
+
 /**
  * A file of the library as covers need it: what opens it, what changes when it changes, and [embedded], the tag pass's
  * answer whether it holds a picture (null while unread). [identityId] is its track identity, [albumKey] its album.
+ * [decidedCover] is the `saved_cover` row of its decided cover (TI §7.1), null without one or for an empty one, and
+ * [release] its release, the decided one before the tags' (docs/library.md §13.1).
  */
 data class CoverFile(
     val fileId: Long,
@@ -23,18 +28,34 @@ data class CoverFile(
     val albumKey: String? = null,
     /** The file's content key in hex, by which [identityId] was read. */
     val contentKey: String? = null,
+    val decidedCover: Long? = null,
+    val release: CoverRelease? = null,
 )
 
-/** An album of an artist, in the artist page's order, and whether one of its songs has an embedded picture. */
-data class ArtistAlbum(val key: String, val embedded: Boolean)
+/**
+ * An album of an artist, in the artist page's order, and whether one of its songs has an embedded picture, a decided
+ * cover or a release MBID (docs/library.md §13.1).
+ */
+data class ArtistAlbum(val key: String, val embedded: Boolean, val decided: Boolean = false, val release: Boolean = false)
 
 /** One source of a cover (docs/library.md §13.1); [key] names the picture it gives, for the caches. */
 sealed interface CoverStep {
     val key: String
 
+    /** Whether the step loads over the network; the loader runs it after giving its place back (§13.3). */
+    val remote: Boolean get() = false
+
     /** An own cover: its copy in the covers folder. */
     data class Own(val fileName: String) : CoverStep {
         override val key: String get() = "own/$fileName"
+    }
+
+    /**
+     * A decided cover saved in PiPlayer (TI §5.2): the `saved_cover` row [id] and its file's name, the SHA-256 of its
+     * bytes, which names the picture for the caches.
+     */
+    data class Saved(val id: Long, val fileName: String) : CoverStep {
+        override val key: String get() = "saved/$fileName"
     }
 
     /** The picture embedded in [file], read by Media3's extractors. */
@@ -45,6 +66,12 @@ sealed interface CoverStep {
     /** The system thumbnail of [file]. */
     data class Thumbnail(val file: CoverFile) : CoverStep {
         override val key: String get() = "thumbnail/${file.fileId}/${file.size}/${file.mtime}"
+    }
+
+    /** The lazy Cover Art Archive cover of [release] (docs/library.md §13.1 step 6), with plain MBIDs. */
+    data class Caa(val release: CoverRelease) : CoverStep {
+        override val key: String get() = "caa/${release.release}/${release.releaseGroup ?: "-"}"
+        override val remote: Boolean get() = true
     }
 }
 
@@ -60,6 +87,12 @@ interface CoverFacts {
 
     /** The artist's first song, for an artist without albums. */
     suspend fun artistFile(artistKey: String): CoverFile?
+
+    /** The decided cover of the album [albumKey]: that of its first song with one by disc, track and file name. */
+    suspend fun albumDecidedCover(albumKey: String): Long? = null
+
+    /** The release of the album [albumKey]: that of its first song with one by disc, track and file name. */
+    suspend fun albumRelease(albumKey: String): CoverRelease? = null
 }
 
 /** The own covers the user chose (docs/library.md §13.2): the name of each copy. */
@@ -69,10 +102,30 @@ interface OwnCoverIndex {
     fun album(albumKey: String): String?
 }
 
+/** The saved covers (TI §5.2): the name of each one's file by its row ID, null when there is no such row. */
+fun interface SavedCoverIndex {
+    suspend fun fileName(id: Long): String?
+
+    companion object {
+        /** No saved covers. */
+        val NONE = SavedCoverIndex { null }
+    }
+}
+
 /** The sources of a cover in their order (docs/library.md §13.1). */
 object CoverPlan {
 
-    suspend fun of(request: CoverRequest, facts: CoverFacts, own: OwnCoverIndex): List<CoverStep> = when (request) {
+    /**
+     * The steps of [request]'s cover. [saved] names the files of decided covers; [online] is whether online lookups are
+     * on, without which no step loads from Cover Art Archive.
+     */
+    suspend fun of(
+        request: CoverRequest,
+        facts: CoverFacts,
+        own: OwnCoverIndex,
+        saved: SavedCoverIndex = SavedCoverIndex.NONE,
+        online: Boolean = false,
+    ): List<CoverStep> = when (request) {
         is CoverRequest.Track -> facts.file(request.fileId)?.let { file ->
             listOfNotNull(
                 file.identityId?.let(own::track)?.let(CoverStep::Own),

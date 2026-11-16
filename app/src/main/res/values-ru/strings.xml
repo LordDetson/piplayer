@@ -407,6 +407,7 @@
     <string name="details_cover_album_own">Своя обложка альбома</string>
     <string name="details_cover_embedded">Встроена в файл</string>
     <string name="details_cover_thumbnail">Миниатюра системы</string>
+    <string name="details_cover_saved">Сохранена в PiPlayer</string>
     <string name="details_cover_none">Нет</string>
     <string name="details_pixels">%1$d × %2$d пикс.</string>
     <string name="details_pixels_bytes">%1$d × %2$d пикс., %3$s</string>

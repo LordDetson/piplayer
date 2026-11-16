@@ -8,6 +8,17 @@ import android.net.Uri
 import android.provider.MediaStore
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.github.lorddetson.piplayer.TestFiles
+import io.github.lorddetson.piplayer.fakes.FakeCaa
+import io.github.lorddetson.piplayer.fakes.TestServices
+import io.github.lorddetson.piplayer.identification.caa.CaaResult
+import io.github.lorddetson.piplayer.identification.caa.CoverImage
+import io.github.lorddetson.piplayer.identification.caa.CoverSize
+import io.github.lorddetson.piplayer.identification.caa.ImageFormat
+import io.github.lorddetson.piplayer.library.details.PictureSize
+import io.github.lorddetson.piplayer.net.OnlineConsent
+import io.github.lorddetson.piplayer.userdata.UserDatabase
+import kotlinx.coroutines.flow.map
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import io.github.lorddetson.piplayer.ui.player.TestImages
 import java.io.File
 import kotlinx.coroutines.runBlocking
@@ -139,6 +150,58 @@ class CoverSourcesTest {
         val center = back.center()
         assertThat(Color.blue(center)).isGreaterThan(230)
         assertThat(BitmapCodec.weight(back)).isEqualTo(200L * 200 * 4)
+    }
+
+    // M3 (docs/library.md §13.1, §13.3): saved covers and the lazy Cover Art Archive step.
+
+    @Test
+    fun aSavedCoverIsDecodedFromItsFileAtItsStepAndNoneWhenItsFileIsGone() {
+        val user = UserDatabase.open(context, name = null)
+        try {
+            val saved = SavedCovers(user, SavedCovers.directory(ownDir))
+            val withSaved = AndroidCoverSources(context, ownDir, saved = saved)
+            val id = checkNotNull(runBlocking { saved.save(BitmapCodec.encode(TestImages.bitmap(1_000))!!, null, SavedCovers.Source.EMBEDDED) })
+            val name = checkNotNull(runBlocking { saved.file(id) }).name
+
+            val cover = runBlocking { withSaved.load(CoverStep.Saved(id, name), 192) }!!
+
+            assertThat(cover.width to cover.height).isEqualTo(192 to 192)
+            assertThat(Color.blue(cover.center())).isGreaterThan(230)
+            // A row ID that names another file now names another picture.
+            assertThat(runBlocking { withSaved.load(CoverStep.Saved(id, "other.jpg"), 192) }).isNull()
+            File(SavedCovers.directory(ownDir), name).delete()
+            assertThat(runBlocking { withSaved.load(CoverStep.Saved(id, name), 192) }).isNull()
+            // Without the saved covers there is none either.
+            assertThat(runBlocking { sources.load(CoverStep.Saved(id, name), 192) }).isNull()
+        } finally {
+            user.close()
+        }
+    }
+
+    @Test
+    fun aCoverArtArchiveFrontIsDecodedAtItsStep() {
+        val gate = TestServices.openGate()
+        val asked = mutableListOf<CoverSize>()
+        val caa = AndroidCoverSources.caa(
+            fronts = { sources, size ->
+                asked += size
+                val url = "https://caa.test/release/${sources.first().mbid}/front-250".toHttpUrl()
+                CaaResult.Found(
+                    CoverImage(FakeCaa.FRONT_250.fixture.bytes(), ImageFormat.JPEG, PictureSize(250, 250), url, url, false, sources.first()),
+                )
+            },
+            gate = gate,
+            gateOpen = gate.consent.map { it.allows(OnlineConsent.CURRENT_DISCLOSURE_VERSION) },
+        )
+        val withCaa = AndroidCoverSources(context, ownDir, caa = caa)
+        val step = CoverStep.Caa(CoverRelease("5ab00000-1111-4222-8333-000000000001"))
+
+        val cover = runBlocking { withCaa.load(step, 128) }!!
+
+        assertThat(cover.width to cover.height).isEqualTo(128 to 128)
+        assertThat(asked).containsExactly(CoverSize.LIST)
+        // Without the step's source, as in a process without the client, there is none.
+        assertThat(runBlocking { sources.load(step, 128) }).isNull()
     }
 
     private companion object {

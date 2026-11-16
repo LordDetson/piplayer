@@ -47,6 +47,43 @@ class CoverInvalidationsTest {
     }
 
     @Test
+    fun eachRunOfTheDecisionMirrorThatChangedDecidedValuesCounts() = runBlocking<Unit> {
+        // A decision may bring a saved cover or a release (docs/library.md §13.3).
+        val count = CoverInvalidations.of(
+            emptyList<Long>().asFlow(),
+            emptyList<Boolean>().asFlow(),
+            decisions = listOf(0L, 0L, 1L, 2L, 2L).asFlow(),
+        ).toList()
+
+        // The covers on screen load again, as after a change of own covers.
+        assertThat(count).containsExactly(CoverChange.RELOAD, CoverChange.RELOAD)
+    }
+
+    @Test
+    fun eachChangeOfOnlineLookupsCounts() = runBlocking<Unit> {
+        // The gate decides the lazy Cover Art Archive step: turned on, it may give covers; turned off, it takes them.
+        val count = CoverInvalidations.of(
+            emptyList<Long>().asFlow(),
+            emptyList<Boolean>().asFlow(),
+            online = listOf(false, false, true, true, false).asFlow(),
+        ).toList()
+
+        assertThat(count).containsExactly(CoverChange.RELOAD, CoverChange.RELOAD)
+    }
+
+    @Test
+    fun theLibrarysOwnChangesLeaveTheCoversOnScreenAsTheyAre() = runBlocking<Unit> {
+        val changes = CoverInvalidations.of(
+            listOf(1L, 2L).asFlow(),
+            listOf(true, false).asFlow(),
+            listOf(0L, 1L).asFlow(),
+            listOf<Any>("a", "b").asFlow(),
+        ).toList()
+
+        assertThat(changes).hasSize(4).containsOnly(CoverChange.MEMORY)
+    }
+
+    @Test
     fun bothCount() {
         assertThat(count(listOf(1, 2), listOf(true, false))).isEqualTo(2)
     }
