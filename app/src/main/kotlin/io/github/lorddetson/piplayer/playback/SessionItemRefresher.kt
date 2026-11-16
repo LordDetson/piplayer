@@ -9,6 +9,11 @@ import io.github.lorddetson.piplayer.library.songs.Song
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -23,15 +28,18 @@ import kotlinx.coroutines.sync.withLock
  * [songs] reads the songs of file IDs from the library each time, never from a list a screen keeps, which a decision does
  * not change; it gives nothing for what the library does not hold, such as a file opened from another app. Reads take
  * turns, each applied before the next starts, so that an older read never replaces a newer one's values. Runs on [scope],
- * the player's thread.
+ * the player's thread, under a job of its own that [stop] ends, so that no read under way reaches a released player.
  */
 class SessionItemRefresher(
     private val player: Player,
     private val songs: suspend (Collection<Long>) -> Map<Long, Song>,
-    private val scope: CoroutineScope,
+    scope: CoroutineScope,
 ) {
 
     private val turn = Mutex()
+
+    /** [scope] with a job of its own for the reads and comparisons: [stop] cancels them, and none starts after it. */
+    private val own = CoroutineScope(scope.coroutineContext + SupervisorJob(scope.coroutineContext[Job]))
 
     private val listener = object : Player.Listener {
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) = refresh()
@@ -40,7 +48,11 @@ class SessionItemRefresher(
     /** From now on, each transition refreshes too. */
     fun start() = player.addListener(listener)
 
-    fun stop() = player.removeListener(listener)
+    /** For good: transitions no longer refresh, a read under way is dropped and later refreshes do nothing. */
+    fun stop() {
+        player.removeListener(listener)
+        own.cancel()
+    }
 
     /** Compares the playing and the next item: after a batch of the tag pass, at a transition. */
     fun refresh() = compare(::currentAndNext)
@@ -54,13 +66,17 @@ class SessionItemRefresher(
     }
 
     /**
-     * Reads the songs of the items [choose] gives, then compares the items it gives once they are read: the queue may have
-     * changed meanwhile, and only items whose songs were read are compared.
+     * Reads the songs of the items [choose] gives, then compares those items once they are read. They are chosen once,
+     * since choosing can look through a large queue: the queue may have changed meanwhile, so an item is compared only
+     * where its place still holds the same entry, and the others catch up at their transition (docs/playback.md §2.6).
      */
     private fun compare(choose: () -> List<Int>) {
-        scope.launch(start = CoroutineStart.UNDISPATCHED) {
+        // An undispatched start runs up to its first suspension even in a cancelled scope, the read included.
+        if (!own.isActive) return
+        own.launch(start = CoroutineStart.UNDISPATCHED) {
             turn.withLock {
-                val ids = choose().mapNotNullTo(LinkedHashSet()) { fileAt(it) }
+                val chosen = choose().mapNotNull { index -> entryAt(index) }
+                val ids = chosen.mapTo(LinkedHashSet()) { it.file }
                 if (ids.isEmpty()) return@withLock
                 val found = try {
                     songs(ids)
@@ -71,9 +87,20 @@ class SessionItemRefresher(
                     Log.w(TAG, "The queue items could not be compared with the library", e)
                     return@withLock
                 }
-                for (index in choose()) refreshAt(index, found)
+                // Stopped while the read returned: the player may be released.
+                ensureActive()
+                for (entry in chosen) refreshAt(entry, found)
             }
         }
+    }
+
+    /** A queue item to compare: its place, its entry and the library file it plays. */
+    private class Entry(val index: Int, val mediaId: String, val file: Long)
+
+    private fun entryAt(index: Int): Entry? {
+        if (index !in 0 until player.mediaItemCount) return null
+        val mediaId = player.getMediaItemAt(index).mediaId
+        return QueueIds.fileId(mediaId)?.let { Entry(index, mediaId, it) }
     }
 
     private fun fileAt(index: Int): Long? =
@@ -99,11 +126,14 @@ class SessionItemRefresher(
         )
     }
 
-    private fun refreshAt(index: Int, found: Map<Long, Song>) {
+    private fun refreshAt(entry: Entry, found: Map<Long, Song>) {
+        val index = entry.index
         if (index !in 0 until player.mediaItemCount) return
         val item = player.getMediaItemAt(index)
+        // Another entry in its place, after an edit of the queue during the read.
+        if (item.mediaId != entry.mediaId) return
         // An added entry plays a library song too (docs/playback.md §9.4).
-        val song = QueueIds.fileId(item.mediaId)?.let(found::get) ?: return
+        val song = found[entry.file] ?: return
         if (item.mediaMetadata.shows(song)) return
         player.replaceMediaItem(index, item.buildUpon().setMediaMetadata(songMetadata(song)).build())
     }

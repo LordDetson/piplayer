@@ -35,6 +35,7 @@ import io.github.lorddetson.piplayer.library.songs.SongList
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.MainScope
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -57,6 +58,7 @@ class PlaybackService : MediaLibraryService() {
     private var passBatches: Job? = null
     private var decidedRefresh: Job? = null
     private var sessionCovers: SessionCovers? = null
+    private var refresher: SessionItemRefresher? = null
     private val postNotificationAgain = Runnable { postNotification() }
     private var lastStartId = 0
     private var startCheckKind = StartIntentRules.Kind.MEDIA_BUTTON
@@ -130,6 +132,7 @@ class PlaybackService : MediaLibraryService() {
         // Queue items follow the library's values: read again each time, never from a list a screen keeps (docs/playback.md
         // §2.6, TI §7.1).
         val refresher = SessionItemRefresher(sessionPlayer, { ids -> withContext(Dispatchers.IO) { SongList.songsById(this@PlaybackService, ids) } }, mainScope)
+            .also { this.refresher = it }
         refresher.start()
         passBatches = mainScope.launch { SongList.batches.drop(1).collect { refresher.refresh() } }
         decidedRefresh = mainScope.launch { Library.decidedFiles(this@PlaybackService).collect { refresher.refreshDecided(it) } }
@@ -229,8 +232,12 @@ class PlaybackService : MediaLibraryService() {
         passBatches = null
         decidedRefresh?.cancel()
         decidedRefresh = null
+        // Before the player is released: a library read under way must not reach it (docs/playback.md §2.6).
+        refresher?.stop()
+        refresher = null
         sessionCovers?.stop()
         sessionCovers = null
+        mainScope.cancel()
         handler.removeCallbacks(postNotificationAgain)
         controls?.release()
         controls = null
