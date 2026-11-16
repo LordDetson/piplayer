@@ -245,10 +245,12 @@ is heard as a click. The becoming-noisy broadcast is protected, so emulator test
   - after Apply, Undo or any other change of decided values (TI §7.1), the playing item and, in play order after it,
     at most 20 queued items of the files the change touched; the next item of another track stays as it is, also for
     gapless playback. When the touched files are not known, the playing and the next item.
-- The items to compare are chosen once, before their songs are read: after the read, each is compared only if its
-  place in the queue still holds the same entry, otherwise it catches up at its transition, so a large queue is looked
-  through once per refresh. The refresh stops with the service: a read still under way is dropped and changes no item
-  of the released player.
+- The items to compare are chosen once, before their songs are read: after the read, each is compared only if its place
+  in the queue still holds the same entry, otherwise a queued item catches up at its transition, so a large queue is
+  looked through once per refresh. The playing item is the exception: an edit of the queue before it (a removal, a move
+  across it) changes its place without a transition, so when its place no longer holds it, it is compared at its new
+  place, which the player knows without a search. The refresh stops with the service: a read still under way is dropped
+  and changes no item of the released player.
 
 ### 2.5 Checks
 
