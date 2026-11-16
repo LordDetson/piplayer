@@ -85,19 +85,66 @@ class DecisionCodecTest {
     }
 
     @Test
-    fun `a reason round-trips in a short text`() {
+    fun `a reason round-trips in a blob of 7 bytes within 8 s of the file's length`() {
         val reasons = listOf(
             Reason(Source.FINGERPRINT, Tier.IDENTIFIER, setOf(Source.FINGERPRINT, Source.TEXT_SEARCH), 0.97, -1_200, 0.92, 0.875, emptySet()),
-            Reason(Source.TEXT_SEARCH, Tier.SIMILARITY, setOf(Source.TEXT_SEARCH), null, null, null, null, setOf(HintField.TITLE, HintField.ARTIST)),
+            Reason(Source.TEXT_SEARCH, Tier.SIMILARITY, setOf(Source.TEXT_SEARCH), null, 8_191, 0.0, 1.0, setOf(HintField.TITLE, HintField.ARTIST)),
             Reason(Source.ISRC, Tier.SIMILARITY, setOf(Source.ISRC, Source.TAG_RECORDING_ID), null, 0, 0.5, null, setOf(HintField.ARTIST)),
+            Reason(Source.TAG_RECORDING_ID, Tier.IDENTIFIER, Source.entries.toSet(), 1.0, -8_192, null, 0.001, setOf(HintField.TITLE)),
         )
         for (reason in reasons) {
-            val text = DecisionCodec.reason(reason)
-            assertThat(DecisionCodec.reason(text)).isEqualTo(reason)
-            assertThat(text.length).isLessThanOrEqualTo(40)
+            val blob = DecisionCodec.reason(reason)
+            assertThat(DecisionCodec.reason(blob)).isEqualTo(reason)
+            assertThat(blob.size).describedAs("bytes of %s", reason).isLessThanOrEqualTo(7)
         }
-        assertThat(DecisionCodec.reason("garbage")).isNull()
-        assertThat(DecisionCodec.reason(null as String?)).isNull()
+        // Without a length difference the blob is the first byte and the 4 bytes of the scores.
+        val noLength = Reason(Source.TEXT_SEARCH, Tier.SIMILARITY, setOf(Source.TEXT_SEARCH), null, null, null, null, emptySet())
+        assertThat(DecisionCodec.reason(noLength)).hasSize(5)
+        assertThat(DecisionCodec.reason(DecisionCodec.reason(noLength))).isEqualTo(noLength)
+        // A length difference of an hour or more still round-trips, in a longer varint.
+        val far = noLength.copy(durationDeltaMs = -3_600_000_000L)
+        assertThat(DecisionCodec.reason(DecisionCodec.reason(far))).isEqualTo(far)
+    }
+
+    @Test
+    fun `the reason blob lays out its parts as TI 10_2 says`() {
+        val reason = Reason(Source.FINGERPRINT, Tier.SIMILARITY, setOf(Source.FINGERPRINT, Source.ISRC), 0.97, -800, 0.95, null, setOf(HintField.ARTIST))
+        val blob = DecisionCodec.reason(reason)
+        // Source 2 in bits 0-1, tier 1 in bit 2, found by ISRC (bit 4) and fingerprint (bit 5), a length difference (bit 7).
+        assertThat(blob[0].toInt() and 0xff).isEqualTo(0b1011_0110)
+        // Artist disagreement (bit 31), fingerprint 970 in bits 20-29, title 950 in bits 10-19, no artist (1023) in bits 0-9.
+        val scores = (blob[1].toLong() and 0xff shl 24) or (blob[2].toLong() and 0xff shl 16) or (blob[3].toLong() and 0xff shl 8) or
+            (blob[4].toLong() and 0xff)
+        assertThat(scores).isEqualTo((1L shl 31) or (970L shl 20) or (950L shl 10) or 1023L)
+        // -800 zigzag is 1 599: 0x3f with the continuation bit, then 0x0c.
+        assertThat(blob.copyOfRange(5, blob.size).map { it.toInt() and 0xff }).containsExactly(0xbf, 0x0c)
+    }
+
+    @Test
+    fun `a score outside 0 to 1 is stored at the nearer end`() {
+        val reason = Reason(Source.FINGERPRINT, Tier.IDENTIFIER, setOf(Source.FINGERPRINT), 1.2, null, -0.1, 0.5, emptySet())
+        assertThat(DecisionCodec.reason(DecisionCodec.reason(reason))).isEqualTo(reason.copy(fingerprintScore = 1.0, title = 0.0))
+    }
+
+    @Test
+    fun `a reason blob this build cannot read gives no reason`() {
+        val good = DecisionCodec.reason(Reason(Source.FINGERPRINT, Tier.IDENTIFIER, setOf(Source.FINGERPRINT), 0.97, -800, 0.95, 0.9, emptySet()))
+        assertThat(DecisionCodec.reason(null as ByteArray?)).isNull()
+        assertThat(DecisionCodec.reason(ByteArray(0))).isNull()
+        // Too short: the scores cut off, and a length difference announced but missing or cut off mid-varint.
+        assertThat(DecisionCodec.reason(good.copyOf(4))).isNull()
+        assertThat(DecisionCodec.reason(good.copyOf(5))).isNull()
+        assertThat(DecisionCodec.reason(good.copyOf(6))).isNull()
+        // Longer than its parts.
+        assertThat(DecisionCodec.reason(good + 0)).isNull()
+        assertThat(DecisionCodec.reason(DecisionCodec.reason(Reason(Source.ISRC, Tier.IDENTIFIER, setOf(Source.ISRC), null, null, null, null, emptySet())) + 1))
+            .isNull()
+        // A score above 1000 that is not 1023 (1001 in the artist's bits).
+        val badScore = good.copyOf().also { it[3] = (it[3].toInt() and 0xfc or 0x03).toByte(); it[4] = 0xe9.toByte() }
+        assertThat(DecisionCodec.reason(badScore)).isNull()
+        // A varint longer than any Long, and the old short text.
+        assertThat(DecisionCodec.reason(good.copyOf(5) + ByteArray(11) { 0x80.toByte() } + 1)).isNull()
+        assertThat(DecisionCodec.reason("FI:F:970:-800:950:900:".toByteArray())).isNull()
     }
 
     @Test

@@ -12,7 +12,7 @@ import androidx.room3.Upsert
 /**
  * One decision of a track (TI §7.1, §10.2), with the provenance of its values once per decision. The encodings of its
  * columns are those of TI §10.2: [kind] a `DecisionKind` code, [fields] the bits of the protected-fields list, the MBIDs
- * and the AcoustID track ID 16 bytes each, [confidence] in thousandths, [reason] the short text of `DecisionCodec`,
+ * and the AcoustID track ID 16 bytes each, [confidence] in thousandths, [reason] the blob of `DecisionCodec`,
  * [fileValues] the "changed in the file" references of the location it was made on (`FileReferences`).
  */
 @Entity(tableName = "decision", indices = [Index("identity_id")])
@@ -27,7 +27,7 @@ data class DecisionEntity(
     @ColumnInfo(name = "release_track_mbid") val releaseTrackMbid: ByteArray? = null,
     @ColumnInfo(name = "acoustid_id") val acoustIdId: ByteArray? = null,
     val confidence: Int? = null,
-    val reason: String? = null,
+    val reason: ByteArray? = null,
     val provider: Int? = null,
     @ColumnInfo(name = "fetched_at") val fetchedAt: Long? = null,
     @ColumnInfo(name = "license_class") val licenseClass: Int? = null,
@@ -43,7 +43,7 @@ data class DecisionEntity(
         batchUuid.contentEquals(other.batchUuid) && kind == other.kind && fields == other.fields &&
         releaseChoiceId == other.releaseChoiceId && recordingMbid.contentEquals(other.recordingMbid) &&
         releaseTrackMbid.contentEquals(other.releaseTrackMbid) && acoustIdId.contentEquals(other.acoustIdId) &&
-        confidence == other.confidence && reason == other.reason && provider == other.provider && fetchedAt == other.fetchedAt &&
+        confidence == other.confidence && reason.contentEquals(other.reason) && provider == other.provider && fetchedAt == other.fetchedAt &&
         licenseClass == other.licenseClass && fileSize == other.fileSize && fileMtime == other.fileMtime &&
         fileValues.contentEquals(other.fileValues) && createdAt == other.createdAt && undoneAt == other.undoneAt &&
         lapsedAt == other.lapsedAt

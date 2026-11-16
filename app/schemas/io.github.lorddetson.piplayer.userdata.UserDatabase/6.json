@@ -2,7 +2,7 @@
   "formatVersion": 1,
   "database": {
     "version": 6,
-    "identityHash": "c8c4cde00ece365c349c8b1c9a0b8a7c",
+    "identityHash": "daf571ff4269ac0cc352ee972cb047d6",
     "entities": [
       {
         "tableName": "library_folder_rule",
@@ -545,7 +545,7 @@
       },
       {
         "tableName": "decision",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `identity_id` INTEGER NOT NULL, `batch_uuid` BLOB, `kind` INTEGER NOT NULL, `fields` INTEGER NOT NULL, `release_choice_id` INTEGER, `recording_mbid` BLOB, `release_track_mbid` BLOB, `acoustid_id` BLOB, `confidence` INTEGER, `reason` TEXT, `provider` INTEGER, `fetched_at` INTEGER, `license_class` INTEGER, `file_size` INTEGER, `file_mtime` INTEGER, `file_values` BLOB, `created_at` INTEGER NOT NULL, `undone_at` INTEGER, `lapsed_at` INTEGER)",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `identity_id` INTEGER NOT NULL, `batch_uuid` BLOB, `kind` INTEGER NOT NULL, `fields` INTEGER NOT NULL, `release_choice_id` INTEGER, `recording_mbid` BLOB, `release_track_mbid` BLOB, `acoustid_id` BLOB, `confidence` INTEGER, `reason` BLOB, `provider` INTEGER, `fetched_at` INTEGER, `license_class` INTEGER, `file_size` INTEGER, `file_mtime` INTEGER, `file_values` BLOB, `created_at` INTEGER NOT NULL, `undone_at` INTEGER, `lapsed_at` INTEGER)",
         "fields": [
           {
             "fieldPath": "id",
@@ -604,7 +604,7 @@
           {
             "fieldPath": "reason",
             "columnName": "reason",
-            "affinity": "TEXT"
+            "affinity": "BLOB"
           },
           {
             "fieldPath": "provider",
@@ -924,7 +924,7 @@
     ],
     "setupQueries": [
       "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
-      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'c8c4cde00ece365c349c8b1c9a0b8a7c')"
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'daf571ff4269ac0cc352ee972cb047d6')"
     ]
   }
 }

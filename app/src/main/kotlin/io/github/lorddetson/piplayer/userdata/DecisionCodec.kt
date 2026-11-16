@@ -103,8 +103,13 @@ object DecisionCodec {
     private val tierLetters = mapOf(Tier.IDENTIFIER to 'I', Tier.SIMILARITY to 'S')
     private val fieldLetters = mapOf(HintField.TITLE to 'T', HintField.ARTIST to 'A')
 
-    /** The short text of a match's [reason] (TI §10.2). */
-    fun reason(reason: Reason): String = listOf(
+    /** The stored blob of a match's [reason] (TI §10.2). */
+    fun reason(reason: Reason): ByteArray = text(reason).toByteArray(Charsets.UTF_8)
+
+    /** The reason of its stored [blob]; null for a blob this build cannot read. */
+    fun reason(blob: ByteArray?): Reason? = text(blob?.toString(Charsets.UTF_8))
+
+    private fun text(reason: Reason): String = listOf(
         "${sourceLetters.getValue(reason.source)}${tierLetters.getValue(reason.tier)}",
         Source.entries.filter { it in reason.foundBy }.map(sourceLetters::getValue).joinToString(""),
         reason.fingerprintScore?.let(::thousandths).orEmpty(),
@@ -114,8 +119,7 @@ object DecisionCodec {
         HintField.entries.filter { it in reason.disagreement }.map(fieldLetters::getValue).joinToString(""),
     ).joinToString(":")
 
-    /** The reason of its short text; null for a text this build cannot read. */
-    fun reason(text: String?): Reason? {
+    private fun text(text: String?): Reason? {
         val parts = text?.split(':') ?: return null
         if (parts.size != 7 || parts[0].length != 2) return null
         fun <T> letter(map: Map<T, Char>, c: Char): T? = map.entries.firstOrNull { it.value == c }?.key
