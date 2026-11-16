@@ -20,6 +20,7 @@ import io.github.lorddetson.piplayer.playback.PlaybackTesting.eventually
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.onMain
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.throughout
 import io.github.lorddetson.piplayer.settings.ListName
+import io.github.lorddetson.piplayer.settings.ProtectedField
 import io.github.lorddetson.piplayer.ui.GrantAudioPermission
 import io.github.lorddetson.piplayer.ui.playlists.PlaylistPageViewModel
 import io.github.lorddetson.piplayer.ui.songs.SongsState
@@ -217,7 +218,8 @@ class ListsShowDecisionsTest {
 
     @Test
     fun theAlbumsTabAnAlbumPagesHeaderAndTheScrollLettersShowADecision() = runBlocking<Unit> {
-        // Charlie is alone on Third, so a decided album renames its group in the tab and on its page.
+        // Charlie is alone on Third, so a decided album renames its group in the tab and on its page. Without the release
+        // MBID ticked, which would give the group the release's key and so another page (docs/library.md §6.2).
         val charlie = Library.database(context).library().files().single { it.mediaStoreId == 3L }.id
         Library.database(context).library().setContent(charlie, OTHER_KEY, 200_000, DurationSource.HEADER)
         Library.identities(context).attach()
@@ -233,7 +235,12 @@ class ListsShowDecisionsTest {
 
         val applied = checkNotNull(
             Library.decisions(context).apply(
-                DecisionFixtures.request(OTHER_KEY, DecisionFixtures.details(title = "Delta", artist = "Cid", album = "Record"), fileId = charlie),
+                DecisionFixtures.request(
+                    OTHER_KEY,
+                    DecisionFixtures.details(title = "Delta", artist = "Cid", album = "Record"),
+                    fields = ProtectedField.entries.toSet() - ProtectedField.COVER - ProtectedField.MUSICBRAINZ_IDS,
+                    fileId = charlie,
+                ),
             ),
         )
 
