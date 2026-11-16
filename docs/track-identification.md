@@ -171,9 +171,12 @@ hundreds of releases takes 5 to 10 s, so the progress shows the pages.
 that goes through its stages stores what it found under the file's content key in the library database (§10.1), in one
 transaction: its ranked candidates, which replace those of the run before, the trace of its steps, of which the last 3
 runs are kept, and the change to the lookup job with its "retry later" time (§3.2). A run that ends before stage 0 or
-as "file unreadable" has no content key and stores nothing; a run that a blocked call or a cancellation ends stores
-nothing either, so the rows of the run before stay. A lookup job that cannot be read counts as none, and rows that
-cannot be written cost the run nothing: its outcome is reported all the same.
+as "file unreadable" has no content key and stores nothing; a run that a blocked call ends, or that is cancelled
+before it stores its rows, stores nothing either, so the rows of the run before stay. A cancellation that comes while
+the rows are being written does not stop the transaction: the rows are stored whole and the caller sees the run
+cancelled. A lookup job that cannot be read counts as none for what the run sends, and the run then changes the job
+only by removing it after an AcoustID answer with results (§3.2), so that it never overwrites a job it could not see.
+Rows that cannot be written cost the run nothing: its outcome is reported all the same.
 
 - Before stage 0 the run checks what every client checks before every attempt (§8), in the same order, and stops at the
   first that fails, without reading, decoding or sending anything: the online gate (once the app has read the user's
@@ -193,12 +196,13 @@ cannot be written cost the run nothing: its outcome is reported all the same.
   ends the run as "file unreadable", with nothing sent. So does, for now, a file opened from another app whose provider
   hands out a pipe: the content key needs reads at any position, and stage 0 does not copy such a file yet (open in M3;
   §3.2 copies pipes for decoding only).
-- Stage 0 never writes the library database. The content key, tags and length it reads from a library file that the
-  tag pass has not read (also one whose stored key the pass has not confirmed since the file changed) serve this run and
-  the rows of §10.1 kept by that key, so that Apply finds an identity by it; the tag pass stores its own values, and
-  writes keys only while it holds the sync. Every read through `:tagger` goes through the one guard of the main process,
-  one at a time (library.md §4.3), so stage 0's read of a file never overlaps the pass's read of the same file and their
-  counts of failed reads never interleave.
+- Stage 0 writes no tag values, content key or length to the library database; only the count of failed reads of
+  §7.2 step 11 (library.md §4.3) changes there, as for every read through `:tagger`. The content key, tags and length
+  it reads from a library file that the tag pass has not read (also one whose stored key the pass has not confirmed
+  since the file changed) serve this run and the rows of §10.1 kept by that key, so that Apply finds an identity by
+  it; the tag pass stores its own values, and writes keys only while it holds the sync. Every read through `:tagger`
+  goes through the one guard of the main process, one at a time (library.md §4.3), so stage 0's read of a file never
+  overlaps the pass's read of the same file and their counts of failed reads never interleave.
 - Stage 1 looks up the recording MBID of the tags, and the release MBID of the tags goes to release choice (§4.2 step
   0). Stage 2 looks up the ISRC. A tag value that is no MBID or ISRC sends nothing.
 - Stage 3 runs only in a build with an application key (§9), with AcoustID not stopped and with a known exact duration;
@@ -564,15 +568,21 @@ PiPlayer never adds an ID3v1 tag to a file that has none; §7.5 lists the TagLib
   and falls back to text search. The lookup is retried once after 1 hour and once in the next batch; after that the
   empty result is final. A text-search candidate scoring at least 0.50 (§4.1) cancels the retry.
   - M3, a single file: the mark is the file's lookup job (§10.1, by content key) with the status `retry_later`, one
-    empty answer and a next attempt 1 hour after that answer, by the services' clock; the run reports that time, and
-    the review states it. Nothing retries on its own in M3: an Identify of the file before that time skips stage 3
-    ("retry pending") and runs the other stages, and the first Identify at or after it asks AcoustID again, once. An
-    answer with results then removes the job; a second empty answer makes it `final`, with two empty answers and no
-    time, and later runs skip stage 3 for that ("empty result final") until the library database is rebuilt, which
-    drops the job. A run whose stage 3 gets no answer (skipped for another reason, stopped early, failed or stopped
-    while the file decodes) leaves the job as it is. A text candidate of at least 0.50 keeps the first empty answer
-    from storing a job, and in a later run removes a job that waits for its retry, so the next Identify asks AcoustID
-    as if for the first time; a final job stays.
+    empty answer and a next attempt 1 hour after that answer, by the services' clock. Nothing retries on its own in
+    M3: an Identify of the file before that time skips stage 3 ("retry pending") and runs the other stages, and the
+    first Identify at or after it asks AcoustID again, once. An answer with results then removes the job; a second
+    empty answer makes it `final`, with two empty answers and no time, and later runs skip stage 3 for that ("empty
+    result final") until the library database is rebuilt, which drops the job. A run whose stage 3 gets no answer
+    (skipped for another reason, stopped early, failed or stopped while the file decodes) leaves the job as it is. A
+    text candidate of at least 0.50 keeps the first empty answer from storing a job, and in a later run removes a job
+    that waits for its retry, so the next Identify asks AcoustID as if for the first time; a final job stays.
+  - A next attempt more than 1 hour after the moment stage 3 checks it can only come from a clock that ran ahead when
+    the job was stored (before network time, say) and was set back since, so it counts as due: a wrong clock never
+    holds the retry back for longer than the hour.
+  - A run reports the retry time, and the review states it, only when the run stored the job or skipped stage 3 as
+    "retry pending". A run that waited for nothing (a match in the high band before stage 3, a retry that was due but
+    got no answer, a job that a text candidate removed) reports none, so the review never shows a time that has
+    passed.
   - M4a, batches: the next batch that takes the file asks AcoustID once more, also for a job that the single-file
     retry made final; after that the empty result is final for batches too.
 - `batch` (several fingerprints in one request) is meant for clients, as AcoustID confirmed in writing on 2026-11-05:
@@ -1511,7 +1521,7 @@ whose first sync after the update runs as on a first launch (about 1.7 s on the 
   release choice, every ranked recording for the outcome); `best_score` the best score of what the stage found by
   itself (§4.1), and for the outcome the run's best; `elapsed_ms` the stage's time, waits for the rate limiter
   included, and for the outcome the whole run's. `note` holds the skip reason (`skipped=no_value`), a code for the
-  failure (`failed=unavailable`; never its class name, which R8 renames in a release), the requests the stage sent and their time at the HTTP layer (`requests=2 http_ms=310`),
+  failure (`failed=unavailable`; never its class name, which R8 renames in a release), the attempts the stage made at the HTTP layer, answered or not (a failed lookup of the host or a refused connection counts too, a call that the gate, a stop or the network check refused does not), and the time of the answered ones (`requests=2 http_ms=310`),
   the browses of release choice (pages, releases received and the page cap) and, for the outcome, its kind
   (`found=high`, `no_key`, `unavailable`) and the "retry later" time. No column holds file names, tag values, addresses
   or error messages, which may carry tag values in a search query. A run that adds its rows drops the runs of its
@@ -1758,9 +1768,9 @@ tests, and a high-band error rate within the threshold of §11.4.
 | M3 | Keep as-is and Skip are remembered by identity and mirrored; a Skip lapses when the tag pass records a new size, modification time or content key; undoing either restores the earlier list state |
 | M0 | Filename parser: a table of real-world names → (artist, title, track number) or "unknown" |
 | M0 | AcoustID request builder: `meta` is space-separated, `duration` is an integer string rounded to the nearest second, body is gzip-compressed, the key stays out of the URL; answers: error 4 stops at once, error 14 and HTTP 429, 500, 502, 503, 504 and 520 to 524 are retried, also when the body is not JSON (such a page counts by its status, so one with any other status, 200 included, is final), other errors are final; recordings with an ID only and results without recordings are kept |
-| M3 | Retry later, a single file (§3.2), with an injected clock: an empty AcoustID result stores a lookup job whose retry is 1 hour later, and the run reports that time; an Identify before it sends nothing to AcoustID, decodes nothing and still runs the text search; the first Identify at that time asks AcoustID once; results there remove the job, and a second empty result makes it final, after which stage 3 is skipped; a text candidate of at least 0.50 keeps the first empty result from storing a job and removes a waiting one in a later run, but leaves a final one; a run whose stage 3 gets no answer leaves the job |
+| M3 | Retry later, a single file (§3.2), with an injected clock: an empty AcoustID result stores a lookup job whose retry is 1 hour later, and the run reports that time; an Identify before it sends nothing to AcoustID, decodes nothing and still runs the text search; the first Identify at that time asks AcoustID once; results there remove the job, and a second empty result makes it final, after which stage 3 is skipped; a text candidate of at least 0.50 keeps the first empty result from storing a job and removes a waiting one in a later run, but leaves a final one; a run whose stage 3 gets no answer leaves the job; a next attempt exactly 1 hour after stage 3 checks it waits, and one later than that (a clock set back since the job was stored) counts as due; the retry time is reported only by a run that stored the job or waited for it, not by a high-band match before stage 3 nor by a due retry without an answer; with a job that cannot be read, results remove the job and an empty answer or a text candidate leaves a final job as it was |
 | M4a | Retry later, batches (§3.2): the next batch asks AcoustID once more for a file whose empty result is waiting or final after the single-file retry, then the empty result counts as final |
-| M3 | Pipeline persistence (§3 "One run", §10.1), on the shared fakes with an injected clock and an in-memory store: a run replaces the candidates of the run before (best first, at most 10, the suggested edition with the best, readable back with their source, score and reason); it writes one trace row per stage it reached and one for its outcome, with the provider, the HTTP status of the stage's last answer (also a busy 503 of a failed stage), the requests, the results, the best score and the elapsed time, and no file names, tag values or error messages; the trace keeps the last 3 runs of a content key in the order they were written; a run ended by a blocked call, a cancelled run and an unreadable file write nothing; a store that cannot be read or written leaves the outcome as it was. Stage 0 of a library file the tag pass has not read takes its content key from the read through `:tagger`, also when the row holds an older key, counts the read against the file and writes nothing to the library database; a file the pass has read takes the stored key and reads nothing |
+| M3 | Pipeline persistence (§3 "One run", §10.1), on the shared fakes with an injected clock and an in-memory store: a run replaces the candidates of the run before (best first, at most 10, the suggested edition with the best, readable back with their source, score and reason); it writes one trace row per stage it reached and one for its outcome, with the provider, the HTTP status of the stage's last answer (also a busy 503 of a failed stage), the requests, the results, the best score and the elapsed time, and no file names, tag values or error messages; the trace keeps the last 3 runs of a content key in the order they were written; a run ended by a blocked call, a run cancelled while it decodes and an unreadable file write nothing; a store that cannot be read or written leaves the outcome as it was. Stage 0 of a library file the tag pass has not read takes its content key from the read through `:tagger`, also when the row holds an older key, counts the read against the file and writes no tag values, key or length to the library database; a file the pass has read takes the stored key and reads nothing |
 | M3 | Descriptor copy (§3.2), with a fake reader and a virtual clock: everything the reader gives reaches the copy in order; a copy past the size bound, past the time bound (a reader that stops giving data without ending), with less free space than the reserve at its start or once another writer has taken the space while it runs, or cancelled by its caller is refused with its reason and the partial file deleted; a reader that fails deletes the partial file too, and so does a writer's error that the descriptor reports at the end (asked once, after the end); only copies older than an hour are swept, and never a copy that another copy is still writing, even when the wall clock has jumped ahead by more than an hour. The decoding table in code: one row per MIME type, FLAC with its end-of-stream rules, PCM in the container without a decoder, ALAC without a platform decoder, a codec outside the table on the platform route, and the decoder path built from the Media3 version, the MIME type and the decoder |
 | M0 | Text query builder: Lucene escaping, lower-case terms, the variants of §3.3 in order, skipped variants for missing values, the stop rule and the limits |
 | M0 | PCM conversion: 8-, 16-, 24-, 32-bit and float input, stereo and 5.1 downmix, rounding and clipping to 16-bit; the fingerprint path stops at 120 s, skips the resampler at 11 025 Hz, flushes it at the end of a short file and starts a new one when the format changes |
