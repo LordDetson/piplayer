@@ -109,6 +109,7 @@ object TrackMenu {
     fun entries(place: TrackMenuPlace, offers: TrackMenuOffers, state: TrackMenuState): List<TrackMenuEntry> = buildList {
         // A file opened from another app has no library row to add, go to or keep anything for.
         if (!state.inLibrary) {
+            if (offers.identify) add(TrackMenuEntry.Identify)
             if (offers.details) add(TrackMenuEntry.Details)
             return@buildList
         }
@@ -127,7 +128,8 @@ object TrackMenu {
             add(TrackMenuEntry.ChooseCover)
             if (state.ownCover) add(TrackMenuEntry.RemoveCover)
         }
-        // "Identify" (M3) and "Edit tags" (M4b) will come here, before "Details".
+        if (offers.identify) add(TrackMenuEntry.Identify)
+        // "Edit tags" (M4b) will come here, before "Details".
         if (offers.details) add(TrackMenuEntry.Details)
     }
 

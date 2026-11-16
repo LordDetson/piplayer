@@ -18,6 +18,9 @@ import io.github.lorddetson.piplayer.ui.identification.ReviewFixtures.match
 import io.github.lorddetson.piplayer.ui.identification.ReviewFixtures.result
 import java.time.Instant
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
@@ -36,11 +39,17 @@ class ReviewModelTest {
     private val live = match(ReviewFixtures.LIVE_RECORDING, score = 0.62, title = "Paper Lanterns (live)", foundBy = listOf(Source.TEXT_SEARCH))
 
     private fun TestScope.started(backend: FakeReviewBackend, file: io.github.lorddetson.piplayer.identification.pipeline.FileRef = libraryFile): ReviewModel {
-        val model = ReviewModel(file, backend, backgroundScope)
+        val model = ReviewModel(file, backend, modelScope())
         model.start()
         advanceUntilIdle()
         return model
     }
+
+    /**
+     * The model's scope on the test's scheduler, outside the test's own job: advanceUntilIdle runs its work, which
+     * backgroundScope's it would not, and a run left waiting does not keep the test from ending.
+     */
+    private fun TestScope.modelScope() = CoroutineScope(StandardTestDispatcher(testScheduler) + SupervisorJob())
 
     private val ReviewModel.ended get() = state.value as ReviewState.Ended
     private val ReviewModel.card get() = ended.card!!
@@ -427,7 +436,7 @@ class ReviewModelTest {
                 onProgress: (PipelineProgress) -> Unit,
             ): io.github.lorddetson.piplayer.identification.pipeline.PipelineResult = error("broken")
         }
-        val model = ReviewModel(libraryFile, backend, backgroundScope)
+        val model = ReviewModel(libraryFile, backend, modelScope())
         model.start()
         advanceUntilIdle()
 

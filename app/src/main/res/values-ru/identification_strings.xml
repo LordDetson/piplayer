@@ -99,6 +99,7 @@
     <string name="review_no_change">Без изменений</string>
     <string name="review_no_value">Нет</string>
     <string name="review_line_description">%1$s: сейчас %2$s, новое %3$s</string>
+    <string name="review_line_unchanged_description">%1$s: %2$s, %3$s</string>
     <plurals name="review_ids">
         <item quantity="one">%d ID</item>
         <item quantity="few">%d ID</item>

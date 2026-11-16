@@ -112,6 +112,8 @@
     <string name="review_no_value">None</string>
     <!-- What TalkBack reads for a line of the diff: %1$s is the field, %2$s the value now, %3$s the new value. -->
     <string name="review_line_description">%1$s: now %2$s, new %3$s</string>
+    <!-- What TalkBack reads for a line whose value stays: %1$s is the field, %2$s its value, %3$s "No change". -->
+    <string name="review_line_unchanged_description">%1$s: %2$s, %3$s</string>
     <plurals name="review_ids">
         <item quantity="one">%d ID</item>
         <item quantity="other">%d IDs</item>

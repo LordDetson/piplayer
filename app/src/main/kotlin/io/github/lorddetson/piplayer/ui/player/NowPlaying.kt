@@ -103,6 +103,7 @@ fun NowPlaying(
                 Icon(painterResource(R.drawable.ic_player_collapse), stringResource(R.string.player_close_now_playing))
             }
             Spacer(Modifier.weight(1f))
+            io.github.lorddetson.piplayer.ui.identification.IdentifyButton(player)
             favorite?.let { FavoriteButton(it, Modifier.testTag(PlayerTags.FAVORITE)) }
             onOpenQueue?.let { open ->
                 IconButton(onClick = open) { Icon(painterResource(R.drawable.ic_queue), stringResource(R.string.queue_open)) }

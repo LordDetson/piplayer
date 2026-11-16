@@ -158,6 +158,7 @@ fun TrackDetailsScreen(fileId: Long?, uri: String?, snackbar: SnackbarHostState,
                 navigationIcon = {
                     IconButton(onClick = onBack) { Icon(painterResource(R.drawable.ic_back), stringResource(R.string.library_back)) }
                 },
+                actions = { io.github.lorddetson.piplayer.ui.identification.IdentifyAction(fileId, uri) },
             )
         },
         snackbarHost = { SnackbarHost(snackbar) },

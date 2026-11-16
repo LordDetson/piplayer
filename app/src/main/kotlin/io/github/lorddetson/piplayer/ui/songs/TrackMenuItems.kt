@@ -11,12 +11,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.res.stringResource
 import io.github.lorddetson.piplayer.R
 import io.github.lorddetson.piplayer.library.songs.Song
+import io.github.lorddetson.piplayer.ui.identification.IdentifyTarget
+import io.github.lorddetson.piplayer.ui.identification.LocalIdentify
 
 /**
  * The entries of the track menu inside an open dropdown (docs/playback.md §9.1): of the library's [song], or of the file
  * opened from another app at [openedUri] when [song] is null. What the menu needs to know of the song (its places, its
  * favorite, its own cover) is read off the main thread each time the menu opens, since a dropdown composes its entries
- * only while it is open. Each entry closes the menu by [close] before it acts.
+ * only while it is open. Each entry closes the menu by [close] before it acts. "Identify" shows where the app provides
+ * [LocalIdentify].
  */
 @Composable
 fun TrackMenuItems(song: Song?, place: TrackMenuPlace, menu: SongMenu, close: () -> Unit, openedUri: String? = null) {
@@ -30,16 +33,23 @@ fun TrackMenuItems(song: Song?, place: TrackMenuPlace, menu: SongMenu, close: ()
             )
         }
     }
+    val identify = LocalIdentify.current
     val offers = TrackMenuOffers(
         addToPlaylist = menu.addToPlaylist != null,
         favorites = menu.favorites != null,
         covers = menu.covers != null,
         details = if (song != null) menu.details != null else openedUri != null && menu.openedDetails != null,
+        identify = identify != null && (song != null || openedUri != null),
     )
     for (entry in TrackMenu.entries(place, offers, state)) {
         DropdownMenuItem(text = { Text(label(entry)) }, onClick = {
             close()
-            if (song != null) menu.run(entry, song) else if (entry == TrackMenuEntry.Details && openedUri != null) menu.openedDetails?.invoke(openedUri)
+            when {
+                entry == TrackMenuEntry.Identify -> (song?.let { IdentifyTarget.Song(it.id) } ?: openedUri?.let(IdentifyTarget::Opened))
+                    ?.let { identify?.invoke(it) }
+                song != null -> menu.run(entry, song)
+                entry == TrackMenuEntry.Details && openedUri != null -> menu.openedDetails?.invoke(openedUri)
+            }
         })
     }
 }
@@ -76,6 +86,7 @@ private fun SongMenu.run(entry: TrackMenuEntry, song: Song) {
         is TrackMenuEntry.Favorite -> favorites?.set?.invoke(song, !entry.favorite)
         TrackMenuEntry.ChooseCover -> covers?.chooseForSong?.invoke(song)
         TrackMenuEntry.RemoveCover -> covers?.removeForSong?.invoke(song)
+        // Opened through LocalIdentify by the menu itself.
         TrackMenuEntry.Identify -> Unit
         TrackMenuEntry.Details -> details?.invoke(song)
         // A selection's entries, which a song's own menu never has.
