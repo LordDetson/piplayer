@@ -550,23 +550,26 @@ keeps playing meanwhile, and the crash leaves a native crash report of `:tagger`
       within a folder, a last folder named like a disc not counting, plus the compilation flag. A file without an album
       belongs to none.
     - Decided values and the album key (M3, decided in step 16). The key comes from the file's own values (its tags once
-      read, the index's until then), never from decided values (TI §7.1), so that identifying one track of a tagged
-      album does not split it: the album keeps its key, its favorite and its own cover (§15.3), and the track keeps its
+      read, the index's until then), never from the values of an identification (TI §7.1), so that identifying one
+      track of a tagged album does not split it: the album keeps its key, its favorite and its own cover (§15.3), and the track keeps its
       own cover and favorite. The files that share a key from their own values are the album's group. A decided release
       MBID changes the key only when every file of the group ends up with the same release MBID, decided or from its
       tags (a decided empty value hides the tags' one); then each of them takes that release's key (`mbid:` and the
       MBID in its usual form, lower case with hyphens, as taggers write it), as if their tags carried it, and joins an
       album whose tags give that key. Otherwise the
-      track stays in its group, and the release MBID is only shown (track details, the badge). A file without an album
-      of its own takes its key from its decided values: the decided release MBID when there is one, otherwise the
+      track stays in its group, and the release MBID is only shown (track details, the badge). A user edit (level 1) of
+      the album, the album artist or the compilation flag counts as the file's own value, as an edit of its tags would
+      (decided in the review of step 16): the user merges or splits albums by editing them, as before M3. A file without
+      an album of its own takes its key from its decided values: the decided release MBID when there is one, otherwise the
       decided album and album artist within its folder, as above.
     - The display writer settles the groups in the transaction of every write of display rows. A write of every file
       settles them all from what it resolved. A smaller write, while some file of the library has a decided release
       MBID, settles the groups of the files it wrote with their other files and changes the key of each file whose key
       differs: for a key of an album and folder, the files whose rows hold it as their own, or when none does (the
       group holds a release's key, or the write holds all of it) the files of the album folder and the folders one
-      below it (more than 16 such groups read the files with a decided release instead, once, since only they can hold
-      a release's key that is not their own); for a key of a release MBID from the tags, the files whose tags carry
+      below it (more than 16 such groups read, in one statement, only the files with a decided release in those folders,
+      since only they can hold a release's key that is not their own, so the cost follows the write and not the
+      library); for a key of a release MBID from the tags, the files whose tags carry
       it. A file without an album of its own belongs to no group. The write reads the keys its rows held before it
       replaces them, so a group that a written file leaves (its tags now name another album) is settled in the same
       write. A group that the sync deletes a file of keeps its keys until the next write of one of its files.
