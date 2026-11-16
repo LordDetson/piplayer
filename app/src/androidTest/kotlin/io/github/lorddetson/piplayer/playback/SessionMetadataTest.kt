@@ -496,6 +496,68 @@ class SessionMetadataTest {
         assertThat(titles()).containsExactly("One")
     }
 
+    /**
+     * The service stops the refresh before it releases the player (docs/playback.md §2.6): a read still under way, which
+     * can wait for the library for seconds, is dropped and never reaches the player; nor does any later refresh.
+     */
+    @Test
+    fun aStoppedRefresherDropsTheReadUnderWayAndChangesNoItem() {
+        playFirst(item(1, LONG_FIXTURE, "One"), item(2, LONG_FIXTURE, "Two"))
+        val read = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val reads = CopyOnWriteArrayList<String>()
+        val refresher = SessionItemRefresher(session, { ids ->
+            reads += "start"
+            read.await()
+            reads += "end"
+            ids.associateWith { song(it, "Late") }
+        }, mainScope)
+        onMain {
+            refresher.start()
+            refresher.refreshDecided(setOf(1L))
+        }
+        assertThat(reads).containsExactly("start")
+
+        onMain { refresher.stop() }
+        onMain { read.complete(Unit) }
+        // Whatever the read's end would dispatch to the player's thread runs before this.
+        onMain { }
+        onMain { refresher.refresh() }
+        onMain { }
+
+        assertThat(reads).describedAs("the read under way was dropped, no other one started").containsExactly("start")
+        assertThat(titles()).containsExactly("One", "Two")
+    }
+
+    /**
+     * A decision whose files are not in a large queue looks through it once: the items are chosen before the read and
+     * not chosen again after it (docs/playback.md §2.6). Each look at an item is counted.
+     */
+    @Test
+    fun aDecisionWhoseFilesAreNotQueuedLooksThroughTheQueueOnce() {
+        val uri = Uri.fromFile(TestFiles.copy(LONG_FIXTURE))
+        val items = List(QUEUE) { MediaItem.Builder().setMediaId("${it + 1}").setUri(uri).setMediaMetadata(MediaMetadata.Builder().setTitle("Old").build()).build() }
+        playFirst(*items.toTypedArray())
+        val looks = AtomicInteger()
+        val counted = object : androidx.media3.common.ForwardingPlayer(session) {
+            override fun getMediaItemAt(index: Int): MediaItem {
+                looks.incrementAndGet()
+                return super.getMediaItemAt(index)
+            }
+        }
+        val refresher = SessionItemRefresher(counted, { ids -> ids.associateWith { song(it, "New $it") } }, mainScope)
+
+        onMain { refresher.refreshDecided(setOf(QUEUE + 1L)) }
+
+        assertThat(titles().first()).describedAs("the playing item").isEqualTo("New 1")
+        assertThat(titles().drop(1)).allMatch { it == "Old" }
+        // Once round the queue, and the playing item looked at again to read and to replace it.
+        assertThat(looks.get()).describedAs("looks at the queue's items").isLessThanOrEqualTo(QUEUE + 4)
+    }
+
+    private companion object {
+        const val QUEUE = 300
+    }
+
     @Test
     fun anItemWithTheSameValuesIsLeftAlone() {
         playFirst(item(1, LONG_FIXTURE, "One"))

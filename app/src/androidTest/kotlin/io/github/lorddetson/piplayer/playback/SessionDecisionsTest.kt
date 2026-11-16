@@ -39,8 +39,10 @@ import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import kotlin.time.Duration.Companion.seconds
+import kotlin.time.TimeSource
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.within
 import org.junit.After
 import org.junit.Before
 import org.junit.Rule
@@ -53,8 +55,9 @@ import org.junit.runner.RunWith
  * docs/playback.md §2.6): the playback service over the app's library, filled from a test index whose files are real
  * files of the media index, so that they play and the cover loader reads their embedded pictures.
  *
- * The fixture is an MP3 without a frame-count header (the 12 s CBR seek fixture, three times over) behind an ID3v2 tag
- * with a title, artist and album and a front cover: its tags and its embedded cover differ from the library's values
+ * The fixture is an MP3 without a frame-count header (the 12 s CBR seek fixture, ten times over, so about two minutes:
+ * long enough that X still plays when a slow emulator has waited its way through every step) behind an ID3v2 tag with a
+ * title, artist and album and a front cover: its tags and its embedded cover differ from the library's values
  * (the test index's) and from the decided ones. The queue is X, Y and X2, where X2 is another file with X's content, so
  * of the same track.
  */
@@ -137,6 +140,7 @@ class SessionDecisionsTest {
         controller.waitUntil("X plays at the head of the queue", 20.seconds) {
             isPlaying && mediaItemCount == 3 && currentMediaItemIndex == 0
         }
+        val started = TimeSource.Monotonic.markNow()
         assertThat(onMain { List(3) { controller.getMediaItemAt(it).mediaId } }).containsExactly(*ids.map { it.toString() }.toTypedArray())
         val platform = platformController()
         // Before any decision: the library's values and the embedded picture as the resolver reads it, not the stream's tags.
@@ -177,6 +181,8 @@ class SessionDecisionsTest {
         assertThat(libraryValues(ids[0]).title).isEqualTo("Alpha")
         awaitShown("the library's values after Undo", ids[0], FRONT_COLOR, platform)
         controller.waitUntil("X2 shows its own values again") { getMediaItemAt(2).mediaMetadata.title.toString() == "Charlie" }
+        assertThat(started.elapsedNow().inWholeMilliseconds).describedAs("the test's steps took less time than X plays, with room to spare")
+            .isLessThan(DURATION_MS - ROOM_MS)
         onMain {
             assertThat(controller.getMediaItemAt(1).mediaMetadata.title.toString()).describedAs("the next item, of another track").isEqualTo("Bravo")
             assertThat(heard.states).describedAs("no new preparation: $heard").isEmpty()
@@ -193,8 +199,9 @@ class SessionDecisionsTest {
 
     /**
      * Waits until the controller and the platform session show PiPlayer's values for [fileId], with a cover of [color],
-     * and checks the duration: the stored exact one, which the player's own estimate of a file without a header is not
-     * asked for.
+     * and checks the durations: the metadata's is the stored exact one; the timeline's is the player's own, and the
+     * platform session gives the same one as the controller (TI §7.1), close to the stored one for this constant-bitrate
+     * file.
      */
     private fun awaitShown(what: String, fileId: Long, color: Int, platform: android.media.session.MediaController) {
         val song = libraryValues(fileId)
@@ -208,6 +215,8 @@ class SessionDecisionsTest {
             assertThat(controller.currentMediaItem!!.mediaMetadata.title.toString()).isEqualTo(song.title)
             assertThat(controller.mediaMetadata.artworkUri).describedAs("the cover URI").isNotNull()
         }
+        val timeline = onMain { controller.duration }
+        assertThat(timeline).describedAs("the timeline's length, the player's own").isCloseTo(DURATION_MS, within(ESTIMATE_MS))
         eventually("$what: the platform session, which Bluetooth and watches read") {
             val metadata = onMain { platform.metadata }
             metadata != null && metadata.getString(android.media.MediaMetadata.METADATA_KEY_TITLE) == song.title &&
@@ -215,6 +224,8 @@ class SessionDecisionsTest {
                 metadata.getString(android.media.MediaMetadata.METADATA_KEY_ALBUM) == song.album &&
                 near(metadata.getBitmap(android.media.MediaMetadata.METADATA_KEY_ALBUM_ART)?.let(::center), color)
         }
+        assertThat(onMain { platform.metadata!!.getLong(android.media.MediaMetadata.METADATA_KEY_DURATION) })
+            .describedAs("the platform session's length, the controller's").isEqualTo(timeline)
     }
 
     private fun platformController(): android.media.session.MediaController {
@@ -249,7 +260,7 @@ class SessionDecisionsTest {
 
     /**
      * The fixture: an ID3v2.3 tag with the title, artist and album frames of the tagged fixture and the front cover of the
-     * cover fixture, then the audio of the CBR seek fixture, which has no frame-count header, three times.
+     * cover fixture, then the audio of the CBR seek fixture, which has no frame-count header, [REPEATS] times.
      */
     private fun fixture(): ByteArray {
         val frames = id3Frames("playback/tagged-44100-stereo.mp3") + id3Frames("playback/cover-front.mp3")
@@ -259,7 +270,7 @@ class SessionDecisionsTest {
             (size shr 21 and 0x7f).toByte(), (size shr 14 and 0x7f).toByte(), (size shr 7 and 0x7f).toByte(), (size and 0x7f).toByte(),
         )
         val audio = TestFiles.assets.open(PlaybackTesting.LONG_FIXTURE).use { it.readBytes() }
-        return header + frames + audio + audio + audio
+        return (0 until REPEATS).fold(header + frames) { bytes, _ -> bytes + audio }
     }
 
     /** The frames of the ID3v2.3 tag at the start of [asset], without its header and padding. */
@@ -311,8 +322,17 @@ class SessionDecisionsTest {
         const val FOLDER = "Music/PiPlayer session test/"
         val NAMES = listOf("x.mp3", "y.mp3", "x2.mp3")
 
+        /** How many times the fixture holds the seek fixture's audio. */
+        const val REPEATS = 10
+
         /** The stored exact length of the fixture as the test's library holds it. */
-        const val DURATION_MS = 36_126L
+        const val DURATION_MS = REPEATS * SongSourceRule.LONG_FIXTURE_MS
+
+        /** The part of X's length the test's steps must leave unplayed, so that a slow run fails here, clearly. */
+        const val ROOM_MS = 15_000L
+
+        /** How far the player's own length, from the first frame's bitrate and the file's size, may be from the stored one. */
+        const val ESTIMATE_MS = 500L
 
         /** The color of the fixtures' front cover (scripts/generate_playback_fixtures.py). */
         const val FRONT_COLOR = 0xFF3D5AFE.toInt()
