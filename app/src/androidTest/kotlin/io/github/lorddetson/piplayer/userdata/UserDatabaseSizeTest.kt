@@ -28,8 +28,9 @@ import org.junit.runner.RunWith
  * tags, whose references all fit the mask, and half on files whose tags differ from the decided values in 8 parts, which
  * take 5 bytes each (TI §10.2); a tenth of the tracks has a second location whose values differ in 4 parts, as
  * `file_state` rows. A year of listening adds 9 000 listening outcomes of 90 days and the folded counts of 15 000
- * identities, 12 000 of which have folded plays too (docs/library.md §15.7). Measured on the API 36 emulator in M3 before
- * the references and `file_state` rows were added: 13.0 MB.
+ * identities, 12 000 of which have folded plays too (docs/library.md §15.7). Each decision's reason is the 7-byte blob
+ * of `DecisionCodec`. Measured on the API 36 emulator in M3 before the references and `file_state` rows were added:
+ * 13.0 MB; on API 30 and 36 with the listening outcomes and the reason as a short text: 14.64 MB, over the limit.
  */
 @RunWith(AndroidJUnit4::class)
 class UserDatabaseSizeTest {

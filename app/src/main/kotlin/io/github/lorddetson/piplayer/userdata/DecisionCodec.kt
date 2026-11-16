@@ -97,49 +97,94 @@ object DecisionCodec {
 
     fun confidence(code: Int?): Double? = code?.let { it / 1_000.0 }
 
-    // The short text of a reason: "<source><tier>:<found by>:<fingerprint>:<length difference>:<title>:<artist>:<disagreement>",
-    // each source and field one letter, the scores in thousandths, empty for none.
-    private val sourceLetters = mapOf(Source.TAG_RECORDING_ID to 'T', Source.ISRC to 'I', Source.FINGERPRINT to 'F', Source.TEXT_SEARCH to 'S')
-    private val tierLetters = mapOf(Tier.IDENTIFIER to 'I', Tier.SIMILARITY to 'S')
-    private val fieldLetters = mapOf(HintField.TITLE to 'T', HintField.ARTIST to 'A')
-
-    /** The stored blob of a match's [reason] (TI §10.2). */
-    fun reason(reason: Reason): ByteArray = text(reason).toByteArray(Charsets.UTF_8)
-
-    /** The reason of its stored [blob]; null for a blob this build cannot read. */
-    fun reason(blob: ByteArray?): Reason? = text(blob?.toString(Charsets.UTF_8))
-
-    private fun text(reason: Reason): String = listOf(
-        "${sourceLetters.getValue(reason.source)}${tierLetters.getValue(reason.tier)}",
-        Source.entries.filter { it in reason.foundBy }.map(sourceLetters::getValue).joinToString(""),
-        reason.fingerprintScore?.let(::thousandths).orEmpty(),
-        reason.durationDeltaMs?.toString().orEmpty(),
-        reason.title?.let(::thousandths).orEmpty(),
-        reason.artist?.let(::thousandths).orEmpty(),
-        HintField.entries.filter { it in reason.disagreement }.map(fieldLetters::getValue).joinToString(""),
-    ).joinToString(":")
-
-    private fun text(text: String?): Reason? {
-        val parts = text?.split(':') ?: return null
-        if (parts.size != 7 || parts[0].length != 2) return null
-        fun <T> letter(map: Map<T, Char>, c: Char): T? = map.entries.firstOrNull { it.value == c }?.key
-        return try {
-            Reason(
-                source = letter(sourceLetters, parts[0][0]) ?: return null,
-                tier = letter(tierLetters, parts[0][1]) ?: return null,
-                foundBy = parts[1].mapTo(LinkedHashSet()) { letter(sourceLetters, it) ?: return null },
-                fingerprintScore = parts[2].ifEmpty { null }?.let { it.toInt() / 1_000.0 },
-                durationDeltaMs = parts[3].ifEmpty { null }?.toLong(),
-                title = parts[4].ifEmpty { null }?.let { it.toInt() / 1_000.0 },
-                artist = parts[5].ifEmpty { null }?.let { it.toInt() / 1_000.0 },
-                disagreement = parts[6].mapTo(LinkedHashSet()) { letter(fieldLetters, it) ?: return null },
-            )
-        } catch (_: NumberFormatException) {
-            null
-        }
+    // The reason blob (TI §10.2): a first byte with the source (bits 0-1), the tier (bit 2), the stages that found it
+    // (bits 3-6) and whether a length difference follows (bit 7); 4 bytes, most significant first, with the disagreements
+    // (bits 30-31) and the three scores in thousandths (bits 20-29, 10-19, 0-9; NO_SCORE for none); then the length
+    // difference as a zigzag varint.
+    private fun sourceCode(source: Source): Int = when (source) {
+        Source.TAG_RECORDING_ID -> 0
+        Source.ISRC -> 1
+        Source.FINGERPRINT -> 2
+        Source.TEXT_SEARCH -> 3
     }
 
-    private fun thousandths(score: Double): String = (score * 1_000).roundToInt().toString()
+    private fun tierCode(tier: Tier): Int = when (tier) {
+        Tier.IDENTIFIER -> 0
+        Tier.SIMILARITY -> 1
+    }
+
+    private fun disagreementBit(field: HintField): Int = when (field) {
+        HintField.TITLE -> 30
+        HintField.ARTIST -> 31
+    }
+
+    /** The stored blob of a match's [reason] (TI §10.2): 7 bytes for a length difference within 8 s. */
+    fun reason(reason: Reason): ByteArray {
+        val delta = reason.durationDeltaMs
+        var first = sourceCode(reason.source) or (tierCode(reason.tier) shl 2)
+        for (source in reason.foundBy) first = first or (1 shl (3 + sourceCode(source)))
+        if (delta != null) first = first or 0x80
+        var scores = (score(reason.fingerprintScore) shl 20) or (score(reason.title) shl 10) or score(reason.artist)
+        for (field in reason.disagreement) scores = scores or (1L shl disagreementBit(field))
+        val out = ByteArrayOutputStream(7)
+        out.write(first)
+        for (shift in 24 downTo 0 step 8) out.write((scores shr shift).toInt() and 0xff)
+        if (delta != null) {
+            var zigzag = (delta shl 1) xor (delta shr 63)
+            while (zigzag and 0x7fL.inv() != 0L) {
+                out.write((zigzag and 0x7f).toInt() or 0x80)
+                zigzag = zigzag ushr 7
+            }
+            out.write(zigzag.toInt())
+        }
+        return out.toByteArray()
+    }
+
+    /** The reason of its stored [blob]; null for a blob this build cannot read (TI §10.2). */
+    fun reason(blob: ByteArray?): Reason? {
+        if (blob == null || blob.size < SCORES_END) return null
+        val first = blob[0].toInt() and 0xff
+        val scores = (1 until SCORES_END).fold(0L) { word, i -> (word shl 8) or (blob[i].toLong() and 0xff) }
+        var delta: Long? = null
+        var end = SCORES_END
+        if (first and 0x80 != 0) {
+            var zigzag = 0L
+            var shift = 0
+            while (true) {
+                if (end == blob.size || shift >= Long.SIZE_BITS) return null
+                val byte = blob[end++].toInt() and 0xff
+                zigzag = zigzag or ((byte and 0x7f).toLong() shl shift)
+                shift += 7
+                if (byte and 0x80 == 0) break
+            }
+            delta = (zigzag ushr 1) xor -(zigzag and 1)
+        }
+        if (end != blob.size) return null
+        val (fingerprint, title, artist) = listOf(20, 10, 0).map { shift ->
+            when (val value = (scores shr shift).toInt() and NO_SCORE) {
+                NO_SCORE -> null
+                in 0..1_000 -> value / 1_000.0
+                else -> return null
+            }
+        }
+        return Reason(
+            source = Source.entries.first { sourceCode(it) == first and 0x3 },
+            tier = Tier.entries.first { tierCode(it) == (first shr 2) and 0x1 },
+            foundBy = Source.entries.filterTo(LinkedHashSet()) { first and (1 shl (3 + sourceCode(it))) != 0 },
+            fingerprintScore = fingerprint,
+            durationDeltaMs = delta,
+            title = title,
+            artist = artist,
+            disagreement = HintField.entries.filterTo(LinkedHashSet()) { scores and (1L shl disagreementBit(it)) != 0L },
+        )
+    }
+
+    /** A score from 0 to 1 in thousandths, at the nearer end when outside; NO_SCORE for none. */
+    private fun score(value: Double?): Long =
+        value?.takeUnless { it.isNaN() }?.let { (it * 1_000).roundToInt().coerceIn(0, 1_000).toLong() } ?: NO_SCORE.toLong()
+
+    private const val SCORES_END = 5
+    private const val NO_SCORE = 1023
 
     private const val MBID_BYTES = 16
 }
