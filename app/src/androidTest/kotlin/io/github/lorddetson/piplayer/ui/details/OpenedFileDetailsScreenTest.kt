@@ -3,8 +3,13 @@ package io.github.lorddetson.piplayer.ui.details
 import android.net.Uri
 import androidx.activity.ComponentActivity
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasContentDescription
+import androidx.compose.ui.test.performClick
+import io.github.lorddetson.piplayer.ui.identification.IdentifyTarget
+import io.github.lorddetson.piplayer.ui.identification.LocalIdentify
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
@@ -46,6 +51,22 @@ class OpenedFileDetailsScreenTest {
         show(TestFiles.copy("playback/cover-front.mp3").also { copies += it })
 
         compose.waitUntilAtLeastOneExists(hasTestTag(PlayerTags.COVER) and hasAnyAncestor(hasTestTag(DetailsTags.HEADER)), timeoutMillis = 10_000)
+    }
+
+    @Test
+    fun theTopBarsIdentifyActionOpensTheReviewOfTheFile() {
+        val gone = File(TestFiles.targetContext.cacheDir, "gone.mp3").apply { delete() }
+        val uri = Uri.fromFile(gone).toString()
+        val opened = mutableListOf<IdentifyTarget>()
+        compose.setContent {
+            CompositionLocalProvider(LocalIdentify provides { target: IdentifyTarget -> opened += target }) {
+                TrackDetailsScreen(fileId = null, uri = uri, SnackbarHostState(), onBack = {})
+            }
+        }
+
+        compose.onNode(hasContentDescription(compose.activity.getString(R.string.identify))).performClick()
+
+        assertThat(opened).containsExactly(IdentifyTarget.Opened(uri))
     }
 
     @Test

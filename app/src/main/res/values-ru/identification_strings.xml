@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Online identification: the disclosure and Settings, "Identification and privacy" (TI §9). -->
+<!-- Online identification: the disclosure, Settings, "Identification and privacy" (TI §9), and the review (TI §6). -->
 <resources>
     <!-- The disclosure before the first online lookup. -->
     <string name="identification_disclosure_title">Распознавание через интернет</string>
@@ -48,4 +48,81 @@
     <string name="identification_status_stopped_user_agent">%1$s: остановлен до перезапуска PiPlayer, потому что сервис отклонил user agent приложения</string>
     <string name="identification_status_stopped_key">%1$s: остановлен до перезапуска PiPlayer, потому что сервис отклонил ключ приложения</string>
     <string name="identification_status_no_key">%1$s: недоступен в этой сборке, в ней нет ключа AcoustID</string>
+    <!-- The review of one file (TI §6, review screen A). -->
+    <string name="identify">Распознать</string>
+    <string name="review_cancel">Отмена</string>
+    <string name="review_progress_local">Чтение файла</string>
+    <string name="review_progress_walk">Измерение длительности трека</string>
+    <string name="review_progress_known_ids">Поиск записи по тегу</string>
+    <string name="review_progress_isrc">Поиск по ISRC</string>
+    <string name="review_progress_decoding">Декодирование звука для отпечатка</string>
+    <string name="review_progress_fingerprint">Поиск по отпечатку</string>
+    <string name="review_progress_text">Поиск по названию и исполнителю</string>
+    <string name="review_progress_release">Выбор релиза</string>
+    <plurals name="review_progress_release_pages">
+        <item quantity="one">Выбор релиза: %d страница релизов</item>
+        <item quantity="few">Выбор релиза: %d страницы релизов</item>
+        <item quantity="many">Выбор релиза: %d страниц релизов</item>
+        <item quantity="other">Выбор релиза: %d страницы релизов</item>
+    </plurals>
+    <string name="review_try_again">Повторить</string>
+    <string name="review_no_network">Нет подключения к интернету. Подключитесь к сети и повторите.</string>
+    <string name="review_captive_portal">Эта сеть сначала просит войти. Войдите в неё и повторите.</string>
+    <string name="review_stopped_user_agent">%1$s перестал отвечать PiPlayer, потому что отказал user agent приложения. Он не будет отвечать до перезапуска PiPlayer.</string>
+    <string name="review_stopped_key">%1$s перестал отвечать PiPlayer, потому что отказал ключ приложения. Он не будет отвечать до перезапуска PiPlayer.</string>
+    <string name="review_unavailable">%1$s не ответил. Повторите позже.</string>
+    <string name="review_no_key">Совпадений не найдено. В этой сборке нет ключа AcoustID, поэтому поиск шёл только по тегам и имени файла.</string>
+    <string name="review_unreadable">Файл не удалось прочитать, поэтому поиска не было.</string>
+    <string name="review_no_match">Совпадений не найдено.</string>
+    <string name="review_failed">Распознать не удалось.</string>
+    <string name="review_retry_at">AcoustID пока ничего не нашёл. Повторите после %1$s.</string>
+    <string name="review_band_high">Высокая уверенность</string>
+    <string name="review_band_medium">Средняя уверенность</string>
+    <string name="review_confidence_description">Уверенность %1$s, %2$s</string>
+    <string name="review_another_edition">Из другого издания</string>
+    <string name="review_pixels">%1$d × %2$d пкс</string>
+    <string name="review_stage_fingerprint">отпечаток</string>
+    <string name="review_stage_tag_id">ID записи из тегов</string>
+    <string name="review_stage_isrc">ISRC</string>
+    <string name="review_stage_text">поиск по тексту</string>
+    <string name="review_stage_by_text">%1$s по тексту</string>
+    <string name="review_stage_with_score">%1$s %2$s</string>
+    <string name="review_reason_duration">длительность %1$s с</string>
+    <string name="review_reason_title">название %1$s</string>
+    <string name="review_reason_artist">исполнитель %1$s</string>
+    <string name="review_reason_title_differs">название не совпадает</string>
+    <string name="review_reason_artist_differs">исполнитель не совпадает</string>
+    <string name="review_reason_also">найдено и через: %1$s</string>
+    <string name="review_other_candidates">Другие варианты</string>
+    <string name="review_no_edition">Не удалось выбрать релиз этой записи, поэтому её нельзя применить.</string>
+    <string name="review_changes">Изменения</string>
+    <string name="review_no_change">Без изменений</string>
+    <string name="review_no_value">Нет</string>
+    <string name="review_line_description">%1$s: сейчас %2$s, новое %3$s</string>
+    <plurals name="review_ids">
+        <item quantity="one">%d ID</item>
+        <item quantity="few">%d ID</item>
+        <item quantity="many">%d ID</item>
+        <item quantity="other">%d ID</item>
+    </plurals>
+    <string name="review_protected_note">Защищённые поля не меняются: %1$s</string>
+    <string name="review_cover_own_song">Ваша обложка песни остаётся сверху</string>
+    <string name="review_cover_own_album">Ваша обложка альбома остаётся сверху</string>
+    <string name="review_cover_none">Нет обложки</string>
+    <string name="review_cover_thumbnail">Миниатюра системы</string>
+    <string name="review_cover_loading">Загрузка обложки</string>
+    <string name="review_cover_failed">Обложку не удалось загрузить.</string>
+    <string name="review_apply">Применить</string>
+    <string name="review_keep_as_is">Оставить как есть</string>
+    <string name="review_skip">Пропустить</string>
+    <string name="review_undo">Отменить</string>
+    <string name="review_applied">Сохранено в PiPlayer</string>
+    <string name="review_kept">Оставлено как есть</string>
+    <string name="review_skipped">Пропущено</string>
+    <string name="review_undone">Отменено</string>
+    <string name="review_apply_failed">Результат не удалось сохранить.</string>
+    <string name="review_keep_failed">«Оставить как есть» не удалось сохранить.</string>
+    <string name="review_skip_failed">«Пропустить» не удалось сохранить.</string>
+    <string name="review_undo_failed">Отменить не удалось.</string>
+    <string name="review_edition_failed">Релиз этого варианта не удалось загрузить.</string>
 </resources>

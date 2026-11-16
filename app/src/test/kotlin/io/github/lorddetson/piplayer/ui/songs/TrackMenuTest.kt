@@ -102,6 +102,37 @@ class TrackMenuTest {
     }
 
     @Test
+    fun `Identify comes right before Details wherever a song has a menu, Now Playing's included`() {
+        val identify = TrackMenuOffers(identify = true)
+
+        for (place in TrackMenuPlace.entries) {
+            val withIdentify = entries(place, offers = identify)
+            assertThat(withIdentify).endsWith(TrackMenuEntry.Identify, Details)
+            assertThat(withIdentify - TrackMenuEntry.Identify).isEqualTo(entries(place))
+        }
+        // Without Details, Identify ends the song's entries.
+        assertThat(entries(TrackMenuPlace.LIST, offers = TrackMenuOffers(details = false, identify = true))).endsWith(RemoveCover, TrackMenuEntry.Identify)
+    }
+
+    @Test
+    fun `a file opened from another app has Identify and Details`() {
+        val opened = TrackMenuState(inLibrary = false)
+
+        for (place in listOf(TrackMenuPlace.QUEUE, TrackMenuPlace.NOW_PLAYING)) {
+            assertThat(entries(place, opened, TrackMenuOffers(identify = true))).containsExactly(TrackMenuEntry.Identify, Details)
+        }
+    }
+
+    @Test
+    fun `a selection's menu has no Identify until batches come`() {
+        val one = SelectionMenuState(rows = 1, songs = 1, favorites = FavoriteBatch(counted = 1, notFavorite = 0))
+
+        for (place in SelectionPlace.entries) {
+            assertThat(selection(place, one, TrackMenuOffers(identify = true))).doesNotContain(TrackMenuEntry.Identify)
+        }
+    }
+
+    @Test
     fun `a song without an album key has no Go to album`() {
         val state = known.copy(links = links.copy(albumKey = null, artists = emptyList()))
 

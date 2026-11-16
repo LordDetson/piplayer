@@ -55,6 +55,7 @@ internal fun label(entry: TrackMenuEntry): String = when (entry) {
     is TrackMenuEntry.Favorite -> stringResource(if (entry.favorite) R.string.favorite_remove else R.string.favorite_add)
     TrackMenuEntry.ChooseCover -> stringResource(R.string.cover_choose)
     TrackMenuEntry.RemoveCover -> stringResource(R.string.cover_remove)
+    TrackMenuEntry.Identify -> stringResource(R.string.identify)
     TrackMenuEntry.Details -> stringResource(R.string.details)
     TrackMenuEntry.Play -> stringResource(R.string.playlist_play)
     is TrackMenuEntry.FavoriteUnavailable ->
@@ -75,6 +76,7 @@ private fun SongMenu.run(entry: TrackMenuEntry, song: Song) {
         is TrackMenuEntry.Favorite -> favorites?.set?.invoke(song, !entry.favorite)
         TrackMenuEntry.ChooseCover -> covers?.chooseForSong?.invoke(song)
         TrackMenuEntry.RemoveCover -> covers?.removeForSong?.invoke(song)
+        TrackMenuEntry.Identify -> Unit
         TrackMenuEntry.Details -> details?.invoke(song)
         // A selection's entries, which a song's own menu never has.
         TrackMenuEntry.Play, is TrackMenuEntry.FavoriteUnavailable, TrackMenuEntry.RemoveFromPlaylist, TrackMenuEntry.RemoveFromQueue -> Unit

@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Online identification: the disclosure and Settings, "Identification and privacy" (TI §9). -->
+<!-- Online identification: the disclosure, Settings, "Identification and privacy" (TI §9), and the review (TI §6). -->
 <resources>
     <!-- Service names, the same in every language. -->
     <string name="identification_name_acoustid" translatable="false">AcoustID</string>
@@ -53,4 +53,88 @@
     <string name="identification_status_stopped_user_agent">%1$s: stopped until PiPlayer restarts, because the service refused the app\'s user agent</string>
     <string name="identification_status_stopped_key">%1$s: stopped until PiPlayer restarts, because the service refused the app\'s key</string>
     <string name="identification_status_no_key">%1$s: not available in this build, which has no AcoustID key</string>
+    <!-- The review of one file (TI §6, review screen A). -->
+    <string name="identify">Identify</string>
+    <string name="review_cancel">Cancel</string>
+    <string name="review_progress_local">Reading the file</string>
+    <string name="review_progress_walk">Measuring the track\'s length</string>
+    <string name="review_progress_known_ids">Looking up the tagged recording</string>
+    <string name="review_progress_isrc">Looking up the ISRC</string>
+    <string name="review_progress_decoding">Decoding the audio for a fingerprint</string>
+    <string name="review_progress_fingerprint">Looking up the fingerprint</string>
+    <string name="review_progress_text">Searching by title and artist</string>
+    <string name="review_progress_release">Choosing the release</string>
+    <plurals name="review_progress_release_pages">
+        <item quantity="one">Choosing the release: %d page of releases</item>
+        <item quantity="other">Choosing the release: %d pages of releases</item>
+    </plurals>
+    <string name="review_try_again">Try again</string>
+    <string name="review_no_network">No internet connection. Connect to a network and try again.</string>
+    <string name="review_captive_portal">This network asks you to sign in first. Sign in to it, then try again.</string>
+    <!-- %1$s is a service name. -->
+    <string name="review_stopped_user_agent">%1$s stopped answering PiPlayer because it refused the app\'s user agent. It stays stopped until PiPlayer restarts.</string>
+    <string name="review_stopped_key">%1$s stopped answering PiPlayer because it refused the app\'s key. It stays stopped until PiPlayer restarts.</string>
+    <string name="review_unavailable">%1$s did not answer. Try again later.</string>
+    <string name="review_no_key">No match found. This build has no AcoustID key, so only the tags and the file name were searched.</string>
+    <string name="review_unreadable">The file could not be read, so nothing was looked up.</string>
+    <string name="review_no_match">No match found.</string>
+    <string name="review_failed">Identification failed.</string>
+    <!-- %1$s is a time of day, such as 14:35. -->
+    <string name="review_retry_at">AcoustID found nothing for now. Try again after %1$s.</string>
+    <string name="review_band_high">High confidence</string>
+    <string name="review_band_medium">Medium confidence</string>
+    <!-- What TalkBack reads for the confidence: %1$s is a percentage, %2$s the band. -->
+    <string name="review_confidence_description">Confidence %1$s, %2$s</string>
+    <string name="review_another_edition">From another edition</string>
+    <!-- %1$d and %2$d are the width and the height in pixels. -->
+    <string name="review_pixels">%1$d × %2$d px</string>
+    <string name="review_stage_fingerprint">fingerprint</string>
+    <string name="review_stage_tag_id">tagged recording ID</string>
+    <string name="review_stage_isrc">ISRC</string>
+    <string name="review_stage_text">text search</string>
+    <!-- %1$s is a stage, such as ISRC, whose recording was scored by its title and artist. -->
+    <string name="review_stage_by_text">%1$s by text</string>
+    <!-- %1$s is a stage name, %2$s AcoustID's score, such as 0.97. -->
+    <string name="review_stage_with_score">%1$s %2$s</string>
+    <!-- %1$s is a signed number of seconds, such as +3; for a difference under half a second, ±0. -->
+    <string name="review_reason_duration">duration %1$s s</string>
+    <!-- %1$s is a percentage. -->
+    <string name="review_reason_title">title %1$s</string>
+    <string name="review_reason_artist">artist %1$s</string>
+    <string name="review_reason_title_differs">title differs</string>
+    <string name="review_reason_artist_differs">artist differs</string>
+    <!-- %1$s is a stage name. -->
+    <string name="review_reason_also">also found by %1$s</string>
+    <string name="review_other_candidates">Other candidates</string>
+    <string name="review_no_edition">No release of this recording could be chosen, so it cannot be applied.</string>
+    <string name="review_changes">Changes</string>
+    <string name="review_no_change">No change</string>
+    <string name="review_no_value">None</string>
+    <!-- What TalkBack reads for a line of the diff: %1$s is the field, %2$s the value now, %3$s the new value. -->
+    <string name="review_line_description">%1$s: now %2$s, new %3$s</string>
+    <plurals name="review_ids">
+        <item quantity="one">%d ID</item>
+        <item quantity="other">%d IDs</item>
+    </plurals>
+    <!-- %1$s lists the protected fields. -->
+    <string name="review_protected_note">Protected fields left alone: %1$s</string>
+    <string name="review_cover_own_song">Your own cover of the song stays on top</string>
+    <string name="review_cover_own_album">Your own cover of the album stays on top</string>
+    <string name="review_cover_none">No cover</string>
+    <string name="review_cover_thumbnail">System thumbnail</string>
+    <string name="review_cover_loading">Loading the cover</string>
+    <string name="review_cover_failed">The cover could not be loaded.</string>
+    <string name="review_apply">Apply</string>
+    <string name="review_keep_as_is">Keep as-is</string>
+    <string name="review_skip">Skip</string>
+    <string name="review_undo">Undo</string>
+    <string name="review_applied">Saved in PiPlayer</string>
+    <string name="review_kept">Kept as it is</string>
+    <string name="review_skipped">Skipped</string>
+    <string name="review_undone">Undone</string>
+    <string name="review_apply_failed">The result could not be saved.</string>
+    <string name="review_keep_failed">Keep as-is could not be saved.</string>
+    <string name="review_skip_failed">Skip could not be saved.</string>
+    <string name="review_undo_failed">It could not be undone.</string>
+    <string name="review_edition_failed">The release of this candidate could not be loaded.</string>
 </resources>

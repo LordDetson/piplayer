@@ -40,6 +40,9 @@ sealed interface TrackMenuEntry {
 
     data object RemoveCover : TrackMenuEntry
 
+    /** "Identify", which opens the review of the song or the opened file (TI §1, §6). */
+    data object Identify : TrackMenuEntry
+
     data object Details : TrackMenuEntry
 
     /** "Play" of the selected songs (docs/library.md §20.3). */
@@ -85,6 +88,8 @@ data class TrackMenuOffers(
     val favorites: Boolean = true,
     val covers: Boolean = true,
     val details: Boolean = true,
+    /** "Identify" (TI §1): the place can open the review. */
+    val identify: Boolean = false,
 )
 
 /**
