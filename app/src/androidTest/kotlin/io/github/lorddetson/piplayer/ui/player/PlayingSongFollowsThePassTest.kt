@@ -61,6 +61,9 @@ class PlayingSongFollowsThePassTest {
                 }
             })
         }
+        // The tag pass stores a batch in the library before the lists take it, and the session reads the library's values
+        // again (docs/playback.md §2.6): the test's source holds the batch's values first, as the library would.
+        songs.songs = listOf(SongSourceRule.song(1, "Changed", LONG_FIXTURE, artist = "New artist", durationMs = 60_000).copy(album = "New album"))
         SongList.applyInPlace(listOf(SongRow(1, 1, "Changed", "New artist", "New album", 60_000)))
 
         compose.waitUntil(10_000) { onMain { connected.mediaMetadata.title?.toString() == "Changed" } }

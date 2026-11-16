@@ -27,7 +27,7 @@ import org.junit.runner.RunWith
 
 /**
  * What the session shows is the queue item's metadata, not what the extractor finds in the stream, and it follows the
- * merged values without touching playback (TI §7.1, docs/playback.md §2.5).
+ * merged values without touching playback (TI §7.1, docs/playback.md §2.6).
  */
 @RunWith(AndroidJUnit4::class)
 class SessionMetadataTest {
@@ -107,16 +107,27 @@ class SessionMetadataTest {
         onMain { assertThat(calls).isZero() }
     }
 
+    /**
+     * The picture the extractor reads from the stream is never shown for a library song: the embedded picture is a step
+     * of the cover order, which the service resolves (TI §7.1, docs/library.md §13.6). Replaces the M2a check that the
+     * stream's cover stayed until the cover resolver arrived.
+     */
     @Test
-    fun theStreamsCoverStaysUntilTheCoverResolverArrives() {
-        playFirst(item(1, tagged))
-        waitForTheStreamTags()
+    fun aLibrarySongShowsNoPictureOfTheStream() {
+        val added = item(1, "playback/cover-front.mp3").buildUpon().setMediaId(QueueIds.added(1, fileId = 7)).build()
+        playFirst(item(1, "playback/cover-front.mp3"), added)
+        eventually("the player has read the stream's cover") { onMain { exo.mediaMetadata.artworkData != null } }
 
-        eventually("the cover has arrived") { onMain { session.mediaMetadata.artworkData != null } }
+        onMain {
+            assertThat(session.mediaMetadata.artworkData).describedAs("a library song").isNull()
+            session.seekToNextMediaItem()
+        }
+        eventually("the player has read the added entry's cover") { onMain { exo.mediaMetadata.artworkData != null } }
+        onMain { assertThat(session.mediaMetadata.artworkData).describedAs("an added entry").isNull() }
     }
 
     @Test
-    fun anOwnCoverReplacesTheStreamsAndListenersHearIt() {
+    fun anOwnCoverShowsAndListenersHearIt() {
         val heard = mutableListOf<MediaMetadata>()
         onMain {
             session.addListener(object : Player.Listener {
@@ -126,8 +137,7 @@ class SessionMetadataTest {
             })
         }
         playFirst(item(1, "playback/cover-front.mp3"))
-        eventually("the stream's cover has arrived") { onMain { session.mediaMetadata.artworkData != null } }
-        val stream = onMain { session.mediaMetadata.artworkData }
+        eventually("the player has read the stream's cover") { onMain { exo.mediaMetadata.artworkData != null } }
         val own = io.github.lorddetson.piplayer.ui.player.TestImages.png(32)
 
         onMain { session.setArtwork("1", own) }
@@ -139,9 +149,10 @@ class SessionMetadataTest {
             // Another item's cover changes nothing now.
             session.setArtwork("2", io.github.lorddetson.piplayer.ui.player.TestImages.png(16))
             assertThat(session.mediaMetadata.artworkData).isEqualTo(own)
+            // Without a cover the song shows none, not the stream's picture.
             session.setArtwork("1", null)
-            assertThat(session.mediaMetadata.artworkData).isEqualTo(stream)
-            assertThat(heard.last().artworkData).isEqualTo(stream)
+            assertThat(session.mediaMetadata.artworkData).isNull()
+            assertThat(heard.last().artworkData).isNull()
         }
     }
 
@@ -178,25 +189,31 @@ class SessionMetadataTest {
     }
 
     @Test
-    fun aChangeOfOwnCoversLooksAgainAndAFailureKeepsTheStreamsPicture() {
+    fun aChangeOfCoversLooksAgainAndAFailureKeepsThePictureShown() {
         val changes = kotlinx.coroutines.flow.MutableStateFlow(0L)
-        var picture: ByteArray? = io.github.lorddetson.piplayer.ui.player.TestImages.png(8)
+        val first = io.github.lorddetson.piplayer.ui.player.TestImages.png(8)
+        val second = io.github.lorddetson.piplayer.ui.player.TestImages.png(16)
+        var picture: ByteArray? = first
         var failing = false
         playFirst(item(1, "playback/cover-front.mp3"))
-        eventually("the stream's cover has arrived") { onMain { exo.mediaMetadata.artworkData != null } }
-        val stream = onMain { exo.mediaMetadata.artworkData }
+        eventually("the player has read the stream's cover") { onMain { exo.mediaMetadata.artworkData != null } }
         val covers = sessionCovers(changes) { if (failing) throw IllegalStateException("closed") else picture }
         try {
-            eventually("the own cover shows") { onMain { session.mediaMetadata.artworkData.contentEquals(picture) } }
+            eventually("the cover shows") { onMain { session.mediaMetadata.artworkData.contentEquals(first) } }
 
+            // The resolver finds no cover: the song shows none, not the stream's picture.
             picture = null
             onMain { changes.value = 1 }
-            eventually("the stream's picture is back") { onMain { session.mediaMetadata.artworkData.contentEquals(stream) } }
+            eventually("the cover is gone") { onMain { session.mediaMetadata.artworkData == null } }
+
+            picture = second
+            onMain { changes.value = 2 }
+            eventually("the new cover shows") { onMain { session.mediaMetadata.artworkData.contentEquals(second) } }
 
             failing = true
-            onMain { changes.value = 2 }
+            onMain { changes.value = 3 }
             Thread.sleep(500)
-            onMain { assertThat(session.mediaMetadata.artworkData).isEqualTo(stream) }
+            onMain { assertThat(session.mediaMetadata.artworkData).isEqualTo(second) }
         } finally {
             onMain { covers.stop() }
         }
@@ -224,14 +241,17 @@ class SessionMetadataTest {
     }
 
     @Test
-    fun thePlayingItemCarriesItsCoverUriNextToTheStreamsPicture() {
+    fun thePlayingItemCarriesItsCoverUriNextToItsPicture() {
         onMain { session.artworkUriOf = { id, _ -> Uri.parse("content://covers.test/s/$id/v1") } }
         playFirst(item(1, "playback/cover-front.mp3"))
-        eventually("the stream's cover has arrived") { onMain { session.mediaMetadata.artworkData != null } }
+        eventually("the player has read the stream's cover") { onMain { exo.mediaMetadata.artworkData != null } }
+        val own = io.github.lorddetson.piplayer.ui.player.TestImages.png(32)
+
+        onMain { session.setArtwork("1", own) }
 
         onMain {
             assertThat(session.mediaMetadata.artworkUri).isEqualTo(Uri.parse("content://covers.test/s/1/v1"))
-            assertThat(session.mediaMetadata.artworkData).isEqualTo(exo.mediaMetadata.artworkData)
+            assertThat(session.mediaMetadata.artworkData).isEqualTo(own)
             // The queue's items stay without artwork.
             assertThat(session.currentMediaItem!!.mediaMetadata.artworkUri).isNull()
         }
@@ -268,20 +288,22 @@ class SessionMetadataTest {
         // Media3's bitmap cache matches by URI before data: one URI for two pictures would keep the first one.
         onMain { session.artworkUriOf = { id, picture -> ProviderArtwork.ofQueueItem(context, id, picture) } }
         playFirst(item(1, "playback/cover-front.mp3"))
-        eventually("the stream's cover has arrived") { onMain { session.mediaMetadata.artworkData != null } }
+        eventually("the player has read the stream's cover") { onMain { exo.mediaMetadata.artworkData != null } }
         val uris = io.github.lorddetson.piplayer.covers.Covers.uris(context)
         val song = io.github.lorddetson.piplayer.covers.CoverRequest.Track(1)
-        val stream = onMain { session.mediaMetadata.artworkUri!! }
-        val bare = ProviderArtwork.ofQueueItem(context, "1")!!
+        val bare = onMain { session.mediaMetadata.artworkUri!! }
 
         onMain { session.setArtwork("1", io.github.lorddetson.piplayer.ui.player.TestImages.png(32)) }
-        val own = onMain { session.mediaMetadata.artworkUri!! }
+        val first = onMain { session.mediaMetadata.artworkUri!! }
+        onMain { session.setArtwork("1", io.github.lorddetson.piplayer.ui.player.TestImages.png(16)) }
+        val second = onMain { session.mediaMetadata.artworkUri!! }
         onMain { session.setArtwork("1", null) }
         val back = onMain { session.mediaMetadata.artworkUri!! }
 
-        assertThat(listOf(stream, own, bare).toSet()).hasSize(3)
-        assertThat(back).isEqualTo(stream)
-        for (uri in listOf(stream, own, bare)) assertThat(uris.parse(uri.authority, uri.pathSegments)).describedAs("$uri").isEqualTo(song)
+        assertThat(bare).describedAs("the stream's picture names no URI of its own").isEqualTo(ProviderArtwork.ofQueueItem(context, "1"))
+        assertThat(listOf(bare, first, second).toSet()).hasSize(3)
+        assertThat(back).isEqualTo(bare)
+        for (uri in listOf(bare, first, second)) assertThat(uris.parse(uri.authority, uri.pathSegments)).describedAs("$uri").isEqualTo(song)
     }
 
     @Test
@@ -332,18 +354,146 @@ class SessionMetadataTest {
 
     private fun song(id: Long, title: String) = Song(id, "uri$id", title, null, null, null)
 
+    /** The player's thread, on which a read that does not wait applies at once. */
+    private val mainScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main.immediate)
+
+    /** A refresher whose library gives each file the song [of] makes, reading each time; [reads] lists what it was asked. */
+    private fun refresher(reads: MutableList<Collection<Long>> = mutableListOf(), of: (Long) -> Song?) =
+        SessionItemRefresher(session, { ids -> reads += ids.toList(); ids.mapNotNull { id -> of(id)?.let { id to it } }.toMap() }, mainScope)
+
+    private fun titles() = onMain { List(session.mediaItemCount) { session.getMediaItemAt(it).mediaMetadata.title.toString() } }
+
     @Test
     fun theCurrentAndTheNextItemFollowTheMergedValuesAndTheOthersWait() {
         playFirst(item(1, LONG_FIXTURE, "One"), item(2, LONG_FIXTURE, "Two"), item(3, LONG_FIXTURE, "Three"))
-        val refresher = SessionItemRefresher(session) { id -> song(id, "New $id") }
+        val reads = mutableListOf<Collection<Long>>()
+        val refresher = refresher(reads) { id -> song(id, "New $id") }
+
+        onMain { refresher.refresh() }
+
+        assertThat(titles()).containsExactly("New 1", "New 2", "Three")
+        onMain { assertThat(session.mediaMetadata.title.toString()).isEqualTo("New 1") }
+        assertThat(reads.flatten()).containsExactlyInAnyOrder(1L, 2L)
+    }
+
+    /**
+     * After a change of decided values (TI §7.1, M3 step 21): the playing item and the queued items of the files it
+     * touched, an added entry of them too, come up to date; the next item of another file stays as it is, even though
+     * the library's values for it differ, and no item of another file is read.
+     */
+    @Test
+    fun aDecisionRefreshesThePlayingItemAndTheQueuedItemsOfItsFilesButNotTheNextOneOfAnother() {
+        val again = item(1, LONG_FIXTURE, "One again").buildUpon().setMediaId(QueueIds.added(1, fileId = 1)).build()
+        playFirst(item(1, LONG_FIXTURE, "One"), item(2, LONG_FIXTURE, "Two"), again, item(3, LONG_FIXTURE, "Three"), item(4, LONG_FIXTURE, "Four"))
+        val reads = mutableListOf<Collection<Long>>()
+        val refresher = refresher(reads) { id -> song(id, "New $id") }
+
+        onMain { refresher.refreshDecided(setOf(1L, 4L)) }
+
+        assertThat(titles()).containsExactly("New 1", "Two", "New 1", "Three", "New 4")
+        assertThat(reads.flatten().toSet()).containsExactlyInAnyOrder(1L, 4L)
+    }
+
+    @Test
+    fun aDecisionThatDidNotTouchThePlayingItemStillComparesIt() {
+        playFirst(item(1, LONG_FIXTURE, "One"), item(2, LONG_FIXTURE, "Two"), item(3, LONG_FIXTURE, "Three"))
+        val refresher = refresher { id -> song(id, "New $id") }
+
+        onMain { refresher.refreshDecided(setOf(3L)) }
+
+        assertThat(titles()).containsExactly("New 1", "Two", "New 3")
+    }
+
+    @Test
+    fun aDecisionWhoseFilesAreNotKnownComparesThePlayingAndTheNextItem() {
+        playFirst(item(1, LONG_FIXTURE, "One"), item(2, LONG_FIXTURE, "Two"), item(3, LONG_FIXTURE, "Three"))
+        val refresher = refresher { id -> song(id, "New $id") }
+
+        onMain { refresher.refreshDecided(null) }
+
+        assertThat(titles()).containsExactly("New 1", "New 2", "Three")
+    }
+
+    @Test
+    fun aDecisionRefreshesAtMostTwentyQueuedItemsAndTheRestAtTheirTransition() {
+        val items = List(25) { item(1, LONG_FIXTURE, "Old $it").buildUpon().setMediaId(QueueIds.added(it.toLong() + 1, fileId = 1)).build() }
+        playFirst(*items.toTypedArray())
+        val refresher = refresher { id -> song(id, "New") }
+        onMain { refresher.start() }
+
+        onMain { refresher.refreshDecided(setOf(1L)) }
+
+        assertThat(titles().take(21)).allMatch { it == "New" }
+        assertThat(titles().drop(21)).containsExactly("Old 21", "Old 22", "Old 23", "Old 24")
+        onMain { session.seekTo(20, 0) }
+        eventually("the item after the twenty comes up to date at its transition") { titles()[21] == "New" }
+        onMain { refresher.stop() }
+    }
+
+    @Test
+    fun theValuesAreReadAgainAtEachRefreshNotKept() {
+        playFirst(item(1, LONG_FIXTURE, "One"))
+        var title = "Read once"
+        val refresher = refresher { id -> song(id, title) }
+        onMain { refresher.refreshDecided(setOf(1L)) }
+        assertThat(titles()).containsExactly("Read once")
+
+        title = "Read again"
+        onMain { refresher.refreshDecided(setOf(1L)) }
+
+        assertThat(titles()).containsExactly("Read again")
+    }
+
+    @Test
+    fun anItemThatCarriesACoverUriIsReplacedWithoutOne() {
+        val withCover = item(1, LONG_FIXTURE, "One").buildUpon()
+            .setMediaMetadata(SessionItemRefresher.songMetadata(song(1, "One")).buildUpon().setArtworkUri(Uri.parse("content://covers.test/s/1/old")).build())
+            .build()
+        playFirst(withCover)
+        val refresher = refresher { id -> song(id, "One") }
+
+        onMain { refresher.refreshDecided(setOf(1L)) }
 
         onMain {
-            refresher.refresh()
-            assertThat(session.getMediaItemAt(0).mediaMetadata.title.toString()).isEqualTo("New 1")
-            assertThat(session.getMediaItemAt(1).mediaMetadata.title.toString()).isEqualTo("New 2")
-            assertThat(session.getMediaItemAt(2).mediaMetadata.title.toString()).isEqualTo("Three")
-            assertThat(session.mediaMetadata.title.toString()).isEqualTo("New 1")
+            assertThat(session.getMediaItemAt(0).mediaMetadata.artworkUri).isNull()
+            assertThat(session.getMediaItemAt(0).mediaMetadata.title.toString()).isEqualTo("One")
         }
+    }
+
+    @Test
+    fun aSlowReadIsAppliedBeforeTheNextReadStarts() {
+        playFirst(item(1, LONG_FIXTURE, "One"))
+        val first = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val reads = java.util.concurrent.CopyOnWriteArrayList<String>()
+        var calls = 0
+        val refresher = SessionItemRefresher(session, { ids ->
+            val call = ++calls
+            reads += "start $call"
+            if (call == 1) first.await()
+            reads += "end $call"
+            ids.associateWith { song(it, "Read $call") }
+        }, mainScope)
+
+        onMain {
+            refresher.refreshDecided(setOf(1L))
+            refresher.refreshDecided(setOf(1L))
+        }
+        assertThat(reads).containsExactly("start 1")
+
+        onMain { first.complete(Unit) }
+
+        eventually("both reads are applied") { reads.size == 4 && titles() == listOf("Read 2") }
+        assertThat(reads).containsExactly("start 1", "end 1", "start 2", "end 2")
+    }
+
+    @Test
+    fun aReadThatFailsLeavesTheItemsAsTheyAre() {
+        playFirst(item(1, LONG_FIXTURE, "One"))
+        val refresher = SessionItemRefresher(session, { throw IllegalStateException("closed") }, mainScope)
+
+        onMain { refresher.refreshDecided(setOf(1L)) }
+
+        assertThat(titles()).containsExactly("One")
     }
 
     @Test
@@ -356,7 +506,10 @@ class SessionMetadataTest {
                     if (reason == Player.TIMELINE_CHANGE_REASON_PLAYLIST_CHANGED) timelines++
                 }
             })
-            SessionItemRefresher(session) { song(it, "One") }.refresh()
+        }
+        onMain {
+            refresher { song(it, "One") }.refresh()
+            refresher { song(it, "One") }.refreshDecided(setOf(1L))
             assertThat(timelines).isZero()
         }
     }
@@ -366,7 +519,8 @@ class SessionMetadataTest {
         playFirst(item(1, LONG_FIXTURE, "One"))
 
         onMain {
-            SessionItemRefresher(session) { null }.refresh()
+            refresher { null }.refresh()
+            refresher { null }.refreshDecided(setOf(1L))
             assertThat(session.getMediaItemAt(0).mediaMetadata.title.toString()).isEqualTo("One")
         }
     }
@@ -374,13 +528,15 @@ class SessionMetadataTest {
     @Test
     fun aTransitionBringsTheNewNextItemUpToDate() {
         playFirst(item(1, LONG_FIXTURE, "One"), item(2, LONG_FIXTURE, "Two"), item(3, LONG_FIXTURE, "Three"))
-        onMain { SessionItemRefresher(session) { id -> song(id, "New $id") }.start() }
+        val refresher = refresher { id -> song(id, "New $id") }
+        onMain { refresher.start() }
 
         onMain { session.seekToNextMediaItem() }
 
         eventually("the new next item is up to date") {
             onMain { session.getMediaItemAt(2).mediaMetadata.title.toString() == "New 3" }
         }
+        onMain { refresher.stop() }
     }
 
     @Test
@@ -398,7 +554,7 @@ class SessionMetadataTest {
             exo.currentPosition
         }
 
-        onMain { SessionItemRefresher(session) { song(it, "New") }.refresh() }
+        onMain { refresher { song(it, "New") }.refreshDecided(setOf(1L)) }
         Thread.sleep(500)
 
         onMain {

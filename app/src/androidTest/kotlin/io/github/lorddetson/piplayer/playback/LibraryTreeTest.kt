@@ -16,12 +16,14 @@ import io.github.lorddetson.piplayer.library.db.FolderKey
 import io.github.lorddetson.piplayer.library.lists.ListKind
 import io.github.lorddetson.piplayer.library.lists.SongQuery
 import io.github.lorddetson.piplayer.library.lists.SongSort
+import io.github.lorddetson.piplayer.library.tagpass.DurationSource
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.connectBrowser
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.eventually
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.onMain
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.stopAndRelease
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.waitUntil
 import io.github.lorddetson.piplayer.ui.GrantAudioPermission
+import io.github.lorddetson.piplayer.userdata.DecisionFixtures
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.runBlocking
@@ -195,6 +197,30 @@ class LibraryTreeTest {
         assertThat(titles(children(long[1].mediaId)).first()).isEqualTo("${'A' + second % 26}ong ${"%03d".format(second)}")
     }
 
+    /**
+     * The tree reads its lists again after a change of decided values, as after a sync (TI §7.1, docs/playback.md §10.5):
+     * right after Apply a controller finds the song under the bucket of its decided title. The rows' own values are read by
+     * file ID anyway; the outlines, which give the order and the buckets, are what a kept list would leave stale.
+     */
+    @Test
+    fun theListsShowADecisionAtOnce() = runBlocking<Unit> {
+        val first = album("First")
+        val dao = Library.database(context).library()
+        val alpha = dao.files().single { it.mediaStoreId == 2L }.id
+        dao.setContent(alpha, DECIDED_KEY, 200_000, DurationSource.HEADER)
+        Library.identities(context).attach()
+        Library.decisionMirror(context).awaitIdle()
+        assertThat(titles(children("songs!A"))).contains("Alpha")
+        assertThat(titles(children(first.mediaId))).containsExactly("Alpha", "Bravo")
+
+        checkNotNull(Library.decisions(context).apply(DecisionFixtures.request(DECIDED_KEY, DecisionFixtures.details(title = "Zulu"), fileId = alpha)))
+
+        assertThat(titles(children("songs!A"))).doesNotContain("Alpha", "Zulu")
+        assertThat(titles(children("songs!Z"))).contains("Zulu")
+        // An identification does not move the song out of its album (library.md §6.2).
+        assertThat(titles(children(first.mediaId))).containsExactlyInAnyOrder("Bravo", "Zulu")
+    }
+
     @Test
     fun anArtistListsTheirAlbumsByYearThenTheirSongs() {
         val ann = children("artists").single { it.mediaMetadata.title.toString() == "Ann" }
@@ -362,5 +388,6 @@ class LibraryTreeTest {
     private companion object {
         const val LONG = 600
         const val WIDE = 450
+        val DECIDED_KEY = "%064x".format(2)
     }
 }
