@@ -39,6 +39,7 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionResult
+import androidx.room3.withWriteTransaction
 import androidx.test.espresso.Espresso
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -55,7 +56,6 @@ import io.github.lorddetson.piplayer.library.songs.SongList
 import io.github.lorddetson.piplayer.playback.PlaybackSessionCallback
 import io.github.lorddetson.piplayer.playback.PlaybackTesting
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.connectController
-import io.github.lorddetson.piplayer.playback.PlaybackTesting.eventually
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.onMain
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.stopAndRelease
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.waitUntil
@@ -67,7 +67,6 @@ import io.github.lorddetson.piplayer.ui.player.TimerChoice
 import io.github.lorddetson.piplayer.ui.player.TimerChoiceStore
 import io.github.lorddetson.piplayer.ui.songs.SongsTags
 import java.util.concurrent.TimeUnit
-import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.After
@@ -84,9 +83,8 @@ import org.junit.runner.RunWith
  * picture embedded in a file there (docs/playback.md §3.1 to §3.4, §3.9; docs/library.md §13.5).
  *
  * Bravo is a file of the library, over a test index whose row is a real file of the media index, so that it plays and
- * the tag pass and the cover loader read its picture: since M3 step 21 the session gives a library song no picture of
- * the stream, so its cover comes only through the cover order (docs/library.md §13.1, §13.6). Alpha is a song of the
- * test's own list only.
+ * the cover loader reads its picture: since M3 step 21 the session gives a library song no picture of the stream, so its
+ * cover comes only through the cover order (docs/library.md §13.1, §13.6). Alpha is a song of the test's own list only.
  */
 @OptIn(ExperimentalTestApi::class)
 @RunWith(AndroidJUnit4::class)
@@ -95,7 +93,7 @@ class PiPlayerAppTest {
     private val context = TestFiles.targetContext
     private val index = FakeMediaIndex()
 
-    /** Bravo as the library gives it once the tag pass has read its file. */
+    /** Bravo as the library gives it. */
     private lateinit var bravo: Song
     private var inserted: Uri? = null
 
@@ -113,12 +111,18 @@ class PiPlayerAppTest {
                 val id = runBlocking {
                     Library.sync(context).sync()
                     Library.sync(context).awaitIdle()
-                    Library.database(context).library().files().single { it.mediaStoreId == store }.id
+                    val database = Library.database(context)
+                    // What the tag pass stores on a device once it finds the picture; the test runner keeps the pass off.
+                    database.withWriteTransaction {
+                        usePrepared("UPDATE audio_file SET embedded_cover_present = 1 WHERE media_store_id = ?") { statement ->
+                            statement.bindLong(1, store)
+                            statement.step()
+                        }
+                    }
+                    database.library().files().single { it.mediaStoreId == store }.id
                 }
-                // As on a device, the tag pass finds the picture, so the cover order takes it at its embedded step.
-                eventually("the tag pass has found Bravo's picture", 30.seconds) {
-                    runBlocking { Covers.facts(context).file(id)?.embedded == true }
-                }
+                // So the cover order takes the picture at its embedded step (docs/library.md §13.1).
+                check(runBlocking { Covers.facts(context).file(id)?.embedded } == true) { "Bravo's picture is not marked as found" }
                 bravo = checkNotNull(SongList.songsById(context, listOf(id))[id]) { "No song $id" }
             } catch (e: Throwable) {
                 // A rule whose start fails is not finished.
