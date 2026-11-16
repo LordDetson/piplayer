@@ -7,6 +7,7 @@ import io.github.lorddetson.piplayer.library.db.LibraryDatabase
 import io.github.lorddetson.piplayer.library.playlists.PlaylistHints
 import io.github.lorddetson.piplayer.library.sync.LibrarySync
 import io.github.lorddetson.piplayer.library.tagpass.DurationSource
+import io.github.lorddetson.piplayer.tagging.TagReadGuard
 import io.github.lorddetson.piplayer.userdata.TrackIdentityEntity
 import io.github.lorddetson.piplayer.userdata.UserDatabase
 import kotlin.coroutines.cancellation.CancellationException
@@ -112,10 +113,12 @@ class IdentityAttacher(
     suspend fun attach(): AttachPlan = running.withLock {
         if (!ready()) return@withLock AttachPlan(emptyList(), emptyList(), emptyList())
         val now = clock()
-        // The places of the files the tag pass has not read yet, at which a missing identity waits (TI §10.2).
+        // The places of the files the tag pass has not read yet and will still read, at which a missing identity waits
+        // (TI §10.2). They are read first: a file the tag pass reads in between is then also keyed, and step 1 attaches.
         val (files, unread) = sync.exclusive {
             val dao = library.library()
-            dao.keyedFiles().map(::keyed) to dao.unreadPlaces().mapTo(HashSet()) { Place(it.volume, it.relativePath, it.displayName) }
+            val unreadPlaces = dao.unreadPlaces(TagReadGuard.UNSAFE_COUNT)
+            dao.keyedFiles().map(::keyed) to unreadPlaces.mapTo(HashSet()) { Place(it.volume, it.relativePath, it.displayName) }
         }
         val dao = user.identities()
         val stored = dao.identities()

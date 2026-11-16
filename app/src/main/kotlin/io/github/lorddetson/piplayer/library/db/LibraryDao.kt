@@ -383,14 +383,17 @@ interface LibraryDao {
     suspend fun keyedFiles(): List<KeyedFileRow>
 
     /**
-     * The places of the files the tag pass has not read yet and has not failed on, at which a missing identity waits
-     * for that read (TI §10.2 "An identity at Apply", docs/library.md §8.2).
+     * The places of the files the tag pass has not read yet and will still read, at which a missing identity waits for
+     * that read (TI §10.2 "An identity at Apply", docs/library.md §8.2): not tried yet, or tried with a failure that a
+     * later process tries again (an empty reader version), below [unsafeCount] failures and outside excluded folders,
+     * as [unreadFiles] picks them.
      */
     @Query(
         "SELECT id AS fileId, volume_name AS volume, relative_path AS relativePath, display_name AS displayName " +
-            "FROM audio_file WHERE tag_pass_at IS NULL AND tag_failure IS NULL",
+            "FROM audio_file WHERE tag_pass_at IS NULL AND (tag_failure IS NULL OR reader_version IS NULL) " +
+            "AND unsafe_count < :unsafeCount AND folder_rule != 2",
     )
-    suspend fun unreadPlaces(): List<StoredPlace>
+    suspend fun unreadPlaces(unsafeCount: Int): List<StoredPlace>
 
     /**
      * The file [fileId] as Apply gives it an identity (TI §10.2 "An identity at Apply"), also before the tag pass has
