@@ -23,19 +23,17 @@ class LibraryFolderReleaseHint(
 
     override suspend fun confirmedReleaseIds(folder: String?): Set<String> {
         val key = folder?.let(FolderKey::parse) ?: return emptySet()
-        // Every folder below the album folder, in one range of the index on volume and path; the rest is filtered here.
+        // The album folder and the folders one below it, in one range of the index on volume and path; of those, only
+        // the ones named like a disc count, which is filtered here.
         val from = AlbumKey.albumFolder(key.relativePath)
         val rows = withContext(ioDispatcher) {
             // The block runs under the library's lock, which is held by its thread: the read blocks that thread.
-            library.use { database -> runBlocking { database.decided().folderReleases(key.volume, from, from + LAST_CHARACTER) } }
+            library.use { database -> runBlocking { database.decided().folderReleases(key.volume, from, from + FolderKey.AFTER_PATHS) } }
         }
         return confirmed(key, rows)
     }
 
     companion object {
-        /** U+10FFFF, after every character a path may hold, so that the range ends after the folder's last path. */
-        private const val LAST_CHARACTER = "􏿿"
-
         /** The releases of [rows] that lie in [folder]'s album folder, in their usual form. */
         fun confirmed(folder: FolderKey, rows: List<FolderReleaseRow>): Set<String> {
             val albumFolder = AlbumKey.folderKey(folder.relativePath)

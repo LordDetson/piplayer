@@ -31,9 +31,14 @@ class LibraryDecisions(
         savedCoverId: Long? = null,
         atDecision: List<Decisions.LocationValues> = emptyList(),
     ): Decisions.Committed? = committed {
-        // Read before the user database's transaction: the library's lock and the user database's are never held at once.
+        // Only for a target without an identity, and before the user database's transaction: the library's lock and the
+        // user database's are never held at once. An identity made meanwhile is used all the same.
         val target = request.target
-        val file = if (target is IdentificationTarget.LibraryFile) files.file(target.fileId, target.contentKey) else null
+        val file = if (target is IdentificationTarget.LibraryFile && !decisions.hasIdentity(target)) {
+            files.file(target.fileId, target.contentKey)
+        } else {
+            null
+        }
         decisions.apply(request, savedCoverId, atDecision, file)
     }
 

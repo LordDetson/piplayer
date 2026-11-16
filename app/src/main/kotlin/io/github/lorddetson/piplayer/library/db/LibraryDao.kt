@@ -730,6 +730,12 @@ data class FolderKey(val volume: String, val relativePath: String) {
     val key: String get() = "$volume/$relativePath"
 
     companion object {
+        /**
+         * U+10FFFF, after every character a path may hold: a folder's path and this end a range of the paths in and below
+         * it.
+         */
+        val AFTER_PATHS: String = String(Character.toChars(Character.MAX_CODE_POINT))
+
         /** The folder [key] names, or null. */
         fun parse(key: String): FolderKey? {
             val slash = key.indexOf('/')

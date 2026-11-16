@@ -13,6 +13,7 @@ import io.github.lorddetson.piplayer.library.mirror.DecisionMirror
 import io.github.lorddetson.piplayer.library.mirror.LibraryDecisions
 import io.github.lorddetson.piplayer.library.sync.LibrarySync
 import io.github.lorddetson.piplayer.library.tagpass.DecodedEncoding
+import io.github.lorddetson.piplayer.library.tagpass.DurationSource
 import io.github.lorddetson.piplayer.library.tagpass.PassFile
 import io.github.lorddetson.piplayer.library.tagpass.PassRead
 import io.github.lorddetson.piplayer.library.tagpass.PassReader
@@ -178,6 +179,51 @@ class ApplyIdentityTest {
         assertThat(Hex.text(taken.contentKey)).isEqualTo(key(1))
         assertThat(taken.missingSince).isNull()
         assertThat(user.identities().identities()).hasSize(1)
+    }
+
+    @Test
+    fun anAttachPassPlannedBeforeApplyMadeAnIdentityKeepsItAndWritesTheRestOfItsPlan() = runBlocking<Unit> {
+        index.volume().rows = listOf(row(1, path = "Music/Record/", name = "01.mp3"), row(3))
+        sync.sync()
+        library.library().setContent(fileId(1), key(1), 200_000, DurationSource.HEADER)
+        library.library().setContent(fileId(3), key(3), 200_000, DurationSource.HEADER)
+        // A missing identity hinted at file 1's place, which the pass's step 2 gives file 1.
+        val missing = user.identities().add(
+            TrackIdentityEntity(
+                contentKey = Hex.bytes(key(9)), durationMs = 200_300, recordingMbid = null,
+                hintVolumeName = FakeMediaIndex.PRIMARY, hintRelativePath = "Music/Record/", hintDisplayName = "01.mp3",
+                hintSize = 1, createdAt = now - 10_000, missingSince = now - 5_000,
+            ),
+        )
+        // Apply runs after the pass has read the identities and before it writes: with another length at hand it makes a
+        // new identity for file 1's key instead.
+        var applied: Decisions.Committed? = null
+        val racing = IdentityAttacher(
+            library, user, sync,
+            holders = {
+                if (applied == null) {
+                    val file = KeyedFile(
+                        fileId(1), key(1), Place(FakeMediaIndex.PRIMARY, "Music/Record/", "01.mp3"), size = 1, durationMs = 290_000,
+                        settled = true, recordingMbid = null, format = null, tagsRead = false,
+                    )
+                    applied = repository.apply(request(key(1), fileId = fileId(1)), libraryFile = file)
+                }
+                user.user().identitiesHoldingData().toSet()
+            },
+            clock = { now },
+        )
+        try {
+            racing.attach()
+        } finally {
+            racing.close()
+        }
+
+        val made = checkNotNull(identityWithKey(1))
+        assertThat(made.id).isEqualTo(checkNotNull(applied).identityId).isNotEqualTo(missing)
+        assertThat(Hex.text(checkNotNull(user.identities().identity(missing)).contentKey)).isEqualTo(key(9))
+        assertThat(user.identities().identity(missing)?.missingSince).isEqualTo(now - 5_000)
+        // The rest of the plan was written in the same transaction.
+        assertThat(identityWithKey(3)).isNotNull()
     }
 
     @Test

@@ -235,8 +235,9 @@ interface DecidedMirrorDao {
     )
     suspend fun placesOf(fileIds: List<Long>): List<FilePlaceRow>
     /**
-     * The release MBIDs of the files of [volume] whose folder starts with [from] and lies before [until] (TI §4.2 key
-     * 1): each file's decided value when it has one, which may be empty, and the tags' value of a read file.
+     * The release MBIDs of the files of [volume] in the folder [from] or one folder below it, [until] ending the range of
+     * its paths (TI §4.2 key 1): each file's decided value when it has one, which may be empty, and the tags' value of a
+     * read file. The folders below are filtered on the path alone, before anything is joined.
      */
     @Query(
         "SELECT f.relative_path AS relativePath, m.file_id IS NOT NULL AS decided, m.value AS decidedRelease, " +
@@ -244,6 +245,7 @@ interface DecidedMirrorDao {
             "LEFT JOIN decided_mirror m ON m.file_id = f.id AND m.field = 'release_mbid' " +
             "LEFT JOIN track t ON t.file_id = f.id AND t.start_ms = 0 AND f.tag_pass_at IS NOT NULL " +
             "WHERE f.volume_name = :volume AND f.relative_path >= :from AND f.relative_path < :until " +
+            "AND instr(substr(f.relative_path, length(:from) + 1), '/') = length(f.relative_path) - length(:from) " +
             "AND (m.file_id IS NOT NULL OR t.release_mbid IS NOT NULL)",
     )
     suspend fun folderReleases(volume: String, from: String, until: String): List<FolderReleaseRow>

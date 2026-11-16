@@ -65,8 +65,8 @@ interface TrackIdentityDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun addAll(identities: List<TrackIdentityEntity>)
 
-    /** The identities no file holds now, which Apply may give a library file (TI §10.2 "An identity at Apply"). */
-    @Query("SELECT * FROM track_identity WHERE missing_since IS NOT NULL ORDER BY id")
+    /** The whole-file identities no file holds now, which Apply may give a library file (TI §10.2 "An identity at Apply"). */
+    @Query("SELECT * FROM track_identity WHERE missing_since IS NOT NULL AND start_ms = 0 ORDER BY id")
     suspend fun missingIdentities(): List<TrackIdentityEntity>
 
     @Update

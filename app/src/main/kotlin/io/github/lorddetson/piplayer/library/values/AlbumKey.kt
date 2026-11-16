@@ -53,7 +53,7 @@ object AlbumKey {
     }
 
     /** What starts the key of an album grouped by its release ID. */
-    private const val RELEASE_PREFIX = "mbid:"
+    const val RELEASE_PREFIX = "mbid:"
 
     /** The normalized text; a name of punctuation alone, such as `+`, normalizes to nothing and keeps itself. */
     private fun keyOf(text: String, normalize: (String) -> String) = normalize(text).ifEmpty { text.lowercase() }

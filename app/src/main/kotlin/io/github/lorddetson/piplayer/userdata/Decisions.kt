@@ -440,6 +440,10 @@ class Decisions(private val database: UserDatabase, private val clock: () -> Lon
         if (rows.isNotEmpty()) dao.saveFileStates(rows)
     }
 
+    /** Whether an identity holds [target]'s track key now, so that Apply needs no file of the library for it. */
+    suspend fun hasIdentity(target: IdentificationTarget): Boolean =
+        target.startMs == 0L && database.identities().idOfKey(Hex.bytes(target.contentKey)) != null
+
     /**
      * The identity of [target] for Apply, inside its transaction: the one that holds the key, or else one made now (TI
      * §10.2 "An identity at Apply"). A file opened from another app gets a missing identity with the app's name and size

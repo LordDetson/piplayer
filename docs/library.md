@@ -555,16 +555,21 @@ keeps playing meanwhile, and the crash leaves a native crash report of `:tagger`
       own cover and favorite. The files that share a key from their own values are the album's group. A decided release
       MBID changes the key only when every file of the group ends up with the same release MBID, decided or from its
       tags (a decided empty value hides the tags' one); then each of them takes that release's key (`mbid:` and the
-      MBID in its usual form), as if their tags carried it, and joins any other album of that release. Otherwise the
+      MBID in its usual form, lower case with hyphens, as taggers write it), as if their tags carried it, and joins an
+      album whose tags give that key. Otherwise the
       track stays in its group, and the release MBID is only shown (track details, the badge). A file without an album
       of its own takes its key from its decided values: the decided release MBID when there is one, otherwise the
       decided album and album artist within its folder, as above.
-    - The display writer settles the groups in the transaction of every write of display rows: a write of every file
-      settles them all from what it resolved; a smaller write, while some file of the library has a decided release
-      MBID, settles the groups of the files it wrote with the files of the same album folder (or, for a key of a
-      release MBID from the tags, the files whose tags carry it) and changes the key of each file whose key differs.
-      A group that a file leaves (its tags name another album, or the sync deletes it) is settled with the next write
-      of one of its files; until then it keeps the key it had.
+    - The display writer settles the groups in the transaction of every write of display rows. A write of every file
+      settles them all from what it resolved. A smaller write, while some file of the library has a decided release
+      MBID, settles the groups of the files it wrote with their other files and changes the key of each file whose key
+      differs: for a key of an album and folder, the files whose rows hold it as their own, or when none does (the
+      group holds a release's key, or the write holds all of it) the files of the album folder and the folders one
+      below it (more than 16 such groups read the files with a decided release instead, once, since only they can hold
+      a release's key that is not their own); for a key of a release MBID from the tags, the files whose tags carry
+      it. A file without an album of its own belongs to no group. A group that a file leaves (its tags name another
+      album, or the sync deletes it) is settled with the next write of one of its files; until then it keeps the key
+      it had.
     - The index gives the track number with the disc in its thousands (`2005` is disc 2, track 5); the resolver splits it.
       The year is the first four digits of the date, or else of the original date; from the index, its year.
 - `display_artist` lists each artist of a file in order: all the artists of its tags once read, otherwise the displayed
@@ -782,6 +787,10 @@ saved queue that refers to identities is in playback.md §4.
   data. Otherwise the new identity stays with its data and the missing one stays missing; a later pass may try again.
   The writers of user data close the other side (§8.1): one that read the new identity before the takeover's
   transaction and writes after it writes for the missing identity, which holds the file's key now.
+- Decision (M3 step 16): Apply makes or moves identities too (§8.1), between the pass's read and its write. So the plan
+  of steps 1 to 3 is checked again in its write transaction: an identity that changed since the plan read it keeps
+  what it has now, no identity takes a key that another one holds now, and a new identity whose key an identity holds
+  now is left out. The rest of the plan is written.
 - Taking a key moves the identity: `content_key`, `duration_ms` and the hints become the file's, and `missing_since` is
   cleared. When two missing identities could take one file, the newest one takes it.
 - The identity's recording MBID follows the file's tags while it is attached. A decided MBID of M3 will win over tags.
