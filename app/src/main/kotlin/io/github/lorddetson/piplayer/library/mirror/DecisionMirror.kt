@@ -61,6 +61,26 @@ class DecisionMirror(
     /** Raised after every run that changed decided values, so that lists, Now Playing and the session read again. */
     val version: StateFlow<Long> = mutableVersion.asStateFlow()
 
+    /** The files each run that raised [version] changed (TI §7.1). */
+    private val changes = DecidedChanges()
+
+    /**
+     * The files whose decided values the runs after version [seen] up to version [upTo] changed, so that the session
+     * compares only their queue items (TI §7.1); null when that is not known.
+     */
+    fun filesChangedAfter(seen: Long, upTo: Long): Set<Long>? = changes.after(seen, upTo)
+
+    /** Raises [version] for a run that changed [files], once they are kept for [filesChangedAfter]. Whether it changed any. */
+    private fun raised(files: List<Long>): Boolean {
+        if (files.isEmpty()) return false
+        synchronized(changes) {
+            val next = mutableVersion.value + 1
+            changes.record(next, files)
+            mutableVersion.value = next
+        }
+        return true
+    }
+
     /**
      * The whole runs this mirror has completed, also those that wrote nothing; a start makes one (TI §10.3). A run that
      * fails does not count, so the first attach pass still asks for one after a failed start-up run.
@@ -239,7 +259,7 @@ class DecisionMirror(
             val stored = library.library().mirroredChangeCounter()
             write(differing(fileIds, desired, existing), desired, counter.takeIf { stored == counter - 1 })
         }
-        changed.also { if (it) mutableVersion.value++ }
+        raised(changed)
     }
 
     /** The run after a batch of the tag pass: the files [fileIds], by the keys they hold now. Whether values changed. */
@@ -249,7 +269,7 @@ class DecisionMirror(
             val ids = fileIds.distinct()
             val existing = ids.chunked(DecidedMirrorDao.CHUNK).flatMap { library.decided().valuesOf(it) }.groupBy { it.fileId }
             // A library without decisions, the common case, reads no more.
-            if (existing.isEmpty() && !user.decisions().hasMirroredDecisions()) return@exclusive false
+            if (existing.isEmpty() && !user.decisions().hasMirroredDecisions()) return@exclusive emptyList()
             val keys = ids.chunked(MirrorDao.CHUNK).flatMap { library.mirror().keysOf(it) }
             val identities = keys.mapNotNull { it.contentKey }.distinct().chunked(MirrorDao.CHUNK)
                 .flatMap { chunk -> user.identities().withKeys(chunk.map(Hex::bytes)) }
@@ -262,7 +282,7 @@ class DecisionMirror(
             }
             write(differing(ids, desired, existing), desired, counter = null)
         }
-        changed.also { if (it) mutableVersion.value++ }
+        raised(changed)
     }
 
     /**
@@ -322,7 +342,7 @@ class DecisionMirror(
         }
         // Counted once it has completed: a run that throws leaves the next request to make one (TI §10.3).
         wholeRuns++
-        return changed.also { if (it) mutableVersion.value++ }
+        return raised(changed)
     }
 
     /** The files whose keys have decided values in [byKey], read in one statement. */
@@ -419,10 +439,10 @@ class DecisionMirror(
 
     /**
      * Replaces the decided values of [changed] with their [desired] rows and derives their display rows again, in one
-     * transaction that also stores [counter] when one is given. Whether any file changed.
+     * transaction that also stores [counter] when one is given. The files it changed: [changed].
      */
-    private suspend fun write(changed: List<Long>, desired: Map<Long, List<DecidedMirrorEntity>>, counter: Long?): Boolean {
-        if (changed.isEmpty() && counter == null) return false
+    private suspend fun write(changed: List<Long>, desired: Map<Long, List<DecidedMirrorEntity>>, counter: Long?): List<Long> {
+        if (changed.isEmpty() && counter == null) return changed
         library.withWriteTransaction {
             if (changed.isNotEmpty()) {
                 val rows = changed.flatMap { desired[it].orEmpty() }
@@ -445,7 +465,7 @@ class DecisionMirror(
             }
             if (counter != null) library.library().setMirroredChangeCounter(counter)
         }
-        return changed.isNotEmpty()
+        return changed
     }
 
     /** Asks for a whole run in the background; requests during a run collapse into one more run. */

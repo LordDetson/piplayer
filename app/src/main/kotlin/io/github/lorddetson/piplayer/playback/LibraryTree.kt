@@ -584,7 +584,11 @@ class LibraryTree(context: Context, private val artwork: TreeArtwork = TreeArtwo
     /** What the lists depend on besides their order. */
     private fun stamp(): List<Any?> {
         if (Library.mayRead(app)) Library.awaitReady(app, READY_TIMEOUT_MS)
-        return listOf(Library.mayRead(app), Library.revision(), LibrarySettings.latest ?: LibrarySettings(app).readHiddenFiles(), Library.collation(), SongList.changingPasses)
+        // Decided values change the lists without a new revision (TI §7.1).
+        return listOf(
+            Library.mayRead(app), Library.revision(), LibrarySettings.latest ?: LibrarySettings(app).readHiddenFiles(), Library.collation(),
+            SongList.changingPasses, Library.decisionStamp(),
+        )
     }
 
     /** [block] on the lists of the library, or null without access to music. */

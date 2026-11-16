@@ -58,7 +58,9 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.launch
@@ -143,6 +145,44 @@ object Library {
         opened(context)
         return opened.filterNotNull().flatMapLatest { it.decisions.version }
     }
+
+    /**
+     * The files whose decided values each run of the decision mirror changed, after the run, for the session's refresh
+     * (TI §7.1, docs/playback.md §2.6); null when they are not known: a run that changed too many, runs missed by a slow
+     * collector, or the first run of a library that replaced another ([reopen], a rebuild). It follows the library as
+     * [decisionVersion] does and gives nothing for the runs before it is collected.
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    fun decidedFiles(context: Context): Flow<Set<Long>?> {
+        opened(context)
+        return flow {
+            var first = true
+            emitAll(
+                opened.filterNotNull().flatMapLatest { library ->
+                    val mirror = library.decisions
+                    val replaced = !first
+                    first = false
+                    flow {
+                        var seen: Long? = if (replaced) null else mirror.version.value
+                        mirror.version.collect { version ->
+                            val before = seen
+                            seen = version
+                            when {
+                                before == null -> emit(null)
+                                version != before -> emit(mirror.filesChangedAfter(before, version))
+                            }
+                        }
+                    }
+                },
+            )
+        }
+    }
+
+    /**
+     * What tells the decided values of the open library apart: its decision mirror and that mirror's version (TI §7.1).
+     * The library tree keeps its lists while it stays (docs/playback.md §10.5).
+     */
+    fun decisionStamp(): Any? = opened.value?.decisions?.let { it to it.version.value }
 
     /** Raised after every run of the mirror; it follows the library across [reopen] and a rebuild. */
     @OptIn(ExperimentalCoroutinesApi::class)

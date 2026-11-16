@@ -32,10 +32,12 @@ import io.github.lorddetson.piplayer.R
 import io.github.lorddetson.piplayer.covers.Covers
 import io.github.lorddetson.piplayer.library.Library
 import io.github.lorddetson.piplayer.library.songs.SongList
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /** The one player of PiPlayer and its media session, which every surface talks to (docs/playback.md §1.1, §4.2). */
 class PlaybackService : MediaLibraryService() {
@@ -53,6 +55,7 @@ class PlaybackService : MediaLibraryService() {
 
     private val passGateListener = PassGateListener()
     private var passBatches: Job? = null
+    private var decidedRefresh: Job? = null
     private var sessionCovers: SessionCovers? = null
     private val postNotificationAgain = Runnable { postNotification() }
     private var lastStartId = 0
@@ -124,9 +127,12 @@ class PlaybackService : MediaLibraryService() {
         // notification (§2.3, §4.5).
         addSession(session)
         saver.start()
-        val refresher = SessionItemRefresher(sessionPlayer, SongList::keptSong)
+        // Queue items follow the library's values: read again each time, never from a list a screen keeps (docs/playback.md
+        // §2.6, TI §7.1).
+        val refresher = SessionItemRefresher(sessionPlayer, { ids -> withContext(Dispatchers.IO) { SongList.songsById(this@PlaybackService, ids) } }, mainScope)
         refresher.start()
         passBatches = mainScope.launch { SongList.batches.drop(1).collect { refresher.refresh() } }
+        decidedRefresh = mainScope.launch { Library.decidedFiles(this@PlaybackService).collect { refresher.refreshDecided(it) } }
         // Own covers and folder images for the session (docs/library.md §13.6).
         sessionCovers = SessionCovers(sessionPlayer, { SessionCovers.pictureOf(this, it) }, Covers.changes(this), mainScope)
             .also { it.start() }
@@ -221,6 +227,8 @@ class PlaybackService : MediaLibraryService() {
         removeTaskForTests = null
         passBatches?.cancel()
         passBatches = null
+        decidedRefresh?.cancel()
+        decidedRefresh = null
         sessionCovers?.stop()
         sessionCovers = null
         handler.removeCallbacks(postNotificationAgain)

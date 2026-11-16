@@ -19,9 +19,10 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * Gives the session the current song's own or decided cover, or for a file the tag pass found without a picture its system
- * thumbnail or lazy Cover Art Archive cover (docs/library.md §13.6); otherwise the stream's picture stays. [resolve] finds
- * that picture for a file ID; [changes] says when own covers, decided values or online lookups change. Runs on [scope], the player's thread.
+ * Gives the session the current library song's cover by the order of docs/library.md §13.1: its own or its album's, its
+ * decided cover, the embedded picture, the system thumbnail or the lazy Cover Art Archive cover, and none without one
+ * (§13.6, TI §7.1). [resolve] finds that picture for a file ID; [changes] says when own covers, decided values or online
+ * lookups change. A look that fails leaves the picture shown. Runs on [scope], the player's thread.
  */
 @OptIn(UnstableApi::class)
 class SessionCovers(
@@ -66,33 +67,29 @@ class SessionCovers(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                // A database that cannot be read now must not take playback down; the stream's picture stays.
+                // A database that cannot be read now must not take playback down; the picture shown stays.
                 Log.w(TAG, "No session cover for $mediaId", e)
-                null
+                return@launch
             }
             player.setArtwork(mediaId, picture)
         }
     }
 
     companion object {
-        /** An own cover is sent at this step, a thumbnail at [THUMBNAIL_PX]. */
+        /** An own, decided or embedded cover is sent at this step, a thumbnail or a Cover Art Archive cover at [THUMBNAIL_PX]. */
         private const val OWN_PX = 1_024
         private const val THUMBNAIL_PX = 512
         private const val TAG = "SessionCovers"
 
-        /** The picture that replaces the stream's for the file [fileId], as JPEG bytes, or null when the stream's stays. */
+        /** The session's picture of the file [fileId] by the cover order, as JPEG bytes, or null without a cover. */
         suspend fun pictureOf(context: Context, fileId: Long): ByteArray? {
             val own = Covers.own(context)
             own.load()
             val file = Covers.facts(context).file(fileId) ?: return null
-            // A decided cover replaces the stream's picture as an own cover does (docs/library.md §13.6).
+            // The embedded picture is a step of the order like the others (TI §7.1); only the steps after it are smaller.
             val chosen = file.identityId?.let(own::track) != null || file.albumKey?.let(own::album) != null ||
                 file.decidedCover?.let { Covers.saved(context).file(it) } != null
-            val px = when {
-                chosen -> OWN_PX
-                file.embedded == false -> THUMBNAIL_PX
-                else -> return null
-            }
+            val px = if (chosen || file.embedded != false) OWN_PX else THUMBNAIL_PX
             val image = Covers.loader(context).load(CoverRequest.Track(fileId), px) ?: return null
             return withContext(Dispatchers.Default) { BitmapCodec.encode(image) }
         }

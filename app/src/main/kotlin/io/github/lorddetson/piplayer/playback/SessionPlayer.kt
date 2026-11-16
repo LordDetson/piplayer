@@ -14,8 +14,9 @@ import androidx.media3.exoplayer.ExoPlayer
  * the current song; a new queue gets its start song first from [StartFirstShuffleOrder] itself.
  *
  * It shows the queue item's metadata, built from the library's merged values, and nothing of what the extractor finds
- * in the stream, so that fields PiPlayer leaves empty do not show raw tags (TI §7.1). The stream's cover stays, unless an
- * own cover or a system thumbnail replaces it ([setArtwork], docs/library.md §13.6).
+ * in the stream, so that fields PiPlayer leaves empty do not show raw tags (TI §7.1). A library song's picture is the
+ * cover the resolver chose ([setArtwork], docs/library.md §13.6), the embedded picture only as one of its steps, and
+ * none without one; only a file opened from another app, which no resolver knows, keeps the stream's picture.
  */
 @OptIn(UnstableApi::class)
 class SessionPlayer(private val player: ExoPlayer) : ForwardingPlayer(player) {
@@ -219,8 +220,8 @@ class SessionPlayer(private val player: ExoPlayer) : ForwardingPlayer(player) {
     }
 
     /**
-     * Replaces the stream's picture of the item [mediaId] with [data] while it is the current one (docs/library.md §13.6),
-     * or gives the stream's back with null. Call it on the player's thread.
+     * The picture of the item [mediaId], a library song, while it is the current one (docs/library.md §13.6), or none with
+     * null. Call it on the player's thread.
      */
     fun setArtwork(mediaId: String, data: ByteArray?) {
         val before = if (data == null) artworks.remove(mediaId) else artworks.put(mediaId, data)
@@ -242,7 +243,7 @@ class SessionPlayer(private val player: ExoPlayer) : ForwardingPlayer(player) {
         artworks.keys.retainAll(setOfNotNull(mediaId))
     }
 
-    /** The pictures that replace the stream's, by media ID: the current item's and the last few before it. */
+    /** The pictures of library songs, by media ID: the current item's and the last few before it. */
     private val artworks = object : LinkedHashMap<String, ByteArray>() {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, ByteArray>?) = size > KEPT_ARTWORKS
     }
@@ -262,7 +263,8 @@ class SessionPlayer(private val player: ExoPlayer) : ForwardingPlayer(player) {
         val item = current.mediaMetadata
         if (item.artworkData != null || item.artworkUri != null) return item
         val own = artworks[current.mediaId]
-        val picture = own ?: stream.artworkData
+        // A library song shows only the cover the resolver chose (TI §7.1); an opened file keeps the stream's picture.
+        val picture = own ?: stream.artworkData.takeIf { QueueIds.fileId(current.mediaId) == null }
         // The URI names the picture shown too: Media3's bitmap cache matches a URI before the data, so one URI for two
         // pictures would keep the first one (docs/library.md §13.8.6).
         val uri = artworkUriOf(current.mediaId, picture)
