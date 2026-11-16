@@ -30,7 +30,8 @@ import org.junit.runner.RunWith
  * `file_state` rows. A year of listening adds 9 000 listening outcomes of 90 days and the folded counts of 15 000
  * identities, 12 000 of which have folded plays too (docs/library.md §15.7). Each decision's reason is the 7-byte blob
  * of `DecisionCodec`. Measured on the API 36 emulator in M3 before the references and `file_state` rows were added:
- * 13.0 MB; on API 30 and 36 with the listening outcomes and the reason as a short text: 14.64 MB, over the limit.
+ * 13.0 MB; on API 30 and 36 with the listening outcomes and the reason as a short text: 14.64 MB, over the limit; with
+ * the reason blob: 14.28 MB (14 282 752 bytes) on both.
  */
 @RunWith(AndroidJUnit4::class)
 class UserDatabaseSizeTest {
