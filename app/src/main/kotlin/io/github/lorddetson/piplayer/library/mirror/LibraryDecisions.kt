@@ -1,6 +1,8 @@
 package io.github.lorddetson.piplayer.library.mirror
 
 import io.github.lorddetson.piplayer.identification.contract.ApplyRequest
+import io.github.lorddetson.piplayer.identification.contract.IdentificationTarget
+import io.github.lorddetson.piplayer.library.identity.ApplyFiles
 import io.github.lorddetson.piplayer.library.values.DecidedField
 import io.github.lorddetson.piplayer.settings.ProtectedField
 import io.github.lorddetson.piplayer.userdata.Decisions
@@ -14,16 +16,26 @@ import kotlinx.coroutines.withContext
  * The decisions as the app makes them (TI §7.1, §10.3): each commits to the user database first, then mirrors the track's
  * files into the library database before it returns, so lists, Now Playing and the session show the result at once. A
  * caller cancelled meanwhile stops neither: the commit finishes, and the mirror runs in its own scope. A failed mirror
- * asks for a whole run, and a process that dies between the two is repaired by the start-up mirror.
+ * asks for a whole run, and a process that dies between the two is repaired by the start-up mirror. [files] gives a
+ * library target that has no identity yet its file, for the identity Apply makes (TI §10.2 "An identity at Apply").
  */
-class LibraryDecisions(private val decisions: Decisions, private val mirror: () -> DecisionMirror) {
+class LibraryDecisions(
+    private val decisions: Decisions,
+    private val files: ApplyFiles = ApplyFiles.NONE,
+    private val mirror: () -> DecisionMirror,
+) {
 
     /** `Decisions.apply`, then the mirror of the track; null when nothing was written. */
     suspend fun apply(
         request: ApplyRequest,
         savedCoverId: Long? = null,
         atDecision: List<Decisions.LocationValues> = emptyList(),
-    ): Decisions.Committed? = committed { decisions.apply(request, savedCoverId, atDecision) }
+    ): Decisions.Committed? = committed {
+        // Read before the user database's transaction: the library's lock and the user database's are never held at once.
+        val target = request.target
+        val file = if (target is IdentificationTarget.LibraryFile) files.file(target.fileId, target.contentKey) else null
+        decisions.apply(request, savedCoverId, atDecision, file)
+    }
 
     /** `Decisions.edit`, then the mirror of the track. */
     suspend fun edit(

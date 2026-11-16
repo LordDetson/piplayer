@@ -3,6 +3,7 @@ package io.github.lorddetson.piplayer.library.sync
 import io.github.lorddetson.piplayer.library.lists.DisplayArtist
 import io.github.lorddetson.piplayer.library.lists.DisplayGenre
 import io.github.lorddetson.piplayer.library.sort.SortKey
+import io.github.lorddetson.piplayer.library.values.AlbumGroupFacts
 import io.github.lorddetson.piplayer.library.values.IndexValues
 import io.github.lorddetson.piplayer.library.values.MergedValues
 
@@ -39,6 +40,11 @@ data class DisplayValues(
     val badgeState: Int = 0,
     /** Keep as-is or Skip from the mirrored decisions (TI §1, §10.1), a `MissingInfoDecision` code. */
     val missingInfoDecision: Int = 0,
+    /**
+     * What the display writer settles the album group by, for a file whose [albumKey] comes from its own values; null
+     * for a file without an album of its own (docs/library.md §6.2). Not stored.
+     */
+    val albumGroup: AlbumGroupFacts? = null,
 ) {
     /** The names of [displayArtists]. */
     val artists: List<String> get() = displayArtists.map { it.name }

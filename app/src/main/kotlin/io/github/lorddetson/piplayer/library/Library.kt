@@ -15,10 +15,12 @@ import android.util.Log
 import androidx.annotation.VisibleForTesting
 import io.github.lorddetson.piplayer.ProcessRole
 import io.github.lorddetson.piplayer.covers.Covers
+import io.github.lorddetson.piplayer.library.db.LibraryAccess
 import io.github.lorddetson.piplayer.library.db.LibraryDatabase
 import io.github.lorddetson.piplayer.library.db.StoredPlace
 import io.github.lorddetson.piplayer.library.identity.FingerprintStep
 import io.github.lorddetson.piplayer.library.identity.IdentityAttacher
+import io.github.lorddetson.piplayer.library.identity.LibraryApplyFiles
 import io.github.lorddetson.piplayer.library.identity.LibraryFingerprints
 import io.github.lorddetson.piplayer.library.identity.LibraryTrackRefs
 import io.github.lorddetson.piplayer.library.mirror.DecisionMirror
@@ -127,7 +129,9 @@ object Library {
      */
     fun decisions(context: Context): LibraryDecisions {
         val app = context.applicationContext
-        return LibraryDecisions(UserData.decisions(app)) { opened(app).decisions }
+        // A library target without an identity gets one from its file at Apply (TI §10.2 "An identity at Apply").
+        val files = LibraryApplyFiles(LibraryAccess.app(app))
+        return LibraryDecisions(UserData.decisions(app), files) { opened(app).decisions }
     }
 
     /**

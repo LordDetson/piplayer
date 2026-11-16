@@ -5,6 +5,7 @@ import androidx.room3.Dao
 import androidx.room3.Entity
 import androidx.room3.Index
 import androidx.room3.Insert
+import androidx.room3.OnConflictStrategy
 import androidx.room3.PrimaryKey
 import androidx.room3.Query
 import androidx.room3.Update
@@ -57,8 +58,16 @@ interface TrackIdentityDao {
     @Insert
     suspend fun add(identity: TrackIdentityEntity): Long
 
-    @Insert
+    /**
+     * The new identities of an attach pass. One whose key an identity took meanwhile is left out: Apply may have made the
+     * identity of a file the pass planned one for (TI §10.2 "An identity at Apply").
+     */
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun addAll(identities: List<TrackIdentityEntity>)
+
+    /** The identities no file holds now, which Apply may give a library file (TI §10.2 "An identity at Apply"). */
+    @Query("SELECT * FROM track_identity WHERE missing_since IS NOT NULL ORDER BY id")
+    suspend fun missingIdentities(): List<TrackIdentityEntity>
 
     @Update
     suspend fun updateAll(identities: List<TrackIdentityEntity>)

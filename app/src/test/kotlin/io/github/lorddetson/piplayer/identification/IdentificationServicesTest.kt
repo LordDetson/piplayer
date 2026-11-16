@@ -17,6 +17,7 @@ import io.github.lorddetson.piplayer.identification.release.FolderReleaseHint
 import io.github.lorddetson.piplayer.identification.release.InMemoryReleaseCache
 import io.github.lorddetson.piplayer.identification.release.LookupPlanTest.Companion.candidate
 import io.github.lorddetson.piplayer.identification.release.LookupPlanTest.Companion.match
+import io.github.lorddetson.piplayer.identification.release.LibraryFolderReleaseHint
 import io.github.lorddetson.piplayer.identification.release.NoFolderReleaseHint
 import io.github.lorddetson.piplayer.identification.release.ReleaseFixtures
 import io.github.lorddetson.piplayer.identification.release.ReleaseRequest
@@ -347,8 +348,8 @@ class IdentificationServicesTest {
         assertThat(services.coverArtArchive).isNotNull()
         assertThat(services.releases).isNotNull()
         assertThat(libraryUses).isZero()
-        // The decisions' hint is bound in M3 step 16; until then no folder knows a release.
-        assertThat(services.folderReleaseHint).isSameAs(NoFolderReleaseHint)
+        // The folder hint reads the library's decided and tagged releases (M3 step 16), also only when it is used.
+        assertThat(services.folderReleaseHint).isInstanceOf(LibraryFolderReleaseHint::class.java)
     }
 
     @Test

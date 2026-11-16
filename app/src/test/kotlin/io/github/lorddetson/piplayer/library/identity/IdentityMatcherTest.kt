@@ -283,4 +283,62 @@ class IdentityMatcherTest {
         assertThat(IdentityMatcher.withinWindow(null, 10_000)).isFalse()
         assertThat(IdentityMatcher.withinWindow(10_000, null)).isFalse()
     }
+
+    // An identity at Apply (TI §10.2): the rules of re-attachment for one unread library file.
+
+    @Test
+    fun atApplyAMissingIdentityHintedAtTheFilesPlaceWithinOneSecondTakesIt() {
+        val f = file(1, "bb", durationMs = 200_900, settled = true)
+        val missing = identity(7, "aa", missingSince = now - 1_000)
+
+        assertThat(IdentityMatcher.atApply(f, listOf(missing))).isEqualTo(missing.following(f))
+        assertThat(IdentityMatcher.atApply(f, listOf(missing))!!.missingSince).isNull()
+    }
+
+    @Test
+    fun atApplyTheNewestOfTwoMissingIdentitiesAtThePlaceTakesIt() {
+        val f = file(1, "bb")
+        val older = identity(7, "aa", missingSince = now - 1_000)
+        val newer = identity(9, "cc", missingSince = now - 2_000)
+
+        assertThat(IdentityMatcher.atApply(f, listOf(older, newer))?.id).isEqualTo(9)
+    }
+
+    @Test
+    fun atApplyNoIdentityTakesAFileTwoSecondsOffAtAnotherPlaceOrHeldByAFile() {
+        val f = file(1, "bb", durationMs = 202_000)
+        // Two seconds off at the hinted place.
+        assertThat(IdentityMatcher.atApply(f, listOf(identity(7, "aa", missingSince = now - 1_000)))).isNull()
+        // Another place.
+        assertThat(IdentityMatcher.atApply(file(1, "bb"), listOf(identity(7, "aa", hint = moved, missingSince = now - 1_000)))).isNull()
+        // Not missing: a file holds its key.
+        assertThat(IdentityMatcher.atApply(file(1, "bb"), listOf(identity(7, "aa")))).isNull()
+        // No hint, as an identity made for a file opened from another app.
+        assertThat(IdentityMatcher.atApply(file(1, "bb"), listOf(identity(7, "aa", hint = null, missingSince = now - 1_000)))).isNull()
+    }
+
+    @Test
+    fun atApplyTheRecordingMbidAloneTakesNothing() {
+        // Step 3 needs the file's tags, which only the tag pass stores.
+        val f = file(1, "bb", place = moved, mbid = "mbid-1")
+        assertThat(IdentityMatcher.atApply(f, listOf(identity(7, "aa", mbid = "mbid-1", missingSince = now - 1_000)))).isNull()
+    }
+
+    @Test
+    fun anOpenedFilesIdentityWithItsDecisionSurvivesThirtyDaysAndIsAttachedByItsKey() {
+        // Made at Apply: missing from the start, hinted only by the provider's name and size (no full place).
+        val opened = Identity(7, "aa", durationMs = null, recordingMbid = null, hint = null, hintSize = 4_000_000,
+            createdAt = now - KEEP_MISSING_MS - 5_000, missingSince = now - KEEP_MISSING_MS - 5_000)
+
+        val kept = plan(emptyList(), listOf(opened), holding = setOf(7))
+        assertThat(kept.deleted).isEmpty()
+        assertThat(kept.updated).isEmpty()
+
+        val f = file(1, "aa", place = moved, durationMs = 201_000)
+        val attached = plan(listOf(f), listOf(opened), holding = setOf(7))
+        assertThat(attached.created).isEmpty()
+        assertThat(attached.updated).containsExactly(
+            opened.copy(durationMs = 201_000, hint = moved, hintSize = f.size, missingSince = null),
+        )
+    }
 }

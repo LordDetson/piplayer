@@ -3,7 +3,9 @@ package io.github.lorddetson.piplayer.userdata
 import androidx.room3.withReadTransaction
 import androidx.room3.withWriteTransaction
 import io.github.lorddetson.piplayer.identification.contract.ApplyRequest
+import io.github.lorddetson.piplayer.identification.contract.IdentificationTarget
 import io.github.lorddetson.piplayer.library.identity.Hex
+import io.github.lorddetson.piplayer.library.identity.KeyedFile
 import io.github.lorddetson.piplayer.library.values.Decided
 import io.github.lorddetson.piplayer.library.values.DecidedField
 import io.github.lorddetson.piplayer.library.values.DecisionContent
@@ -149,12 +151,19 @@ class Decisions(private val database: UserDatabase, private val clock: () -> Lon
      * Stores the identification [request] (TI §7.1): the ticked fields with all their parts, the per-track values as
      * `track_metadata` rows, the release-level ones in a shared `release_choice` with [savedCoverId] as its cover, and
      * the provenance. [atDecision] are the values of the track's locations at the decision, the first being the one it
-     * was made on. Null when no identity holds the target's key, and then nothing is written.
+     * was made on. When no identity holds the target's key, the identity is made in the same transaction (TI §10.2 "An
+     * identity at Apply"): for a file opened from another app from the target's hints, for a library file from
+     * [libraryFile], the library's file of the target with stage 0's key. Null when a library target has no identity and
+     * no [libraryFile] (the file is gone), and then nothing is written.
      */
-    suspend fun apply(request: ApplyRequest, savedCoverId: Long? = null, atDecision: List<LocationValues> = emptyList()): Committed? =
+    suspend fun apply(
+        request: ApplyRequest,
+        savedCoverId: Long? = null,
+        atDecision: List<LocationValues> = emptyList(),
+        libraryFile: KeyedFile? = null,
+    ): Committed? =
         database.withWriteTransaction {
-            val identity = database.identities().idOfKey(Hex.bytes(request.target.contentKey)).takeIf { request.target.startMs == 0L }
-                ?: return@withWriteTransaction null
+            val identity = identityAtApply(request.target, libraryFile) ?: return@withWriteTransaction null
             val now = clock()
             val details = request.details
             val parts = DecisionContent.ofRelease(details, savedCoverId)
@@ -427,6 +436,12 @@ class Decisions(private val database: UserDatabase, private val clock: () -> Lon
             }
         }
         if (rows.isNotEmpty()) dao.saveFileStates(rows)
+    }
+
+    /** The identity of [target] for Apply, made when none holds its key (TI §10.2); null when none can be. */
+    private suspend fun identityAtApply(target: IdentificationTarget, libraryFile: KeyedFile?): Long? {
+        if (target.startMs != 0L) return null
+        return database.identities().idOfKey(Hex.bytes(target.contentKey))
     }
 
     private suspend fun committed(decisionId: Long, identity: Long): Committed {

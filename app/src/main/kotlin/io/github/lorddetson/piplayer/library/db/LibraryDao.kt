@@ -382,6 +382,20 @@ interface LibraryDao {
     )
     suspend fun keyedFiles(): List<KeyedFileRow>
 
+    /**
+     * The file [fileId] as Apply gives it an identity (TI §10.2 "An identity at Apply"), also before the tag pass has
+     * read it: its place and size, its exact length or else the index's, and no tags. Its content key is the stored one,
+     * empty when none is stored; Apply takes stage 0's.
+     */
+    @Query(
+        "SELECT f.id AS fileId, COALESCE(f.content_key, '') AS contentKey, f.volume_name AS volume, " +
+            "f.relative_path AS relativePath, f.display_name AS displayName, f.size, " +
+            "COALESCE(f.duration_ms, e.duration_ms) AS durationMs, f.duration_source AS durationSource, " +
+            "NULL AS recordingMbid, f.format, 0 AS tagsRead FROM audio_file f " +
+            "LEFT JOIN media_index_entry e ON e.file_id = f.id WHERE f.id = :fileId",
+    )
+    suspend fun applyFile(fileId: Long): KeyedFileRow?
+
     @Query("$FOUND_FILES WHERE f.id = :fileId")
     suspend fun foundFile(fileId: Long): FoundFileRow?
 

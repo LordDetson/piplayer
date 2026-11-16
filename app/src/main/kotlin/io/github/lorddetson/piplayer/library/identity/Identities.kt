@@ -46,6 +46,19 @@ data class Identity(
     )
 }
 
+/**
+ * The library's file of an Apply target that no identity holds yet (TI §10.2 "An identity at Apply"), with the content
+ * key stage 0 computed; null when the file is gone.
+ */
+fun interface ApplyFiles {
+    suspend fun file(fileId: Long, contentKey: String): KeyedFile?
+
+    companion object {
+        /** No library: a library target without an identity gets none. */
+        val NONE = ApplyFiles { _, _ -> null }
+    }
+}
+
 /** What one attach pass writes into the user database. */
 data class AttachPlan(
     /** New identities for files no identity held, one per key; the file names the hints. */
@@ -141,6 +154,14 @@ object IdentityMatcher {
         // A new identity for every file left; steps 4 and 5 may take some of them over after this plan is written.
         return AttachPlan(created = unattached.sortedBy { it.fileId }, updated = updated, deleted = deleted)
     }
+
+    /**
+     * The identity that Apply gives a library [file] none holds yet (TI §10.2 "An identity at Apply"): the rules of
+     * re-attachment for that one file that need neither its tags nor the attach pass, so step 2, a missing identity of
+     * [identities] hinted at its place with a length within [DURATION_WINDOW_MS] (the newest first), attached to it;
+     * null when the file gets a new identity.
+     */
+    fun atApply(file: KeyedFile, identities: List<Identity>): Identity? = TODO("M3 step 16")
 
     fun withinWindow(a: Long?, b: Long?): Boolean =
         a != null && b != null && kotlin.math.abs(a - b) <= DURATION_WINDOW_MS

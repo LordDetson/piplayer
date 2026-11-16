@@ -1,0 +1,34 @@
+package io.github.lorddetson.piplayer.library.identity
+
+import io.github.lorddetson.piplayer.library.db.LibraryAccess
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
+
+/**
+ * The library's files as Apply gives them an identity (TI §10.2 "An identity at Apply"), read through [library] so that
+ * a rebuild never closes the database under the read. The length counts as settled: the index's length stands in for a
+ * walk the tag pass has not made yet, since step 2 of re-attachment needs one.
+ */
+class LibraryApplyFiles(
+    private val library: LibraryAccess,
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+) : ApplyFiles {
+
+    override suspend fun file(fileId: Long, contentKey: String): KeyedFile? = withContext(ioDispatcher) {
+        // The block runs under the library's lock, which is held by its thread: the read blocks that thread.
+        val row = library.use { database -> runBlocking { database.library().applyFile(fileId) } } ?: return@withContext null
+        KeyedFile(
+            fileId = row.fileId,
+            contentKey = contentKey,
+            place = Place(row.volume, row.relativePath, row.displayName),
+            size = row.size,
+            durationMs = row.durationMs,
+            settled = true,
+            recordingMbid = null,
+            format = row.format,
+            tagsRead = false,
+        )
+    }
+}
