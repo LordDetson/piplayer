@@ -232,6 +232,30 @@ class IdentityMatcherTest {
     }
 
     @Test
+    fun aWaitingIdentityHoldsBackNoFileOnceTheTagPassHasTriedTheFileAtItsHint() {
+        // The tag pass tried the file at the hint and will try it again in a later process: the identity still waits.
+        val elsewhere = file(1, "bb", place = moved, durationMs = 199_500, mbid = "m1")
+        val waiting = identity(7, "aa", mbid = "m1", missingSince = now - 1_000)
+
+        val result = IdentityMatcher.plan(listOf(elsewhere), listOf(waiting), emptySet(), now, unread = setOf(music), untried = emptySet())
+
+        assertThat(result.updated).isEmpty()
+        // The file step 3 would give it is not held back: a file that fails in every process would hold it for good.
+        assertThat(result.created).containsExactly(elsewhere)
+    }
+
+    @Test
+    fun aWaitingIdentityHoldsBackTheFileStep3WouldGiveItOnlyWhileTheFileAtItsHintIsUntried() {
+        val elsewhere = file(1, "bb", place = moved, durationMs = 199_500, mbid = "m1")
+        val waiting = identity(7, "aa", mbid = "m1", missingSince = now - 1_000)
+
+        val result = IdentityMatcher.plan(listOf(elsewhere), listOf(waiting), emptySet(), now, unread = setOf(music), untried = setOf(music))
+
+        assertThat(result.updated).isEmpty()
+        assertThat(result.created).isEmpty()
+    }
+
+    @Test
     fun aWaitingIdentityHoldsBackNoFileThatStep3WouldNotGiveIt() {
         // 2 s off: step 3 would not give it the file, so the file gets a new identity at once.
         val farOff = file(1, "bb", place = moved, durationMs = 198_000, mbid = "m1")

@@ -100,6 +100,18 @@ class ApplyIdentityTest {
         mirror.awaitIdle()
     }
 
+    /** A run of the real tag pass in a new process whose reader cannot open any file, as for an index row whose file is gone. */
+    private suspend fun passThatCannotOpen() {
+        TagPass(
+            library, sync,
+            object : PassReader {
+                override suspend fun read(file: PassFile): PassRead = PassRead.OpenFailed
+            },
+            cyrillicLanguage = { false }, legacyEncoding = { null }, decodedEncoding = DecodedEncoding.InMemory(),
+            crashBackoff = 1.milliseconds,
+        ).run()
+    }
+
     @Test
     fun anOpenedFilesIdentityIsMissingFromApplyOnSurvivesThirtyDaysAndIsAttachedOnceTheFileIsInTheLibrary() = runBlocking<Unit> {
         index.volume().rows = listOf(row(2))
@@ -469,7 +481,9 @@ class ApplyIdentityTest {
         attacher.attach()
 
         assertThat(Hex.text(checkNotNull(user.identities().identity(missing)).contentKey)).isEqualTo(key(1))
-        assertThat(identityWithKey(5)).isNull()
+        // The tag pass has tried file 1, so file 5, which step 3 would give the identity, is held back no longer.
+        val own = checkNotNull(identityWithKey(5)).id
+        assertThat(own).isNotEqualTo(missing)
 
         // A later process reads file 1, and the next pass attaches the identity by its key.
         readByThePass()
@@ -479,7 +493,38 @@ class ApplyIdentityTest {
         assertThat(Hex.text(attached.contentKey)).isEqualTo(key(1))
         assertThat(attached.missingSince).isNull()
         assertThat(display(1).title).isEqualTo("Decided title")
-        assertThat(identityWithKey(5)?.id).isNotNull().isNotEqualTo(missing)
+        assertThat(identityWithKey(5)?.id).isEqualTo(own)
+    }
+
+    @Test
+    fun aFileThatCannotBeOpenedInEveryProcessKeepsTheIdentityWaitingAndHoldsBackNoFile() = runBlocking<Unit> {
+        val missing = appliedAtAnUnreadFile("4e000000-1111-4222-8333-00000000000c")
+
+        // Two processes in a row cannot open file 1; the tag pass keeps trying it (library.md §5.3).
+        repeat(2) { process ->
+            passThatCannotOpen()
+            assertThat(library.library().files().single { it.mediaStoreId == 1L }.tagFailure).isEqualTo("open")
+            now += 60_000
+            attacher.attach()
+
+            val waiting = checkNotNull(user.identities().identity(missing))
+            assertThat(Hex.text(waiting.contentKey)).describedAs("process $process").isEqualTo(key(1))
+            assertThat(waiting.missingSince).isNotNull()
+            // File 5, which step 3 would give the identity, has an identity of its own.
+            assertThat(identityWithKey(5)?.id).describedAs("process $process").isNotNull().isNotEqualTo(missing)
+        }
+    }
+
+    @Test
+    fun anIdentityHintedAtAFileThatCouldNotBeOpenedStillWaitsAfterTheReaderVersionsAreForgotten() = runBlocking<Unit> {
+        val missing = appliedAtAnUnreadFile("4e000000-1111-4222-8333-00000000000d")
+        library.library().markFailed(fileId(1), "open", readerVersion = null)
+        // A change of the legacy encoding has every file read again (library.md §5.7): file 1 too.
+        sync.exclusive { library.library().forgetReaderVersions() }
+
+        attacher.attach()
+
+        assertThat(Hex.text(checkNotNull(user.identities().identity(missing)).contentKey)).isEqualTo(key(1))
     }
 
     @Test
@@ -528,8 +573,8 @@ class ApplyIdentityTest {
             row(1, path = "Music/Record/", name = "01.mp3", durationMs = 60_000, generation = 10),
         )
         sync.sync()
-        // The tag pass tried file 1 and could not read it.
-        library.library().markFailed(fileId(1), "read", readerVersion = 1)
+        // The tag pass tried file 1 with the current reader and could not read it.
+        library.library().markFailed(fileId(1), "read", readerVersion = TagPass.READER_VERSION)
         val missing = user.identities().add(
             TrackIdentityEntity(
                 contentKey = Hex.bytes(key(9)), durationMs = 60_300, recordingMbid = Hex.mbidBytes(recording),
