@@ -1,148 +1,132 @@
 package io.github.lorddetson.piplayer.spike
 
-import io.github.lorddetson.piplayer.identification.acoustid.AcoustIdCandidate
-import io.github.lorddetson.piplayer.identification.fingerprint.FingerprintResult
-import io.github.lorddetson.piplayer.identification.fingerprint.PcmEncoding
-import io.github.lorddetson.piplayer.identification.fingerprint.PcmFormat
-import io.github.lorddetson.piplayer.identification.fingerprint.SourceInfo
+import io.github.lorddetson.piplayer.identification.contract.IdentificationOutcome
+import io.github.lorddetson.piplayer.identification.contract.IdentificationTarget
 import io.github.lorddetson.piplayer.identification.musicbrainz.MusicBrainzException
+import io.github.lorddetson.piplayer.identification.pipeline.FingerprintSource
+import io.github.lorddetson.piplayer.identification.pipeline.LocalFile
+import io.github.lorddetson.piplayer.identification.pipeline.PipelineResult
+import io.github.lorddetson.piplayer.identification.pipeline.PipelineStage
+import io.github.lorddetson.piplayer.identification.pipeline.SkipReason
+import io.github.lorddetson.piplayer.identification.pipeline.StageDuration
+import io.github.lorddetson.piplayer.identification.pipeline.StageReport
+import io.github.lorddetson.piplayer.identification.pipeline.StageResult
+import io.github.lorddetson.piplayer.identification.provider.ProviderId
+import io.github.lorddetson.piplayer.identification.release.ReleaseChoice
+import io.github.lorddetson.piplayer.identification.score.Band
+import io.github.lorddetson.piplayer.identification.score.Ranking
+import io.github.lorddetson.piplayer.identification.score.Reason
+import io.github.lorddetson.piplayer.identification.score.RecordingMatch
+import io.github.lorddetson.piplayer.identification.score.Source
 import io.github.lorddetson.piplayer.identification.score.TextCandidate
-import io.github.lorddetson.piplayer.identification.score.TextScore
+import io.github.lorddetson.piplayer.identification.score.Tier
 import io.github.lorddetson.piplayer.identification.score.TrackHint
-import io.github.lorddetson.piplayer.identification.text.QueryVariant
-import io.github.lorddetson.piplayer.identification.text.RecordingQuery
-import io.github.lorddetson.piplayer.identification.text.ScoredCandidate
-import io.github.lorddetson.piplayer.identification.text.TextSearchResult
-import io.github.lorddetson.piplayer.identification.text.VariantAttempt
-import io.github.lorddetson.piplayer.nativelib.chromaprint.Fingerprint
-import io.github.lorddetson.piplayer.nativelib.taglib.TagReadResult
 import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.serialization.json.Json
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 
+/** The spike's report of one pipeline run: the corpus record and the text for the clipboard. */
 class SpikeReportsTest {
 
-    private val acoustIdCandidates = List(7) { index ->
-        AcoustIdCandidate(
-            acoustIdTrackId = "track-$index",
-            acoustIdScore = 0.97 - index * 0.1,
-            recordingId = "rec-$index",
-            title = "Paper Lanterns",
-            artistCredit = "The Quiet Harbors",
-            lengthMs = 214_400,
-            releaseGroups = listOf("Harbor Lights"),
-            confidence = 0.97 - index * 0.1,
-        )
-    }
-
-    private val query = RecordingQuery(QueryVariant.entries.first(), "recording:(+paper)", 25)
-
-    private val scored = ScoredCandidate(
-        TextCandidate("mb-1", "Paper Lanterns", "The Quiet Harbors", listOf("The Quiet Harbors"), 214_000),
-        TextScore(title = 1.0, artist = 1.0, durationCredit = 1.0, albumTrack = 0.0, total = 0.85),
+    private val file = LocalFile(
+        target = IdentificationTarget.OpenedFile("content://test/1", "0".repeat(64), "01 - Paper Lanterns.mp3", 8_600_000),
+        fileName = "01 - Paper Lanterns.mp3",
+        tags = null,
+        duration = StageDuration.Exact(214_000),
+        format = "MPEG",
+        folder = null,
+        uri = "content://test/1",
     )
 
-    private val report = SpikeReport(
-        fileName = "01 - Paper Lanterns.mp3",
-        sizeBytes = 8_600_000,
-        tags = StageOutcome.Done(
-            TagReadResult.Success(mapOf("TITLE" to listOf("Paper Lanterns")), null, emptyList()),
-            12.milliseconds,
+    private fun match(index: Int) = RecordingMatch(
+        TextCandidate("rec-$index", "Paper Lanterns", "The Quiet Harbors", listOf("The Quiet Harbors"), 214_400),
+        score = 0.97 - index * 0.1,
+        reason = Reason(
+            source = Source.FINGERPRINT,
+            tier = Tier.IDENTIFIER,
+            foundBy = setOf(Source.TEXT_SEARCH, Source.FINGERPRINT),
+            fingerprintScore = 0.97 - index * 0.1,
+            durationDeltaMs = 400,
+            title = 1.0,
+            artist = 1.0,
+            disagreement = emptySet(),
         ),
-        hint = SpikeHint(TrackHint("Paper Lanterns", "The Quiet Harbors", 214_000), HintSource.TAGS),
+    )
+
+    private val found = PipelineResult(
+        outcome = IdentificationOutcome.Found(
+            Ranking(List(7, ::match), 0.1, Band.MEDIUM),
+            ReleaseChoice.NONE,
+            acoustIdTrackId = "track-0",
+        ),
+        file = file,
+        hint = TrackHint("Paper Lanterns", "The Quiet Harbors", 214_000),
         durationMs = 214_000,
-        durationSource = DurationSource.TAGLIB,
-        fingerprint = StageOutcome.Done(
-            FingerprintResult(
-                Fingerprint(IntArray(948), "AQAA"),
-                fedSamples = 1_323_000,
-                inputFormat = PcmFormat(44_100, 2, PcmEncoding.PCM_16BIT),
-                source = SourceInfo("audio/mpeg", "c2.android.mp3.decoder", 214_000_000),
-                reachedEnd = false,
+        lengthWalked = true,
+        stages = listOf(
+            StageReport(PipelineStage.LOCAL_READ, StageResult.Ran(0), 3.milliseconds),
+            StageReport(PipelineStage.KNOWN_IDS, StageResult.Skipped(SkipReason.NO_VALUE), 0.milliseconds),
+            StageReport(PipelineStage.FINGERPRINT, StageResult.Ran(7), 5_400.milliseconds),
+            StageReport(
+                PipelineStage.TEXT_SEARCH,
+                StageResult.Failed(MusicBrainzException.Unavailable(4, null)),
+                9_000.milliseconds,
             ),
-            1_800.milliseconds,
         ),
-        acoustId = StageOutcome.Done(acoustIdCandidates, 600.milliseconds),
-        textSearch = StageOutcome.Done(
-            TextSearchResult(
-                attempts = listOf(VariantAttempt(query, listOf(scored))),
-                candidates = listOf(scored),
-            ),
-            1_200.milliseconds,
-        ),
+        fingerprint = FingerprintSource.COMPUTED,
     )
 
     @Test
-    fun `the record keeps the stages, their best candidates and the timings`() {
-        val record = SpikeReports.record(report)
+    fun `the record keeps the outcome, each stage's status and time and the best five recordings`() {
+        val record = SpikeReports.record(found)
 
         assertThat(record.file).isEqualTo("01 - Paper Lanterns.mp3")
-        assertThat(record.durationSource).isEqualTo("TAGLIB")
-        assertThat(record.tags).isEqualTo("done")
-        assertThat(record.hintSource).isEqualTo("TAGS")
-        assertThat(record.hintTitle).isEqualTo("Paper Lanterns")
-        assertThat(record.fingerprint).isEqualTo("done")
-        assertThat(record.fingerprintItems).isEqualTo(948)
-        assertThat(record.fingerprintSeconds).isEqualTo(120.0)
-        assertThat(record.inputFormat).isEqualTo("44100 Hz, 2 ch, PCM_16BIT")
-        assertThat(record.decoder).isEqualTo("c2.android.mp3.decoder (audio/mpeg)")
-        assertThat(record.acoustId).isEqualTo("done")
-        assertThat(record.acoustIdCandidates).hasSize(SpikeReports.TOP)
-        assertThat(record.acoustIdCandidates.first())
-            .isEqualTo(RecordCandidate("rec-0", "Paper Lanterns", "The Quiet Harbors", 214_400, 0.97, 0.97))
-        assertThat(record.textQueries).isEqualTo(1)
-        assertThat(record.textCandidates.single())
-            .isEqualTo(RecordCandidate("mb-1", "Paper Lanterns", "The Quiet Harbors", 214_000, 0.85))
-        assertThat(record.elapsedMs).containsExactlyInAnyOrderEntriesOf(
-            mapOf("tags" to 12L, "fingerprint" to 1_800L, "acoustId" to 600L, "textSearch" to 1_200L),
+        assertThat(record.outcome).isEqualTo("Found")
+        assertThat(record.band).isEqualTo("MEDIUM")
+        assertThat(record.durationMs).isEqualTo(214_000)
+        assertThat(record.lengthWalked).isTrue()
+        assertThat(record.fingerprint).isEqualTo("COMPUTED")
+        assertThat(record.stages).containsEntry("KNOWN_IDS", "skipped: NO_VALUE")
+            .containsEntry("FINGERPRINT", "found 7")
+            .containsEntry("TEXT_SEARCH", "failed: Unavailable: MusicBrainz unavailable after 4 attempts")
+        assertThat(record.elapsedMs).containsEntry("FINGERPRINT", 5_400L)
+        assertThat(record.candidates).hasSize(SpikeReports.TOP)
+        assertThat(record.candidates.first().foundBy).containsExactly("FINGERPRINT", "TEXT_SEARCH")
+        assertThat(record.candidates.first().acoustIdScore).isEqualTo(0.97)
+        assertThat(record.release).isNull()
+    }
+
+    @Test
+    fun `the record survives a round trip through JSON`() {
+        val record = SpikeReports.record(found)
+
+        val line = Json.encodeToString(SpikeRecord.serializer(), record)
+
+        assertThat(Json.decodeFromString(SpikeRecord.serializer(), line)).isEqualTo(record)
+    }
+
+    @Test
+    fun `a run that ended early names its outcome and provider`() {
+        val record = SpikeReports.record(PipelineResult(IdentificationOutcome.Unavailable(ProviderId.ACOUSTID)))
+
+        assertThat(record.outcome).isEqualTo("Unavailable(ACOUSTID)")
+        assertThat(record.band).isNull()
+        assertThat(record.candidates).isEmpty()
+    }
+
+    @Test
+    fun `the text names the file, the stages, the outcome and the best recordings`() {
+        val text = SpikeReports.text(found)
+
+        assertThat(text).contains(
+            "File: 01 - Paper Lanterns.mp3",
+            "Duration: 3:34, walked",
+            "Hint: The Quiet Harbors - Paper Lanterns",
+            "FINGERPRINT: found 7, 5400 ms",
+            "Outcome: Found (MEDIUM)",
+            "0.97  The Quiet Harbors - Paper Lanterns  3:34  FINGERPRINT+TEXT_SEARCH  rec-0",
         )
-    }
-
-    @Test
-    fun `skipped and failed stages are spelled out`() {
-        val record = SpikeReports.record(
-            report.copy(
-                acoustId = StageOutcome.Skipped(SkipReason.NO_API_KEY),
-                textSearch = StageOutcome.Failed("IOException: timeout", 30_000.milliseconds),
-            ),
-        )
-        assertThat(record.acoustId).isEqualTo("skipped: NO_API_KEY")
-        assertThat(record.acoustIdCandidates).isEmpty()
-        assertThat(record.textSearch).isEqualTo("failed: IOException: timeout")
-        assertThat(record.elapsedMs).containsEntry("textSearch", 30_000L).doesNotContainKey("acoustId")
-    }
-
-    @Test
-    fun `a text search that stopped after a failed query is marked as partial`() {
-        val partial = TextSearchResult(
-            attempts = listOf(VariantAttempt(query, emptyList())),
-            candidates = emptyList(),
-            failure = MusicBrainzException.Unavailable(4, null),
-        )
-        val record = SpikeReports.record(report.copy(textSearch = StageOutcome.Done(partial, 9_000.milliseconds)))
-
-        assertThat(record.textSearch).isEqualTo("partial: Unavailable: MusicBrainz unavailable after 4 attempts")
-        assertThat(SpikeReports.text(report.copy(textSearch = StageOutcome.Done(partial, 9_000.milliseconds))))
-            .contains("partial: Unavailable")
-    }
-
-    @Test
-    fun `the record is one line of JSON`() {
-        val line = Json.encodeToString(SpikeRecord.serializer(), SpikeReports.record(report))
-        assertThat(line).doesNotContain("\n")
-        assertThat(Json.decodeFromString(SpikeRecord.serializer(), line)).isEqualTo(SpikeReports.record(report))
-    }
-
-    @Test
-    fun `the text names the file, the hint and the best candidates of each stage`() {
-        val text = SpikeReports.text(report)
-
-        assertThat(text).contains("01 - Paper Lanterns.mp3")
-        assertThat(text.lines()).contains("Hint (TAGS): The Quiet Harbors - Paper Lanterns")
-        assertThat(text).contains("948 items").contains("120.0 s")
-        assertThat(text).contains("0.97").contains("rec-0")
-        assertThat(text).contains("0.85").contains("mb-1")
         assertThat(text).doesNotContain("rec-5")
     }
 }

@@ -6,14 +6,21 @@ import mockwebserver3.RecordedRequest
 
 /**
  * A fake AcoustID `/v2/lookup` (TI §3.2): it reads the gzip-compressed form and answers by the fingerprint sent, with
- * [LOOKUP] for any fingerprint not set with [on]. Serve it at `/v2/` and point the client's base URL there.
+ * [LOOKUP] (or what [otherwise] set) for any fingerprint not set with [on]. Serve it at `/v2/` and point the client's
+ * base URL there.
  */
 class FakeAcoustId : FixtureDispatcher() {
 
     private val answers = ConcurrentHashMap<String, Fixture>()
 
+    @Volatile
+    private var fallback = LOOKUP
+
     /** Answers a lookup of [fingerprint] with [fixture]. */
     fun on(fingerprint: String, fixture: Fixture): FakeAcoustId = apply { answers[fingerprint] = fixture }
+
+    /** Answers a lookup of any fingerprint not set with [on] with [fixture], as for one a device computes. */
+    fun otherwise(fixture: Fixture): FakeAcoustId = apply { fallback = fixture }
 
     override fun route(request: RecordedRequest): MockResponse {
         if (request.method != "POST" || request.url.encodedPath.substringAfterLast('/') != "lookup") {
@@ -21,7 +28,7 @@ class FakeAcoustId : FixtureDispatcher() {
         }
         val form = request.formFields()
         if (form["client"].isNullOrEmpty()) return MISSING_CLIENT.response()
-        return (answers[form["fingerprint"]] ?: LOOKUP).response()
+        return (answers[form["fingerprint"]] ?: fallback).response()
     }
 
     companion object {
@@ -45,5 +52,8 @@ class FakeAcoustId : FixtureDispatcher() {
 
         /** Error 2, a missing parameter: what the server says to a form without `client`. */
         val MISSING_CLIENT = Fixture("acoustid/error-2.json", code = 400)
+
+        /** One track (0.95) linked to the Harbor Lights recording by its ID only, which MusicBrainz then describes. */
+        val ID_ONLY = Fixture("acoustid/id-only.json")
     }
 }

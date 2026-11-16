@@ -1,0 +1,80 @@
+package io.github.lorddetson.piplayer.identification.pipeline
+
+import android.content.Context
+import android.net.Uri
+import io.github.lorddetson.piplayer.identification.IdentificationServices
+import io.github.lorddetson.piplayer.identification.fingerprint.DecodingException
+import io.github.lorddetson.piplayer.library.db.LibraryAccess
+import io.github.lorddetson.piplayer.library.identity.LibraryFingerprints
+import io.github.lorddetson.piplayer.nativelib.chromaprint.Chromaprint
+import io.github.lorddetson.piplayer.tagging.Tagger
+import java.io.IOException
+import kotlin.coroutines.cancellation.CancellationException
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
+
+/** The native library's encoder (TI §3.2): stored raw items into the string AcoustID takes. */
+object ChromaprintEncoder : FingerprintEncoder {
+    override fun encode(raw: IntArray): String = Chromaprint.encode(raw)
+}
+
+/**
+ * The fingerprint cache of the library database that [library] reaches (TI §3.2, §10.1), as stage 3 uses it: a file is
+ * decoded on the user's lane of [LibraryFingerprints], whose computation caches the fingerprint with its decoder path and
+ * keeps the AcoustID track ID cached for the key.
+ */
+class LibraryFingerprintCache(
+    private val context: Context,
+    private val library: LibraryAccess,
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+) : FingerprintCache {
+
+    override suspend fun cached(contentKey: String): CachedFingerprint? = withContext(ioDispatcher) {
+        // The block runs under the library's lock, held by its thread: the read blocks that thread.
+        library.use { database -> runBlocking { database.library().fingerprint(contentKey) } }
+    }?.let { CachedFingerprint(LibraryFingerprints.items(it.fingerprint), it.acoustIdId) }
+
+    override suspend fun compute(file: LocalFile): ComputedFingerprint {
+        // Decoding takes seconds, far too long to hold the library's lock; the database open now caches the result.
+        val database = library.use { it }
+        val fingerprints = LibraryFingerprints(context, database, uriOf = { error("A single file is opened by its URI") })
+        val result = try {
+            fingerprints.compute(Uri.parse(file.uri), file.target.contentKey, file.format, LibraryFingerprints.Lane.USER)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: IOException) {
+            throw e
+        } catch (e: RuntimeException) {
+            // A decoder or extractor that fails in its own way: the file is not fingerprinted.
+            throw DecodingException.Failed("The file could not be fingerprinted: ${e.message}", e)
+        }
+        return ComputedFingerprint(result.fingerprint.raw, result.fingerprint.encoded)
+    }
+
+    override suspend fun keepAcoustIdTrack(contentKey: String, trackId: String) = withContext(ioDispatcher) {
+        library.use { database -> runBlocking { database.identificationCache().keepAcoustIdTrack(contentKey, trackId) } }
+    }
+}
+
+/** The pipeline of the app's main process (TI §3 "One run"). */
+object AppPipeline {
+
+    /**
+     * The app's pipeline: the app's services, whose gate is the user's stored choice (TI §9) and which a run waits to
+     * read, stage 0 through the library and `:tagger`, the library's fingerprint cache and the native encoder.
+     */
+    fun of(context: Context): IdentificationPipeline = over(context, IdentificationServices.of(context))
+
+    /** The same parts over [services], such as the debug spike's own. */
+    fun over(context: Context, services: IdentificationServices): IdentificationPipeline {
+        val library = LibraryAccess.app(context)
+        return IdentificationPipeline(
+            services = services,
+            local = AndroidLocalStage(context, Tagger.client(context), library),
+            fingerprints = LibraryFingerprintCache(context.applicationContext, library),
+            encoder = ChromaprintEncoder,
+        )
+    }
+}

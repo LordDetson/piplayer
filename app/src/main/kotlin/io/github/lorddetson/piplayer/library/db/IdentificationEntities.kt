@@ -138,6 +138,13 @@ interface IdentificationCacheDao {
 
     @Query("SELECT `key` FROM api_cache ORDER BY `key`")
     suspend fun apiKeys(): List<String>
+
+    /**
+     * Keeps [trackId], the AcoustID track ID of the best result of a lookup, with the fingerprint cached for [contentKey]
+     * (TI §3.2); a key without a cached fingerprint keeps nothing. Computing the fingerprint again keeps it.
+     */
+    @Query("UPDATE fingerprint SET acoustid_id = :trackId WHERE content_key = :contentKey")
+    suspend fun keepAcoustIdTrack(contentKey: String, trackId: String)
 }
 
 /** Reads and plain writes of `decided_mirror` (TI §10.1); whole replacements go through [replaceDecided]. */

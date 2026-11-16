@@ -35,11 +35,13 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.lorddetson.piplayer.R
+import io.github.lorddetson.piplayer.identification.pipeline.PipelineProgress
+import io.github.lorddetson.piplayer.identification.pipeline.PipelineStage
 import kotlinx.coroutines.launch
 
 /**
- * The M0 identification spike (debug builds only): picks a file through the system picker and shows the raw candidates
- * of AcoustID and of the MusicBrainz text search as a plain-text report that can be copied.
+ * The identification spike (debug builds only): picks a file through the system picker, runs the identification
+ * pipeline on it (TI §3 "One run") with its progress, and shows the run as a plain-text report that can be copied.
  */
 @Composable
 fun SpikeScreen(onClose: () -> Unit, viewModel: SpikeViewModel = viewModel()) {
@@ -86,7 +88,7 @@ fun SpikeScreen(onClose: () -> Unit, viewModel: SpikeViewModel = viewModel()) {
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     CircularProgressIndicator()
-                    Text(stageText(current.stage))
+                    Text(progressText(current.progress))
                 }
                 is SpikeViewModel.State.Failed ->
                     Text(stringResource(R.string.spike_failed, current.error), color = MaterialTheme.colorScheme.error)
@@ -114,11 +116,17 @@ fun SpikeScreen(onClose: () -> Unit, viewModel: SpikeViewModel = viewModel()) {
 }
 
 @Composable
-private fun stageText(stage: SpikeStage): String = stringResource(
-    when (stage) {
-        SpikeStage.READING_TAGS -> R.string.spike_stage_reading_tags
-        SpikeStage.FINGERPRINTING -> R.string.spike_stage_fingerprinting
-        SpikeStage.ACOUSTID -> R.string.spike_stage_acoustid
-        SpikeStage.TEXT_SEARCH, SpikeStage.DONE -> R.string.spike_stage_text_search
-    },
-)
+private fun progressText(progress: PipelineProgress): String = when (progress) {
+    is PipelineProgress.Started -> stringResource(
+        when (progress.stage) {
+            PipelineStage.LOCAL_READ -> R.string.spike_stage_reading_tags
+            PipelineStage.KNOWN_IDS, PipelineStage.ISRC -> R.string.spike_stage_known_ids
+            PipelineStage.FINGERPRINT -> R.string.spike_stage_acoustid
+            PipelineStage.TEXT_SEARCH -> R.string.spike_stage_text_search
+            PipelineStage.RELEASE_CHOICE -> R.string.spike_stage_choosing
+        },
+    )
+    PipelineProgress.WalkingLength -> stringResource(R.string.spike_stage_walking)
+    PipelineProgress.Decoding -> stringResource(R.string.spike_stage_fingerprinting)
+    is PipelineProgress.ReleasePages -> stringResource(R.string.spike_stage_releases, progress.pages)
+}

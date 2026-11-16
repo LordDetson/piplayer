@@ -1,5 +1,6 @@
 package io.github.lorddetson.piplayer.spike
 
+import android.net.Uri
 import android.util.Log
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -14,9 +15,10 @@ import org.junit.Test
 import org.junit.runner.RunWith
 
 /**
- * The own-files check of M0 (TI §11.4): runs the identification spike over every file under `own-files` in the app's
- * private files directory (folders included) and writes one JSON line per file to `spike/own-files.jsonl` next to it,
- * for the owner to mark each result right or wrong. A file that cannot be opened gets a line with its error. It sends
+ * The own-files check (TI §11.4): runs the identification pipeline, as the debug spike does, over every file under
+ * `own-files` in the app's private files directory (folders included) and writes one JSON line per file to
+ * `spike/own-files.jsonl` next to it, for the owner to mark each result right or wrong. A run that fails gets a line
+ * with its error. It sends
  * tags, file names and fingerprints to AcoustID and MusicBrainz, so it runs only with the instrumentation argument
  * `ownFiles=true`; scripts/run_own_files_spike.sh pushes the files, runs it and pulls the results.
  */
@@ -40,7 +42,7 @@ class OwnFilesSpikeRun {
             delete()
         }
 
-        val spike = SpikeServices.spike(context)
+        val pipeline = SpikeServices.pipeline(context)
         // The run itself is the opt-in (ownFiles=true), so the spike's gate is open for it.
         val gate = SpikeGate.open()
         try {
@@ -48,8 +50,8 @@ class OwnFilesSpikeRun {
                 files.forEachIndexed { index, file ->
                     val path = file.relativeTo(folder).path
                     val line = try {
-                        val report = runBlocking { OpenedFile.open(context, file).use { spike.run(it) } }
-                        Json.encodeToString(SpikeRecord.serializer(), SpikeReports.record(report).copy(file = path))
+                        val result = runBlocking { SpikeServices.run(Uri.fromFile(file).toString(), pipeline) }
+                        Json.encodeToString(SpikeRecord.serializer(), SpikeReports.record(result).copy(file = path))
                     } catch (e: Exception) {
                         buildJsonObject {
                             put("file", path)

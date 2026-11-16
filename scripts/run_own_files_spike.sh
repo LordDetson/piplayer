@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Runs the M0 identification spike over a folder of the owner's own audio files on the connected device or emulator
-# and pulls one JSON line per file (TI §11.4). The files and the results are private: keep both outside git.
+# Runs the identification pipeline, as the debug spike does, over a folder of the owner's own audio files on the
+# connected device or emulator and pulls one JSON line per file (TI §11.4). The files and the results are private:
+# keep both outside git.
 #
 # Usage: scripts/run_own_files_spike.sh <folder with audio files> <output .jsonl>
 # Needs adb on PATH and an AcoustID application key in local.properties (acoustid.apiKey=...); without a key the

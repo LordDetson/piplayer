@@ -15,7 +15,8 @@ import io.github.lorddetson.piplayer.net.NoNetworkException
 /**
  * How one identification ended (TI §3, §6, §8, §9): the shared model of the pipeline (M3 step 13), which reports it, and
  * the review (step 18), which shows it. The first four end a call before anything is sent ([blocked]); [NoKey] and
- * [Found] end a run that went through its stages ([finished]).
+ * [Found] end a run that went through its stages ([finished]). [Unreadable] ends a run whose file stage 0 cannot read,
+ * and [Unavailable] one that a failing provider left without a result (TI §3 "One run").
  */
 sealed interface IdentificationOutcome {
 
@@ -36,6 +37,15 @@ sealed interface IdentificationOutcome {
      * application key (TI §9): the review says so instead of a plain "no match".
      */
     data object NoKey : IdentificationOutcome
+
+    /** Stage 0 could not read the file (TI §3.1), so it has no content key: nothing was sent. */
+    data object Unreadable : IdentificationOutcome
+
+    /**
+     * [provider] stayed busy or failed through every retry, and nothing reached the medium band, or the winner's
+     * release could not be fetched (TI §3 "One run"): the review says to try again later instead of "no match".
+     */
+    data class Unavailable(val provider: ProviderId) : IdentificationOutcome
 
     /**
      * The run went through its stages: [ranking] holds the scored recordings, best first, in their [band] (TI §4.1;

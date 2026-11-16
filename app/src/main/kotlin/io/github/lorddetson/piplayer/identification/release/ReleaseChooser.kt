@@ -100,9 +100,13 @@ class ReleaseChooser(
     /**
      * The suggested edition of [ranking]'s winner and the ranked releases of every recording [LookupPlan] browses. A
      * failed browse of a recording other than the winner is skipped and traced; any other failure, and every call that
-     * may not be sent, ends the choice.
+     * may not be sent, ends the choice. [onPage] hears the browse pages fetched so far for each recording.
      */
-    suspend fun choose(ranking: Ranking, request: ReleaseRequest): ReleaseChoice {
+    suspend fun choose(
+        ranking: Ranking,
+        request: ReleaseRequest,
+        onPage: (recordingId: String, pages: Int) -> Unit = { _, _ -> },
+    ): ReleaseChoice {
         val best = ranking.best
         if (best == null || ranking.band == Band.NO_MATCH) return ReleaseChoice.NONE
         val winner = best.recordingId
@@ -117,7 +121,7 @@ class ReleaseChooser(
             // A correctly tagged edition is not replaced by the ranking (TI §4.2 step 0).
             if (id == winner && tagged != null) continue
             val list = try {
-                lookups.releasesOfRecording(id, LookupPlan.MAX_RELEASE_PAGES)
+                lookups.releasesOfRecording(id, LookupPlan.MAX_RELEASE_PAGES) { pages -> onPage(id, pages) }
             } catch (e: SendBlockedException) {
                 throw e
             } catch (e: MusicBrainzException.UserAgentRejected) {

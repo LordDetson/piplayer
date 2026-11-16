@@ -57,6 +57,13 @@ interface MusicBrainzLookups {
     /** Every release of a recording, official ones or else any, over at most [maxPages] browse requests. */
     suspend fun releasesOfRecording(recordingId: String, maxPages: Int = MusicBrainzClient.MAX_PAGES): ReleaseList
 
+    /**
+     * The same, telling [onPage] the number of pages fetched so far after each page, for the progress of a run (TI §3).
+     * Without its own paging a lookup reports the pages once, at the end.
+     */
+    suspend fun releasesOfRecording(recordingId: String, maxPages: Int, onPage: (pages: Int) -> Unit): ReleaseList =
+        releasesOfRecording(recordingId, maxPages).also { onPage(it.pages) }
+
     /** Every release of a release group, all statuses, official ones first, over at most [maxPages] requests. */
     suspend fun releasesOfReleaseGroup(groupId: String, maxPages: Int = MusicBrainzClient.MAX_PAGES): ReleaseList
 }
@@ -141,10 +148,15 @@ class MusicBrainzClient(
      * Pages through the official releases of the recording; when it has none, through its releases of any status
      * (TI §4.2 step 1). Both walks together send at most [maxPages] requests.
      */
-    override suspend fun releasesOfRecording(recordingId: String, maxPages: Int): ReleaseList {
-        val official = walk(maxPages) { offset -> browseReleasesOfRecording(recordingId, offset, officialOnly = true) }
+    override suspend fun releasesOfRecording(recordingId: String, maxPages: Int): ReleaseList =
+        releasesOfRecording(recordingId, maxPages) {}
+
+    override suspend fun releasesOfRecording(recordingId: String, maxPages: Int, onPage: (pages: Int) -> Unit): ReleaseList {
+        val official = walk(maxPages, onPage) { offset ->
+            browseReleasesOfRecording(recordingId, offset, officialOnly = true)
+        }
         if (official.releases.isNotEmpty() || official.pages >= maxPages) return official
-        val any = walk(maxPages - official.pages) { offset ->
+        val any = walk(maxPages - official.pages, { onPage(official.pages + it) }) { offset ->
             browseReleasesOfRecording(recordingId, offset, officialOnly = false)
         }
         return any.copy(pages = official.pages + any.pages, nonOfficialFallback = true)
@@ -152,7 +164,7 @@ class MusicBrainzClient(
 
     /** Pages through the group's releases of every status: official ones first, otherwise in the server's order. */
     override suspend fun releasesOfReleaseGroup(groupId: String, maxPages: Int): ReleaseList {
-        val all = walk(maxPages) { offset -> browseReleasesOfReleaseGroup(groupId, offset) }
+        val all = walk(maxPages, onPage = {}) { offset -> browseReleasesOfReleaseGroup(groupId, offset) }
         return all.copy(releases = all.releases.sortedBy { !it.status.equals(OFFICIAL, ignoreCase = true) })
     }
 
@@ -171,9 +183,14 @@ class MusicBrainzClient(
 
     /**
      * Sends pages from offset 0 until the reported count is reached, a page comes back empty or [maxPages] pages are
-     * sent. The next offset grows by the releases actually received, which can be fewer than the limit.
+     * sent. The next offset grows by the releases actually received, which can be fewer than the limit. [onPage] hears
+     * the number of pages after each one.
      */
-    private suspend fun walk(maxPages: Int, page: suspend (offset: Int) -> ReleaseBrowseResponse): ReleaseList {
+    private suspend fun walk(
+        maxPages: Int,
+        onPage: (pages: Int) -> Unit,
+        page: suspend (offset: Int) -> ReleaseBrowseResponse,
+    ): ReleaseList {
         val releases = LinkedHashMap<String, ReleaseDto>()
         var offset = 0
         var total = 0
@@ -182,6 +199,7 @@ class MusicBrainzClient(
         while (pages < maxPages) {
             val answer = page(offset)
             pages++
+            onPage(pages)
             total = answer.releaseCount
             answer.releases.forEach { releases.putIfAbsent(it.id, it) }
             offset += answer.releases.size

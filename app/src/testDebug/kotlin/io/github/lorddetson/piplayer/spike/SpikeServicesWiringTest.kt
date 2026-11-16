@@ -5,14 +5,23 @@ import io.github.lorddetson.piplayer.fakes.FakeMusicBrainz
 import io.github.lorddetson.piplayer.fakes.RecordingRequestLog
 import io.github.lorddetson.piplayer.fakes.TestServices
 import io.github.lorddetson.piplayer.identification.FingerprintStage
-import io.github.lorddetson.piplayer.identification.fingerprint.FingerprintResult
-import io.github.lorddetson.piplayer.identification.fingerprint.PcmEncoding
-import io.github.lorddetson.piplayer.identification.fingerprint.PcmFormat
-import io.github.lorddetson.piplayer.identification.fingerprint.PcmSource
-import io.github.lorddetson.piplayer.identification.fingerprint.SourceInfo
-import io.github.lorddetson.piplayer.nativelib.chromaprint.Fingerprint
-import io.github.lorddetson.piplayer.nativelib.taglib.AudioProperties
-import io.github.lorddetson.piplayer.nativelib.taglib.TagReadResult
+import io.github.lorddetson.piplayer.identification.IdentificationServices
+import io.github.lorddetson.piplayer.identification.contract.IdentificationOutcome
+import io.github.lorddetson.piplayer.identification.contract.IdentificationTarget
+import io.github.lorddetson.piplayer.identification.pipeline.CachedFingerprint
+import io.github.lorddetson.piplayer.identification.pipeline.ComputedFingerprint
+import io.github.lorddetson.piplayer.identification.pipeline.FileRef
+import io.github.lorddetson.piplayer.identification.pipeline.FingerprintCache
+import io.github.lorddetson.piplayer.identification.pipeline.IdentificationPipeline
+import io.github.lorddetson.piplayer.identification.pipeline.LocalFile
+import io.github.lorddetson.piplayer.identification.pipeline.LocalStage
+import io.github.lorddetson.piplayer.identification.pipeline.PipelineStage
+import io.github.lorddetson.piplayer.identification.pipeline.SkipReason
+import io.github.lorddetson.piplayer.identification.pipeline.StageDuration
+import io.github.lorddetson.piplayer.identification.pipeline.StageResult
+import io.github.lorddetson.piplayer.library.values.TrackTags
+import io.github.lorddetson.piplayer.tagging.contentkey.DurationPlan
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.testTimeSource
@@ -21,7 +30,11 @@ import mockwebserver3.junit5.StartStop
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 
-/** The spike's services as SpikeServices builds them, against the shared fakes instead of the real hosts. */
+/**
+ * The spike as SpikeServices builds it: the app's pipeline over the spike's own services behind [SpikeGate], here against
+ * the shared fakes instead of the real hosts, with stage 0 and the fingerprint cache as fakes.
+ */
+@OptIn(ExperimentalCoroutinesApi::class)
 class SpikeServicesWiringTest {
 
     @StartStop
@@ -30,90 +43,81 @@ class SpikeServicesWiringTest {
     @StartStop
     private val musicBrainzServer = MockWebServer()
 
-    private val key = "testKey123"
+    private val uri = "content://test/01 - The Quiet Harbors - Paper Lanterns.mp3"
 
-    private object File : SpikeFile {
-        override val displayName = "01 - The Quiet Harbors - Paper Lanterns.mp3"
-        override val sizeBytes = 8_600_000L
-        val source = PcmSource { SourceInfo("audio/mpeg", "c2.android.mp3.decoder", durationUs = 214_000_000) }
-        override suspend fun readTags() = TagReadResult.Success(
-            properties = mapOf("TITLE" to listOf("Paper Lanterns"), "ARTIST" to listOf("The Quiet Harbors")),
-            audio = AudioProperties(lengthMs = 214_000, bitrateKbps = 320, sampleRate = 44_100, channels = 2),
-            pictures = emptyList(),
+    private val local = object : LocalStage {
+        override suspend fun read(file: FileRef) = LocalFile(
+            target = IdentificationTarget.OpenedFile(uri, CONTENT_KEY, "01 - The Quiet Harbors - Paper Lanterns.mp3", 8_600_000),
+            fileName = "01 - The Quiet Harbors - Paper Lanterns.mp3",
+            tags = TrackTags(title = "Paper Lanterns", artist = "The Quiet Harbors"),
+            duration = StageDuration.Exact(214_000),
+            format = "MPEG",
+            folder = null,
+            uri = uri,
         )
-        override fun pcmSource() = source
+
+        override suspend fun walk(file: LocalFile, plan: DurationPlan): Long? = null
     }
 
-    private val fingerprinter: suspend (PcmSource) -> FingerprintResult = {
-        FingerprintResult(
-            Fingerprint(IntArray(948), "AQAAencoded"),
-            fedSamples = 1_323_000,
-            inputFormat = PcmFormat(44_100, 2, PcmEncoding.PCM_16BIT),
-            source = SourceInfo("audio/mpeg", "c2.android.mp3.decoder", 214_000_000),
-            reachedEnd = false,
-        )
+    private val fingerprints = object : FingerprintCache {
+        override suspend fun cached(contentKey: String): CachedFingerprint? = null
+        override suspend fun compute(file: LocalFile) = ComputedFingerprint(IntArray(948), "AQAAencoded")
+        override suspend fun keepAcoustIdTrack(contentKey: String, trackId: String) = Unit
     }
 
-    private fun TestScope.spike(log: RecordingRequestLog): IdentificationSpike {
+    private fun TestScope.services(log: RecordingRequestLog, key: String): IdentificationServices {
         acoustIdServer.dispatcher = log.wrap(FakeAcoustId())
         musicBrainzServer.dispatcher = log.wrap(FakeMusicBrainz())
-        val services = SpikeServices.create(
+        return SpikeServices.create(
             userAgent = TestServices.USER_AGENT,
             connectivity = TestServices.FakeConnectivity(),
             acoustIdApiKey = key,
             baseUrls = TestServices.baseUrls(acoustIdServer.url("/v2/"), musicBrainzServer.url("/ws/2/")),
             timeSource = testTimeSource,
         )
-        // The spike takes its AcoustID stage from the services, so it agrees with their stage 3.
-        assertThat(services.fingerprintStage).isInstanceOf(FingerprintStage.Available::class.java)
-        return SpikeServices.spike(services, fingerprinter)
     }
 
+    private fun TestScope.pipeline(services: IdentificationServices) =
+        IdentificationPipeline(services, local, fingerprints, { error("nothing is cached") }, timeSource = testTimeSource)
+
+    private fun RecordingRequestLog.toServer(server: MockWebServer) = to("${server.hostName}:${server.port}")
+
     @Test
-    fun `with the spike gate open, the spike reaches AcoustID and MusicBrainz through the services`() = runTest {
+    fun `a spike run opens the gate for the pipeline, which reaches AcoustID and MusicBrainz through the services`() = runTest {
         val log = RecordingRequestLog { testScheduler.currentTime }
-        val spike = spike(log)
+        val services = services(log, KEY)
+        assertThat(services.fingerprintStage).isInstanceOf(FingerprintStage.Available::class.java)
 
-        val report = SpikeGate.open().use { spike.run(File) }
+        val result = SpikeServices.run(uri, pipeline(services))
 
-        val candidates = (report.acoustId as StageOutcome.Done).value
-        assertThat(candidates.first().recordingId).isEqualTo("b0e4d1f2-1111-4111-8111-000000000001")
-        assertThat((report.textSearch as StageOutcome.Done).value.candidates).isNotEmpty()
-        assertThat(log.to("${acoustIdServer.hostName}:${acoustIdServer.port}")).hasSize(1)
-        assertThat(log.to("${musicBrainzServer.hostName}:${musicBrainzServer.port}")).isNotEmpty()
+        assertThat(result.outcome).isInstanceOf(IdentificationOutcome.Found::class.java)
+        assertThat(log.toServer(acoustIdServer)).hasSize(1)
+        assertThat(log.toServer(musicBrainzServer)).isNotEmpty()
         assertThat(log.entries.map { it.userAgent }).containsOnly(TestServices.USER_AGENT)
         assertThat(SpikeGate.isOpen()).isFalse()
     }
 
     @Test
-    fun `the spike skips AcoustID when the services have no key`() = runTest {
+    fun `the spike skips AcoustID when its services have no key`() = runTest {
         val log = RecordingRequestLog { testScheduler.currentTime }
-        acoustIdServer.dispatcher = log.wrap(FakeAcoustId())
-        musicBrainzServer.dispatcher = log.wrap(FakeMusicBrainz())
-        val services = SpikeServices.create(
-            userAgent = TestServices.USER_AGENT,
-            connectivity = TestServices.FakeConnectivity(),
-            acoustIdApiKey = "",
-            baseUrls = TestServices.baseUrls(acoustIdServer.url("/v2/"), musicBrainzServer.url("/ws/2/")),
-            timeSource = testTimeSource,
-        )
+        val services = services(log, key = "")
         assertThat(services.fingerprintStage).isInstanceOf(FingerprintStage.Unavailable::class.java)
 
-        val report = SpikeGate.open().use { SpikeServices.spike(services, fingerprinter).run(File) }
+        val result = SpikeServices.run(uri, pipeline(services))
 
-        assertThat(report.acoustId).isEqualTo(StageOutcome.Skipped(SkipReason.NO_API_KEY))
-        assertThat(log.to("${acoustIdServer.hostName}:${acoustIdServer.port}")).isEmpty()
-        assertThat((report.textSearch as StageOutcome.Done).value.candidates).isNotEmpty()
+        assertThat(result.stages.single { it.stage == PipelineStage.FINGERPRINT }.result)
+            .isEqualTo(StageResult.Skipped(SkipReason.NO_KEY))
+        assertThat(log.toServer(acoustIdServer)).isEmpty()
+        assertThat(log.toServer(musicBrainzServer)).isNotEmpty()
     }
 
     @Test
     fun `without a spike run the gate is closed and nothing is sent`() = runTest {
         val log = RecordingRequestLog { testScheduler.currentTime }
-        val report = spike(log).run(File)
 
-        assertThat(report.acoustId).isInstanceOf(StageOutcome.Failed::class.java)
-        assertThat((report.acoustId as StageOutcome.Failed).error).startsWith("GateClosedException")
-        assertThat(report.textSearch).isInstanceOf(StageOutcome.Failed::class.java)
+        val result = pipeline(services(log, KEY)).run(FileRef.Opened(uri))
+
+        assertThat(result.outcome).isEqualTo(IdentificationOutcome.Disabled)
         assertThat(log.size).isZero()
     }
 
@@ -127,5 +131,10 @@ class SpikeServicesWiringTest {
         assertThat(SpikeGate.isOpen()).isTrue()
         second.close()
         assertThat(SpikeGate.isOpen()).isFalse()
+    }
+
+    private companion object {
+        const val KEY = "testKey123"
+        const val CONTENT_KEY = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
     }
 }

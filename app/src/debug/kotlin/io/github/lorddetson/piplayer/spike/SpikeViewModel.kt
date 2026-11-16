@@ -4,6 +4,8 @@ import android.app.Application
 import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import io.github.lorddetson.piplayer.identification.pipeline.PipelineProgress
+import io.github.lorddetson.piplayer.identification.pipeline.PipelineStage
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -14,15 +16,16 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * Runs the spike on a picked file. The work survives configuration changes; closing the screen cancels it ([cancel]),
- * and so does the end of the screen's owner.
+ * Runs the identification pipeline on a picked file through [SpikeServices]. The work survives configuration changes;
+ * closing the screen cancels it ([cancel]), and so does the end of the screen's owner.
  */
 class SpikeViewModel(application: Application) : AndroidViewModel(application) {
 
     sealed interface State {
         data object Idle : State
 
-        data class Running(val fileName: String?, val stage: SpikeStage) : State
+        /** The run goes on; [progress] is what it reported last. */
+        data class Running(val progress: PipelineProgress) : State
 
         data class Finished(val text: String) : State
 
@@ -44,16 +47,14 @@ class SpikeViewModel(application: Application) : AndroidViewModel(application) {
     fun identify(uri: Uri) {
         job?.cancel()
         job = viewModelScope.launch {
-            mutableState.value = State.Running(null, SpikeStage.READING_TAGS)
+            mutableState.value = State.Running(PipelineProgress.Started(PipelineStage.LOCAL_READ))
             mutableState.value = try {
-                val report = withContext(Dispatchers.IO) {
-                    OpenedFile.open(getApplication(), uri).use { file ->
-                        SpikeServices.run(getApplication(), file) { stage ->
-                            mutableState.value = State.Running(file.displayName, stage)
-                        }
-                    }
+                // Off the main thread: the services build their HTTP client when first asked.
+                val result = withContext(Dispatchers.IO) {
+                    val pipeline = SpikeServices.pipeline(getApplication())
+                    SpikeServices.run(uri.toString(), pipeline) { mutableState.value = State.Running(it) }
                 }
-                State.Finished(SpikeReports.text(report))
+                State.Finished(SpikeReports.text(result))
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {

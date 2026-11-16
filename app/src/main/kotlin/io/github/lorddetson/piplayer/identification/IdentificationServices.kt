@@ -33,10 +33,12 @@ import io.github.lorddetson.piplayer.net.RateLimiter
 import io.github.lorddetson.piplayer.net.RetryPolicy
 import io.github.lorddetson.piplayer.settings.DataStoreOnlineGate
 import java.time.Clock
+import kotlin.time.Duration.Companion.seconds
 import kotlin.time.TimeSource
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
@@ -104,6 +106,16 @@ class IdentificationServices(
 
     fun status(provider: ProviderId): StateFlow<ProviderStatus> = providerStatus.status(provider)
 
+    /**
+     * Waits until [gate] knows the user's choice, at most [GATE_READ_TIMEOUT]: the app's gate is closed until it has read
+     * the `settings` file (TI §9), and a run that started before the read would otherwise report online lookups as off
+     * (TI §3 "One run"). Other gates know their state at once.
+     */
+    suspend fun awaitGateRead() {
+        val stored = gate as? DataStoreOnlineGate ?: return
+        withTimeoutOrNull(GATE_READ_TIMEOUT) { stored.awaitLoaded() }
+    }
+
     val musicBrainz: MusicBrainzClient by lazy {
         MusicBrainzClient(
             http = http,
@@ -169,6 +181,9 @@ class IdentificationServices(
     )
 
     companion object {
+
+        /** How long a run waits for the app's gate to read the user's choice; still closed after it means off. */
+        val GATE_READ_TIMEOUT = 5.seconds
 
         /**
          * Services whose HTTP client checks the same [gate]. [configureHttp] adjusts the client, for example to trust a
