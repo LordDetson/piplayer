@@ -133,6 +133,23 @@ class SongListInPlaceTest {
     }
 
     @Test
+    fun aRunOfTheDecisionMirrorTakenDuringThePassIsAChangeOfThePass() {
+        SongList.load(SongSource { listOf(song(1, "A")) })
+        val passes = SongList.changingPasses
+        assertThat(SongList.takeInPass()).describedAs("without a pass").isFalse()
+
+        SongList.passStarted()
+        // A run for the pass's batches whose values wait for the sort after it (docs/library.md §3.5).
+        assertThat(SongList.takeInPass()).describedAs("while the pass runs").isTrue()
+        assertThat(SongList.resortDue()).describedAs("while the pass runs").isFalse()
+        SongList.passFinished()
+
+        assertThat(SongList.resortDue()).isTrue()
+        assertThat(SongList.changingPasses).isEqualTo(passes + 1)
+        assertThat(SongList.takeInPass()).describedAs("after the pass").isFalse()
+    }
+
+    @Test
     fun aSortStillDueWaitsWhileAnotherPassRuns() {
         SongList.load(SongSource { listOf(song(1, "A")) })
         SongList.passStarted()

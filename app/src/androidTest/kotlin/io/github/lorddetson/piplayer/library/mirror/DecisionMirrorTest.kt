@@ -40,6 +40,7 @@ import io.github.lorddetson.piplayer.userdata.DecisionFixtures.request
 import io.github.lorddetson.piplayer.userdata.Decisions
 import io.github.lorddetson.piplayer.userdata.UserDatabase
 import java.io.File
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
@@ -70,7 +71,10 @@ class DecisionMirrorTest {
     private val index = FakeMediaIndex()
     private val sync = LibrarySync(library, index, mayRead = { true }, FakeRules())
     private val attacher = IdentityAttacher(library, user, sync, holders = { user.user().identitiesHoldingData().toSet() })
-    private val mirror = DecisionMirror(library, user, sync)
+    /** Whether the tag pass runs, as the mirror asks for a run made only for its batches; and how often it was taken so. */
+    private val passRunning = AtomicBoolean(false)
+    private val takenInPass = AtomicInteger()
+    private val mirror = DecisionMirror(library, user, sync, inPass = { passRunning.get().also { if (it) takenInPass.incrementAndGet() } })
     private val repository = Decisions(user)
     private val decisions = LibraryDecisions(repository) { mirror }
 
@@ -885,6 +889,71 @@ class DecisionMirrorTest {
         assertThat(lapsedAt(skipped.decisionId)).isNotNull()
         assertThat(mirror.wholeRuns).isGreaterThan(runs)
         for (n in listOf(1L, 2L)) assertThat(display(n).missingInfoDecision).isEqualTo(MissingInfoDecision.NONE)
+    }
+
+    @Test
+    fun aRunMadeOnlyForBatchesOfThePassWhileItRunsRaisesTheVersionButNotTheOneTheListsFollow() = runBlocking<Unit> {
+        // Each file its own key; a decision on file 2, whose copies the pass finds one after another (docs/library.md §3.5).
+        library(listOf(row(1), row(2), row(3), row(4)))
+        checkNotNull(decisions.apply(request(key(2), details(title = "Decided"))))
+        mirror.awaitIdle()
+        fun copyOfTwo(n: Long) = runBlocking { library.library().setContent(fileId(n), key(2), 200_000, DurationSource.HEADER) }
+        var version = mirror.version.value
+        var listed = mirror.listVersion.value
+
+        // The pass runs and reads a copy: the run waits in the lists and counts as a change of the pass.
+        passRunning.set(true)
+        copyOfTwo(3)
+        mirror.requestRead(listOf(fileId(3)), emptyList())
+        mirror.awaitIdle()
+        assertThat(display(3).title).isEqualTo("Decided")
+        assertThat(mirror.version.value).describedAs("the version of decided values").isGreaterThan(version)
+        assertThat(mirror.listVersion.value).describedAs("the version the lists follow").isEqualTo(listed)
+        assertThat(takenInPass.get()).describedAs("runs taken as changes of the pass").isEqualTo(1)
+
+        // A run for a batch that changed nothing does not ask.
+        mirror.requestRead(listOf(fileId(3)), emptyList())
+        mirror.awaitIdle()
+        assertThat(takenInPass.get()).isEqualTo(1)
+
+        // A commit during the pass is the user's own change.
+        version = mirror.version.value
+        checkNotNull(decisions.apply(request(key(2), details(title = "Again", recording = 101))))
+        assertThat(mirror.version.value).isGreaterThan(version)
+        assertThat(mirror.listVersion.value).describedAs("after a commit during the pass").isGreaterThan(listed)
+        listed = mirror.listVersion.value
+
+        // A run that took other files besides a batch's: the mirror is held while both are asked for, so one run takes them.
+        val holding = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val checks = AtomicInteger()
+        mirror.beforeChecks = {
+            if (checks.getAndIncrement() == 0) {
+                holding.complete(Unit)
+                release.await()
+            }
+        }
+        mirror.requestRead(emptyList(), failed = listOf(Long.MAX_VALUE))
+        withTimeout(10_000) { holding.await() }
+        copyOfTwo(4)
+        mirror.requestRead(listOf(fileId(4)), emptyList())
+        mirror.requestFiles(listOf(fileId(1)))
+        release.complete(Unit)
+        mirror.awaitIdle()
+        assertThat(display(4).title).isEqualTo("Again")
+        assertThat(mirror.listVersion.value).describedAs("after a run that also took other files").isGreaterThan(listed)
+        listed = mirror.listVersion.value
+        mirror.beforeChecks = {}
+
+        // The same run once the pass has ended reloads at once, and asks nothing of the pass.
+        passRunning.set(false)
+        val taken = takenInPass.get()
+        copyOfTwo(1)
+        mirror.requestRead(listOf(fileId(1)), emptyList())
+        mirror.awaitIdle()
+        assertThat(display(1).title).isEqualTo("Again")
+        assertThat(mirror.listVersion.value).describedAs("after the pass").isGreaterThan(listed)
+        assertThat(takenInPass.get()).isEqualTo(taken)
     }
 
     @Test

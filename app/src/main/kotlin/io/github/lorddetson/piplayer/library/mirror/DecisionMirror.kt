@@ -51,6 +51,7 @@ class DecisionMirror(
     private val sync: LibrarySync,
     /** Whether the library knows its files; before its first sync there is nothing to match. */
     private val ready: () -> Boolean = { true },
+    private val inPass: () -> Boolean = { false },
 ) {
     private val decisions = Decisions(user)
     private val displays = TrackDisplayWriter(library)
@@ -58,6 +59,8 @@ class DecisionMirror(
 
     /** Raised after every run that changed decided values, so that lists, Now Playing and the session read again. */
     val version: StateFlow<Long> = mutableVersion.asStateFlow()
+
+    val listVersion: StateFlow<Long> get() = version
 
     /** The files each run that raised [version] changed (TI §7.1). */
     private val changes = DecidedChanges()

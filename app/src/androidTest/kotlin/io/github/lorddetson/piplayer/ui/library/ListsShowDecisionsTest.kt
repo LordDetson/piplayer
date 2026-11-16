@@ -10,6 +10,7 @@ import io.github.lorddetson.piplayer.library.FakeMediaIndex
 import io.github.lorddetson.piplayer.library.FakeMediaIndex.Companion.row
 import io.github.lorddetson.piplayer.library.Library
 import io.github.lorddetson.piplayer.library.LibraryRule
+import io.github.lorddetson.piplayer.library.lists.AlbumGroup
 import io.github.lorddetson.piplayer.library.lists.ArtistGroup
 import io.github.lorddetson.piplayer.library.lists.LibraryLists
 import io.github.lorddetson.piplayer.library.lists.SongQuery
@@ -107,6 +108,21 @@ class ListsShowDecisionsTest {
 
     private fun ArtistsViewModel.names(): List<String>? = (state.value as? GroupsState.Loaded<List<ArtistGroup>>)?.value?.map { it.name }
 
+    private fun AlbumsViewModel.titles(): List<String>? = (state.value as? GroupsState.Loaded<List<AlbumGroup>>)?.value?.map { it.title }
+
+    private fun SongsViewModel.sections(): List<String?>? = (state.value as? SongsState.Loaded)?.takeIf { it.complete }?.songs?.map { it.section }
+
+    /** The screen goes to the background and comes back, as at a return (docs/library.md §5.4, §6.5). */
+    private fun SongsViewModel.returns() = onMain {
+        onStop()
+        onStart(granted = true, deniedForGood = false)
+    }
+
+    private fun GroupsViewModel<*>.returns() = onMain {
+        onStop()
+        onStart(granted = true)
+    }
+
     @Test
     fun theListsShowADecisionAtOnceAndTheTagsAgainAfterUndo() = runBlocking<Unit> {
         val playlist = UserData.playlists(context).create("Mix")
@@ -199,7 +215,135 @@ class ListsShowDecisionsTest {
         eventually("a smart list may read again") { smartChanges.get() > smartSeen }
     }
 
+    @Test
+    fun theAlbumsTabAnAlbumPagesHeaderAndTheScrollLettersShowADecision() = runBlocking<Unit> {
+        // Charlie is alone on Third, so a decided album renames its group in the tab and on its page.
+        val charlie = Library.database(context).library().files().single { it.mediaStoreId == 3L }.id
+        Library.database(context).library().setContent(charlie, OTHER_KEY, 200_000, DurationSource.HEADER)
+        Library.identities(context).attach()
+        Library.decisionMirror(context).awaitIdle()
+        val thirdKey = Library.read(context) { LibraryLists(it).albums() }.single { it.title == "Third" }.key
+        val songs = songs()
+        val albums = held("albums") { AlbumsViewModel(app).apply { onStart(granted = true) } }
+        val header = held("album page") { AlbumPageViewModel(app, thirdKey).apply { onStart(granted = true) } }
+        fun headerTitle() = (header.state.value as? GroupsState.Loaded<AlbumGroup?>)?.value?.title
+        eventually("the lists are read", 20.seconds) {
+            songs.sections() == listOf("A", "B", "C") && albums.titles() == listOf("First", "Third") && headerTitle() == "Third"
+        }
+
+        val applied = checkNotNull(
+            Library.decisions(context).apply(
+                DecisionFixtures.request(OTHER_KEY, DecisionFixtures.details(title = "Delta", artist = "Cid", album = "Record"), fileId = charlie),
+            ),
+        )
+
+        eventually("the Albums tab shows the decided album") { albums.titles() == listOf("First", "Record") }
+        eventually("the album page's header shows the decided album") { headerTitle() == "Record" }
+        eventually("the scroll letters follow the decided title") { songs.sections() == listOf("A", "B", "D") }
+
+        checkNotNull(Library.decisions(context).undo(applied.decisionId))
+
+        eventually("the Albums tab shows the tag's album again") { albums.titles() == listOf("First", "Third") }
+        eventually("the album page's header shows the tag's album again") { headerTitle() == "Third" }
+        eventually("the scroll letters follow the tag's title again") { songs.sections() == listOf("A", "B", "C") }
+    }
+
+    @Test
+    fun aRunOfTheMirrorOfFavoritesAndPlaysThatChangedNothingGivesNoNewValueToTheChangesOfAList() = runBlocking<Unit> {
+        val changes = AtomicInteger()
+        val smartChanges = AtomicInteger()
+        collecting.launch { SongList.changes(context).collect { changes.incrementAndGet() } }
+        collecting.launch { SongList.changes(context, SongQuery.favorites()).collect { smartChanges.incrementAndGet() } }
+        eventually("the changes are watched") { changes.get() > 0 && smartChanges.get() > 0 }
+        Library.identities(context).awaitIdle()
+        Library.mirror(context).awaitIdle()
+        Library.decisionMirror(context).awaitIdle()
+        val seen = changes.get()
+        val smartSeen = smartChanges.get()
+
+        // A whole run writes the same rows again and raises its version.
+        Library.mirror(context).mirror()
+
+        eventually("a smart list reads again") { smartChanges.get() > smartSeen }
+        throughout("a list that is not smart is not read again", 1.seconds) { changes.get() == seen }
+    }
+
+    @Test
+    fun whileThePassRunsARunOfTheDecisionMirrorForABatchWaitsForThePassEnd() = runBlocking<Unit> {
+        checkNotNull(
+            Library.decisions(context).apply(
+                DecisionFixtures.request(KEY, DecisionFixtures.details(title = "Zulu", artist = "Zed", album = "Record"), fileId = alpha),
+            ),
+        )
+        val playlist = UserData.playlists(context).create("Bravo only")
+        Library.playlists(context).addFiles(playlist, listOf(bravo))
+        val songs = songs()
+        val artists = held("artists") { ArtistsViewModel(app).apply { onStart(granted = true) } }
+        val albums = held("albums") { AlbumsViewModel(app).apply { onStart(granted = true) } }
+        val page = held("playlist") { PlaylistPageViewModel(app, playlist) }
+        collecting.launch { page.items.collect {} }
+        fun playlistTitles() = page.items.value?.map { it.title }
+        val changes = AtomicInteger()
+        collecting.launch { SongList.changes(context).collect { changes.incrementAndGet() } }
+        eventually("the lists are read", 20.seconds) {
+            songs.titles() == listOf("Bravo", "Charlie", "Zulu") && artists.names() == listOf("Bob", "Cid", "Zed") &&
+                albums.titles() == listOf("First", "Third") && playlistTitles() == listOf("Bravo") && changes.get() > 0
+        }
+        Library.identities(context).awaitIdle()
+        Library.mirror(context).awaitIdle()
+        val mirror = Library.decisionMirror(context)
+        mirror.awaitIdle()
+        val version = mirror.version.value
+
+        // The pass reads Bravo again and finds it a copy of the decided file (docs/library.md §3.5).
+        SongList.passStarted()
+        val shownSongs = songs.state.value
+        val shownArtists = artists.state.value
+        val shownAlbums = albums.state.value
+        val seen = changes.get()
+        Library.database(context).library().setContent(bravo, KEY, 200_000, DurationSource.HEADER)
+        mirror.requestRead(listOf(bravo), emptyList())
+        mirror.awaitIdle()
+        assertThat(mirror.version.value).describedAs("the run changed decided values").isGreaterThan(version)
+
+        eventually("the playlist page shows the decided title at once") { playlistTitles() == listOf("Zulu") }
+        throughout("the lists do not change", 1.seconds) { changes.get() == seen }
+        assertThat(songs.state.value).describedAs("the Songs tab").isSameAs(shownSongs)
+        assertThat(artists.state.value).describedAs("the Artists tab").isSameAs(shownArtists)
+        assertThat(albums.state.value).describedAs("the Albums tab").isSameAs(shownAlbums)
+        assertThat(SongList.current()).describedAs("the list kept for the service").isNotNull()
+
+        // The pass ends; at the return the Songs tab sorts anew and the tabs group again, with the decided values.
+        SongList.passFinished()
+        songs.returns()
+        artists.returns()
+        albums.returns()
+
+        eventually("the Songs tab sorts with the decided values") { songs.titles() == listOf("Charlie", "Zulu", "Zulu") }
+        eventually("the Artists tab groups with the decided artist") { artists.names() == listOf("Cid", "Zed") }
+        eventually("the Albums tab groups with the decided album") { albums.titles() == listOf("Record", "Third") }
+    }
+
+    @Test
+    fun anApplyDuringThePassChangesTheSongsInPlaceAndGroupsTheTabsAtOnce() = runBlocking<Unit> {
+        val songs = songs()
+        val artists = held("artists") { ArtistsViewModel(app).apply { onStart(granted = true) } }
+        eventually("the lists are read", 20.seconds) {
+            songs.titles() == listOf("Alpha", "Bravo", "Charlie") && artists.names() == listOf("Ann", "Bob", "Cid")
+        }
+        SongList.passStarted()
+
+        checkNotNull(
+            Library.decisions(context).apply(DecisionFixtures.request(KEY, DecisionFixtures.details(title = "Zulu", artist = "Zed"), fileId = alpha)),
+        )
+
+        eventually("the Songs tab changes the title in place") { songs.titles() == listOf("Zulu", "Bravo", "Charlie") }
+        eventually("the Artists tab groups again") { artists.names() == listOf("Bob", "Cid", "Zed") }
+        SongList.passFinished()
+    }
+
     private companion object {
         val KEY = "%064x".format(7)
+        val OTHER_KEY = "%064x".format(8)
     }
 }

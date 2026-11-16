@@ -347,6 +347,8 @@ object SongList {
     var changingPasses = 0L
         private set
 
+    fun takeInPass(): Boolean = false
+
     /** Whether the tag pass runs now. */
     fun passRunning(): Boolean = synchronized(lock) { passRunning }
 
