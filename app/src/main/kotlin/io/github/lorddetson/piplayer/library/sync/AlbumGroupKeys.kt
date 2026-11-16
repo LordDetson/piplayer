@@ -1,5 +1,6 @@
 package io.github.lorddetson.piplayer.library.sync
 
+import androidx.annotation.VisibleForTesting
 import androidx.room3.PooledConnection
 import androidx.sqlite.SQLiteStatement
 import io.github.lorddetson.piplayer.library.db.FOLDER_AND_ONE_BELOW
@@ -34,6 +35,11 @@ internal object AlbumGroupKeys {
         /** The keys the rows of the written files held, for the groups that a file leaves. */
         class Keys(val keys: Map<Long, String>) : Before
     }
+
+    /** Called with the album keys whose files a smaller write reads to settle their groups (tests). */
+    @VisibleForTesting
+    @Volatile
+    internal var onGroupsRead: (Collection<String>) -> Unit = {}
 
     /** A file of a group that the write did not touch: its own album key, its release and the key its row holds. */
     private class Stored(val fileId: Long, val ownKey: String?, val release: String?, val storedKey: String?)
@@ -104,6 +110,7 @@ internal object AlbumGroupKeys {
         if (groups.isEmpty() && left.isEmpty()) return
         val keys = groups.keys + left
         val (released, own) = keys.partition { it.startsWith(AlbumKey.RELEASE_PREFIX) }
+        onGroupsRead(keys)
         // A statement for all groups at once, so that a whole run of the decision mirror reads no folder by folder.
         val holding = select(HOLDING, own).filter { it.fileId !in written && it.ownKey == it.storedKey }.groupBy { it.ownKey }
         val tagged = select(TAGGED, released).filter { it.fileId !in written }.groupBy { it.ownKey }

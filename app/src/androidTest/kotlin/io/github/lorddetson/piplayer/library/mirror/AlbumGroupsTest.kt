@@ -11,6 +11,7 @@ import io.github.lorddetson.piplayer.library.db.LibraryDatabase
 import io.github.lorddetson.piplayer.library.identity.Hex
 import io.github.lorddetson.piplayer.library.identity.IdentityAttacher
 import io.github.lorddetson.piplayer.library.lists.LibraryLists
+import io.github.lorddetson.piplayer.library.sync.AlbumGroupKeys
 import io.github.lorddetson.piplayer.library.sync.IndexRow
 import io.github.lorddetson.piplayer.library.sync.LibrarySync
 import io.github.lorddetson.piplayer.library.sync.TrackDisplayWriter
@@ -23,6 +24,7 @@ import io.github.lorddetson.piplayer.userdata.Decisions
 import io.github.lorddetson.piplayer.userdata.Favorites
 import io.github.lorddetson.piplayer.userdata.UserDatabase
 import java.io.File
+import java.util.Collections
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.After
@@ -53,6 +55,7 @@ class AlbumGroupsTest {
 
     @After
     fun close() {
+        AlbumGroupKeys.onGroupsRead = {}
         mirror.close()
         userMirror.close()
         attacher.close()
@@ -136,6 +139,26 @@ class AlbumGroupsTest {
         // So does a write of one of them.
         TrackDisplayWriter(library).refresh(listOf(fileId(2)))
         for (track in 1L..3L) assertThat(albumKeyOf(track)).describedAs("track $track after one row").isEqualTo("mbid:$release")
+    }
+
+    @Test
+    fun aWriteOfAnIdentifiedTrackReadsNoFileOfItsGroupWhileAnotherFileHasNeitherADecidedAlbumNorRelease() = runBlocking<Unit> {
+        library(listOf(track(1), track(2), track(3)))
+        val own = checkNotNull(albumKeyOf(1))
+        // Only this test's library is written meanwhile; a write elsewhere names other keys.
+        val read = Collections.synchronizedList(ArrayList<String>())
+        AlbumGroupKeys.onGroupsRead = { read += it }
+
+        // Track 3 has no decided value: the group keeps its own key, and its files are not read.
+        identify(1)
+        identify(2)
+        assertThat(read).describedAs("groups read while track 3 has no decided value").doesNotContain(own)
+        for (track in 1L..3L) assertThat(albumKeyOf(track)).describedAs("track $track before the last").isEqualTo(own)
+
+        // Every other file of the group has a decided album: the group can move, so it is read.
+        identify(3)
+        assertThat(read).describedAs("groups read by the last write").contains(own)
+        for (track in 1L..3L) assertThat(albumKeyOf(track)).describedAs("track $track").isEqualTo("mbid:$release")
     }
 
     @Test
