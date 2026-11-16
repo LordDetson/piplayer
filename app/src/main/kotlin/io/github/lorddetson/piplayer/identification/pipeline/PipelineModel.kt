@@ -2,6 +2,7 @@ package io.github.lorddetson.piplayer.identification.pipeline
 
 import io.github.lorddetson.piplayer.identification.contract.IdentificationOutcome
 import io.github.lorddetson.piplayer.identification.contract.IdentificationTarget
+import io.github.lorddetson.piplayer.identification.release.BrowseTrace
 import io.github.lorddetson.piplayer.identification.score.TrackHint
 import io.github.lorddetson.piplayer.library.values.TrackTags
 import io.github.lorddetson.piplayer.net.HttpSummary
@@ -149,7 +150,8 @@ sealed interface StageResult {
 
 /**
  * One stage of a run, for the trace (TI §10.1): how it ended, its [elapsed] time, when it started by the services'
- * clock ([startedAtMs], null when not known) and what the HTTP layer saw of its requests ([http], null when it sent none).
+ * clock ([startedAtMs], null when not known), what the HTTP layer saw of its requests ([http], null when it sent none),
+ * the [bestScore] of what it found by itself (TI §4.1) and, for release choice, its [browses].
  */
 data class StageReport(
     val stage: PipelineStage,
@@ -157,6 +159,8 @@ data class StageReport(
     val elapsed: Duration,
     val startedAtMs: Long? = null,
     val http: HttpSummary? = null,
+    val bestScore: Double? = null,
+    val browses: List<BrowseTrace> = emptyList(),
 )
 
 /** Where stage 3 took its fingerprint from. */

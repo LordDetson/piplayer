@@ -99,7 +99,7 @@ class PipelineGateReadTest {
     }
 
     @Test
-    fun `a run that starts before the stored choice is read waits for it`() = runBlocking {
+    fun `a run that starts before the stored choice is read waits for it`() = runBlocking<Unit> {
         val gate = gate(enabled = true)
         assertThat(gate.isOpen()).describedAs("closed before the file is read").isFalse()
 
@@ -110,7 +110,7 @@ class PipelineGateReadTest {
     }
 
     @Test
-    fun `a stored choice of off read after the start gives online lookups off`() = runBlocking {
+    fun `a stored choice of off read after the start gives online lookups off`() = runBlocking<Unit> {
         val result = pipeline(gate(enabled = false)).run(FileRef.Opened("file:///music/track.mp3"))
 
         assertThat(result.outcome).isEqualTo(IdentificationOutcome.Disabled)

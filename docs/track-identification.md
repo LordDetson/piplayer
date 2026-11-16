@@ -1510,8 +1510,8 @@ whose first sync after the update runs as on a first launch (about 1.7 s on the 
   layer saw it, none when no answer came; `result_count` the recordings the stage found (the browsed recordings for
   release choice, every ranked recording for the outcome); `best_score` the best score of what the stage found by
   itself (§4.1), and for the outcome the run's best; `elapsed_ms` the stage's time, waits for the rate limiter
-  included, and for the outcome the whole run's. `note` holds the skip reason (`skipped=no_value`), the failure's error
-  type (`failed=Unavailable`), the requests the stage sent and their time at the HTTP layer (`requests=2 http_ms=310`),
+  included, and for the outcome the whole run's. `note` holds the skip reason (`skipped=no_value`), a code for the
+  failure (`failed=unavailable`; never its class name, which R8 renames in a release), the requests the stage sent and their time at the HTTP layer (`requests=2 http_ms=310`),
   the browses of release choice (pages, releases received and the page cap) and, for the outcome, its kind
   (`found=high`, `no_key`, `unavailable`) and the "retry later" time. No column holds file names, tag values, addresses
   or error messages, which may carry tag values in a search query. A run that adds its rows drops the runs of its

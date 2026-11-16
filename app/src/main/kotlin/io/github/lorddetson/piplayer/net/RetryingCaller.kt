@@ -4,6 +4,7 @@ import java.io.IOException
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.hours
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -37,6 +38,9 @@ fun interface CallGuard {
  * [guard] is asked before every attempt, and again once the limiter lets the attempt go, so that turning online
  * lookups off, a provider's stop or a lost network ends a call that is waiting out a backoff. A [SendBlockedException]
  * from the guard or from the client's gate fails the call as it is: it is never retried and never pauses the limiter.
+ *
+ * Every attempt sent is reported to the [HttpTrace] of the calling coroutine, if it has one, with its answer's status
+ * (TI §10.1); a blocked attempt sent nothing and is not reported.
  */
 class RetryingCaller(
     private val http: OkHttpClient,
@@ -58,6 +62,7 @@ class RetryingCaller(
         paused: (remaining: Duration) -> IOException,
         handle: (Response) -> CallOutcome<T>,
     ): T {
+        val trace = currentCoroutineContext()[HttpTrace]
         var attempt = 0
         while (true) {
             attempt++
@@ -68,15 +73,22 @@ class RetryingCaller(
             } catch (e: RateLimitPauseException) {
                 throw paused(e.remaining)
             }
+            var answered = false
             val outcome = try {
                 // Again after the wait, as the gate, a stop or the network may have changed during a backoff; a
                 // call blocked here has taken its slot, which only spaces the next caller as a sent one would.
                 guard.check()
-                http.newCall(request).await().use { response -> withContext(ioDispatcher) { handle(response) } }
+                http.newCall(request).await().use { response ->
+                    answered = true
+                    trace?.answered(response.code, response.receivedResponseAtMillis - response.sentRequestAtMillis)
+                    withContext(ioDispatcher) { handle(response) }
+                }
             } catch (e: SendBlockedException) {
                 // Nothing was sent (the client's gate also refuses redirect hops): no retry and no pause.
                 CallOutcome.Fail(e)
             } catch (e: IOException) {
+                // A body that breaks off after its status was answered; anything before it got no answer.
+                if (!answered) trace?.unanswered()
                 CallOutcome.Retry(e)
             }
             when (outcome) {

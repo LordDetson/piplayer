@@ -104,8 +104,23 @@ class PipelinePersistenceTest {
         assertThat(rows.map { it.recordingMbid }).isEqualTo(found.ranking.matches.map { it.recordingId }.take(rows.size))
         assertThat(rows.map { it.score }).isEqualTo(found.ranking.matches.map { it.score }.take(rows.size))
         assertThat(rows.first().source).isEqualTo(found.ranking.best!!.reason.source.name.lowercase())
-        assertThat(rows.first().releaseMbid).isEqualTo(found.choice.suggested!!.release.id)
+        assertThat(rows.size).isGreaterThan(1)
         assertThat(StoredCandidates.matches(rows)).isEqualTo(found.ranking.matches.take(rows.size))
+    }
+
+    @Test
+    fun `the best candidate carries the suggested edition`() = runTest {
+        val pipeline = pipeline()
+        acoustIdAnswers(FakeAcoustId.ID_ONLY)
+
+        val result = pipeline.identify()
+
+        assertThat((result.outcome as IdentificationOutcome.Found).choice.suggested!!.release.id)
+            .isEqualTo(FakeMusicBrainz.HARBOR_RELEASE)
+        val best = store.candidatesOf(KEY).first()
+        assertThat(best.recordingMbid).isEqualTo(FakeMusicBrainz.HARBOR_RECORDING)
+        assertThat(best.releaseMbid).isEqualTo(FakeMusicBrainz.HARBOR_RELEASE)
+        assertThat(best.source).isEqualTo("fingerprint")
     }
 
     @Test
