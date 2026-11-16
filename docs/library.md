@@ -798,11 +798,17 @@ saved queue that refers to identities is in playback.md §4.
   now is left out. The rest of the plan is written.
 - Decision (M3 step 16b): until the tag pass reads a library file that Apply gave an identity, the library holds no key
   for it, and the pass sees that identity as missing. So a missing identity whose hinted place holds a file the tag pass
-  has not read yet (`tag_pass_at` empty and no `tag_failure`) waits: steps 3 to 5 do not move it, while it still counts
-  for the uniqueness of steps 3 and 5, so that no other identity takes the file meanwhile. Step 2 still runs for it,
-  since it only gives it the file at its hint. Once the tag pass has read the file, or the file has left the library,
-  the identity takes part as before. The pass reads the places of the unread files with the keyed files, while no sync
-  writes (TI §10.2 "An identity at Apply").
+  has not read yet and will still read waits: `tag_pass_at` empty, `folder_rule` not excluded, `unsafe_count` below the
+  limit of §4.4, and either no `tag_failure` or one that is tried again in a later process (`open` or `crash`, stored
+  with an empty `reader_version`, §5.3). Steps 3 to 5 do not move it, while it still counts for the uniqueness of
+  steps 3 and 5, so that no other identity takes the file meanwhile, and the one unattached file that step 3 would give
+  it is held back like a file whose length waits for a walk: it gets no new identity in that pass, so that step 3 can
+  still give it to the identity once the wait ends (steps 4 and 5 take files over from new identities and need no
+  hold). Step 2 still runs for it, since it only gives it the file at its hint. Once the tag pass has read the file, or
+  the file has left the library, the identity takes part as before. A file whose read failed for good (`unsupported`,
+  `read`, or marked unsafe) or that lies in an excluded folder, which the tag pass does not read, makes nothing wait.
+  The pass reads the places of the waiting files with the keyed files, while no sync writes (TI §10.2 "An identity at
+  Apply").
 - Taking a key moves the identity: `content_key`, `duration_ms` and the hints become the file's, and `missing_since` is
   cleared. When two missing identities could take one file, the newest one takes it.
 - The identity's recording MBID follows the file's tags while it is attached. A decided MBID of M3 will win over tags.
