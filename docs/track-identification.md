@@ -1626,7 +1626,7 @@ used, never through a stored content URI, which goes stale after a media index r
 - Mirrored into the library database on every change: the decided values (`decided_mirror`, with the badge state and
   the Keep as-is/Skip state they give), favorites (tracks and albums), play counts and last played times; the resolver
   recomputes the missing-information reasons at the same time. Every write of such data raises
-  `user_meta.change_counter` in the same transaction.
+  `user_meta.change_counter` in the same transaction. The listening outcomes of §10.2 are not mirrored and raise no counter.
   - The decided values are also mirrored at start-up when `user_meta.change_counter` differs from
     `library_meta.mirrored_change_counter`, which the mirror sets to the counter it read once `decided_mirror` holds
     what the user database held at that value (M3).
