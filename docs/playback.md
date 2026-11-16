@@ -1480,3 +1480,95 @@ replay, a transition to the next song, a new queue that starts with the same son
 the song back to its start (§4.3.1) as new playbacks; a counted playback that ends the queue getting its listened time
 there; a saved playback that a restore does not resume ending only when it counted; a change of the
 queue that keeps the item and new values for the current entry in place keeping its playback.
+
+## 12. Listening outcomes (M3, PIM-89)
+
+The owner's decision of 16.11.2026: besides the plays that count (§11), the service records how every listening ended,
+so that recommendations over the user's own library (after 1.0) have their main negative signal, the skips, and the
+history starts early. It is local only: nothing of it is ever sent. What is stored is in library.md §15.7.
+
+### 12.1 What a listening is
+
+- A listening is a playback of §11.1, one listening of one queue item, with the listened time of §11.1: the time that
+  passes while the player plays, to which pauses and seeks add nothing. A new playback starts where §11.1 says.
+- When a playback of a library song ends with an outcome (§12.2), one event is written with the song's track identity,
+  the time the playback started (wall clock, as for plays), the listened time, the song's length (the player's once it
+  knows it, otherwise the queue item's; empty when neither is known) and the outcome.
+- Only songs of the library are recorded, by their track identity, as plays are (§11.2, library.md §15.5): an opened file
+  or a song whose tags are not read yet writes nothing.
+
+### 12.2 Outcomes
+
+- **Listened to the end**: the playback played into the end of its song. So it ends at a gapless or an ordinary
+  transition to the next song, a repeat-one replay, a repeat-all wrap, the end of the queue (§11.2), and the end of a
+  song that "stop after current track" stops at (§6.4). It also ends so when the user moves on (below) while the
+  position is at the end of the song as §4.3.1 defines it (its last 2 %, at most its last 5 s): "Next" pressed in the
+  fade-out, or the song after one that stop after current track paused at its end. A seek to the end that lets the song
+  end is listened to the end too, with the little listened time it has: the stored listened time and length tell such a
+  playback apart.
+- **Early skip**: the user moved on before the end after less than 30 s of listened time. 29.9 s is an early skip,
+  30 s a late one.
+- **Late skip**: the user moved on before the end after 30 s of listened time or more. The share listened is the
+  listened time over the length, at most 1, and unknown when the length is; it is not stored apart, since both values
+  are.
+- The user moves on with "Next", "Previous" to another song, another entry chosen in the queue, a new queue of another
+  song (Play on a list, an album, a folder, the library tree or a voice search) and the removal of the current entry
+  from the queue. Whether the player was playing or paused at that moment does not matter.
+
+### 12.3 What writes no outcome
+
+- The service is destroyed (the notification swiped away while paused, a task swipe, a stop): the playback stops
+  without being skipped or finished. The snapshot carries its progress (§11.3), and the restore decides (§12.5).
+- A new queue that starts with the same song, as choosing the playing song again or Play on its album does: the user
+  asked for that song again, so its playback before is not a skip. The new playback starts as §11.1 says.
+- The queue emptied, with no item after it.
+- A playback that ends after a playback error: a broken song that the service moves past (§2.4) was not skipped by the
+  user. Playing again after the error (a retry that plays) clears it.
+- A playback with no listened time: one that never played, as when the user moves on while it is still loading or
+  paused at its start.
+- A playback writes at most one outcome, the first. A playback that ended the queue was written as listened to the end
+  there; when it goes on (play pressed after the end replays the song from its start, §11.2), nothing more is written
+  for it.
+
+### 12.4 Pause, seeking and repeat
+
+- A pause neither ends a playback nor decides its outcome, and its time adds nothing. Moving on while paused is a skip
+  by the listened time so far, or listened to the end when the position is at the end.
+- A seek inside the song continues its playback and adds nothing to its listened time; "Previous" that goes back to the
+  song's start does too (§11.1).
+- With repeat one each replay is a new playback (§11.1), so the playback before it ends as listened to the end. "Next"
+  with repeat one moves to the next song and is a skip.
+
+### 12.5 Process death
+
+- A restore that resumes the saved item continues its playback (§11.3), and the outcome is written when it ends, under
+  the start it had before the process died.
+- A restore that moves off the end of the saved song (§4.3.1: to the next song, or to the start of the same one) ends
+  the saved playback as listened to the end, with its saved listened time, under the song's file now and with the length
+  the snapshot saved (the queue item's when it saved none). When the check against the player's own length moves the
+  resumed playback off the end (§4.3.1), the playback ends as listened to the end there, as at any end of a song.
+- A saved playback whose song is gone from the queue, whose file is not known any more, or that is an opened file writes
+  nothing: whether it was skipped is not known. Neither does a saved playback that no restore ends.
+- As for plays, a process killed while playing loses at most five seconds of listened time.
+
+### 12.6 Writing
+
+- The outcome goes to the same background writer as the plays, in order, after the listened time of a play that ended at
+  the same moment. The writer reads the song's identity with the file's content key and checks it in its write
+  transaction, as a play does (library.md §8.1). Nothing of it is mirrored, so it does not raise the change counter.
+
+### 12.7 Checks
+
+JVM tests: the outcome rule: 29.9 s and 30 s of listened time at a skip, a late skip with its share (and none without a
+length), listened to the end at an automatic transition, at a repeat-one replay and at the end of the queue whatever the
+listened time, a move within the end of the song as listened to the end and one just before it as a skip, a new queue
+of another song as a skip and of the same song or of nothing as no outcome, no outcome after an error or without
+listened time; which saved playback a restore finishes (one moved off the end of a song whose file is known, not a
+resumed, a gone or an opened one).
+
+Instrumented tests: the tracker on a real player with a test clock: "Next" before and after 30 s as an early and a late
+skip, a transition to the next song, a repeat-one replay and the end of the queue as listened to the end, a new queue of
+another song as a skip and of the same song as none, a pause and a seek adding nothing to the skip's listened time, a
+release writing nothing, one outcome for a playback that ended the queue and went on, and a saved playback finished at a
+restore. Through the playback service: a library song skipped with "Next" and the next one played to the end of the
+queue are written into `user.db` by their identities as an early skip and as listened to the end.

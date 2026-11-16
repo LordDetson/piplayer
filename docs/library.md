@@ -204,8 +204,8 @@ The data model it implements is sketched in track-identification.md §10 (TI bel
     - `user_meta(id, change_counter)`: one row whose counter goes up in the same transaction as every write of user
       data, so that the library database can tell whether it still mirrors it (TI §10.3).
 - Version 2 adds the track identities (§8.1), version 3 the references of own covers (§13.2), version 4 favorites,
-  favorite albums, their album members and play statistics (§15.1), version 5 playlists (§16.1). Later tables
-  (decisions) arrive with their milestones.
+  favorite albums, their album members and play statistics (§15.1), version 5 playlists (§16.1), version 6 the
+  decisions of identification (TI §10.2) and the listening outcomes (§15.7).
 - Since version 4 `user_meta` also has `rules_counter`, which goes up only with the folder rules: the sync applies the
   rules again when it changes (§3.4), so that a favorite or a play does not make the sync walk the rules and read the
   lists again. `change_counter` goes up with every write the library database mirrors (folder rules, favorites,
@@ -708,7 +708,8 @@ saved queue that refers to identities is in playback.md §4.
 - `missing_since` is empty while a file holds the identity's key and is set when none does any more. An identity that
   holds no user data and has been missing for 30 days is deleted: a deleted file, an SD card left out of the phone. An
   identity that holds user data is never deleted. User data that refers to identities: a song's own cover (§13.2), a
-  favorite, play events and play statistics (§15), playlist entries (§16.2); decisions (M3) will add theirs. Album members
+  favorite, play events and play statistics (§15), playlist entries (§16.2), decisions and `file_state` rows (M3, TI
+  §10.2) and listening outcomes (M3, §15.7). Album members
   (§15.3) are not user data: they never keep an identity. Decision (PIM-31): when steps 4 and 5 of §8.2 delete the new
   identity whose file a missing identity takes over, its album members become the missing identity's, in the same
   transaction, so that an album seen with that file keeps counting it.
@@ -1408,6 +1409,37 @@ Instrumented tests on the API 30 emulator:
   song's play by its identity (opened files and songs without one not at all) and ending its writer when closed.
 - On the screen: the toggle on Now Playing and in the song menu, on the album page, and the Favorites chip of the
   Albums tab.
+
+### 15.7 Listening outcomes (M3, PIM-89)
+
+How the service decides the outcome of a listening is in playback.md §12. The history is kept for recommendations over
+the user's own library after 1.0; in M3 no screen shows it, and it never leaves the device.
+
+- `user.db` version 6 adds `listen_event(started_at, identity_id, listened_ms, duration_ms, outcome)`: one row per
+  listening that ended with an outcome in the last 90 days, keyed by the start (wall clock) and the identity, without row
+  IDs. `listened_ms` is the listened time, `duration_ms` the song's length or empty when it was not known, and `outcome`
+  1 for an early skip, 2 for a late skip and 3 for listened to the end. The key starts with the time, so rows go in at
+  the end of the table and the fold takes them from its front; the table has no other index.
+- `listen_stats(identity_id, early_skips, late_skips, finished, listened_ms, last_started_at)`: the listenings older
+  than 90 days, folded per identity: how many ended in each outcome, their listened time and the latest start.
+- An outcome writes one row; a second outcome for the same identity and start is ignored, so a playback keeps its first
+  (playback.md §12.3). The writer checks the identity in its write transaction as a play does (§8.1), and with none it
+  writes nothing.
+- Events older than 90 days are folded into `listen_stats` in the same transaction that folds the play events into
+  `play_stats` (§15.5), by the first full mirror run of each process.
+- Nothing of it is mirrored into the library database, so its writes and its fold do not raise the change counter
+  (§3.1).
+- Both tables are user data that refers to identities (§8.1): an identity they refer to is never deleted, and the
+  attach pass counts them among the identities that hold data.
+- Both tables are in `user.db`, which backups and transfers take whole (§3.3); the backup rules need no change.
+- Size: 100 listenings a day give about 9 000 events in 90 days; with the folded counts of 15 000 identities they stay
+  within the size budget of `user.db` (TI §10.2).
+
+Checks. JVM tests: the outcome rule of playback.md §12.7. Instrumented tests: `user.db` version 5 migrates to 6 with both
+tables empty (TI §11.2); an outcome written by its identity, a second outcome of the same playback ignored, one without
+an identity not written, nothing raising the change counter, the fold of events older than 90 days into `listen_stats`
+(and of newer ones not) adding to the counts already there, both tables counted among the identities that hold data, and
+the tracker and the service of playback.md §12.7.
 
 ## 16. Playlists (M2b: PIM-31)
 
