@@ -25,7 +25,7 @@ data class IndexValues(
  * The winners of levels 1 and 2 per part (TI §7.1), as `decided_mirror` holds them: a part that is here wins, also with
  * an empty value.
  */
-data class FieldOverrides(val decided: Map<DecidedField, Decided>) {
+data class FieldOverrides(val decided: Map<DecidedField, Decided>, val missingInfo: Int = 0) {
 
     /** User edits of the title, artist and album, as tests write them. */
     constructor(title: String? = null, artist: String? = null, album: String? = null) : this(

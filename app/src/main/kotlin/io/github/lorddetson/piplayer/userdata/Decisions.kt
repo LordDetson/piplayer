@@ -39,7 +39,29 @@ class Decisions(private val database: UserDatabase, private val clock: () -> Lon
     )
 
     /** The decided values of the identities with decisions, by content key in hex, read with the [counter] at that time. */
-    data class Snapshot(val counter: Long, val byKey: Map<String, Map<DecidedField, Decided>>)
+    data class Snapshot(
+        val counter: Long,
+        val byKey: Map<String, Map<DecidedField, Decided>>,
+        val missingInfoByKey: Map<String, Decided> = emptyMap(),
+    )
+
+    data class LiveSkip(val decisionId: Long, val identityId: Long, val contentKey: String, val size: Long?, val mtimeMs: Long?)
+
+    data class Lapsed(val identityIds: Set<Long>, val counter: Long)
+
+    suspend fun keepAsIs(identityId: Long, contentKey: ByteArray? = null): Committed? = null
+
+    suspend fun skip(identityId: Long, fileSize: Long, fileMtimeMs: Long, contentKey: ByteArray? = null): Committed? = null
+
+    suspend fun missingInfoOf(identityIds: Collection<Long>): Map<Long, Decided> = emptyMap()
+
+    suspend fun hasLiveSkips(): Boolean = false
+
+    suspend fun liveSkips(decisionIds: Collection<Long>, identityIds: Collection<Long>): List<LiveSkip> = emptyList()
+
+    suspend fun lapse(decisionIds: Collection<Long>): Lapsed? = null
+
+    suspend fun filesChanged(items: List<Pair<Long, LocationValues>>): List<Set<DecidedField>> = items.map { emptySet() }
 
     /**
      * Stores the identification [request] (TI §7.1): the ticked fields with all their parts, the per-track values as

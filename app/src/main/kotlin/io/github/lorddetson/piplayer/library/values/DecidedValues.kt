@@ -162,6 +162,7 @@ data class DecisionValues(
     val fields: Set<ProtectedField>,
     val values: Map<DecidedField, String?> = emptyMap(),
     val undone: Boolean = false,
+    val lapsed: Boolean = false,
 )
 
 /** Levels 1 and 2 of the precedence (TI §7.1): which decision wins each part of each field. */
@@ -202,6 +203,10 @@ object DecisionResolver {
         decided.isNotEmpty() -> BADGE_IDENTIFIED
         else -> BADGE_NONE
     }
+
+    fun missingInfoOf(decisions: List<DecisionValues>): Decided? = null
+
+    const val MISSING_INFO_LEVEL = 0
 
     /** No decided value wins: the values come from the file. */
     const val BADGE_NONE = 0

@@ -5,9 +5,11 @@ import io.github.lorddetson.piplayer.TestFiles
 import io.github.lorddetson.piplayer.identification.contract.LicenseClass
 import io.github.lorddetson.piplayer.identification.provider.ProviderId
 import io.github.lorddetson.piplayer.library.identity.Hex
+import io.github.lorddetson.piplayer.library.lists.MissingInfoDecision
 import io.github.lorddetson.piplayer.library.values.Decided
 import io.github.lorddetson.piplayer.library.values.DecidedField
 import io.github.lorddetson.piplayer.library.values.DecisionKind
+import io.github.lorddetson.piplayer.library.values.DecisionResolver
 import io.github.lorddetson.piplayer.settings.ProtectedField
 import io.github.lorddetson.piplayer.userdata.DecisionFixtures.details
 import io.github.lorddetson.piplayer.userdata.DecisionFixtures.request
@@ -288,6 +290,147 @@ class DecisionsTest {
 
         decisions.undo(revert.decisionId)
         assertThat(decisions.fileChanged(identity, retagged)).containsExactly(DecidedField.TITLE)
+    }
+
+    @Test
+    fun keepAsIsAndSkipStoreNoValuesRaiseTheCounterAndASkipKeepsTheFilesStamp() = runBlocking<Unit> {
+        val identity = identity(1)
+        val before = database.user().changeCounter()
+
+        val kept = checkNotNull(decisions.keepAsIs(identity))
+        val skipped = checkNotNull(decisions.skip(identity, fileSize = 5_000, fileMtimeMs = 1_700_000_000_000))
+
+        assertThat(kept.counter).isEqualTo(before + 1)
+        assertThat(skipped.counter).isEqualTo(before + 2).isEqualTo(database.user().changeCounter())
+        with(checkNotNull(dao.decision(kept.decisionId))) {
+            assertThat(kind).isEqualTo(DecisionKind.KEEP_AS_IS.code)
+            assertThat(fields).isZero()
+            assertThat(fileSize).isNull()
+        }
+        with(checkNotNull(dao.decision(skipped.decisionId))) {
+            assertThat(kind).isEqualTo(DecisionKind.SKIP.code)
+            assertThat(fields).isZero()
+            assertThat(fileSize).isEqualTo(5_000)
+            assertThat(fileMtime).isEqualTo(1_700_000_000_000)
+            assertThat(lapsedAt).isNull()
+        }
+        assertThat(dao.metadataOf(listOf(kept.decisionId, skipped.decisionId))).isEmpty()
+        // They decide no value, and the newer one counts.
+        assertThat(decisions.decidedOf(listOf(identity))).isEmpty()
+        assertThat(decisions.missingInfoOf(listOf(identity)).getValue(identity))
+            .isEqualTo(Decided(MissingInfoDecision.SKIPPED_VALUE, DecisionResolver.MISSING_INFO_LEVEL, skipped.decisionId))
+        // A decision is user data, so the identity stays.
+        assertThat(database.user().identitiesHoldingData()).containsExactly(identity)
+    }
+
+    @Test
+    fun keepAsIsAndSkipOfATrackThatHasNoIdentityNowWriteNothing() = runBlocking<Unit> {
+        val identity = identity(1)
+        val before = database.user().changeCounter()
+
+        assertThat(decisions.keepAsIs(identity + 1)).isNull()
+        assertThat(decisions.skip(identity + 1, 1, 1, contentKey = Hex.bytes(key(2)))).isNull()
+
+        assertThat(database.user().changeCounter()).isEqualTo(before)
+        assertThat(dao.decisionsOf(identity)).isEmpty()
+    }
+
+    @Test
+    fun undoingTheNewerOfKeepAsIsAndSkipBringsTheOlderBack() = runBlocking<Unit> {
+        val identity = identity(1)
+        val kept = checkNotNull(decisions.keepAsIs(identity))
+        val skipped = checkNotNull(decisions.skip(identity, 1, 1_000))
+
+        decisions.undo(skipped.decisionId)
+        assertThat(decisions.missingInfoOf(listOf(identity)).getValue(identity).decisionId).isEqualTo(kept.decisionId)
+
+        decisions.undo(kept.decisionId)
+        assertThat(decisions.missingInfoOf(listOf(identity))).isEmpty()
+    }
+
+    @Test
+    fun aLapseMarksOnlyLiveSkipsAndRaisesTheCounterOnce() = runBlocking<Unit> {
+        val first = identity(1)
+        val second = identity(2)
+        val kept = checkNotNull(decisions.keepAsIs(first))
+        val skipped = checkNotNull(decisions.skip(first, 1, 1_000))
+        val undone = checkNotNull(decisions.skip(second, 1, 1_000))
+        decisions.undo(undone.decisionId)
+        val other = checkNotNull(decisions.skip(second, 2, 2_000))
+        assertThat(decisions.hasLiveSkips()).isTrue()
+        val counter = database.user().changeCounter()
+
+        val lapsed = checkNotNull(decisions.lapse(listOf(skipped.decisionId, kept.decisionId, undone.decisionId, other.decisionId)))
+
+        assertThat(lapsed.counter).isEqualTo(counter + 1).isEqualTo(database.user().changeCounter())
+        assertThat(lapsed.identityIds).containsExactlyInAnyOrder(first, second)
+        assertThat(dao.decision(skipped.decisionId)?.lapsedAt).isNotNull()
+        assertThat(dao.decision(other.decisionId)?.lapsedAt).isNotNull()
+        // Keep as-is never lapses, and an undone Skip stays as it was.
+        assertThat(dao.decision(kept.decisionId)?.lapsedAt).isNull()
+        assertThat(dao.decision(undone.decisionId)?.lapsedAt).isNull()
+        assertThat(decisions.missingInfoOf(listOf(first)).getValue(first).decisionId).isEqualTo(kept.decisionId)
+        assertThat(decisions.missingInfoOf(listOf(second))).isEmpty()
+        assertThat(decisions.hasLiveSkips()).isFalse()
+        // A lapse with nothing left to lapse writes nothing.
+        assertThat(decisions.lapse(listOf(skipped.decisionId, kept.decisionId))).isNull()
+        assertThat(database.user().changeCounter()).isEqualTo(counter + 1)
+    }
+
+    @Test
+    fun theLiveSkipsAreFoundByDecisionAndByIdentity() = runBlocking<Unit> {
+        val first = identity(1)
+        val second = identity(2)
+        val third = identity(3)
+        val a = checkNotNull(decisions.skip(first, 10, 10_000))
+        val b = checkNotNull(decisions.skip(second, 20, 20_000))
+        decisions.keepAsIs(third)
+        val lapsed = checkNotNull(decisions.skip(third, 30, 30_000))
+        decisions.lapse(listOf(lapsed.decisionId))
+
+        val found = decisions.liveSkips(decisionIds = listOf(a.decisionId, lapsed.decisionId), identityIds = listOf(second, third))
+
+        assertThat(found).containsExactlyInAnyOrder(
+            Decisions.LiveSkip(a.decisionId, first, key(1), 10, 10_000),
+            Decisions.LiveSkip(b.decisionId, second, key(2), 20, 20_000),
+        )
+    }
+
+    @Test
+    fun theFilesOfABatchAreComparedInOneCallAsOneByOne() = runBlocking<Unit> {
+        val identity = identity(1)
+        val other = identity(2)
+        decisions.apply(request(key(1), fields = setOf(ProtectedField.TITLE, ProtectedField.ARTIST)), atDecision = listOf(here, copy))
+        val retagged = copy.copy(values = copy.values + (DecidedField.TITLE to "retagged"))
+
+        // The identity without decisions has nothing to compare.
+        val flagged = decisions.filesChanged(listOf(identity to here, identity to retagged, other to here))
+
+        assertThat(flagged).containsExactly(emptySet(), setOf(DecidedField.TITLE), emptySet())
+        assertThat(dao.fileStates(identity).single { it.relativePath == "Copy/" && it.field == DecidedField.TITLE.code }.changedInFile).isTrue()
+        assertThat(dao.fileStates(other)).isEmpty()
+    }
+
+    @Test
+    fun theSnapshotHoldsTheKeepAsIsAndSkipOfEveryIdentityByKey() = runBlocking<Unit> {
+        identity(1)
+        identity(2)
+        identity(3)
+        decisions.apply(request(key(1)))
+        val kept = checkNotNull(decisions.keepAsIs(2))
+        val skipped = checkNotNull(decisions.skip(1, 1, 1_000))
+        val lapsed = checkNotNull(decisions.skip(3, 1, 1_000))
+        decisions.lapse(listOf(lapsed.decisionId))
+
+        val snapshot = decisions.snapshot()
+
+        assertThat(snapshot.byKey.keys).containsExactly(key(1))
+        assertThat(snapshot.missingInfoByKey).isEqualTo(
+            mapOf(
+                key(1) to Decided(MissingInfoDecision.SKIPPED_VALUE, DecisionResolver.MISSING_INFO_LEVEL, skipped.decisionId),
+                key(2) to Decided(MissingInfoDecision.KEEP_AS_IS_VALUE, DecisionResolver.MISSING_INFO_LEVEL, kept.decisionId),
+            ),
+        )
     }
 
     @Test

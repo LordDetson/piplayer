@@ -13,7 +13,11 @@ import io.github.lorddetson.piplayer.library.values.DecidedField
  * same order. A file differs when one of its rows is missing, has another value, level or decision, or names a part this
  * build does not know, and when it holds rows but should hold none.
  */
-internal class DecidedComparison(private val fileIds: LongArray, private val desired: List<Map<DecidedField, Decided>>) {
+internal class DecidedComparison(
+    private val fileIds: LongArray,
+    private val desired: List<Map<DecidedField, Decided>>,
+    private val missingInfo: List<Decided?> = List(fileIds.size) { null },
+) {
 
     init {
         require(fileIds.size == desired.size) { "${fileIds.size} files with ${desired.size} sets of values" }

@@ -88,6 +88,7 @@ class TagPass(
     private val pause: Duration = Duration.ZERO,
     private val gate: suspend () -> Unit = {},
     private val onBatch: (List<SongRow>) -> Unit = {},
+    private val onStored: (read: List<Long>, failed: List<Long>) -> Unit = { _, _ -> },
 ) {
     private val dao: LibraryDao = database.library()
     private val displays = TrackDisplayWriter(database)

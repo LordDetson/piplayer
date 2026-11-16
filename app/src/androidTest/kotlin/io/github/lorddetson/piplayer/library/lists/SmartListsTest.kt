@@ -11,6 +11,8 @@ import io.github.lorddetson.piplayer.library.db.LibraryDatabase
 import io.github.lorddetson.piplayer.library.db.TrackEntity
 import io.github.lorddetson.piplayer.library.identity.Hex
 import io.github.lorddetson.piplayer.library.identity.IdentityAttacher
+import io.github.lorddetson.piplayer.library.mirror.DecisionMirror
+import io.github.lorddetson.piplayer.library.mirror.LibraryDecisions
 import io.github.lorddetson.piplayer.library.mirror.UserMirror
 import io.github.lorddetson.piplayer.library.sync.IndexRow
 import io.github.lorddetson.piplayer.library.sync.LibrarySync
@@ -19,6 +21,7 @@ import io.github.lorddetson.piplayer.library.sync.TrackDisplayWriter
 import io.github.lorddetson.piplayer.library.tagpass.DurationSource
 import io.github.lorddetson.piplayer.library.values.TrackTags
 import io.github.lorddetson.piplayer.settings.HiddenFiles
+import io.github.lorddetson.piplayer.userdata.Decisions
 import io.github.lorddetson.piplayer.userdata.Favorites
 import io.github.lorddetson.piplayer.userdata.PlayStats
 import io.github.lorddetson.piplayer.userdata.UserDatabase
@@ -48,9 +51,12 @@ class SmartListsTest {
     private val mirror = UserMirror(library, user, sync, covers, clock = { now })
     private val favorites = Favorites(user) { now }
     private val plays = PlayStats(user)
+    private val decisionMirror = DecisionMirror(library, user, sync)
+    private val decisions = LibraryDecisions(Decisions(user) { now }) { decisionMirror }
 
     @After
     fun close() {
+        decisionMirror.close()
         mirror.close()
         attacher.close()
         sync.close()
@@ -240,6 +246,45 @@ class SmartListsTest {
         val songs = lists(own).songs(SongQuery.missingInfo(MissingReasons.COVER or MissingReasons.RECORDING_ID))
         assertThat(songs.associate { it.mediaStoreId to it.reasons })
             .isEqualTo(mapOf(4L to MissingReasons.RECORDING_ID, 3L to (MissingReasons.COVER or MissingReasons.RECORDING_ID)))
+    }
+
+    @Test
+    fun songsMissingInformationLeaveOutASongKeptAsItIsAndMarkASkippedOne() = runBlocking<Unit> {
+        missingLibrary()
+        val chosen = SongQuery.missingInfo(MissingReasons.ALL)
+        assertThat(shown(chosen)).containsExactly(2L, 4L, 7L, 3L)
+
+        // Keep as-is takes Delta out of the list and its count; Skip leaves Golf listed and marks it.
+        val kept = checkNotNull(decisions.keepAsIs(identityOf(4)))
+        val file7 = library.library().files().single { it.mediaStoreId == 7L }
+        val skipped = checkNotNull(decisions.skip(identityOf(7), file7.size, file7.mtime * 1_000))
+
+        assertThat(shown(chosen)).containsExactly(2L, 7L, 3L)
+        assertThat(shown(SongQuery.missingInfo(MissingReasons.COVER))).containsExactly(7L, 3L)
+        val songs = lists().songs(chosen).associateBy { it.mediaStoreId }
+        assertThat(songs.getValue(7L).skipped).isTrue()
+        assertThat(songs.getValue(7L).reasons).isEqualTo(MissingReasons.COVER)
+        assertThat(songs.getValue(2L).skipped).isFalse()
+        // A search within the list leaves the kept song out too.
+        assertThat(shown(chosen.copy(search = "delta"))).isEmpty()
+        // Other lists carry no mark.
+        assertThat(lists().songs(SongQuery.SONGS).map { it.skipped }).containsOnly(false)
+
+        // Undoing either brings the earlier list back.
+        decisions.undo(kept.decisionId)
+        decisions.undo(skipped.decisionId)
+        assertThat(shown(chosen)).containsExactly(2L, 4L, 7L, 3L)
+        assertThat(lists().songs(chosen).map { it.skipped }).containsOnly(false)
+    }
+
+    @Test
+    fun aSongKeptAsItIsStaysOutWithAnOwnCoverChecked() = runBlocking<Unit> {
+        missingLibrary()
+        decisions.keepAsIs(identityOf(3))
+        val own = OwnCoverKeys(albumKeys = setOf("a"), contentKeys = setOf(key(4)))
+
+        assertThat(shown(SongQuery.missingInfo(MissingReasons.COVER), own)).containsExactly(7L)
+        assertThat(shown(SongQuery.missingInfo(MissingReasons.COVER or MissingReasons.RECORDING_ID), own)).containsExactly(4L, 7L)
     }
 
     @Test

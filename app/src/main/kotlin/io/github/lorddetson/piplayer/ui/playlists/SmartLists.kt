@@ -126,6 +126,8 @@ internal fun reasonLabel(reason: Int): Int = when (reason) {
     else -> R.string.reason_recording_id
 }
 
+internal fun missingInfoLine(reasons: Int?, skipped: Boolean, label: (Int) -> String, skippedLabel: String): String? = null
+
 /**
  * The number of songs of each smart list (docs/library.md §17.2), read off the main thread again after every sync that
  * changed the library, a change of the hidden files, every run of the mirror and every new choice of reasons; null until

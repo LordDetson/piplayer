@@ -1,5 +1,8 @@
 package io.github.lorddetson.piplayer.library.values
 
+import io.github.lorddetson.piplayer.library.db.DecidedMirrorEntity
+import io.github.lorddetson.piplayer.library.lists.MissingInfoDecision
+import io.github.lorddetson.piplayer.library.sync.TrackDisplayWriter
 import io.github.lorddetson.piplayer.library.values.DecidedField.ALBUM
 import io.github.lorddetson.piplayer.library.values.DecidedField.ALBUM_ARTIST
 import io.github.lorddetson.piplayer.library.values.DecidedField.ALBUM_ARTIST_SORT
@@ -60,6 +63,37 @@ class DecidedMergeTest {
         displayName: String = "05 Name Artist - Name Title.mp3",
         embeddedCover: Boolean = false,
     ) = MergedValues.of(displayName, index, tags, read, embeddedCover = embeddedCover, overrides = overrides)
+
+    @Test
+    fun `Keep as-is and Skip reach the display row, read or unread, and change neither the reasons nor the badge`() {
+        for (state in listOf(MissingInfoDecision.KEEP_AS_IS, MissingInfoDecision.SKIPPED)) {
+            val read = merge(tags = emptyTags, overrides = FieldOverrides(emptyMap(), missingInfo = state))
+            assertThat(read.missingInfoDecision).isEqualTo(state)
+            assertThat(read.reasons).isEqualTo(merge(tags = emptyTags).reasons)
+            assertThat(read.badgeState).isEqualTo(DecisionResolver.BADGE_NONE)
+            assertThat(merge(read = false, overrides = FieldOverrides(emptyMap(), missingInfo = state)).missingInfoDecision).isEqualTo(state)
+            // Beside decided values too.
+            assertThat(merge(overrides = identified(TITLE to "Song").copy(missingInfo = state)).missingInfoDecision).isEqualTo(state)
+        }
+        assertThat(merge().missingInfoDecision).isEqualTo(MissingInfoDecision.NONE)
+        assertThat(merge(overrides = identified(TITLE to "Song")).missingInfoDecision).isEqualTo(MissingInfoDecision.NONE)
+    }
+
+    @Test
+    fun `the display writer takes Keep as-is and Skip from their row of decided_mirror`() {
+        val rows = listOf(
+            DecidedMirrorEntity(1, "title", "Song", LEVEL_IDENTIFICATION, 7),
+            DecidedMirrorEntity(1, MissingInfoDecision.FIELD, MissingInfoDecision.SKIPPED_VALUE, 0, 8),
+            DecidedMirrorEntity(2, MissingInfoDecision.FIELD, MissingInfoDecision.KEEP_AS_IS_VALUE, 0, 9),
+            DecidedMirrorEntity(3, "title", "Other", LEVEL_USER_EDIT, 10),
+        )
+
+        val overrides = TrackDisplayWriter.overridesOf(rows)
+
+        assertThat(overrides.getValue(1)).isEqualTo(FieldOverrides(mapOf(TITLE to Decided("Song", LEVEL_IDENTIFICATION, 7)), MissingInfoDecision.SKIPPED))
+        assertThat(overrides.getValue(2)).isEqualTo(FieldOverrides(emptyMap(), MissingInfoDecision.KEEP_AS_IS))
+        assertThat(overrides.getValue(3).missingInfo).isEqualTo(MissingInfoDecision.NONE)
+    }
 
     @Test
     fun `decided values win over the tags in the display columns`() {

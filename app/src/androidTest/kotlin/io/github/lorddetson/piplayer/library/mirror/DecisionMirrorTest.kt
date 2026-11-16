@@ -13,6 +13,7 @@ import io.github.lorddetson.piplayer.library.db.TrackDisplayEntity
 import io.github.lorddetson.piplayer.library.identity.Hex
 import io.github.lorddetson.piplayer.library.identity.IdentityAttacher
 import io.github.lorddetson.piplayer.library.lists.LibraryLists
+import io.github.lorddetson.piplayer.library.lists.MissingInfoDecision
 import io.github.lorddetson.piplayer.library.sync.IndexRow
 import io.github.lorddetson.piplayer.library.sync.LibrarySync
 import io.github.lorddetson.piplayer.library.sync.TrackDisplayWriter
@@ -23,9 +24,11 @@ import io.github.lorddetson.piplayer.library.tagpass.PassRead
 import io.github.lorddetson.piplayer.library.tagpass.PassReader
 import io.github.lorddetson.piplayer.library.tagpass.TagPass
 import io.github.lorddetson.piplayer.library.values.DecidedField
+import io.github.lorddetson.piplayer.library.values.DecisionContent
 import io.github.lorddetson.piplayer.library.values.DecisionKind
 import io.github.lorddetson.piplayer.library.values.DecisionResolver
 import io.github.lorddetson.piplayer.library.values.MergedValues
+import io.github.lorddetson.piplayer.library.values.TrackTags
 import io.github.lorddetson.piplayer.settings.ProtectedField
 import io.github.lorddetson.piplayer.tagging.TagReport
 import io.github.lorddetson.piplayer.tagging.contentkey.DurationCheck
@@ -602,6 +605,218 @@ class DecisionMirrorTest {
 
     private fun deleteDatabase(file: File) {
         for (suffix in listOf("", "-wal", "-shm", "-journal")) File(file.path + suffix).delete()
+    }
+
+    private suspend fun stampOf(mediaStoreId: Long): Pair<Long, Long> {
+        val file = library.library().files().single { it.mediaStoreId == mediaStoreId }
+        return file.size to SkipLapse.mtimeMs(file.mtime)
+    }
+
+    private suspend fun skip(mediaStoreId: Long, keyOf: Long = mediaStoreId): Decisions.Committed {
+        val (size, mtime) = stampOf(mediaStoreId)
+        return checkNotNull(decisions.skip(identityOf(keyOf), size, mtime))
+    }
+
+    private suspend fun lapsedAt(decisionId: Long) = user.decisions().decision(decisionId)?.lapsedAt
+
+    @Test
+    fun keepAsIsAndSkipReachTheDisplayOfEveryFileOfTheirKeyAndUndoTakesThemBack() = runBlocking<Unit> {
+        // Files 2 and 3 are byte-identical copies.
+        library(listOf(row(1), row(2), row(3)), keys = mapOf(3L to 2L))
+        val version = mirror.version.value
+
+        val kept = checkNotNull(decisions.keepAsIs(identityOf(2)))
+
+        for (copy in listOf(2L, 3L)) assertThat(display(copy).missingInfoDecision).isEqualTo(MissingInfoDecision.KEEP_AS_IS)
+        assertThat(display(1).missingInfoDecision).isEqualTo(MissingInfoDecision.NONE)
+        // No value is decided: the display keeps the file's values and badge.
+        assertThat(display(2).title).isEqualTo("Song 2")
+        assertThat(display(2).badgeState).isEqualTo(DecisionResolver.BADGE_NONE)
+        assertThat(library.decided().valuesOf(listOf(fileId(2))))
+            .containsExactly(DecidedMirrorEntity(fileId(2), MissingInfoDecision.FIELD, MissingInfoDecision.KEEP_AS_IS_VALUE, 0, kept.decisionId))
+        assertThat(mirror.version.value).isGreaterThan(version)
+        assertThat(library.library().mirroredChangeCounter()).isEqualTo(user.user().changeCounter())
+
+        val skipped = skip(2)
+        for (copy in listOf(2L, 3L)) assertThat(display(copy).missingInfoDecision).isEqualTo(MissingInfoDecision.SKIPPED)
+
+        decisions.undo(skipped.decisionId)
+        for (copy in listOf(2L, 3L)) assertThat(display(copy).missingInfoDecision).isEqualTo(MissingInfoDecision.KEEP_AS_IS)
+        decisions.undo(kept.decisionId)
+        for (copy in listOf(2L, 3L)) assertThat(display(copy).missingInfoDecision).isEqualTo(MissingInfoDecision.NONE)
+        assertThat(library.decided().valuesOf(listOf(fileId(2), fileId(3)))).isEmpty()
+    }
+
+    @Test
+    fun keepAsIsAndSkipStayThroughTheSyncANewDisplayVersionTheWriterAndAWholeRun() = runBlocking<Unit> {
+        library(listOf(row(1), row(2)))
+        skip(1)
+        decisions.keepAsIs(identityOf(2))
+        decisions.apply(request(key(2), fields = setOf(ProtectedField.TITLE)))
+        suspend fun check(step: String) {
+            assertThat(display(1).missingInfoDecision).describedAs(step).isEqualTo(MissingInfoDecision.SKIPPED)
+            assertThat(display(2).missingInfoDecision).describedAs(step).isEqualTo(MissingInfoDecision.KEEP_AS_IS)
+            assertThat(display(2).title).describedAs(step).isEqualTo("Song")
+        }
+        check("after the decisions")
+
+        index.volume().version = "2"
+        index.volume().rows = listOf(row(1, generation = 60), row(2, generation = 60))
+        sync.sync()
+        check("after a sync that stores every file again")
+        library.library().setDisplayVersion(0)
+        sync.sync()
+        check("after a new display version")
+        TrackDisplayWriter(library).refresh(listOf(fileId(1), fileId(2)))
+        check("after a refresh by the writer")
+        assertThat(mirror.mirrorAll()).isFalse()
+
+        // A whole run puts back the row lost behind its back.
+        library.decided().deleteFiles(listOf(fileId(1)))
+        assertThat(mirror.mirrorAll()).isTrue()
+        check("after a whole run")
+    }
+
+    @Test
+    fun aKeepAsIsCommittedWithoutItsRunShowsAfterTheNextStart() = runBlocking<Unit> {
+        library(listOf(row(1)))
+        mirror.mirrorAll()
+        // The process died between the two commits.
+        repository.keepAsIs(identityOf(1))
+        assertThat(display(1).missingInfoDecision).isEqualTo(MissingInfoDecision.NONE)
+
+        val next = DecisionMirror(library, user, sync)
+        try {
+            assertThat(next.mirrorIfChanged()).isTrue()
+            assertThat(display(1).missingInfoDecision).isEqualTo(MissingInfoDecision.KEEP_AS_IS)
+            assertThat(library.library().mirroredChangeCounter()).isEqualTo(user.user().changeCounter())
+        } finally {
+            next.close()
+        }
+    }
+
+    /** A reader of the tag pass that gives each file the key of [keys] (else its media ID) and the title of [titles]. */
+    private inner class StampReader(val keys: Map<Long, Long> = emptyMap(), val titles: Map<Long, String> = emptyMap()) : PassReader {
+        override suspend fun read(file: PassFile): PassRead = PassRead.Replied(
+            TagReport(
+                properties = mapOf(
+                    "TITLE" to listOf(titles[file.mediaStoreId] ?: "Tag ${file.mediaStoreId}"), "ARTIST" to listOf("Tag artist"),
+                ),
+                audio = TagReport.Audio(200_000, 128, 44_100, 2),
+                content = TagReport.Content(key(keys[file.mediaStoreId] ?: file.mediaStoreId), "mp3", DurationPlan(200_000, DurationCheck.NONE)),
+            ),
+        )
+    }
+
+    /** A run of the real tag pass that reports what it stored to the mirror, as the app's does. */
+    private suspend fun readAndReport(reader: PassReader = StampReader()) {
+        TagPass(
+            library, sync, reader,
+            cyrillicLanguage = { false },
+            legacyEncoding = { null },
+            decodedEncoding = DecodedEncoding.InMemory(),
+            crashBackoff = 1.milliseconds,
+            onStored = { read, failed -> mirror.requestRead(read, failed) },
+        ).run()
+        mirror.awaitIdle()
+    }
+
+    /** File 1 and its copy 2, which has the same size and a time of its own, both read by the tag pass. */
+    private suspend fun fileAndCopy() {
+        library(listOf(row(1), row(2).copy(size = row(1).size)), keys = mapOf(2L to 1L))
+        readAndReport(StampReader(keys = mapOf(2L to 1L)))
+    }
+
+    @Test
+    fun aSkippedFileThatATaggerChangedLetsTheSkipLapseOnceTheTagPassReadsItAgain() = runBlocking<Unit> {
+        fileAndCopy()
+        val skipped = skip(1)
+        for (n in listOf(1L, 2L)) assertThat(display(n).missingInfoDecision).isEqualTo(MissingInfoDecision.SKIPPED)
+
+        // A full read of the library changes no file: the Skip stays.
+        sync.exclusive { library.library().forgetReaderVersions() }
+        readAndReport(StampReader(keys = mapOf(2L to 1L)))
+        assertThat(lapsedAt(skipped.decisionId)).isNull()
+        assertThat(display(1).missingInfoDecision).isEqualTo(MissingInfoDecision.SKIPPED)
+
+        // A tagger writes file 1: its size and time change, the sync forgets what the pass read, and the pass reads it again.
+        val counter = user.user().changeCounter()
+        index.volume().rows = listOf(row(1).copy(size = 9_000, modifiedSeconds = 1_800_000_000, generationModified = 70), row(2).copy(size = row(1).size))
+        sync.sync()
+        readAndReport(StampReader(keys = mapOf(2L to 1L)))
+
+        assertThat(lapsedAt(skipped.decisionId)).isNotNull()
+        assertThat(user.user().changeCounter()).isEqualTo(counter + 1)
+        assertThat(library.library().mirroredChangeCounter()).isEqualTo(user.user().changeCounter())
+        // The mark is gone from every copy.
+        for (n in listOf(1L, 2L)) assertThat(display(n).missingInfoDecision).isEqualTo(MissingInfoDecision.NONE)
+        assertThat(library.decided().valuesOf(listOf(fileId(1), fileId(2)))).isEmpty()
+    }
+
+    @Test
+    fun aFileWhoseContentKeyChangedLetsTheSkipLapse() = runBlocking<Unit> {
+        library(listOf(row(1)))
+        readAndReport()
+        val skipped = skip(1)
+        assertThat(display(1).missingInfoDecision).isEqualTo(MissingInfoDecision.SKIPPED)
+
+        // The audio was encoded again: a new size and time, and a key no identity holds yet.
+        index.volume().rows = listOf(row(1).copy(size = 9_000, modifiedSeconds = 1_800_000_000, generationModified = 70))
+        sync.sync()
+        readAndReport(StampReader(keys = mapOf(1L to 9L)))
+
+        assertThat(lapsedAt(skipped.decisionId)).isNotNull()
+        assertThat(display(1).missingInfoDecision).isEqualTo(MissingInfoDecision.NONE)
+        // The identity that follows the file to its new key brings no Skip with it.
+        val moved = user.identities().identity(identityOf(1))!!.copy(contentKey = Hex.bytes(key(9)))
+        user.identities().updateAll(listOf(moved))
+        mirror.mirrorAll()
+        assertThat(display(1).missingInfoDecision).isEqualTo(MissingInfoDecision.NONE)
+    }
+
+    @Test
+    fun aCopyThatAppearsKeepsTheSkipAndShowsIt() = runBlocking<Unit> {
+        library(listOf(row(1)))
+        readAndReport()
+        val skipped = skip(1)
+
+        // A byte-identical copy appears, with a time of its own.
+        index.volume().rows = listOf(row(1), row(2).copy(size = row(1).size))
+        sync.sync()
+        readAndReport(StampReader(keys = mapOf(2L to 1L)))
+
+        assertThat(lapsedAt(skipped.decisionId)).isNull()
+        for (n in listOf(1L, 2L)) assertThat(display(n).missingInfoDecision).isEqualTo(MissingInfoDecision.SKIPPED)
+    }
+
+    @Test
+    fun aReadOfAFileWhoseDecidedPartChangedInTheFileFlagsItAtItsLocation() = runBlocking<Unit> {
+        library(listOf(row(1)))
+        readAndReport()
+        val file = library.library().files().single()
+        val location = Decisions.LocationValues(
+            file.volumeName, file.relativePath, file.displayName,
+            DecisionContent.ofTags(TrackTags.from(mapOf("TITLE" to listOf("Tag 1"), "ARTIST" to listOf("Tag artist")))),
+        )
+        decisions.apply(request(key(1), fields = setOf(ProtectedField.TITLE, ProtectedField.ARTIST)), atDecision = listOf(location))
+
+        // Read again unchanged: nothing is flagged.
+        sync.exclusive { library.library().forgetReaderVersions() }
+        readAndReport()
+        assertThat(user.decisions().fileStates(identityOf(1))).isEmpty()
+
+        // A tagger changed the title.
+        val counter = user.user().changeCounter()
+        index.volume().rows = listOf(row(1).copy(size = 9_000, modifiedSeconds = 1_800_000_000, generationModified = 70))
+        sync.sync()
+        readAndReport(StampReader(titles = mapOf(1L to "Retagged")))
+
+        val states = user.decisions().fileStates(identityOf(1))
+        assertThat(states.map { DecidedField.ofCode(it.field) to it.changedInFile }).containsExactly(DecidedField.TITLE to true)
+        assertThat(states.single().relativePath).isEqualTo(file.relativePath)
+        // Flags are not mirrored: no counter moved, and the decision keeps winning.
+        assertThat(user.user().changeCounter()).isEqualTo(counter)
+        assertThat(display(1).title).isEqualTo("Song")
     }
 
     @Test

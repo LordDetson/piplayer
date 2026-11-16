@@ -1,5 +1,6 @@
 package io.github.lorddetson.piplayer.library.mirror
 
+import io.github.lorddetson.piplayer.library.lists.MissingInfoDecision
 import io.github.lorddetson.piplayer.library.values.Decided
 import io.github.lorddetson.piplayer.library.values.DecidedField
 import kotlin.random.Random
@@ -103,10 +104,48 @@ class DecidedComparisonTest {
         }
     }
 
+    /** [compare] with the Keep as-is or Skip each file should hold, [missing] by file. */
+    private fun compareWith(desired: Map<Long, Map<DecidedField, Decided>>, missing: Map<Long, Decided>, rows: List<Row>): List<Long> {
+        val ids = desired.keys.sorted()
+        val comparison = DecidedComparison(ids.toLongArray(), ids.map(desired::getValue), ids.map(missing::get))
+        for (row in rows) comparison.row(row.fileId, row.field, row.value, row.level, row.decisionId)
+        return comparison.differing()
+    }
+
+    private val skipped = Decided(MissingInfoDecision.SKIPPED_VALUE, 0, 40)
+    private fun stateRow(fileId: Long, state: Decided = skipped) = Row(fileId, MissingInfoDecision.FIELD, state.value, state.level, state.decisionId)
+
+    @Test
+    fun `a Keep as-is or Skip row compares like a decided value`() {
+        // File 5 has a Skip besides its values; file 2 has only a Keep as-is.
+        val kept = Decided(MissingInfoDecision.KEEP_AS_IS_VALUE, 0, 41)
+        val desiredAll = desired + (2L to emptyMap())
+        val missing = mapOf(5L to skipped, 2L to kept)
+        val rows = mirrored + stateRow(5) + stateRow(2, kept)
+
+        assertThat(compareWith(desiredAll, missing, rows)).isEmpty()
+        assertThat(compareWith(desiredAll, missing, rows.shuffled(Random(5)))).isEmpty()
+        // Its row missing, or holding another state or decision, makes the file differ.
+        assertThat(compareWith(desiredAll, missing, rows - stateRow(5))).containsExactly(5L)
+        assertThat(compareWith(desiredAll, missing, rows - stateRow(2, kept))).containsExactly(2L)
+        assertThat(compareWith(desiredAll, missing, rows - stateRow(5) + stateRow(5, kept.copy(decisionId = 40)))).containsExactly(5L)
+        assertThat(compareWith(desiredAll, missing, rows - stateRow(5) + stateRow(5, skipped.copy(decisionId = 99)))).containsExactly(5L)
+    }
+
+    @Test
+    fun `a Keep as-is or Skip row of a file that should hold none makes it differ`() {
+        // File 9 should hold values only; file 3 nothing at all.
+        assertThat(compareWith(desired, emptyMap(), mirrored + stateRow(9))).containsExactly(9L)
+        assertThat(compareWith(desired, emptyMap(), mirrored + stateRow(3))).containsExactly(3L)
+        // Without the Keep as-is or Skip given, the comparison is the one of the values alone.
+        assertThat(compareWith(desired, emptyMap(), mirrored)).isEmpty()
+    }
+
     @Test
     fun `the files must come in ascending order, each once, with their values`() {
         assertThatThrownBy { DecidedComparison(longArrayOf(5, 1), listOf(values(5), values(1))) }.isInstanceOf(IllegalArgumentException::class.java)
         assertThatThrownBy { DecidedComparison(longArrayOf(1, 1), listOf(values(1), values(1))) }.isInstanceOf(IllegalArgumentException::class.java)
         assertThatThrownBy { DecidedComparison(longArrayOf(1), emptyList()) }.isInstanceOf(IllegalArgumentException::class.java)
+        assertThatThrownBy { DecidedComparison(longArrayOf(1), listOf(values(1)), emptyList()) }.isInstanceOf(IllegalArgumentException::class.java)
     }
 }

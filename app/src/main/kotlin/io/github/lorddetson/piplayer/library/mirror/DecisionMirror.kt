@@ -380,6 +380,8 @@ class DecisionMirror(
     /** Asks for a whole run in the background when the counters differ (TI §10.3). */
     fun requestIfChanged() = ask { pendingIfChanged = true }
 
+    fun requestRead(read: List<Long>, failed: List<Long>) {}
+
     /** Asks for a run of [fileIds] in the background, which the tag pass has just read. */
     fun requestFiles(fileIds: List<Long>) {
         if (fileIds.isNotEmpty()) ask { pendingFiles.addAll(fileIds) }

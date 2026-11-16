@@ -40,6 +40,7 @@ class TagPassTest {
     private val rules = FakeRules()
     private val sync = LibrarySync(database, index, mayRead = { true }, rules)
     private val batches = CopyOnWriteArrayList<List<SongRow>>()
+    private val stored = CopyOnWriteArrayList<Pair<List<Long>, List<Long>>>()
     private var cyrillic = true
     private var manual: LegacyEncoding? = null
     private val decoded = DecodedEncoding.InMemory()
@@ -69,6 +70,7 @@ class TagPassTest {
         batchSize = batchSize,
         crashBackoff = 1.milliseconds,
         onBatch = { batches += it },
+        onStored = { read, failed -> stored += read to failed },
     )
 
     @After
@@ -108,6 +110,26 @@ class TagPassTest {
         assertThat(files().values).allSatisfy { assertThat(it.tagPassAt).isNotNull() }
         assertThat(display(7).title).isEqualTo("Tag 7.mp3")
         assertThat(dao.tracks()).hasSize(1_000)
+    }
+
+    @Test
+    fun eachBatchReportsTheFilesItReadAndThoseThatFailed() = runBlocking<Unit> {
+        library(1, 2, 3, 4)
+        reader.answers[2] = PassRead.OpenFailed
+        reader.answers[3] = PassRead.Replied(TagReport(error = TagReadError.UNSUPPORTED_FORMAT))
+        val pass = pass(batchSize = 2)
+
+        pass.run()
+
+        val ids = files().mapValues { it.value.id }
+        assertThat(stored.flatMap { it.first }).containsExactlyInAnyOrder(ids.getValue(1), ids.getValue(4))
+        assertThat(stored.flatMap { it.second }).containsExactlyInAnyOrder(ids.getValue(2), ids.getValue(3))
+        // One report per batch, after its transaction.
+        assertThat(stored).hasSize(2)
+        // A run with nothing left to read reports nothing.
+        stored.clear()
+        pass.run()
+        assertThat(stored).isEmpty()
     }
 
     @Test

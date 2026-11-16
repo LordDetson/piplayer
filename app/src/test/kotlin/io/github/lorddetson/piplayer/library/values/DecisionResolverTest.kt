@@ -1,5 +1,6 @@
 package io.github.lorddetson.piplayer.library.values
 
+import io.github.lorddetson.piplayer.library.lists.MissingInfoDecision
 import io.github.lorddetson.piplayer.library.values.DecidedField.ALBUM
 import io.github.lorddetson.piplayer.library.values.DecidedField.ARTIST
 import io.github.lorddetson.piplayer.library.values.DecidedField.ARTIST_CREDITS
@@ -179,6 +180,51 @@ class DecisionResolverTest {
         ).winners()
 
         assertThat(winners[TITLE]).isEqualTo(Decided("A title", LEVEL_IDENTIFICATION, 1))
+    }
+
+    private fun keep(id: Long, at: Long = id * 10, undone: Boolean = false) = DecisionValues(id, KEEP_AS_IS, at, emptySet(), undone = undone)
+
+    private fun skip(id: Long, at: Long = id * 10, undone: Boolean = false, lapsed: Boolean = false) =
+        DecisionValues(id, SKIP, at, emptySet(), undone = undone, lapsed = lapsed)
+
+    private fun List<DecisionValues>.missingInfo() = DecisionResolver.missingInfoOf(this)
+
+    private fun kept(id: Long) = Decided(MissingInfoDecision.KEEP_AS_IS_VALUE, DecisionResolver.MISSING_INFO_LEVEL, id)
+
+    private fun skipped(id: Long) = Decided(MissingInfoDecision.SKIPPED_VALUE, DecisionResolver.MISSING_INFO_LEVEL, id)
+
+    @Test
+    fun `without Keep as-is or Skip the list state is none`() {
+        assertThat(emptyList<DecisionValues>().missingInfo()).isNull()
+        assertThat(listOf(identification(1, 10, "A"), edit(2, 20, mapOf(TITLE to "T")), revert(3, 30, ProtectedField.TITLE)).missingInfo())
+            .isNull()
+    }
+
+    @Test
+    fun `the newest Keep as-is or Skip by row ID counts, whatever value decisions lie between`() {
+        assertThat(listOf(keep(1)).missingInfo()).isEqualTo(kept(1))
+        assertThat(listOf(skip(1)).missingInfo()).isEqualTo(skipped(1))
+        assertThat(listOf(keep(1), identification(2, 20, "A"), skip(3), edit(4, 40, mapOf(TITLE to "T"))).missingInfo()).isEqualTo(skipped(3))
+        assertThat(listOf(skip(1), revert(2, 20, ProtectedField.TITLE), keep(3), identification(4, 40, "B")).missingInfo()).isEqualTo(kept(3))
+        // By row ID, not by the time: a Skip made after the clock was set back still replaces the Keep as-is.
+        assertThat(listOf(keep(3, at = 100), skip(7, at = 1)).missingInfo()).isEqualTo(skipped(7))
+        assertThat(listOf(skip(7, at = 1), keep(3, at = 100)).missingInfo()).isEqualTo(skipped(7))
+    }
+
+    @Test
+    fun `undoing the newer Keep as-is or Skip brings the older back, and undoing both leaves none`() {
+        assertThat(listOf(keep(1), skip(2, undone = true)).missingInfo()).isEqualTo(kept(1))
+        assertThat(listOf(skip(1), keep(2, undone = true)).missingInfo()).isEqualTo(skipped(1))
+        assertThat(listOf(keep(1, undone = true), skip(2, undone = true)).missingInfo()).isNull()
+        // Undoing the older changes nothing.
+        assertThat(listOf(keep(1, undone = true), skip(2)).missingInfo()).isEqualTo(skipped(2))
+    }
+
+    @Test
+    fun `a lapsed Skip counts for nothing, so an older Keep as-is counts again`() {
+        assertThat(listOf(skip(1, lapsed = true)).missingInfo()).isNull()
+        assertThat(listOf(keep(1), skip(2, lapsed = true)).missingInfo()).isEqualTo(kept(1))
+        assertThat(listOf(skip(1, lapsed = true), skip(2)).missingInfo()).isEqualTo(skipped(2))
     }
 
     /** The per-field table: decisions in order, which ones are undone, and the expected winner of the title. */

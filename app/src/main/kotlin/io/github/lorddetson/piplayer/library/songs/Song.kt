@@ -19,6 +19,7 @@ data class Song(
     val section: String? = null,
     /** In Songs missing information, the song's reasons that the list's chips choose (docs/library.md §17.1). */
     val reasons: Int? = null,
+    val skipped: Boolean = false,
 )
 
 /** Where the songs of the list come from: the library, or a test's own list. */

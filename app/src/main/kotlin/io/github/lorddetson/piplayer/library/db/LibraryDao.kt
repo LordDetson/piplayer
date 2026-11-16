@@ -562,6 +562,7 @@ data class ListSongRow(
     val sectionNumber: Long? = null,
     /** In Songs missing information, the chosen reasons the song has (docs/library.md §17.1); other lists select none. */
     val reasons: Int? = null,
+    val skipped: Boolean = false,
 )
 
 /** An album key with what its visible songs say of it. */

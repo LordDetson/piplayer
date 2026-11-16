@@ -38,6 +38,29 @@ object MissingReasons {
 }
 
 /**
+ * Keep as-is and Skip as Songs missing information reads them (TI §1, §10.1): the codes of
+ * `track_display.missing_info_decision` and the values of the `decided_mirror` row they come from.
+ */
+object MissingInfoDecision {
+    const val NONE = 0
+    const val KEEP_AS_IS = 1
+    const val SKIPPED = 2
+
+    /** The field of the `decided_mirror` row that holds a track's Keep as-is or Skip; no part of a decided field. */
+    const val FIELD = "missing_info_decision"
+    const val KEEP_AS_IS_VALUE = "keep_as_is"
+    const val SKIPPED_VALUE = "skipped"
+
+    fun ofValue(value: String?): Int = NONE
+
+    fun valueOf(code: Int): String? = null
+
+    fun listed(code: Int): Boolean = true
+
+    fun marked(code: Int): Boolean = false
+}
+
+/**
  * The own covers that take "No cover" away (docs/library.md §17.1): the album keys with an own cover and the content keys
  * (as the library database writes them) of the identities with one.
  */
