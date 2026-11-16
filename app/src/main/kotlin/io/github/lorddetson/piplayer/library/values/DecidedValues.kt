@@ -1,5 +1,6 @@
 package io.github.lorddetson.piplayer.library.values
 
+import io.github.lorddetson.piplayer.library.lists.MissingInfoDecision
 import io.github.lorddetson.piplayer.settings.ProtectedField
 
 /** How a decided part's value reads as text (TI §10.2): what the precedence resolver and `decided_mirror` hold. */
@@ -153,7 +154,7 @@ data class Decided(val value: String?, val level: Int, val decisionId: Long)
 /**
  * One decision of a track as the resolver reads it (TI §7.1): its [fields] (the ticked, edited or reverted fields of
  * the protected-fields list) and the [values] of their parts, a missing or null value being empty. An [undone] decision
- * counts for nothing. [id] orders the decisions; [createdAt] is for track details and the history only.
+ * counts for nothing, and neither does a [lapsed] Skip (TI §1). [id] orders the decisions; [createdAt] is for track details and the history only.
  */
 data class DecisionValues(
     val id: Long,
@@ -204,8 +205,27 @@ object DecisionResolver {
         else -> BADGE_NONE
     }
 
-    fun missingInfoOf(decisions: List<DecisionValues>): Decided? = null
+    /**
+     * The Keep as-is or Skip of a track (TI §1): the newest of [decisions] by row ID of those two kinds that is neither
+     * undone nor lapsed, as the row value of `MissingInfoDecision` at [MISSING_INFO_LEVEL]; null when none counts. Value
+     * decisions between them change nothing.
+     */
+    fun missingInfoOf(decisions: List<DecisionValues>): Decided? {
+        var newest: DecisionValues? = null
+        for (decision in decisions) {
+            if (decision.undone || decision.lapsed) continue
+            if (decision.kind != DecisionKind.KEEP_AS_IS && decision.kind != DecisionKind.SKIP) continue
+            if (newest == null || decision.id > newest.id) newest = decision
+        }
+        val value = when (newest?.kind) {
+            DecisionKind.KEEP_AS_IS -> MissingInfoDecision.KEEP_AS_IS_VALUE
+            DecisionKind.SKIP -> MissingInfoDecision.SKIPPED_VALUE
+            else -> return null
+        }
+        return Decided(value, MISSING_INFO_LEVEL, newest.id)
+    }
 
+    /** The level of the `decided_mirror` row of a Keep as-is or Skip: no precedence level, since it decides no value. */
     const val MISSING_INFO_LEVEL = 0
 
     /** No decided value wins: the values come from the file. */

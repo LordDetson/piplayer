@@ -126,7 +126,15 @@ internal fun reasonLabel(reason: Int): Int = when (reason) {
     else -> R.string.reason_recording_id
 }
 
-internal fun missingInfoLine(reasons: Int?, skipped: Boolean, label: (Int) -> String, skippedLabel: String): String? = null
+/**
+ * The line under a song of Songs missing information (docs/library.md §17.1, TI §1): its [reasons] that the chips choose,
+ * by [label], in the chips' order, and [skippedLabel] after them for a [skipped] song; null for a row of another list.
+ */
+internal fun missingInfoLine(reasons: Int?, skipped: Boolean, label: (Int) -> String, skippedLabel: String): String? {
+    if (reasons == null || reasons == 0) return null
+    val parts = MissingReasons.ORDER.filter { reasons and it != 0 }.map(label)
+    return (if (skipped) parts + skippedLabel else parts).joinToString(" · ")
+}
 
 /**
  * The number of songs of each smart list (docs/library.md §17.2), read off the main thread again after every sync that

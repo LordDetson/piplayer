@@ -10,6 +10,7 @@ import io.github.lorddetson.piplayer.library.db.LibraryDatabase
 import io.github.lorddetson.piplayer.library.db.ReadFileRow
 import io.github.lorddetson.piplayer.library.db.TrackEntity
 import io.github.lorddetson.piplayer.library.db.replaceInChunks
+import io.github.lorddetson.piplayer.library.lists.MissingInfoDecision
 import io.github.lorddetson.piplayer.library.sort.Collation
 import io.github.lorddetson.piplayer.library.sort.SortKeys
 import io.github.lorddetson.piplayer.library.values.Decided
@@ -113,9 +114,21 @@ class TrackDisplayWriter(private val database: LibraryDatabase) {
         /** Above this many files the decided values of all are read at once, rather than in chunks. */
         private const val READ_ALL_DECIDED = 5_000
 
-        /** The decided values of `decided_mirror` [rows] by file; a field this build does not know is left out. */
+        /**
+         * The decided values of `decided_mirror` [rows] by file, with the Keep as-is or Skip of their own row (TI §10.1); a
+         * field this build does not know is left out.
+         */
         fun overridesOf(rows: List<DecidedMirrorEntity>): Map<Long, FieldOverrides> = rows.groupBy { it.fileId }.mapValues { (_, own) ->
-            FieldOverrides(own.mapNotNull { row -> DecidedField.ofName(row.field)?.let { it to Decided(row.value, row.level, row.decisionId) } }.toMap())
+            var missingInfo = MissingInfoDecision.NONE
+            val decided = HashMap<DecidedField, Decided>()
+            for (row in own) {
+                if (row.field == MissingInfoDecision.FIELD) {
+                    missingInfo = MissingInfoDecision.ofValue(row.value)
+                } else {
+                    DecidedField.ofName(row.field)?.let { decided[it] = Decided(row.value, row.level, row.decisionId) }
+                }
+            }
+            FieldOverrides(decided, missingInfo)
         }
 
         /** The decided values of [fileIds], as the sync joins them for the files it stores again (TI §10.3). */
@@ -139,6 +152,7 @@ class TrackDisplayWriter(private val database: LibraryDatabase) {
             "file_id", "title", "artist", "album", "duration_ms", "search_text", "missing_info_reasons",
             "album_key", "album_artist", "compilation", "year", "disc_number", "track_number", "artist_key",
             "album_search", "title_sort", "artist_sort", "album_sort", "album_artist_sort", "file_sort", "badge_state",
+            "missing_info_decision",
         )
         private val ARTIST_COLUMNS = listOf("file_id", "position", "artist_key", "name", "search_text", "sort_key")
         private val GENRE_COLUMNS = listOf("file_id", "position", "genre_key", "name", "search_text", "sort_key")
@@ -241,6 +255,7 @@ class TrackDisplayWriter(private val database: LibraryDatabase) {
             blob(values.albumArtistSort?.bytes)
             blob(values.fileSort.bytes)
             long(values.badgeState.toLong())
+            long(values.missingInfoDecision.toLong())
         }
     }
 }

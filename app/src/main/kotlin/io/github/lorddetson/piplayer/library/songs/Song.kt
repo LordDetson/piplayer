@@ -19,6 +19,7 @@ data class Song(
     val section: String? = null,
     /** In Songs missing information, the song's reasons that the list's chips choose (docs/library.md §17.1). */
     val reasons: Int? = null,
+    /** In Songs missing information, whether the user skipped the song (TI §1): its row says so after its reasons. */
     val skipped: Boolean = false,
 )
 

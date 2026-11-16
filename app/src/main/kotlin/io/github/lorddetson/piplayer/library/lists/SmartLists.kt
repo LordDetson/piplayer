@@ -51,13 +51,25 @@ object MissingInfoDecision {
     const val KEEP_AS_IS_VALUE = "keep_as_is"
     const val SKIPPED_VALUE = "skipped"
 
-    fun ofValue(value: String?): Int = NONE
+    /** The code of a row's [value]; a value this build does not know counts as none. */
+    fun ofValue(value: String?): Int = when (value) {
+        KEEP_AS_IS_VALUE -> KEEP_AS_IS
+        SKIPPED_VALUE -> SKIPPED
+        else -> NONE
+    }
 
-    fun valueOf(code: Int): String? = null
+    /** The row value of [code]; none has no row. */
+    fun valueOf(code: Int): String? = when (code) {
+        KEEP_AS_IS -> KEEP_AS_IS_VALUE
+        SKIPPED -> SKIPPED_VALUE
+        else -> null
+    }
 
-    fun listed(code: Int): Boolean = true
+    /** Whether Songs missing information lists a song with [code]: every song but one kept as it is. */
+    fun listed(code: Int): Boolean = code != KEEP_AS_IS
 
-    fun marked(code: Int): Boolean = false
+    /** Whether its row carries the Skip mark. */
+    fun marked(code: Int): Boolean = code == SKIPPED
 }
 
 /**

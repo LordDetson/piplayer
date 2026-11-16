@@ -1,5 +1,6 @@
 package io.github.lorddetson.piplayer.library.mirror
 
+import io.github.lorddetson.piplayer.library.lists.MissingInfoDecision
 import io.github.lorddetson.piplayer.library.values.Decided
 import io.github.lorddetson.piplayer.library.values.DecidedField
 
@@ -9,9 +10,10 @@ import io.github.lorddetson.piplayer.library.values.DecidedField
  * row and no map of rows: with a decision on every one of 20 000 files, materialising both sides took most of the time
  * the run held off the sync. Rows may also be read in [part]s on several threads, a part per thread.
  *
- * [fileIds] are the files that should hold decided values, ascending and each once, and [desired] their values in the
- * same order. A file differs when one of its rows is missing, has another value, level or decision, or names a part this
- * build does not know, and when it holds rows but should hold none.
+ * [fileIds] are the files that should hold decided values, ascending and each once, [desired] their values in the same
+ * order, and [missingInfo] the Keep as-is or Skip each should hold as its `MissingInfoDecision.FIELD` row (TI §10.1). A
+ * file differs when one of its rows is missing, has another value, level or decision, or names a part this build does
+ * not know, and when it holds rows but should hold none.
  */
 internal class DecidedComparison(
     private val fileIds: LongArray,
@@ -21,6 +23,7 @@ internal class DecidedComparison(
 
     init {
         require(fileIds.size == desired.size) { "${fileIds.size} files with ${desired.size} sets of values" }
+        require(fileIds.size == missingInfo.size) { "${fileIds.size} files with ${missingInfo.size} Keep as-is or Skip states" }
         for (i in 1 until fileIds.size) require(fileIds[i - 1] < fileIds[i]) { "The files are not ascending at ${fileIds[i]}" }
     }
 
@@ -47,7 +50,7 @@ internal class DecidedComparison(
             }
             if (differs[i]) return
             // Each part of a file has one row (the primary key), so a file matches once as many rows match as it has parts.
-            val wanted = DecidedField.ofName(field)?.let { desired[i][it] }
+            val wanted = if (field == MissingInfoDecision.FIELD) missingInfo[i] else DecidedField.ofName(field)?.let { desired[i][it] }
             if (wanted != null && wanted.level == level && wanted.decisionId == decisionId && wanted.value == value) {
                 matching[i]++
             } else {
@@ -67,7 +70,8 @@ internal class DecidedComparison(
         val all = synchronized(parts) { parts.toList() }
         val out = ArrayList<Long>()
         for (i in fileIds.indices) {
-            if (all.any { it.differs[i] } || all.sumOf { it.matching[i] } != desired[i].size) out += fileIds[i]
+            val rows = desired[i].size + if (missingInfo[i] != null) 1 else 0
+            if (all.any { it.differs[i] } || all.sumOf { it.matching[i] } != rows) out += fileIds[i]
         }
         val stray = all.flatMapTo(HashSet()) { it.stray }
         if (stray.isNotEmpty()) {

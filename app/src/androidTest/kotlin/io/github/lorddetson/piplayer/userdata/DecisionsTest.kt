@@ -378,7 +378,7 @@ class DecisionsTest {
     }
 
     @Test
-    fun theLiveSkipsAreFoundByDecisionAndByIdentity() = runBlocking<Unit> {
+    fun theLiveSkipsComeWithTheirIdentitiesKeysAndLocationHints() = runBlocking<Unit> {
         val first = identity(1)
         val second = identity(2)
         val third = identity(3)
@@ -387,12 +387,11 @@ class DecisionsTest {
         decisions.keepAsIs(third)
         val lapsed = checkNotNull(decisions.skip(third, 30, 30_000))
         decisions.lapse(listOf(lapsed.decisionId))
+        decisions.undo(checkNotNull(decisions.skip(third, 40, 40_000)).decisionId)
 
-        val found = decisions.liveSkips(decisionIds = listOf(a.decisionId, lapsed.decisionId), identityIds = listOf(second, third))
-
-        assertThat(found).containsExactlyInAnyOrder(
-            Decisions.LiveSkip(a.decisionId, first, key(1), 10, 10_000),
-            Decisions.LiveSkip(b.decisionId, second, key(2), 20, 20_000),
+        assertThat(decisions.liveSkips()).containsExactlyInAnyOrder(
+            Decisions.LiveSkip(a.decisionId, first, key(1), "external_primary", "Music/", "1.mp3", 10, 10_000),
+            Decisions.LiveSkip(b.decisionId, second, key(2), "external_primary", "Music/", "2.mp3", 20, 20_000),
         )
     }
 

@@ -47,6 +47,7 @@ import androidx.compose.ui.unit.dp
 import io.github.lorddetson.piplayer.R
 import io.github.lorddetson.piplayer.library.lists.MissingReasons
 import io.github.lorddetson.piplayer.library.lists.SongLinks
+import io.github.lorddetson.piplayer.ui.playlists.missingInfoLine
 import io.github.lorddetson.piplayer.ui.playlists.reasonLabel
 import io.github.lorddetson.piplayer.library.lists.SongQuery
 import io.github.lorddetson.piplayer.library.songs.Song
@@ -352,18 +353,19 @@ private fun SongRow(song: Song, playing: Boolean, menu: SongMenu?, selection: So
             )
         },
         supportingContent = {
-            val reasons = song.reasons?.takeIf { it != 0 }
+            // In Songs missing information, the song's reasons that the chips choose, and the Skip mark (docs/library.md §17.1).
+            val reasons = if (song.reasons == null || song.reasons == 0) {
+                null
+            } else {
+                val labels = MissingReasons.ORDER.associateWith { stringResource(reasonLabel(it)) }
+                missingInfoLine(song.reasons, song.skipped, labels::getValue, stringResource(R.string.reason_skipped))
+            }
             if (reasons == null) {
                 Text("$artist · ${formatDuration(song.durationMs)}", maxLines = 1, overflow = TextOverflow.Ellipsis)
             } else {
                 Column {
                     Text("$artist · ${formatDuration(song.durationMs)}", maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    // In Songs missing information, the song's reasons that the chips choose (docs/library.md §17.1).
-                    Text(
-                        MissingReasons.ORDER.filter { reasons and it != 0 }.map { stringResource(reasonLabel(it)) }.joinToString(" · "),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.tertiary,
-                    )
+                    Text(reasons, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.tertiary)
                 }
             }
         },

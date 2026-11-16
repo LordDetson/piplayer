@@ -328,6 +328,7 @@
     <string name="reason_album">Нет альбома</string>
     <string name="reason_cover">Нет обложки</string>
     <string name="reason_recording_id">Нет MusicBrainz ID</string>
+    <string name="reason_skipped">Пропущено</string>
     <!-- Track details (docs/library.md §18). -->
     <string name="details">Сведения</string>
     <string name="details_not_found">Этой песни больше нет в библиотеке</string>

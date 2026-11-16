@@ -323,6 +323,8 @@
     <string name="reason_album">No album</string>
     <string name="reason_cover">No cover</string>
     <string name="reason_recording_id">No MusicBrainz ID</string>
+    <!-- After the reasons of a song the user skipped in Songs missing information (TI §1). -->
+    <string name="reason_skipped">Skipped</string>
     <!-- Track details (docs/library.md §18). -->
     <string name="details">Details</string>
     <string name="details_not_found">This song is no longer in the library</string>

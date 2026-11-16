@@ -37,6 +37,7 @@ data class DisplayValues(
     val displayGenres: List<DisplayGenre> = emptyList(),
     /** The metadata badge from the decided values that win (TI §6, §10.1; `DecisionResolver.badgeOf`). */
     val badgeState: Int = 0,
+    /** Keep as-is or Skip from the mirrored decisions (TI §1, §10.1), a `MissingInfoDecision` code. */
     val missingInfoDecision: Int = 0,
 ) {
     /** The names of [displayArtists]. */

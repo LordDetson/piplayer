@@ -22,6 +22,9 @@ internal class KeyedFiles(val ids: LongArray, val keys: Array<String>) {
     fun valuesOf(fileId: Long, byKey: Map<String, Map<DecidedField, Decided>>): Map<DecidedField, Decided> =
         ids.binarySearch(fileId).let { if (it < 0) emptyMap() else byKey[keys[it]].orEmpty() }
 
+    /** The key of [fileId]; null for a file that is not one of these. */
+    fun keyOf(fileId: Long): String? = ids.binarySearch(fileId).let { if (it < 0) null else keys[it] }
+
     /** The files that only one of these and [other] holds, or that the two hold with different keys. */
     fun moved(other: KeyedFiles): Set<Long> {
         val out = HashSet<Long>()

@@ -239,8 +239,13 @@ class TagPass(
         return ParsedRead(report, TrackTags.from(decoded.properties), decoded.encoding, Json.encodeToString(raw))
     }
 
-    /** One transaction per batch, while no sync runs. A file the sync changed since it was read keeps nothing of the read. */
+    /**
+     * One transaction per batch, while no sync runs. A file the sync changed since it was read keeps nothing of the read.
+     * Then [onStored] gets the files read and those whose read failed, for the lapse of Skips and the comparison of
+     * decided values (TI §1, §7.1).
+     */
     private suspend fun apply(items: List<Pending>) {
+        var stored: Pair<List<Long>, List<Long>>? = null
         val rows = sync.exclusive {
             val states = dao.fileStates(items.map { it.file.fileId }).associateBy { it.id }
             val current = items.filter { item ->
@@ -260,9 +265,11 @@ class TagPass(
                 val inputs = displays.inputsOf(read + failed)
                 with(TrackDisplayWriter) { write(inputs.map { it.fileId }, TextForms().let { forms -> inputs.map { it.resolve(forms) } }) }
             }
+            stored = read to failed
             read.chunked(CHUNK).flatMap { dao.songRowsOf(it) }
         }
         if (rows.isNotEmpty()) onBatch(rows)
+        stored?.let { (read, failed) -> if (read.isNotEmpty() || failed.isNotEmpty()) onStored(read, failed) }
     }
 
     private suspend fun fail(item: Pending, states: Map<Long, FileState>) {

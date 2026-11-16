@@ -8,13 +8,16 @@ import io.github.lorddetson.piplayer.library.db.DecidedMirrorDao
 import io.github.lorddetson.piplayer.library.db.DecidedMirrorEntity
 import io.github.lorddetson.piplayer.library.db.LibraryDatabase
 import io.github.lorddetson.piplayer.library.db.MirrorDao
+import io.github.lorddetson.piplayer.library.db.TrackEntity
 import io.github.lorddetson.piplayer.library.db.replaceAll
 import io.github.lorddetson.piplayer.library.identity.Hex
+import io.github.lorddetson.piplayer.library.lists.MissingInfoDecision
 import io.github.lorddetson.piplayer.library.sort.SortKeys
 import io.github.lorddetson.piplayer.library.sync.LibrarySync
 import io.github.lorddetson.piplayer.library.sync.TrackDisplayWriter
 import io.github.lorddetson.piplayer.library.values.Decided
 import io.github.lorddetson.piplayer.library.values.DecidedField
+import io.github.lorddetson.piplayer.library.values.DecisionContent
 import io.github.lorddetson.piplayer.userdata.Decisions
 import io.github.lorddetson.piplayer.userdata.UserDatabase
 import kotlin.coroutines.cancellation.CancellationException
@@ -35,8 +38,10 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
 /**
- * Mirrors the decided values of the user database into `decided_mirror` and derives the display rows of the files they
- * change again, in one library database transaction while no sync writes (TI §7.1, §10.3). The runs take one lock, and
+ * Mirrors the decided values of the user database, and the Keep as-is or Skip of each track, into `decided_mirror` and
+ * derives the display rows of the files they change again, in one library database transaction while no sync writes
+ * (TI §7.1, §10.3). After each batch of the tag pass it lets lapse the Skips of changed files and compares the files read
+ * with their decided values first (TI §1, §7.1). The runs take one lock, and
  * each reads the user database under it, so an older run never writes over a newer decision.
  */
 class DecisionMirror(
@@ -83,24 +88,47 @@ class DecisionMirror(
     private var pendingUnlessRan = false
     private var pendingIfChanged = false
     private val pendingFiles = LinkedHashSet<Long>()
+    private val pendingRead = LinkedHashSet<Long>()
+    private val pendingFailed = LinkedHashSet<Long>()
 
     /** Whether the background loop is making a run, and how many runs after a commit are under way. */
     private var working = false
     private var committing = 0
 
     /** What the background loop takes at once. */
-    private class Asked(val all: Boolean, val unlessRan: Boolean, val ifChanged: Boolean, val files: List<Long>)
+    private class Asked(
+        val all: Boolean,
+        val unlessRan: Boolean,
+        val ifChanged: Boolean,
+        val files: List<Long>,
+        val read: List<Long>,
+        val failed: List<Long>,
+    )
 
     init {
         scope.launch {
             for (request in requests) {
                 val asked = synchronized(lock) {
                     working = true
-                    Asked(pendingAll, pendingUnlessRan, pendingIfChanged, pendingFiles.toList()).also {
+                    Asked(
+                        pendingAll, pendingUnlessRan, pendingIfChanged, pendingFiles.toList(), pendingRead.toList(), pendingFailed.toList(),
+                    ).also {
                         pendingAll = false
                         pendingUnlessRan = false
                         pendingIfChanged = false
                         pendingFiles.clear()
+                        pendingRead.clear()
+                        pendingFailed.clear()
+                    }
+                }
+                // Before the mirror runs, which replace the rows that name a file's Skip before its read (TI §1).
+                if (asked.read.isNotEmpty() || asked.failed.isNotEmpty()) {
+                    try {
+                        afterRead(asked.read, asked.failed)
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        Log.w(TAG, "The checks after a batch of the tag pass failed", e)
                     }
                 }
                 try {
@@ -110,7 +138,8 @@ class DecisionMirror(
                         else -> {
                             if (asked.unlessRan) mirrorUnlessRan()
                             if (asked.ifChanged) mirrorIfChanged()
-                            if (asked.files.isNotEmpty()) mirrorFiles(asked.files)
+                            val files = (asked.files + asked.read + asked.failed).distinct()
+                            if (files.isNotEmpty()) mirrorFiles(files)
                         }
                     }
                 } catch (e: CancellationException) {
@@ -128,7 +157,9 @@ class DecisionMirror(
 
     /** Idle once nothing runs and nothing is asked for; called under [lock]. */
     private fun settle() {
-        if (!working && committing == 0 && !pendingAll && !pendingUnlessRan && !pendingIfChanged && pendingFiles.isEmpty()) {
+        if (!working && committing == 0 && !pendingAll && !pendingUnlessRan && !pendingIfChanged && pendingFiles.isEmpty() &&
+            pendingRead.isEmpty() && pendingFailed.isEmpty()
+        ) {
             idle.value = true
         }
     }
@@ -162,11 +193,13 @@ class DecisionMirror(
         // The user database first, under the lock; the sync waits only for the library database's part.
         val keys = decisions.keysOf(identityIds)
         val decided = decisions.decidedOf(identityIds)
+        val states = decisions.missingInfoOf(identityIds)
         val changed = sync.exclusive {
             val identityOfKey = keys.entries.associate { (identity, key) -> key to identity }
             val files = keys.values.toList().chunked(DecidedMirrorDao.CHUNK).flatMap { library.decided().filesWithKeys(it) }
             val desired = files.associate { file ->
-                file.fileId to rowsOf(file.fileId, file.contentKey?.let(identityOfKey::get)?.let(decided::get))
+                val identity = file.contentKey?.let(identityOfKey::get)
+                file.fileId to rowsOf(file.fileId, identity?.let(decided::get), identity?.let(states::get))
             }
             val fileIds = files.map { it.fileId }
             val existing = fileIds.chunked(DecidedMirrorDao.CHUNK).flatMap { library.decided().valuesOf(it) }.groupBy { it.fileId }
@@ -183,14 +216,16 @@ class DecisionMirror(
             val ids = fileIds.distinct()
             val existing = ids.chunked(DecidedMirrorDao.CHUNK).flatMap { library.decided().valuesOf(it) }.groupBy { it.fileId }
             // A library without decisions, the common case, reads no more.
-            if (existing.isEmpty() && !user.decisions().hasLiveValueDecisions()) return@exclusive false
+            if (existing.isEmpty() && !user.decisions().hasMirroredDecisions()) return@exclusive false
             val keys = ids.chunked(MirrorDao.CHUNK).flatMap { library.mirror().keysOf(it) }
             val identities = keys.mapNotNull { it.contentKey }.distinct().chunked(MirrorDao.CHUNK)
                 .flatMap { chunk -> user.identities().withKeys(chunk.map(Hex::bytes)) }
                 .associate { Hex.text(it.contentKey) to it.id }
             val decided = decisions.decidedOf(identities.values)
+            val states = decisions.missingInfoOf(identities.values)
             val desired = keys.associate { file ->
-                file.fileId to rowsOf(file.fileId, file.contentKey?.let(identities::get)?.let(decided::get))
+                val identity = file.contentKey?.let(identities::get)
+                file.fileId to rowsOf(file.fileId, identity?.let(decided::get), identity?.let(states::get))
             }
             write(differing(ids, desired, existing), desired, counter = null)
         }
@@ -235,19 +270,22 @@ class DecisionMirror(
         // the sync and the tag pass change, and compares again the files whose keys moved meanwhile and the files that
         // should hold no values, whose rows may be gone with their files.
         val snapshot = decisions.snapshot()
-        val byKey = snapshot.byKey
+        val states = snapshot.missingInfoByKey
+        // The keys with decided values or a Keep as-is or Skip (TI §10.1), the latter with no values.
+        val byKey = if (states.isEmpty()) snapshot.byKey else snapshot.byKey + (states.keys - snapshot.byKey.keys).associateWith { emptyMap<DecidedField, Decided>() }
         val before = keyedFiles(byKey)
-        val comparison = DecidedComparison(before.ids, before.values(byKey))
+        val comparison = DecidedComparison(before.ids, before.values(byKey), before.keys.map(states::get))
         compareMirrored(comparison)
         beforeHold()
         val changed = sync.exclusive {
             val now = keyedFiles(byKey)
+            fun rows(fileId: Long) = now.keyOf(fileId).let { key -> rowsOf(fileId, key?.let(byKey::get), key?.let(states::get)) }
             val found = comparison.differing()
-            val again = before.moved(now) + found.filter { now.valuesOf(it, byKey).isEmpty() }
+            val again = before.moved(now) + found.filter { now.keyOf(it) == null }
             val existing = again.chunked(DecidedMirrorDao.CHUNK).flatMap { library.decided().valuesOf(it) }.groupBy { it.fileId }
-            val stale = differing(again, again.associateWith { rowsOf(it, now.valuesOf(it, byKey)) }, existing)
+            val stale = differing(again, again.associateWith(::rows), existing)
             val differing = (found.filter { it !in again } + stale).sorted()
-            write(differing, differing.associateWith { rowsOf(it, now.valuesOf(it, byKey)) }, snapshot.counter)
+            write(differing, differing.associateWith(::rows), snapshot.counter)
         }
         // Counted once it has completed: a run that throws leaves the next request to make one (TI §10.3).
         wholeRuns++
@@ -326,9 +364,18 @@ class DecisionMirror(
         fun toArray(): LongArray = items.copyOf(size)
     }
 
-    /** The rows of [decided] for [fileId]; none without decided values. */
-    private fun rowsOf(fileId: Long, decided: Map<DecidedField, Decided>?): List<DecidedMirrorEntity> =
-        decided.orEmpty().map { (part, value) -> DecidedMirrorEntity(fileId, part.stored, value.value, value.level, value.decisionId) }
+    /**
+     * The rows of [decided] for [fileId], and the row of its [missingInfo], the Keep as-is or Skip that counts (TI §10.1);
+     * none without either.
+     */
+    private fun rowsOf(fileId: Long, decided: Map<DecidedField, Decided>?, missingInfo: Decided?): List<DecidedMirrorEntity> {
+        val rows = decided.orEmpty().map { (part, value) -> DecidedMirrorEntity(fileId, part.stored, value.value, value.level, value.decisionId) }
+        return if (missingInfo == null) {
+            rows
+        } else {
+            rows + DecidedMirrorEntity(fileId, MissingInfoDecision.FIELD, missingInfo.value, missingInfo.level, missingInfo.decisionId)
+        }
+    }
 
     /** The files of [fileIds] whose [desired] rows differ from the [existing] ones. */
     private fun differing(
@@ -380,7 +427,75 @@ class DecisionMirror(
     /** Asks for a whole run in the background when the counters differ (TI §10.3). */
     fun requestIfChanged() = ask { pendingIfChanged = true }
 
-    fun requestRead(read: List<Long>, failed: List<Long>) {}
+    /**
+     * Asks for the checks and the run after a batch of the tag pass (TI §1, §7.1) in the background: the files [read] with
+     * their tags and those whose read [failed].
+     */
+    fun requestRead(read: List<Long>, failed: List<Long>) {
+        if (read.isEmpty() && failed.isEmpty()) return
+        ask {
+            pendingRead.addAll(read)
+            pendingFailed.addAll(failed)
+        }
+    }
+
+    /**
+     * The checks after a batch of the tag pass, before its run: the Skips that lapse with the files it tried (TI §1), which
+     * are committed and mirrored as a decision is, then the comparison of the files it read with their decided values
+     * (TI §7.1).
+     */
+    @VisibleForTesting
+    internal suspend fun afterRead(read: List<Long>, failed: List<Long>) {
+        val lapsed = running.withLock { if (ready()) lapseSkips((read + failed).distinct()) else null }
+        if (lapsed != null) mirrorIdentities(lapsed.identityIds, lapsed.counter)
+        if (read.isNotEmpty()) running.withLock { if (ready()) compareRead(read.distinct()) }
+    }
+
+    /**
+     * Lets lapse the Skips of the tracks of [fileIds] that no file holds the stamp of any more (TI §1): the Skip of the track
+     * a file belonged to before the read, as its row here names it, and of the track that holds the file's key now or whose
+     * location hint is the file's place, as after a sync forgot the key of a changed file.
+     */
+    private suspend fun lapseSkips(fileIds: List<Long>): Decisions.Lapsed? {
+        if (fileIds.isEmpty() || !decisions.hasLiveSkips()) return null
+        val skips = decisions.liveSkips()
+        val before = fileIds.chunked(DecidedMirrorDao.CHUNK).flatMap { library.decided().missingInfoOf(it) }
+            .filter { it.value == MissingInfoDecision.SKIPPED_VALUE }.mapTo(HashSet()) { it.decisionId }
+        val places = fileIds.chunked(DecidedMirrorDao.CHUNK).flatMap { library.decided().placesOf(it) }
+        val keys = places.mapNotNullTo(HashSet()) { it.contentKey }
+        val spots = places.mapTo(HashSet<Triple<String?, String?, String?>>()) { Triple(it.volume, it.relativePath, it.displayName) }
+        val candidates = skips.filter { skip ->
+            skip.decisionId in before || skip.contentKey in keys || Triple(skip.hintVolume, skip.hintRelativePath, skip.hintDisplayName) in spots
+        }
+        if (candidates.isEmpty()) return null
+        val stamps = candidates.map { it.contentKey }.distinct().chunked(DecidedMirrorDao.CHUNK)
+            .flatMap { library.decided().stampsWithKeys(it) }.groupBy({ it.contentKey }, { SkipLapse.FileStamp(it.size, it.mtime) })
+        val lapsing = candidates.filter { skip ->
+            SkipLapse.lapses(SkipLapse.Skip(skip.decisionId, skip.identityId, skip.size, skip.mtimeMs), stamps[skip.contentKey].orEmpty())
+        }
+        return if (lapsing.isEmpty()) null else decisions.lapse(lapsing.map { it.decisionId })
+    }
+
+    /**
+     * Compares the files [fileIds] that the tag pass has just read with the decided values of their tracks, at their
+     * locations (TI §7.1), all in one user database transaction; only tracks with decided values are looked at.
+     */
+    private suspend fun compareRead(fileIds: List<Long>) {
+        if (!user.decisions().hasLiveValueDecisions()) return
+        val reads = fileIds.chunked(DecidedMirrorDao.CHUNK).flatMap { library.library().readFilesOf(it) }
+        val keys = fileIds.chunked(MirrorDao.CHUNK).flatMap { library.mirror().keysOf(it) }.associate { it.fileId to it.contentKey }
+        val identityOfKey = keys.values.filterNotNull().distinct().chunked(MirrorDao.CHUNK)
+            .flatMap { chunk -> user.identities().withKeys(chunk.map(Hex::bytes)) }
+            .associate { Hex.text(it.contentKey) to it.id }
+        val decided = decisions.withLiveValues(identityOfKey.values)
+        if (decided.isEmpty()) return
+        val items = reads.mapNotNull { read ->
+            val identity = keys[read.fileId]?.let(identityOfKey::get)?.takeIf { it in decided } ?: return@mapNotNull null
+            identity to Decisions.LocationValues(read.volume, read.relativePath, read.displayName, DecisionContent.ofTags(TrackEntity.tagsOf(read)))
+        }
+        decisions.filesChanged(items)
+    }
+
 
     /** Asks for a run of [fileIds] in the background, which the tag pass has just read. */
     fun requestFiles(fileIds: List<Long>) {

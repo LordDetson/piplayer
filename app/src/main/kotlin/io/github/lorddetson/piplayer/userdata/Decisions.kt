@@ -19,8 +19,8 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 
 /**
- * The decisions of identification in the user database (TI §7.1, §10.2): Apply, Edit fields, a per-field revert and
- * Undo, each in one transaction that raises the change counter. It writes only the user database; the library database
+ * The decisions of identification in the user database (TI §7.1, §10.2): Apply, Edit fields, a per-field revert, Keep
+ * as-is, Skip, the lapse of a Skip and Undo, each in one transaction that raises the change counter. It writes only the user database; the library database
  * follows through `DecisionMirror`, which `LibraryDecisions` runs after each commit.
  */
 class Decisions(private val database: UserDatabase, private val clock: () -> Long = System::currentTimeMillis) {
@@ -39,29 +39,98 @@ class Decisions(private val database: UserDatabase, private val clock: () -> Lon
     )
 
     /** The decided values of the identities with decisions, by content key in hex, read with the [counter] at that time. */
+    /**
+     * The decided values of the identities with decisions, by content key in hex, and the Keep as-is or Skip that counts
+     * for each identity that has one (TI §1), read with the [counter] at that time.
+     */
     data class Snapshot(
         val counter: Long,
         val byKey: Map<String, Map<DecidedField, Decided>>,
         val missingInfoByKey: Map<String, Decided> = emptyMap(),
     )
 
-    data class LiveSkip(val decisionId: Long, val identityId: Long, val contentKey: String, val size: Long?, val mtimeMs: Long?)
+    /**
+     * A Skip that counts (TI §1): its decision, its identity with the [contentKey] in hex and the location hint, and the
+     * stamp of the file it was made on, the time in milliseconds.
+     */
+    data class LiveSkip(
+        val decisionId: Long,
+        val identityId: Long,
+        val contentKey: String,
+        val hintVolume: String?,
+        val hintRelativePath: String?,
+        val hintDisplayName: String?,
+        val size: Long?,
+        val mtimeMs: Long?,
+    )
 
+    /** A committed lapse: the identities whose Skips lapsed and the change [counter] it raised to. */
     data class Lapsed(val identityIds: Set<Long>, val counter: Long)
 
-    suspend fun keepAsIs(identityId: Long, contentKey: ByteArray? = null): Committed? = null
+    /** Keep as-is for the track of [identityId] (TI §1): no values. Null when the track has no identity now. */
+    suspend fun keepAsIs(identityId: Long, contentKey: ByteArray? = null): Committed? =
+        listState(identityId, contentKey, DecisionKind.KEEP_AS_IS, size = null, mtimeMs = null)
 
-    suspend fun skip(identityId: Long, fileSize: Long, fileMtimeMs: Long, contentKey: ByteArray? = null): Committed? = null
+    /**
+     * Skip for the track of [identityId] (TI §1), with the [fileSize] and [fileMtimeMs] of the file it is made on, which let
+     * it lapse. Null when the track has no identity now.
+     */
+    suspend fun skip(identityId: Long, fileSize: Long, fileMtimeMs: Long, contentKey: ByteArray? = null): Committed? =
+        listState(identityId, contentKey, DecisionKind.SKIP, fileSize, fileMtimeMs)
 
-    suspend fun missingInfoOf(identityIds: Collection<Long>): Map<Long, Decided> = emptyMap()
+    private suspend fun listState(identityId: Long, contentKey: ByteArray?, kind: DecisionKind, size: Long?, mtimeMs: Long?): Committed? =
+        database.withWriteTransaction {
+            val identity = database.identities().current(identityId, contentKey) ?: return@withWriteTransaction null
+            val id = dao.add(
+                DecisionEntity(identityId = identity, kind = kind.code, fields = 0, fileSize = size, fileMtime = mtimeMs, createdAt = clock()),
+            )
+            committed(id, identity)
+        }
 
-    suspend fun hasLiveSkips(): Boolean = false
+    /** The Keep as-is or Skip that counts for each of [identityIds] that has one (TI §1). */
+    suspend fun missingInfoOf(identityIds: Collection<Long>): Map<Long, Decided> =
+        statesOf(identityIds.distinct().chunked(CHUNK).flatMap { dao.liveStatesOf(it) })
 
-    suspend fun liveSkips(decisionIds: Collection<Long>, identityIds: Collection<Long>): List<LiveSkip> = emptyList()
+    /** Whether any Skip counts, so that the check after a batch of the tag pass costs nothing without one. */
+    suspend fun hasLiveSkips(): Boolean = dao.hasLiveSkips()
 
-    suspend fun lapse(decisionIds: Collection<Long>): Lapsed? = null
+    /** Every Skip that counts (TI §1). */
+    suspend fun liveSkips(): List<LiveSkip> = dao.liveSkips().map {
+        LiveSkip(it.decisionId, it.identityId, Hex.text(it.contentKey), it.hintVolume, it.hintRelativePath, it.hintDisplayName, it.size, it.mtimeMs)
+    }
 
-    suspend fun filesChanged(items: List<Pair<Long, LocationValues>>): List<Set<DecidedField>> = items.map { emptySet() }
+    /**
+     * Lets the Skips [decisionIds] lapse (TI §1): those that still count get `lapsed_at`, and the change counter rises
+     * once, in one transaction. Null when none counted any more, and then nothing is written.
+     */
+    suspend fun lapse(decisionIds: Collection<Long>): Lapsed? = database.withWriteTransaction {
+        val live = decisionIds.distinct().mapNotNull { dao.decision(it) }
+            .filter { it.kind == DecisionKind.SKIP.code && it.undoneAt == null && it.lapsedAt == null }
+        if (live.isEmpty()) return@withWriteTransaction null
+        val now = clock()
+        for (chunk in live.map { it.id }.chunked(CHUNK)) dao.markLapsed(chunk, now)
+        database.user().countChange()
+        Lapsed(live.mapTo(HashSet()) { it.identityId }, database.user().changeCounter())
+    }
+
+    /** Which of [identityIds] have decisions that may decide values, so that only their files are compared (TI §7.1). */
+    suspend fun withLiveValues(identityIds: Collection<Long>): Set<Long> =
+        identityIds.distinct().chunked(CHUNK).flatMapTo(HashSet()) { dao.identitiesWithLiveValues(it) }
+
+    /**
+     * [fileChanged] for each of [items] (an identity and a location with its values now), all in one transaction, as
+     * after a batch of the tag pass (TI §7.1); the flagged parts of each, in the same order.
+     */
+    suspend fun filesChanged(items: List<Pair<Long, LocationValues>>): List<Set<DecidedField>> {
+        if (items.isEmpty()) return emptyList()
+        return database.withWriteTransaction { items.map { (identity, location) -> changedAt(identity, location) } }
+    }
+
+    /** The Keep as-is or Skip that counts for each identity among [rows], the decisions of those kinds. */
+    private fun statesOf(rows: List<StateDecisionRow>): Map<Long, Decided> = rows.groupBy { it.identityId }.mapNotNull { (identity, own) ->
+        val states = own.mapNotNull { row -> DecisionKind.ofCode(row.kind)?.let { DecisionValues(row.id, it, 0, emptySet()) } }
+        DecisionResolver.missingInfoOf(states)?.let { identity to it }
+    }.toMap()
 
     /**
      * Stores the identification [request] (TI §7.1): the ticked fields with all their parts, the per-track values as
@@ -189,6 +258,7 @@ class Decisions(private val database: UserDatabase, private val clock: () -> Lon
                 metadata = dao.liveMetadata(),
                 choices = decisions.mapNotNull { it.releaseChoiceId }.distinct().chunked(CHUNK).flatMap { dao.releaseChoices(it) },
                 keys = dao.decidedKeys(),
+                states = dao.liveStates(),
             )
         }
         // Decoding and resolving made up most of a whole run with a decision on each of 20 000 files (TI §11.2), so they
@@ -200,7 +270,12 @@ class Decisions(private val database: UserDatabase, private val clock: () -> Lon
                 .parallel { own -> own.mapNotNull { (identity, decisions) -> resolvedOne(decisions, metadata, choices)?.let { identity to it } } }
                 .toMap()
             val keys = read.keys.associate { it.identityId to Hex.text(it.contentKey) }
-            Snapshot(read.counter, decided.mapNotNull { (identity, values) -> keys[identity]?.let { it to values } }.toMap())
+            val stateKeys = read.states.associate { it.identityId to it.contentKey }
+            Snapshot(
+                read.counter,
+                decided.mapNotNull { (identity, values) -> keys[identity]?.let { it to values } }.toMap(),
+                statesOf(read.states).mapNotNull { (identity, state) -> stateKeys[identity]?.let { Hex.text(it) to state } }.toMap(),
+            )
         }
     }
 
@@ -211,6 +286,7 @@ class Decisions(private val database: UserDatabase, private val clock: () -> Lon
         val metadata: List<TrackMetadataEntity>,
         val choices: List<ReleaseChoiceEntity>,
         val keys: List<DecisionKeyRow>,
+        val states: List<StateDecisionRow>,
     )
 
     /** [transform] of this list's items in parts, a few per core, on the calling dispatcher; in order. */
@@ -225,7 +301,11 @@ class Decisions(private val database: UserDatabase, private val clock: () -> Lon
      * until the user chooses. Each part compares with the references of the decision that wins it now. The flagged
      * parts, those flagged before included.
      */
-    suspend fun fileChanged(identityId: Long, location: LocationValues): Set<DecidedField> = database.withWriteTransaction {
+    suspend fun fileChanged(identityId: Long, location: LocationValues): Set<DecidedField> =
+        database.withWriteTransaction { changedAt(identityId, location) }
+
+    /** [fileChanged] inside the caller's transaction. */
+    private suspend fun changedAt(identityId: Long, location: LocationValues): Set<DecidedField> {
         val decisions = dao.decisionsOf(identityId).filter { it.undoneAt == null }
         val winners = DecisionResolver.resolve(values(decisions, metadataOf(decisions), choicesOf(decisions)))
         val ofDecision = decisions.associate { it.id to FileReferences.decode(it.fileValues) }
@@ -246,7 +326,7 @@ class Decisions(private val database: UserDatabase, private val clock: () -> Lon
                 },
             )
         }
-        changed + flaggedBefore
+        return changed + flaggedBefore
     }
 
     /**
@@ -361,7 +441,10 @@ class Decisions(private val database: UserDatabase, private val clock: () -> Lon
             values[DecidedField.RECORDING_MBID] = Hex.mbidText(decision.recordingMbid)
             values[DecidedField.RELEASE_TRACK_MBID] = Hex.mbidText(decision.releaseTrackMbid)
         }
-        DecisionValues(decision.id, kind, decision.createdAt, DecisionCodec.fields(decision.fields), values, decision.undoneAt != null)
+        DecisionValues(
+            decision.id, kind, decision.createdAt, DecisionCodec.fields(decision.fields), values, decision.undoneAt != null,
+            lapsed = decision.lapsedAt != null,
+        )
     }
 
     private fun resolved(

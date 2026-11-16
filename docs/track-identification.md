@@ -119,8 +119,9 @@ in PiPlayer's database by default, and optionally into the file's tags with undo
     "Skipped" after its reasons in its row.
   - A Skip stores the size and the modification time of the file it is made on. Each time the tag pass has stored a
     batch, every Skip that counts is checked for the files of the batch, those it could not read included: the Skip of
-    the track a file belonged to before the read (as `decided_mirror` shows it) and the Skip of the track it belongs to
-    now. A Skip lapses when no file of its track holds the stored size and modification time any more. So a file
+    the track a file belonged to before the read (as `decided_mirror` shows it), the Skip of the track it belongs to
+    now, and the Skip of a track whose location hint is the file's place (since the sync forgets the key of a changed
+    file, a whole run may have cleared its rows before the pass reads it). A Skip lapses when no file of its track holds the stored size and modification time any more. So a file
     changed by a tagger lets it lapse (the sync forgets what the pass read of a file whose size or modification time
     changed, and the pass reads it again), and so does a new content key, since the file then leaves the track's key;
     a byte-identical copy that appears, a move, a full read of the library and a library rebuild do not.

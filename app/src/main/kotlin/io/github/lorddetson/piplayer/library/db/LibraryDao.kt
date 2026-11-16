@@ -562,6 +562,7 @@ data class ListSongRow(
     val sectionNumber: Long? = null,
     /** In Songs missing information, the chosen reasons the song has (docs/library.md §17.1); other lists select none. */
     val reasons: Int? = null,
+    /** In Songs missing information, whether the song carries the Skip mark (TI §1); other lists select none. */
     val skipped: Boolean = false,
 )
 

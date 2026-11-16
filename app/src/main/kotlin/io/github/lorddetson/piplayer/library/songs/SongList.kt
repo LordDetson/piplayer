@@ -164,10 +164,15 @@ object SongList {
 
     /**
      * A new value whenever [query]'s list may be read: [changes], and for a smart list also after every run of the mirror,
-     * which follows every change of favorites, plays and own covers and every attach pass (docs/library.md §17.4).
+     * which follows every change of favorites, plays and own covers and every attach pass (docs/library.md §17.4), and
+     * after every run of the decision mirror that changed what it mirrors, such as a Keep as-is or a Skip (TI §1).
      */
     fun changes(context: Context, query: SongQuery): Flow<Any> =
-        if (query.kind.smart) changes(context).combine(Library.mirrorVersion(context), ::Pair) else changes(context)
+        if (query.kind.smart) {
+            combine(changes(context), Library.mirrorVersion(context), Library.decisionVersion(context)) { a, b, c -> Triple(a, b, c) }
+        } else {
+            changes(context)
+        }
 
     /**
      * Reads [source], which gives its songs in list order, and keeps the list as [query], unless a read of it that

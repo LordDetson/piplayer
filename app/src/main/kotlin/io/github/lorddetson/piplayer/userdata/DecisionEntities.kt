@@ -207,6 +207,43 @@ interface DecisionDao {
     )
     suspend fun decidedKeys(): List<DecisionKeyRow>
 
+    /**
+     * Whether any decision is mirrored (TI §10.1): one that may decide values, or a Keep as-is or Skip that counts, not
+     * undone; so that the mirror after a batch of the tag pass costs nothing in a library without one.
+     */
+    @Query(
+        "SELECT EXISTS(SELECT 1 FROM decision WHERE undone_at IS NULL AND (kind IN (1, 2, 3) OR (kind IN (4, 5) AND lapsed_at IS NULL)))",
+    )
+    suspend fun hasMirroredDecisions(): Boolean
+
+    /** The Keep as-is and Skip decisions that are neither undone nor lapsed, with their identities' keys (TI §1). */
+    @Query("$LIVE_STATES WHERE d.undone_at IS NULL AND d.lapsed_at IS NULL AND d.kind IN (4, 5)")
+    suspend fun liveStates(): List<StateDecisionRow>
+
+    /** [liveStates] of [identityIds] (at most 500 at once). */
+    @Query("$LIVE_STATES WHERE d.undone_at IS NULL AND d.lapsed_at IS NULL AND d.kind IN (4, 5) AND d.identity_id IN (:identityIds)")
+    suspend fun liveStatesOf(identityIds: List<Long>): List<StateDecisionRow>
+
+    @Query("SELECT EXISTS(SELECT 1 FROM decision WHERE kind = 5 AND undone_at IS NULL AND lapsed_at IS NULL)")
+    suspend fun hasLiveSkips(): Boolean
+
+    /** Every Skip that counts, with its identity's key and location hint (TI §1). */
+    @Query(
+        "SELECT d.id AS decisionId, d.identity_id AS identityId, i.content_key AS contentKey, i.hint_volume_name AS hintVolume, " +
+            "i.hint_relative_path AS hintRelativePath, i.hint_display_name AS hintDisplayName, d.file_size AS size, " +
+            "d.file_mtime AS mtimeMs FROM decision d JOIN track_identity i ON i.id = d.identity_id " +
+            "WHERE d.kind = 5 AND d.undone_at IS NULL AND d.lapsed_at IS NULL AND i.start_ms = 0",
+    )
+    suspend fun liveSkips(): List<LiveSkipRow>
+
+    /** Marks the Skips [ids] lapsed at [at], those that count only; how many it marked (at most 500 at once). */
+    @Query("UPDATE decision SET lapsed_at = :at WHERE kind = 5 AND undone_at IS NULL AND lapsed_at IS NULL AND id IN (:ids)")
+    suspend fun markLapsed(ids: List<Long>, at: Long): Int
+
+    /** Which of [identityIds] (at most 500 at once) have decisions that may decide values and are not undone. */
+    @Query("SELECT DISTINCT identity_id FROM decision WHERE undone_at IS NULL AND kind IN (1, 2, 3) AND identity_id IN (:identityIds)")
+    suspend fun identitiesWithLiveValues(identityIds: List<Long>): List<Long>
+
     @Query("SELECT * FROM file_state WHERE identity_id = :identityId")
     suspend fun fileStates(identityId: Long): List<FileStateEntity>
 
@@ -218,4 +255,25 @@ interface DecisionDao {
 
     @Query("SELECT * FROM saved_cover WHERE id = :id")
     suspend fun savedCover(id: Long): SavedCoverEntity?
+
+    companion object {
+        /** The Keep as-is and Skip decisions with their identities' keys; the conditions follow. */
+        const val LIVE_STATES = "SELECT d.id, d.identity_id AS identityId, d.kind, i.content_key AS contentKey FROM decision d " +
+            "JOIN track_identity i ON i.id = d.identity_id AND i.start_ms = 0"
+    }
 }
+
+/** A Keep as-is or Skip decision of [identityId] with its identity's [contentKey]. */
+data class StateDecisionRow(val id: Long, val identityId: Long, val kind: Int, val contentKey: ByteArray)
+
+/** A Skip that counts, with its identity's key and location hint and the stamp it stored. */
+data class LiveSkipRow(
+    val decisionId: Long,
+    val identityId: Long,
+    val contentKey: ByteArray,
+    val hintVolume: String?,
+    val hintRelativePath: String?,
+    val hintDisplayName: String?,
+    val size: Long?,
+    val mtimeMs: Long?,
+)

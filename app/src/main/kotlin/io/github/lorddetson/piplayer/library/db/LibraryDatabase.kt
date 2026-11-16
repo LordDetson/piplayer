@@ -9,6 +9,7 @@ import androidx.room3.PrimaryKey
 import androidx.room3.Room
 import androidx.room3.RoomDatabase
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
+import io.github.lorddetson.piplayer.library.lists.MissingInfoDecision
 import java.io.File
 import kotlinx.coroutines.Dispatchers
 
@@ -165,9 +166,9 @@ data class TrackDisplayEntity(
     @ColumnInfo(name = "badge_state", defaultValue = "0") val badgeState: Int = BADGE_NONE,
 ) {
     companion object {
-        const val DECISION_NONE = 0
-        const val DECISION_KEEP_AS_IS = 1
-        const val DECISION_SKIPPED = 2
+        const val DECISION_NONE = MissingInfoDecision.NONE
+        const val DECISION_KEEP_AS_IS = MissingInfoDecision.KEEP_AS_IS
+        const val DECISION_SKIPPED = MissingInfoDecision.SKIPPED
 
         /** No decision wins: the values come from the file (the badge's "from tags"); M3 step 12 adds the others. */
         const val BADGE_NONE = 0

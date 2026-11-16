@@ -176,6 +176,7 @@ class LibraryLists(
             mediaStoreId = row.mediaStoreId,
             section = section,
             reasons = row.reasons,
+            skipped = row.skipped,
         )
 
     /** A song read by its ID, in no list's order, so without a section. */
@@ -483,15 +484,15 @@ class LibraryLists(
             !missing -> sql.add("SELECT $SONG_COLUMNS, ${SECTIONS.getValue(query.sort)}")
             checkCovers -> sql.add(
                 "SELECT $SONG_COLUMNS, ${SECTIONS.getValue(query.sort)}, (CASE WHEN $own THEN d.missing_info_reasons & " +
-                    "${MissingReasons.ALL and MissingReasons.COVER.inv()} ELSE d.missing_info_reasons END) & $chosen AS reasons",
+                    "${MissingReasons.ALL and MissingReasons.COVER.inv()} ELSE d.missing_info_reasons END) & $chosen AS reasons, $SKIPPED",
                 *coverArgs,
             )
-            else -> sql.add("SELECT $SONG_COLUMNS, ${SECTIONS.getValue(query.sort)}, d.missing_info_reasons & $chosen AS reasons")
+            else -> sql.add("SELECT $SONG_COLUMNS, ${SECTIONS.getValue(query.sort)}, d.missing_info_reasons & $chosen AS reasons, $SKIPPED")
         }
         if (missing) {
             sql.add(
                 " FROM track_display d INDEXED BY index_track_display_missing_info_reasons CROSS JOIN audio_file f ON f.id = d.file_id " +
-                    "WHERE d.missing_info_reasons IN (${sets.joinToString(",")})",
+                    "WHERE d.missing_info_reasons IN (${sets.joinToString(",")}) AND d.missing_info_decision != ${MissingInfoDecision.KEEP_AS_IS}",
             )
             if (checkCovers) sql.add(" AND ((d.missing_info_reasons & ${chosen and MissingReasons.COVER.inv()}) != 0 OR NOT $own)", *coverArgs)
         } else {
@@ -615,6 +616,9 @@ class LibraryLists(
 
     companion object {
         /** What a list selects of a song, from `track_display d` and `audio_file f`. */
+        /** Whether a song of Songs missing information carries the Skip mark (TI §1); a song kept as it is is not listed. */
+        private const val SKIPPED = "d.missing_info_decision = ${MissingInfoDecision.SKIPPED} AS skipped"
+
         private const val SONG_COLUMNS = "f.id AS fileId, f.media_store_id AS mediaStoreId, d.title, d.artist, d.album, " +
             "d.duration_ms AS durationMs, d.disc_number AS discNumber, f.relative_path AS relativePath"
 

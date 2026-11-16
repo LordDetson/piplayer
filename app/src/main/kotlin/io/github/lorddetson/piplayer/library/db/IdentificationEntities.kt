@@ -193,6 +193,12 @@ interface IdentificationRunDao {
     suspend fun dropTracedRuns(contentKey: String, runIds: List<String>)
 }
 
+/** A file's content key with its size and modification time (seconds), as the lapse of a Skip compares them (TI §1). */
+data class FileStampRow(val contentKey: String, val size: Long, val mtime: Long)
+
+/** A file's place and content key. */
+data class FilePlaceRow(val fileId: Long, val volume: String, val relativePath: String, val displayName: String, val contentKey: String?)
+
 /** Reads and plain writes of `decided_mirror` (TI §10.1); whole replacements go through [replaceDecided]. */
 @Dao
 interface DecidedMirrorDao {
@@ -206,6 +212,21 @@ interface DecidedMirrorDao {
     /** The files that hold the content keys [keys] (at most [CHUNK] at once). */
     @Query("SELECT id, content_key FROM audio_file WHERE content_key IN (:keys)")
     suspend fun filesWithKeys(keys: List<String>): List<FileKeyRow>
+
+    /** The Keep as-is and Skip rows of [fileIds] (at most [CHUNK] at once; TI §1, §10.1). */
+    @Query("SELECT * FROM decided_mirror WHERE field = 'missing_info_decision' AND file_id IN (:fileIds)")
+    suspend fun missingInfoOf(fileIds: List<Long>): List<DecidedMirrorEntity>
+
+    /** The size and modification time of the files that hold the content keys [keys] (at most [CHUNK] at once; TI §1). */
+    @Query("SELECT content_key AS contentKey, size, mtime FROM audio_file WHERE content_key IN (:keys)")
+    suspend fun stampsWithKeys(keys: List<String>): List<FileStampRow>
+
+    /** The places and keys of [fileIds] (at most [CHUNK] at once). */
+    @Query(
+        "SELECT id AS fileId, volume_name AS volume, relative_path AS relativePath, display_name AS displayName, " +
+            "content_key AS contentKey FROM audio_file WHERE id IN (:fileIds)",
+    )
+    suspend fun placesOf(fileIds: List<Long>): List<FilePlaceRow>
 
     @Upsert
     suspend fun saveValues(rows: List<DecidedMirrorEntity>)

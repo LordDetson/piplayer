@@ -267,10 +267,11 @@ object Library {
             gate = passGate::awaitOpen,
             onBatch = { rows ->
                 SongList.applyInPlace(rows)
-                // Favorites and play counts come back with the keys (docs/library.md §15.4), and so do decided values (TI §7.1).
+                // Favorites and play counts come back with the keys (docs/library.md §15.4).
                 library.mirror.requestFiles(rows.map { it.fileId })
-                library.decisions.requestFiles(rows.map { it.fileId })
             },
+            // So do decided values, and a Skip lapses with a changed file (TI §1, §7.1).
+            onStored = { read, failed -> library.decisions.requestRead(read, failed) },
         )
         val walks = DurationWalks(library.database, library.sync, reader, passGate, onBatch = SongList::applyLengths)
         return TagPassRunner(pass, library.sync.status, passGate, walks = walks, onRunEnd = library.identities::request)

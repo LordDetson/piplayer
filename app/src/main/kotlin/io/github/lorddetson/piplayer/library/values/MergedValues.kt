@@ -4,6 +4,7 @@ import android.provider.MediaStore
 import io.github.lorddetson.piplayer.identification.text.FileNameParser
 import io.github.lorddetson.piplayer.library.lists.DisplayArtists
 import io.github.lorddetson.piplayer.library.lists.DisplayGenres
+import io.github.lorddetson.piplayer.library.lists.MissingInfoDecision
 import io.github.lorddetson.piplayer.library.sync.DisplayValues
 import io.github.lorddetson.piplayer.settings.ProtectedField
 
@@ -23,9 +24,10 @@ data class IndexValues(
 
 /**
  * The winners of levels 1 and 2 per part (TI §7.1), as `decided_mirror` holds them: a part that is here wins, also with
- * an empty value.
+ * an empty value. [missingInfo] is the track's Keep as-is or Skip from the same rows (TI §1), a `MissingInfoDecision`
+ * code.
  */
-data class FieldOverrides(val decided: Map<DecidedField, Decided>, val missingInfo: Int = 0) {
+data class FieldOverrides(val decided: Map<DecidedField, Decided>, val missingInfo: Int = MissingInfoDecision.NONE) {
 
     /** User edits of the title, artist and album, as tests write them. */
     constructor(title: String? = null, artist: String? = null, album: String? = null) : this(
@@ -188,6 +190,7 @@ object MergedValues {
                 else -> null
             },
             badgeState = DecisionResolver.badgeOf(decided),
+            missingInfoDecision = overrides.missingInfo,
         )
     }
 
