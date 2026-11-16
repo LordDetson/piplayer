@@ -112,19 +112,23 @@ class IdentityAttacher(
     suspend fun attach(): AttachPlan = running.withLock {
         if (!ready()) return@withLock AttachPlan(emptyList(), emptyList(), emptyList())
         val now = clock()
-        val files = sync.exclusive { library.library().keyedFiles() }.map(::keyed)
+        // The places of the files the tag pass has not read yet, at which a missing identity waits (TI §10.2).
+        val (files, unread) = sync.exclusive {
+            val dao = library.library()
+            dao.keyedFiles().map(::keyed) to dao.unreadPlaces().mapTo(HashSet()) { Place(it.volume, it.relativePath, it.displayName) }
+        }
         val dao = user.identities()
         val stored = dao.identities()
         val holding = holders()
         val hints = playlists?.identityHints().orEmpty()
-        val plan = IdentityMatcher.plan(files, stored.map(::identity), holding, now)
+        val plan = IdentityMatcher.plan(files, stored.map(::identity), holding, now, unread)
         if (!plan.isEmpty) {
             write(plan, stored.associateBy { it.id }, now)
             changes.value++
         }
         // Step 4, the stronger evidence, before step 5 (TI §3.1): both take over files the plan gave new identities.
-        if (holding.isNotEmpty()) fingerprints?.let { step -> takeOver { identities -> step.takeovers(files, identities, holding) } }
-        if (hints.isNotEmpty()) takeOver { identities -> PlaylistHints.takeovers(files, identities, holding, hints) }
+        if (holding.isNotEmpty()) fingerprints?.let { step -> takeOver { identities -> step.takeovers(files, identities, holding, unread) } }
+        if (hints.isNotEmpty()) takeOver { identities -> PlaylistHints.takeovers(files, identities, holding, hints, unread) }
         // Entries without an identity take the one of the file their hints name, now that every settled file has one.
         playlists?.link(files)
         dropStaleFingerprints(now)

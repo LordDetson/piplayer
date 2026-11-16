@@ -48,7 +48,8 @@ class FingerprintStep(
 
     /**
      * The takeovers for [identities] over [files], after the other steps have run: only identities in [holdingData]
-     * look for a file, and only files whose identity is not in it may be taken.
+     * look for a file, and only files whose identity is not in it may be taken. An identity that waits for the read of
+     * the file at its hint ([IdentityMatcher.waitsForRead] with [unread]) looks for none.
      */
     suspend fun takeovers(
         files: List<KeyedFile>,
@@ -58,7 +59,9 @@ class FingerprintStep(
     ): List<Takeover> {
         val owners = identities.associateBy { it.contentKey }
         val attachedKeys = files.keys()
-        val missing = identities.filter { it.id in holdingData && it.contentKey !in attachedKeys && it.missingSince != null }
+        val missing = identities.filter {
+            it.id in holdingData && it.contentKey !in attachedKeys && it.missingSince != null && !IdentityMatcher.waitsForRead(it, unread)
+        }
         val takenKeys = HashSet<String>()
         val result = mutableListOf<Takeover>()
         for (identity in missing.sortedByDescending { it.id }) {

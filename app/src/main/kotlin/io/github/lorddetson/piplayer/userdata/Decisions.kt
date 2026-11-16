@@ -448,7 +448,8 @@ class Decisions(private val database: UserDatabase, private val clock: () -> Lon
      * The identity of [target] for Apply, inside its transaction: the one that holds the key, or else one made now (TI
      * §10.2 "An identity at Apply"). A file opened from another app gets a missing identity with the app's name and size
      * as hints; a library file, [libraryFile], gets the missing identity hinted at its place
-     * ([IdentityMatcher.atApply]) or else a new one with its place. Null when none can be (no file for a library target).
+     * ([IdentityMatcher.atApply]), by the exact length stage 0 found when the target carries it, or else a new one with
+     * its place. Null when none can be (no file for a library target).
      */
     private suspend fun identityAtApply(target: IdentificationTarget, libraryFile: ApplyFile?): Long? {
         if (target.startMs != 0L) return null
@@ -466,7 +467,9 @@ class Decisions(private val database: UserDatabase, private val clock: () -> Lon
                 ),
             )
             is IdentificationTarget.LibraryFile -> {
-                val file = libraryFile?.file?.takeIf { it.fileId == target.fileId }?.copy(contentKey = target.contentKey) ?: return null
+                // Stage 0's key, and its exact length when it found one: the index's can be off by more than step 2's 1 s.
+                val file = libraryFile?.file?.takeIf { it.fileId == target.fileId }
+                    ?.let { it.copy(contentKey = target.contentKey, durationMs = target.durationMs ?: it.durationMs) } ?: return null
                 // The identity of the key the library still stores for this file alone is the file's own, whose audio
                 // changed in place before the attach pass saw it. It counts as missing, and it comes first: it holds the
                 // file's old key, where another missing identity only names the place.

@@ -5,6 +5,7 @@ import io.github.lorddetson.piplayer.identification.IdentificationServices
 import io.github.lorddetson.piplayer.identification.acoustid.AcoustIdCandidates
 import io.github.lorddetson.piplayer.identification.acoustid.AcoustIdException
 import io.github.lorddetson.piplayer.identification.contract.IdentificationOutcome
+import io.github.lorddetson.piplayer.identification.contract.IdentificationTarget
 import io.github.lorddetson.piplayer.identification.fingerprint.DecodingException
 import io.github.lorddetson.piplayer.identification.musicbrainz.MusicBrainzClient
 import io.github.lorddetson.piplayer.identification.musicbrainz.MusicBrainzException
@@ -178,7 +179,11 @@ class IdentificationPipeline(
             }?.takeIf { it > 0 }
             hint = TrackHints.assemble(read.tags, read.fileName, durationMs)
             stages += StageReport(PipelineStage.LOCAL_READ, StageResult.Ran(0), start.elapsedNow(), startedAt)
-            return read
+            // A library file's target carries the exact length, which Apply matches the file by (TI §10.2).
+            val target = read.target
+            val withLength = if (target is IdentificationTarget.LibraryFile) read.copy(target = target.copy(durationMs = durationMs)) else read
+            file = withLength
+            return withLength
         }
 
         /** The file's lookup job; one that cannot be read counts as none (TI §3 "One run"). */

@@ -103,7 +103,9 @@ object PlaylistHints {
      * identity could take that file. As in step 4, a file may be taken only from an identity outside [holdingData] made
      * since the missing one went missing, which is then deleted. Byte-identical copies are one file: a hint may name any
      * copy of a key, an identity whose hints name copies of one key alone takes that key, and the copy it takes over is
-     * the one at a hinted place, else the lowest file ID among the copies its hints name.
+     * the one at a hinted place, else the lowest file ID among the copies its hints name. An identity that waits for
+     * the read of the file at its hint ([IdentityMatcher.waitsForRead] with [unread]) takes nothing, but its claims still
+     * keep another identity from a file it could take.
      */
     fun takeovers(
         files: List<KeyedFile>,
@@ -131,6 +133,8 @@ object PlaylistHints {
         }
         val claims = candidates.flatMap { (_, matched) -> matched.map { (key, _) -> key } }.groupingBy { it }.eachCount()
         return candidates.mapNotNull { (identity, matched) ->
+            // One that waits for the read of the file at its hint takes nothing, but its claims above still count.
+            if (IdentityMatcher.waitsForRead(identity, unread)) return@mapNotNull null
             val (key, named) = matched.singleOrNull()?.takeIf { (key, _) -> claims[key] == 1 } ?: return@mapNotNull null
             val places = hints.getValue(identity.id).mapNotNullTo(HashSet()) { it.place }
             val file = named.filter { it.place in places }.minByOrNull { it.fileId } ?: named.minBy { it.fileId }

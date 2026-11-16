@@ -8,8 +8,9 @@ import kotlinx.coroutines.withContext
 
 /**
  * The library's files as Apply gives them an identity (TI §10.2 "An identity at Apply"), read through [library] so that
- * a rebuild never closes the database under the read. The length counts as settled: the index's length stands in for a
- * walk the tag pass has not made yet, since step 2 of re-attachment needs one.
+ * a rebuild never closes the database under the read. The length counts as settled: the stored or else the index's
+ * length stands in for a walk the tag pass has not made yet, since step 2 of re-attachment needs one, unless the target
+ * carries stage 0's exact length, which Apply takes instead.
  */
 class LibraryApplyFiles(
     private val library: LibraryAccess,

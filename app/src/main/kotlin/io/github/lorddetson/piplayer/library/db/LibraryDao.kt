@@ -383,6 +383,16 @@ interface LibraryDao {
     suspend fun keyedFiles(): List<KeyedFileRow>
 
     /**
+     * The places of the files the tag pass has not read yet and has not failed on, at which a missing identity waits
+     * for that read (TI §10.2 "An identity at Apply", docs/library.md §8.2).
+     */
+    @Query(
+        "SELECT id AS fileId, volume_name AS volume, relative_path AS relativePath, display_name AS displayName " +
+            "FROM audio_file WHERE tag_pass_at IS NULL AND tag_failure IS NULL",
+    )
+    suspend fun unreadPlaces(): List<StoredPlace>
+
+    /**
      * The file [fileId] as Apply gives it an identity (TI §10.2 "An identity at Apply"), also before the tag pass has
      * read it: its place and size, its exact length or else the index's, and no tags. Its content key is the stored one,
      * empty when none is stored; Apply takes stage 0's.
