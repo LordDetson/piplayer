@@ -101,7 +101,7 @@ class IdentificationPipelineDeviceTest {
         val first = pipeline(services()).run(FileRef.Opened(uri)) { progress += it }
 
         val found = first.outcome as IdentificationOutcome.Found
-        assertThat(found.band).isEqualTo(Band.HIGH)
+        assertThat(found.band).describedAs("stages %s, duration %s ms", first.stages, first.durationMs).isEqualTo(Band.HIGH)
         assertThat(found.choice.suggested!!.release.id).isEqualTo(FakeMusicBrainz.HARBOR_RELEASE)
         assertThat(found.choice.suggested.source).isEqualTo(EditionSource.RANKING)
         assertThat(found.acoustIdTrackId).isEqualTo(ID_ONLY_TRACK)

@@ -11,6 +11,7 @@ import io.github.lorddetson.piplayer.identification.musicbrainz.MusicBrainzExcep
 import io.github.lorddetson.piplayer.identification.musicbrainz.toCandidate
 import io.github.lorddetson.piplayer.identification.provider.ProviderId
 import io.github.lorddetson.piplayer.identification.provider.ProviderStatus
+import io.github.lorddetson.piplayer.identification.provider.ProviderStoppedException
 import io.github.lorddetson.piplayer.identification.provider.StopReason
 import io.github.lorddetson.piplayer.identification.release.ReleaseChoice
 import io.github.lorddetson.piplayer.identification.release.ReleaseRequest
@@ -103,7 +104,10 @@ class IdentificationPipeline(
             val start = timeSource.markNow()
             val read = try {
                 local.read(ref)
-            } catch (e: IOException) {
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // A file gone, a reader that failed in its own way: no content key either way.
                 null
             }
             if (read == null) {
@@ -119,7 +123,9 @@ class IdentificationPipeline(
                     lengthWalked = true
                     val walked = try {
                         local.walk(read, duration.plan)
-                    } catch (e: IOException) {
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
                         null
                     }
                     // The FLAC end check keeps the header value unless the last frame ends sooner (TI §3.1).
@@ -193,6 +199,16 @@ class IdentificationPipeline(
             }
             val response = try {
                 stage.acoustId.lookup(encoded, duration!!)
+            } catch (e: ProviderStoppedException) {
+                if (e.provider != ProviderId.ACOUSTID) throw Blocked(IdentificationOutcome.ProviderStopped(e.provider, e.reason))
+                // AcoustID stopped after the stage was checked, by another run's error 4: its stop only skips the stage.
+                acoustIdStop = e.reason
+                stages += StageReport(
+                    PipelineStage.FINGERPRINT,
+                    StageResult.Skipped(SkipReason.PROVIDER_STOPPED),
+                    start.elapsedNow(),
+                )
+                return
             } catch (e: IOException) {
                 blockedOrNull(e)
                 // A refused key stops AcoustID for the process (TI §3.2); anything else is the service failing.
@@ -217,7 +233,14 @@ class IdentificationPipeline(
 
         /** The cached fingerprint encoded from its raw items, or the string of the session that computes it now. */
         private suspend fun encoded(read: LocalFile): String {
-            val cached = fingerprints.cached(read.target.contentKey)
+            val cached = try {
+                fingerprints.cached(read.target.contentKey)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: RuntimeException) {
+                // A cache that cannot be read now is a miss: the file is decoded again.
+                null
+            }
             if (cached != null) {
                 fingerprint = FingerprintSource.CACHED
                 return try {
@@ -227,7 +250,13 @@ class IdentificationPipeline(
                 }
             }
             onProgress(PipelineProgress.Decoding)
-            val computed = fingerprints.compute(read)
+            val computed = try {
+                fingerprints.compute(read)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: RuntimeException) {
+                throw IOException("The fingerprint could not be computed", e)
+            }
             fingerprint = FingerprintSource.COMPUTED
             return computed.encoded
         }

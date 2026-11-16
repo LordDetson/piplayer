@@ -111,7 +111,7 @@ class IdentificationPipelineTest {
     @Test
     fun `a cached fingerprint is encoded from its raw items and nothing is decoded`() = runTest {
         val pipeline = pipeline()
-        fingerprints.stored[KEY] = CachedFingerprint(RAW, acoustIdTrackId = null)
+        fingerprints.stored[KEY] = CachedFingerprint(RAW)
         acoustId.on(FakeEncoder.encoded(RAW), ID_ONLY)
 
         val result = pipeline.runOpened()
@@ -149,7 +149,6 @@ class IdentificationPipelineTest {
         val result = pipeline.runOpened()
 
         assertThat(fingerprints.kept).containsExactly(org.assertj.core.api.Assertions.entry(KEY, CLOSE_SCORES_BEST))
-        assertThat(fingerprints.stored[KEY]!!.acoustIdTrackId).isEqualTo(CLOSE_SCORES_BEST)
         assertThat(result.found().acoustIdTrackId).isEqualTo(CLOSE_SCORES_BEST)
     }
 
@@ -449,6 +448,56 @@ class IdentificationPipelineTest {
     }
 
     @Test
+    fun `an AcoustID that stops after its stage was checked only skips the stage`() = runTest {
+        val pipeline = pipeline()
+        // Another run's error 4 stops AcoustID while this file decodes.
+        fingerprints.whileComputing = { statuses.stop(ProviderId.ACOUSTID, StopReason.INVALID_API_KEY) }
+
+        val result = pipeline.runOpened()
+
+        assertThat(result.stage(PipelineStage.FINGERPRINT)).isEqualTo(StageResult.Skipped(SkipReason.PROVIDER_STOPPED))
+        assertThat(acoustIdRequests()).isEmpty()
+        assertThat(result.stage(PipelineStage.TEXT_SEARCH)).isInstanceOf(StageResult.Ran::class.java)
+        assertThat(result.found().band).isEqualTo(Band.MEDIUM)
+    }
+
+    @Test
+    fun `a fingerprint cache that cannot be read counts as a miss`() = runTest {
+        val pipeline = pipeline()
+        fingerprints.cacheFailure = IllegalStateException("database closed")
+        acoustId.on(SESSION, ID_ONLY)
+
+        val result = pipeline.runOpened()
+
+        assertThat(fingerprints.computes).isEqualTo(1)
+        assertThat(result.fingerprint).isEqualTo(FingerprintSource.COMPUTED)
+        assertThat(result.found().band).isEqualTo(Band.HIGH)
+    }
+
+    @Test
+    fun `a fingerprint computation that fails in its own way fails the stage and the text search still runs`() = runTest {
+        val pipeline = pipeline()
+        fingerprints.runtimeFailure = IllegalStateException("codec released")
+
+        val result = pipeline.runOpened()
+
+        assertThat(result.stage(PipelineStage.FINGERPRINT)).isInstanceOf(StageResult.Failed::class.java)
+        assertThat(acoustIdRequests()).isEmpty()
+        assertThat(result.stage(PipelineStage.TEXT_SEARCH)).isInstanceOf(StageResult.Ran::class.java)
+    }
+
+    @Test
+    fun `a stage 0 that fails in its own way ends the run as unreadable`() = runTest {
+        val pipeline = pipeline()
+        local.failure = IllegalStateException("binder gone")
+
+        val result = pipeline.runOpened()
+
+        assertThat(result.outcome).isEqualTo(IdentificationOutcome.Unreadable)
+        assertThat(log.size).isZero()
+    }
+
+    @Test
     fun `an unreadable file ends the run and sends nothing`() = runTest {
         val pipeline = pipeline()
         local.file = null
@@ -615,8 +664,12 @@ class IdentificationPipelineTest {
         @Volatile
         var walked: Long? = null
 
+        @Volatile
+        var failure: RuntimeException? = null
+
         override suspend fun read(file: FileRef): LocalFile? {
             reads += file
+            failure?.let { throw it }
             return this.file
         }
 
@@ -643,21 +696,29 @@ class IdentificationPipelineTest {
         @Volatile
         var suspendUntil: CompletableDeferred<Unit>? = null
 
-        override suspend fun cached(contentKey: String): CachedFingerprint? = stored[contentKey]
+        @Volatile
+        var cacheFailure: RuntimeException? = null
+
+        @Volatile
+        var runtimeFailure: RuntimeException? = null
+
+        override suspend fun cached(contentKey: String): CachedFingerprint? {
+            cacheFailure?.let { throw it }
+            return stored[contentKey]
+        }
 
         override suspend fun compute(file: LocalFile): ComputedFingerprint {
             computes++
             whileComputing()
             suspendUntil?.await()
             failure?.let { throw it }
-            val key = file.target.contentKey
-            stored[key] = CachedFingerprint(RAW, stored[key]?.acoustIdTrackId)
+            runtimeFailure?.let { throw it }
+            stored[file.target.contentKey] = CachedFingerprint(RAW)
             return ComputedFingerprint(RAW, SESSION)
         }
 
         override suspend fun keepAcoustIdTrack(contentKey: String, trackId: String) {
             kept[contentKey] = trackId
-            stored[contentKey]?.let { stored[contentKey] = CachedFingerprint(it.raw, trackId) }
         }
     }
 

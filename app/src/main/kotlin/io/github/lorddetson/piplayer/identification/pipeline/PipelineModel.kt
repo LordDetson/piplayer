@@ -57,8 +57,8 @@ interface LocalStage {
     suspend fun walk(file: LocalFile, plan: DurationPlan): Long?
 }
 
-/** A fingerprint cached for a content key (TI §10.1): its raw items and the AcoustID track ID of its best result. */
-class CachedFingerprint(val raw: IntArray, val acoustIdTrackId: String?)
+/** A fingerprint cached for a content key (TI §10.1): its raw items. */
+class CachedFingerprint(val raw: IntArray)
 
 /** A fingerprint just computed: its raw items and the compressed string of the session that made them (TI §3.2). */
 class ComputedFingerprint(val raw: IntArray, val encoded: String)

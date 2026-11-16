@@ -75,23 +75,10 @@ class LibraryFingerprints(
      * the copy or the decoder soon.
      */
     suspend fun compute(uri: Uri, contentKey: String, format: String?, lane: Lane): FingerprintResult {
-        val result = withContext(lane.dispatcher) {
-            val job = coroutineContext.job
-            val descriptor = context.contentResolver.openFileDescriptor(uri, "r")
-                ?: throw FileNotFoundException("No descriptor for $uri")
-            // The calculator keeps to the lane's thread, so the lane is busy until the fingerprint is made.
-            descriptor.use {
-                NativeFingerprinting.calculator(dispatcher = lane.dispatcher)
-                    .fingerprint(sources(it) { !job.isActive })
-            }
-        }
+        val result = decode(context, uri, lane, sources)
         // Cached after leaving the lane: Room suspends to its own threads, and coming back to the lane's single thread
         // would queue the end of this request behind the next request's whole decode.
-        library.library().saveComputedFingerprint(
-            FingerprintEntity(
-                contentKey, bytes(result.fingerprint.raw), format, clock(), decoderPath = result.source.decoderPath,
-            ),
-        )
+        library.library().saveComputedFingerprint(entity(contentKey, format, result, clock()))
         return result
     }
 
@@ -104,6 +91,38 @@ class LibraryFingerprints(
                 task.run()
             }, name).apply { isDaemon = true }
         }.asCoroutineDispatcher()
+
+        /**
+         * The fingerprint of the file at [uri], decoded on [lane]'s thread by the source [sources] makes, without
+         * caching it; [compute] caches it too. Single-file identification caches it itself, under the library's lock.
+         */
+        suspend fun decode(
+            context: Context,
+            uri: Uri,
+            lane: Lane,
+            sources: (descriptor: ParcelFileDescriptor, cancelled: () -> Boolean) -> PcmSource = { descriptor, cancelled ->
+                MediaCodecPcmSource(context, descriptor.fileDescriptor, cancelled, checkError = descriptor::checkError)
+            },
+        ): FingerprintResult = withContext(lane.dispatcher) {
+            val job = coroutineContext.job
+            val descriptor = context.contentResolver.openFileDescriptor(uri, "r")
+                ?: throw FileNotFoundException("No descriptor for $uri")
+            // The calculator keeps to the lane's thread, so the lane is busy until the fingerprint is made.
+            descriptor.use {
+                NativeFingerprinting.calculator(dispatcher = lane.dispatcher)
+                    .fingerprint(sources(it) { !job.isActive })
+            }
+        }
+
+        /** The cache row of [result], computed at [computedAt] for [contentKey]. */
+        fun entity(
+            contentKey: String,
+            format: String?,
+            result: FingerprintResult,
+            computedAt: Long = System.currentTimeMillis(),
+        ) = FingerprintEntity(
+            contentKey, bytes(result.fingerprint.raw), format, computedAt, decoderPath = result.source.decoderPath,
+        )
 
         fun bytes(items: IntArray): ByteArray = ByteBuffer.allocate(items.size * 4).apply { items.forEach(::putInt) }.array()
 
