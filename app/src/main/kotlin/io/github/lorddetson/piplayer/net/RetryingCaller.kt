@@ -39,8 +39,9 @@ fun interface CallGuard {
  * lookups off, a provider's stop or a lost network ends a call that is waiting out a backoff. A [SendBlockedException]
  * from the guard or from the client's gate fails the call as it is: it is never retried and never pauses the limiter.
  *
- * Every attempt sent is reported to the [HttpTrace] of the calling coroutine, if it has one, with its answer's status
- * (TI §10.1); a blocked attempt sent nothing and is not reported.
+ * Every attempt made, answered or not, is reported to the [HttpTrace] of the calling coroutine, if it has one, with its
+ * answer's status or as unanswered (TI §10.1); a failed lookup of the host or a refused connection is an attempt too,
+ * although it sends no byte. A blocked attempt is no attempt and is not reported.
  */
 class RetryingCaller(
     private val http: OkHttpClient,

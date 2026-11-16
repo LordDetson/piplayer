@@ -420,7 +420,7 @@ class IdentificationPipeline(
          */
         private suspend fun stored(outcome: IdentificationOutcome, ranking: Ranking, choice: ReleaseChoice): PipelineResult {
             val change = jobChange()
-            // Only a retry this run stored or waited for is reported, so never a time that has passed (TI §3.2).
+            // Only a retry this run stored (or tried to) or waited for is reported, never a time that has passed (TI §3.2).
             val waiting = when (change) {
                 is JobChange.Save -> change.job.nextAttemptAt
                 JobChange.Drop -> null

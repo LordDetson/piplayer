@@ -176,9 +176,11 @@ enum class FingerprintSource { CACHED, COMPUTED }
  * @property lengthWalked the length was walked in this run.
  * @property stages every stage that was reached, in order.
  * @property fingerprint where stage 3 took its fingerprint from; null when it took none.
- * @property retryLater the file waits for the retry of an empty AcoustID result after this run (TI §3.2).
- * @property retryAt when that retry is due, by the services' clock; null unless this run stored the job or skipped
- *   stage 3 while it waits, so never a time that has passed.
+ * @property retryLater this run reports a retry of an empty AcoustID result (TI §3.2): true only when it stored, or tried
+ *   to store, a `retry_later` job, or skipped stage 3 as retry pending; the same as `retryAt != null`.
+ * @property retryAt when that retry is due, by the services' clock; null unless this run stored, or tried to store, the
+ *   job or skipped stage 3 while it waits, so never a time that has passed. A job that could not be written still
+ *   reports its time.
  */
 data class PipelineResult(
     val outcome: IdentificationOutcome,

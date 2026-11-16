@@ -31,7 +31,7 @@ class HttpTrace : AbstractCoroutineContextElement(HttpTrace) {
         lastStatus = null
     }
 
-    /** What was seen so far; null when no attempt was sent. */
+    /** What was seen so far; null when no attempt was made, answered or not. */
     fun summary(): HttpSummary? = synchronized(lock) {
         if (requests == 0) null else HttpSummary(requests, lastStatus, elapsedMs)
     }
