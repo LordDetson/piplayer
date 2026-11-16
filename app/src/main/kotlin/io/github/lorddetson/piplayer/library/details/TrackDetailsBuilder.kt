@@ -48,8 +48,16 @@ import io.github.lorddetson.piplayer.library.details.DetailField.TRACK_ID
 import io.github.lorddetson.piplayer.identification.provider.ProviderId
 import io.github.lorddetson.piplayer.identification.score.Reason
 import io.github.lorddetson.piplayer.library.tagpass.DurationSource
+import io.github.lorddetson.piplayer.library.details.DetailField.ACOUSTID_ID
 import io.github.lorddetson.piplayer.library.values.DecidedField
+import io.github.lorddetson.piplayer.library.values.DecisionKind
+import io.github.lorddetson.piplayer.library.values.DecisionResolver
 import io.github.lorddetson.piplayer.library.values.DecisionValues
+import io.github.lorddetson.piplayer.library.values.PartKind
+import io.github.lorddetson.piplayer.library.identity.Hex
+import io.github.lorddetson.piplayer.settings.ProtectedField
+import io.github.lorddetson.piplayer.userdata.DecisionCodec
+import io.github.lorddetson.piplayer.userdata.Decisions
 import io.github.lorddetson.piplayer.library.values.FieldOverrides
 import io.github.lorddetson.piplayer.library.values.IndexValues
 import io.github.lorddetson.piplayer.library.values.MergedValues
@@ -99,7 +107,19 @@ data class DecisionRecord(
     val reason: Reason? = null,
     val acoustId: String? = null,
     val fetchedAt: Long? = null,
-)
+) {
+    companion object {
+        /** The record of a [stored] decision, its provenance decoded (TI §10.2). */
+        fun of(stored: Decisions.Stored): DecisionRecord = DecisionRecord(
+            values = stored.values,
+            provider = DecisionCodec.provider(stored.row.provider),
+            confidence = DecisionCodec.confidence(stored.row.confidence),
+            reason = DecisionCodec.reason(stored.row.reason),
+            acoustId = Hex.mbidText(stored.row.acoustIdId),
+            fetchedAt = stored.row.fetchedAt,
+        )
+    }
+}
 
 /**
  * Everything details are made of; [fileId] is null for a file opened from another app. [decisions] are every decision of
@@ -131,6 +151,12 @@ object TrackDetailsBuilder {
         // Level 3 counts once the file is read, level 4 only before (TI §7.1).
         val tags = inputs.tags.takeIf { read }
         val index = inputs.index.takeIf { !read }
+        val records = inputs.decisions
+        // Levels 1 and 2 from the identity's decisions, by the resolver that fills `decided_mirror` (TI §7.1, §18.7).
+        val overrides = records?.let { FieldOverrides(DecisionResolver.resolve(it.map(DecisionRecord::values)), inputs.overrides.missingInfo) }
+            ?: inputs.overrides
+        val decided = overrides.decided
+        val providers = records.orEmpty().associate { it.values.id to it.provider }
         // The resolver of the lists itself, so that the fields it resolves are exactly what the lists show.
         val merged = MergedValues.of(
             displayName = file.displayName,
@@ -139,35 +165,59 @@ object TrackDetailsBuilder {
             read = read,
             exactDurationMs = file.exactDurationMs,
             tagLengthMs = file.tagLengthMs,
-            overrides = inputs.overrides,
+            overrides = overrides,
             volume = file.volume.orEmpty(),
             relativePath = file.relativePath.orEmpty(),
         )
-        val rows = ArrayList<DetailRow>()
-        fun add(field: DetailField, value: DetailValue?) {
-            if (value != null) rows += DetailRow(field, value)
-        }
-        fun text(field: DetailField, value: String?) = add(field, value.present()?.let(DetailValue::Text))
-        fun texts(field: DetailField, values: List<String>) = add(field, values.mapNotNull { it.present() }.ifEmpty { null }?.let(DetailValue::Texts))
+        // Every part with its level by the same precedence, for the other fields and every source (§18.7).
+        val parts = MergedValues.parts(file.displayName, inputs.index, inputs.tags, read, overrides)
+        val decidedFields = decided.keys.mapTo(HashSet()) { it.group }
+        val changedFields = inputs.changedInFile.mapTo(HashSet()) { it.group }
 
-        text(TITLE, merged.title)
-        text(ARTIST, merged.artist)
-        text(ALBUM, merged.album)
-        text(ALBUM_ARTIST, merged.albumArtist)
-        add(TRACK, merged.trackNumber?.let { DetailValue.OfTotal(it, tags?.trackTotal) })
-        add(DISC, merged.discNumber?.let { DetailValue.OfTotal(it, tags?.discTotal) })
-        text(DISC_SUBTITLE, tags?.discSubtitle)
-        text(DATE, if (read) tags?.date else index?.year?.takeIf { it > 0 }?.toString())
-        text(ORIGINAL_DATE, tags?.originalDate)
-        texts(GENRE, if (read) tags?.genres.orEmpty() else listOfNotNull(index?.genre))
-        texts(COMPOSER, if (read) tags?.composers.orEmpty() else listOfNotNull(index?.composer))
-        add(COMPILATION, if (tags?.compilation == true) DetailValue.Flag(true) else null)
-        text(LABEL, tags?.label)
-        text(CATALOG_NUMBER, tags?.catalogNumber)
-        text(BARCODE, tags?.barcode)
-        text(ISRC, tags?.isrc)
-        add(TRACK_GAIN, tags?.trackGainDb?.let { DetailValue.Gain(it, tags.trackPeak) })
-        add(ALBUM_GAIN, tags?.albumGainDb?.let { DetailValue.Gain(it, tags.albumPeak) })
+        fun sourceOf(level: Int, decisionId: Long?) =
+            ValueSource(level, if (level == DecisionKind.LEVEL_IDENTIFICATION) decisionId?.let(providers::get) else null)
+        fun sourceOf(part: DecidedField): ValueSource? = parts[part]?.let { sourceOf(it.level, decided[part]?.decisionId) }
+        fun decidedSource(part: DecidedField): ValueSource? = decided[part]?.let { sourceOf(it.level, it.decisionId) }
+
+        val rows = ArrayList<DetailRow>()
+        fun add(field: DetailField, value: DetailValue?, source: ValueSource? = null) {
+            if (value == null) return
+            val decidedField = field.protected?.takeIf { it in decidedFields }
+            rows += DetailRow(field, value, source, decidedField != null, decidedField != null && decidedField in changedFields)
+        }
+        fun text(field: DetailField, value: String?, source: ValueSource? = null) = add(field, value.present()?.let(DetailValue::Text), source)
+        fun texts(field: DetailField, values: List<String>, source: ValueSource?) =
+            add(field, values.mapNotNull { it.present() }.ifEmpty { null }?.let(DetailValue::Texts), source)
+        // A decided list is joined as tags write a list (§18.7).
+        fun part(field: DetailField, part: DecidedField) {
+            val value = parts[part]?.value
+            text(field, if (part.kind == PartKind.LIST) DecidedField.items(value).joinToString(LIST_SEPARATOR) else value, sourceOf(part))
+        }
+        val fileLevel = ValueSource(if (read) DecisionKind.LEVEL_TAGS else DecisionKind.LEVEL_INDEX)
+
+        text(TITLE, merged.title, sourceOf(DecidedField.TITLE))
+        text(ARTIST, merged.artist, sourceOf(DecidedField.ARTIST))
+        text(ALBUM, merged.album, sourceOf(DecidedField.ALBUM))
+        text(ALBUM_ARTIST, merged.albumArtist, sourceOf(DecidedField.ALBUM_ARTIST))
+        add(TRACK, merged.trackNumber?.let { DetailValue.OfTotal(it, parts[DecidedField.TRACK_TOTAL]?.value?.toIntOrNull()) }, sourceOf(DecidedField.TRACK_NUMBER))
+        add(DISC, merged.discNumber?.let { DetailValue.OfTotal(it, parts[DecidedField.DISC_TOTAL]?.value?.toIntOrNull()) }, sourceOf(DecidedField.DISC_NUMBER))
+        part(DISC_SUBTITLE, DecidedField.DISC_SUBTITLE)
+        part(DATE, DecidedField.DATE)
+        part(ORIGINAL_DATE, DecidedField.ORIGINAL_DATE)
+        texts(GENRE, if (read) tags?.genres.orEmpty() else listOfNotNull(index?.genre), fileLevel)
+        texts(COMPOSER, if (read) tags?.composers.orEmpty() else listOfNotNull(index?.composer), fileLevel)
+        // A decided flag that is off is a value that can be reverted; the tags' off stays left out.
+        when {
+            parts[DecidedField.COMPILATION]?.value == "1" -> add(COMPILATION, DetailValue.Flag(true), sourceOf(DecidedField.COMPILATION))
+            ProtectedField.COMPILATION in decidedFields -> add(COMPILATION, DetailValue.Flag(false), decidedSource(DecidedField.COMPILATION))
+        }
+        part(LABEL, DecidedField.LABEL)
+        part(CATALOG_NUMBER, DecidedField.CATALOG_NUMBER)
+        part(BARCODE, DecidedField.BARCODE)
+        part(ISRC, DecidedField.ISRC)
+        val tagLevel = ValueSource(DecisionKind.LEVEL_TAGS)
+        add(TRACK_GAIN, tags?.trackGainDb?.let { DetailValue.Gain(it, tags.trackPeak) }, tagLevel)
+        add(ALBUM_GAIN, tags?.albumGainDb?.let { DetailValue.Gain(it, tags.albumPeak) }, tagLevel)
 
         inputs.user?.let { user ->
             add(FAVORITE, DetailValue.Flag(user.favorite))
@@ -195,21 +245,42 @@ object TrackDetailsBuilder {
         if (!read) add(TAGS, DetailValue.Tags(file.tagState ?: TagState.NOT_READ))
 
         inputs.cover?.let { cover ->
-            add(COVER_SOURCE, DetailValue.Cover(cover.source))
+            // The decided cover's source while it shows; the source row itself says where any other cover comes from.
+            add(COVER_SOURCE, DetailValue.Cover(cover.source), if (cover.source == CoverSource.SAVED) decidedSource(DecidedField.COVER) else null)
             if (cover.width != null && cover.height != null && cover.width > 0 && cover.height > 0) {
                 add(COVER_SIZE, DetailValue.Pixels(cover.width, cover.height, cover.bytes?.takeIf { it > 0 }))
             }
         }
 
-        // The IDs of the merged values: the media index has none, so they come from the read tags (TI §7.1).
-        fun ids(field: DetailField, kind: MusicBrainzKind, values: List<String?>) =
-            values.mapNotNull { it.present() }.distinct().forEach { add(field, DetailValue.MusicBrainz(kind, it)) }
-        ids(RECORDING_ID, MusicBrainzKind.RECORDING, listOf(tags?.recordingMbid))
-        ids(RELEASE_ID, MusicBrainzKind.RELEASE, listOf(tags?.releaseMbid))
-        ids(RELEASE_GROUP_ID, MusicBrainzKind.RELEASE_GROUP, listOf(tags?.releaseGroupMbid))
-        ids(TRACK_ID, MusicBrainzKind.TRACK, listOf(tags?.releaseTrackMbid))
-        ids(ARTIST_ID, MusicBrainzKind.ARTIST, tags?.artistMbids.orEmpty())
-        ids(ALBUM_ARTIST_ID, MusicBrainzKind.ARTIST, tags?.albumArtistMbids.orEmpty())
+        // The IDs of the merged values: the media index has none, so they come from a decision or the read tags (TI §7.1).
+        fun ids(field: DetailField, kind: MusicBrainzKind, part: DecidedField) {
+            val source = sourceOf(part) ?: return
+            DecidedField.items(parts[part]?.value).mapNotNull { it.present() }.distinct().forEach { add(field, DetailValue.MusicBrainz(kind, it), source) }
+        }
+        ids(RECORDING_ID, MusicBrainzKind.RECORDING, DecidedField.RECORDING_MBID)
+        ids(RELEASE_ID, MusicBrainzKind.RELEASE, DecidedField.RELEASE_MBID)
+        ids(RELEASE_GROUP_ID, MusicBrainzKind.RELEASE_GROUP, DecidedField.RELEASE_GROUP_MBID)
+        ids(TRACK_ID, MusicBrainzKind.TRACK, DecidedField.RELEASE_TRACK_MBID)
+        ids(ARTIST_ID, MusicBrainzKind.ARTIST, DecidedField.ARTIST_IDS)
+        ids(ALBUM_ARTIST_ID, MusicBrainzKind.ARTIST, DecidedField.ALBUM_ARTIST_IDS)
+        // The AcoustID track ID of the decision that wins the recording ID; never the fingerprint cache's (§18.7).
+        decided[DecidedField.RECORDING_MBID]?.decisionId
+            ?.let { id -> records?.firstOrNull { it.values.id == id }?.acoustId }
+            ?.let { add(ACOUSTID_ID, DetailValue.AcoustId(it), ValueSource(DecisionKind.LEVEL_IDENTIFICATION, ProviderId.ACOUSTID)) }
+
+        // A decided field that no level fills shows as empty, so that its revert can be reached (§18.7).
+        val shown = rows.mapNotNullTo(HashSet()) { it.field.protected }
+        for ((field, row) in EMPTY_ROWS) {
+            if (field in decidedFields && field !in shown) add(row.first, DetailValue.Empty, decidedSource(row.second))
+        }
+
+        val identification = records
+            ?.filter { it.values.kind == DecisionKind.APPLY && !it.values.undone }
+            ?.maxByOrNull { it.values.id }
+            ?.let { IdentificationFacts(it.values.id, it.provider, it.confidence, it.reason, it.values.createdAt, it.fetchedAt) }
+        val listDecision = records?.let { all -> DecisionResolver.missingInfoOf(all.map(DecisionRecord::values)) }?.let { state ->
+            ListDecision(state.decisionId, skipped = records.firstOrNull { it.values.id == state.decisionId }?.values?.kind == DecisionKind.SKIP)
+        }
 
         return TrackDetails(
             fileId = inputs.fileId,
@@ -217,6 +288,11 @@ object TrackDetailsBuilder {
             artist = merged.artist,
             album = merged.album,
             rows = rows.sortedBy { it.field.ordinal },
+            badge = DetailBadges.of(inputs.badgeState, records.orEmpty()),
+            identification = identification,
+            listDecision = listDecision,
+            trace = inputs.trace,
+            target = inputs.target,
         )
     }
 
@@ -241,6 +317,28 @@ object TrackDetailsBuilder {
     private fun String?.present(): String? = this?.trim()?.takeUnless { it.isEmpty() || it == UNKNOWN }
 
     private const val UNKNOWN = "<unknown>"
+
+    /** How a decided list shows, as tags write a list (TI §7.5). */
+    private const val LIST_SEPARATOR = "; "
+
+    /** The row of each field that may show as empty, with the part whose level it takes (§18.7); a cover always has a row. */
+    private val EMPTY_ROWS: Map<ProtectedField, Pair<DetailField, DecidedField>> = mapOf(
+        ProtectedField.TITLE to (TITLE to DecidedField.TITLE),
+        ProtectedField.ARTIST to (ARTIST to DecidedField.ARTIST),
+        ProtectedField.ALBUM to (ALBUM to DecidedField.ALBUM),
+        ProtectedField.ALBUM_ARTIST to (ALBUM_ARTIST to DecidedField.ALBUM_ARTIST),
+        ProtectedField.DATE to (DATE to DecidedField.DATE),
+        ProtectedField.ORIGINAL_DATE to (ORIGINAL_DATE to DecidedField.ORIGINAL_DATE),
+        ProtectedField.TRACK_NUMBER to (TRACK to DecidedField.TRACK_NUMBER),
+        ProtectedField.DISC_NUMBER to (DISC to DecidedField.DISC_NUMBER),
+        ProtectedField.DISC_SUBTITLE to (DISC_SUBTITLE to DecidedField.DISC_SUBTITLE),
+        ProtectedField.COMPILATION to (COMPILATION to DecidedField.COMPILATION),
+        ProtectedField.LABEL to (LABEL to DecidedField.LABEL),
+        ProtectedField.CATALOG_NUMBER to (CATALOG_NUMBER to DecidedField.CATALOG_NUMBER),
+        ProtectedField.BARCODE to (BARCODE to DecidedField.BARCODE),
+        ProtectedField.ISRC to (ISRC to DecidedField.ISRC),
+        ProtectedField.MUSICBRAINZ_IDS to (RECORDING_ID to DecidedField.RECORDING_MBID),
+    )
 }
 
 /** The metadata badge of track details and Now Playing (TI §6, docs/library.md §18.7). */
@@ -250,5 +348,13 @@ object DetailBadges {
      * The badge of a display row's [badgeState] (null without a display row: none), with the provider and confidence of
      * the newest identification among [decisions] whose values win while identified.
      */
-    fun of(badgeState: Int?, decisions: List<DecisionRecord>): Badge? = TODO("step 22")
+    fun of(badgeState: Int?, decisions: List<DecisionRecord>): Badge? {
+        val state = BadgeState.ofCode(badgeState) ?: return null
+        if (state != BadgeState.IDENTIFIED) return Badge(state)
+        val winner = DecisionResolver.resolve(decisions.map(DecisionRecord::values)).values
+            .filter { it.level == DecisionKind.LEVEL_IDENTIFICATION }
+            .maxOfOrNull { it.decisionId }
+        val record = decisions.firstOrNull { it.values.id == winner }
+        return Badge(state, record?.provider, record?.confidence)
+    }
 }

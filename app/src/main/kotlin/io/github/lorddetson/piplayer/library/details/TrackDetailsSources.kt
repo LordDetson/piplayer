@@ -27,6 +27,17 @@ object TrackDetailsSources {
         )
     }
 
+    /** The metadata badges of songs of the library (docs/library.md §18.7), read through the library's lock. */
+    fun badges(context: Context): TrackBadges {
+        val app = context.applicationContext
+        return TrackBadges(
+            object : LibraryTrackRefs.Access {
+                override fun <T> read(block: (LibraryDatabase) -> T): T = Library.read(app, block)
+            },
+            UserData.database(app),
+        )
+    }
+
     /** Files opened from another app, read through `:tagger`. */
     fun opened(context: Context): OpenedFileDetails {
         val app = context.applicationContext

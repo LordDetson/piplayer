@@ -261,6 +261,32 @@ class Decisions(private val database: UserDatabase, private val clock: () -> Lon
         return values(decisions, metadataOf(decisions), choicesOf(decisions))
     }
 
+    /** A decision as the resolver reads it, with its stored row for the provenance (docs/library.md §18.7). */
+    class Stored(val values: DecisionValues, val row: DecisionEntity)
+
+    /** Every decision of [identityId] with its row, undone ones too, oldest first, in one read transaction. */
+    suspend fun storedOf(identityId: Long): List<Stored> = database.withReadTransaction {
+        val decisions = dao.decisionsOf(identityId)
+        val rows = decisions.associateBy { it.id }
+        values(decisions, metadataOf(decisions), choicesOf(decisions)).map { Stored(it, rows.getValue(it.id)) }
+    }
+
+    /**
+     * The decided parts flagged as changed in the file at the place [volume], [relativePath] and [displayName] for the
+     * decisions that win them now (TI §7.1), read without writing: track details mark their fields (docs/library.md
+     * §18.7), while the comparison belongs to the tag pass.
+     */
+    suspend fun flaggedAt(identityId: Long, volume: String, relativePath: String, displayName: String): Set<DecidedField> =
+        database.withReadTransaction {
+            val flagged = dao.fileStates(identityId).filter {
+                it.changedInFile && it.volumeName == volume && it.relativePath == relativePath && it.displayName == displayName
+            }
+            if (flagged.isEmpty()) return@withReadTransaction emptySet()
+            val decisions = dao.decisionsOf(identityId).filter { it.undoneAt == null }
+            val winners = DecisionResolver.resolve(values(decisions, metadataOf(decisions), choicesOf(decisions)))
+            flagged.mapNotNullTo(LinkedHashSet()) { row -> DecidedField.ofCode(row.field)?.takeIf { winners[it]?.decisionId == row.decisionId } }
+        }
+
     /** The decided values that win for each of [identityIds] that has any. */
     suspend fun decidedOf(identityIds: Collection<Long>): Map<Long, Map<DecidedField, Decided>> {
         val decisions = identityIds.distinct().chunked(CHUNK).flatMap { dao.liveValueDecisionsOf(it) }

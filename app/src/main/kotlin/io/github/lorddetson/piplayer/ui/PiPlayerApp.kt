@@ -33,6 +33,9 @@ import io.github.lorddetson.piplayer.ui.songs.TrackMenuPlace
 import io.github.lorddetson.piplayer.ui.details.TrackDetailsScreen
 import io.github.lorddetson.piplayer.ui.identification.IdentifyTarget
 import io.github.lorddetson.piplayer.ui.identification.LocalIdentify
+import io.github.lorddetson.piplayer.ui.details.BadgeHost
+import io.github.lorddetson.piplayer.ui.details.LocalBadgeHost
+import io.github.lorddetson.piplayer.ui.details.MetadataBadges
 import io.github.lorddetson.piplayer.ui.identification.ReviewScreen
 import androidx.compose.runtime.CompositionLocalProvider
 import io.github.lorddetson.piplayer.library.songs.Song
@@ -236,8 +239,13 @@ fun PiPlayerApp(viewModel: PlayerViewModel = viewModel()) {
             if (backStack.lastOrNull() != route) backStack.add(route)
         }
     }
-    // Every entry reaches "Identify" through LocalIdentify (TI §1).
-    val identifyDecorator = remember { NavEntryDecorator<NavKey> { entry -> CompositionLocalProvider(LocalIdentify provides identify) { entry.Content() } } }
+    // Now Playing's metadata badge reads the library and opens a song's details (docs/library.md §18.7).
+    val appContext = LocalContext.current.applicationContext
+    val badges = remember { BadgeHost({ MetadataBadges.of(appContext, it) }, { showDetails(TrackDetailsRoute(fileId = it)) }) }
+    // Every entry reaches "Identify" through LocalIdentify (TI §1), and the badge through LocalBadgeHost.
+    val identifyDecorator = remember {
+        NavEntryDecorator<NavKey> { entry -> CompositionLocalProvider(LocalIdentify provides identify, LocalBadgeHost provides badges) { entry.Content() } }
+    }
     val context = LocalContext.current
     val currentMediaId = rememberCurrentMediaId(player)
     // An added entry plays a library song too (docs/playback.md §9.4).

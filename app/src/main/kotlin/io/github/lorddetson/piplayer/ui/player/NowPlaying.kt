@@ -153,6 +153,7 @@ fun NowPlaying(
                 modifier = Modifier.opens(onOpenAlbum, R.string.open_album),
             )
         }
+        io.github.lorddetson.piplayer.ui.details.PlayingBadge(player)
         Spacer(Modifier.height(4.dp))
         FormatLineText(player)
         Spacer(Modifier.height(16.dp))

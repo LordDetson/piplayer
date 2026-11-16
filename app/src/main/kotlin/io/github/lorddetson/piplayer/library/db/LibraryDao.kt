@@ -107,6 +107,10 @@ interface LibraryDao {
     @Query("SELECT * FROM media_index_entry WHERE file_id = :fileId")
     suspend fun entry(fileId: Long): MediaIndexEntryEntity?
 
+    /** The metadata badge of one file's display row (TI §6, §10.1); null without a display row. */
+    @Query("SELECT badge_state FROM track_display WHERE file_id = :fileId")
+    suspend fun badgeState(fileId: Long): Int?
+
     /** The first track of one file, as the tag pass read it (docs/library.md §18.2). */
     @Query("SELECT * FROM track WHERE file_id = :fileId ORDER BY start_ms LIMIT 1")
     suspend fun trackOf(fileId: Long): TrackEntity?

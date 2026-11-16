@@ -10,10 +10,15 @@ import io.github.lorddetson.piplayer.covers.CoverStep
 import io.github.lorddetson.piplayer.covers.Covers
 import io.github.lorddetson.piplayer.covers.EmbeddedPictures
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.withContext
 
@@ -48,10 +53,15 @@ class DetailsCaaProbe(
 ) {
 
     /** Whether [step] has a picture, as far as the details can tell within [waitMs]. */
+    @OptIn(ExperimentalCoroutinesApi::class)
     suspend fun online(step: CoverStep.Caa): Boolean {
         val px = DetailsCover.caaProbePx(density())
         val loading = scope.async { load(step, px) }
-        return withTimeoutOrNull(waitMs) { loading.await() } ?: false
+        return withTimeoutOrNull(waitMs) { loading.await() } ?: run {
+            // Given up: once the load that goes on finds a picture, the details read again and find it in the caches.
+            loading.invokeOnCompletion { failure -> if (failure == null && loading.getCompleted()) onLate() }
+            false
+        }
     }
 }
 
@@ -86,7 +96,7 @@ class AndroidPictureProbe(context: Context) : PictureProbe {
      */
     override suspend fun online(step: CoverStep.Caa): Boolean = caa.online(step)
 
-    private val caa = DetailsCaaProbe({ app.resources.displayMetrics.density }, probes) { step, px ->
+    private val caa = DetailsCaaProbe({ app.resources.displayMetrics.density }, probes, onLate = { late.update { it + 1 } }) { step, px ->
         safely { Covers.loader(app).step(step, px) != null } ?: false
     }
 
@@ -100,11 +110,19 @@ class AndroidPictureProbe(context: Context) : PictureProbe {
         null
     }
 
-    private companion object {
-        const val TAG = "AndroidPictureProbe"
+    companion object {
+        private const val TAG = "AndroidPictureProbe"
+
+        private val late = MutableStateFlow(0L)
+
+        /**
+         * Rises when a Cover Art Archive load of the details that outran their wait finds a picture, so that the details
+         * read again (docs/library.md §18.3).
+         */
+        val lateLoads: StateFlow<Long> = late.asStateFlow()
 
         /** The smallest step of the loader (docs/library.md §13.3): enough to know that there is one. */
-        const val THUMBNAIL_PX = 96
+        private const val THUMBNAIL_PX = 96
 
         /** Cover Art Archive loads of the details, which outlive a read given up after [DetailsCover.CAA_WAIT_MS]. */
         private val probes = CoroutineScope(SupervisorJob() + Dispatchers.IO)

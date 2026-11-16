@@ -10,11 +10,14 @@ import io.github.lorddetson.piplayer.covers.OwnCovers
 import io.github.lorddetson.piplayer.covers.SavedCoverIndex
 import io.github.lorddetson.piplayer.covers.SavedCovers
 import io.github.lorddetson.piplayer.library.db.AudioFileEntity
+import io.github.lorddetson.piplayer.library.db.IdentificationTraceEntity
 import io.github.lorddetson.piplayer.library.db.MediaIndexEntryEntity
 import io.github.lorddetson.piplayer.library.db.TrackEntity
 import io.github.lorddetson.piplayer.library.identity.Hex
 import io.github.lorddetson.piplayer.library.identity.LibraryTrackRefs
+import io.github.lorddetson.piplayer.library.values.DecisionContent
 import io.github.lorddetson.piplayer.library.values.IndexValues
+import io.github.lorddetson.piplayer.userdata.Decisions
 import io.github.lorddetson.piplayer.userdata.UserDatabase
 import java.io.File
 import kotlinx.coroutines.Dispatchers
@@ -52,23 +55,42 @@ class LibraryTrackDetails(
     private val online: () -> Boolean = { false },
 ) {
 
-    /** What the library database holds of one file, read at once. */
-    private class Stored(val file: AudioFileEntity, val entry: MediaIndexEntryEntity?, val track: TrackEntity?)
+    /**
+     * What the library database holds of one file, read at once: its rows, its display row's badge state and the trace of
+     * its content key (docs/library.md §18.7).
+     */
+    private class Stored(
+        val file: AudioFileEntity,
+        val entry: MediaIndexEntryEntity?,
+        val track: TrackEntity?,
+        val badgeState: Int?,
+        val trace: List<IdentificationTraceEntity>,
+    )
 
     /** The covers' view of the library, the loader's own (docs/library.md §13.1). */
     private val facts = LibraryCoverFacts(access, user)
+
+    private val decisions = Decisions(user)
 
     /** The details of the file [fileId], or null when the library has no such file. */
     suspend fun read(fileId: Long): TrackDetails? = withContext(Dispatchers.IO) {
         val stored = access.read { database ->
             runBlocking {
                 val dao = database.library()
-                dao.file(fileId)?.let { Stored(it, dao.entry(fileId), dao.trackOf(fileId)) }
+                dao.file(fileId)?.let { file ->
+                    val trace = file.contentKey?.let { database.identificationRuns().trace(it) }.orEmpty()
+                    Stored(file, dao.entry(fileId), dao.trackOf(fileId), dao.badgeState(fileId), trace)
+                }
             }
         } ?: return@withContext null
         val file = stored.file
         val identity = file.contentKey?.let { user.identities().idOfKey(Hex.bytes(it)) }
         val read = file.tagPassAt != null
+        val tags = stored.track?.toTags()
+        // The decisions of the song's identity, read from the user database as plays are (§18.2, §18.7).
+        val location = Decisions.LocationValues(file.volumeName, file.relativePath, file.displayName, DecisionContent.ofTags(tags.takeIf { read }))
+        val records = identity?.let { decisions.storedOf(it).map(DecisionRecord::of) }
+        val changed = identity?.let { decisions.flaggedAt(it, location.volume, location.relativePath, location.displayName) }.orEmpty()
         TrackDetailsBuilder.of(
             DetailInputs(
                 fileId = fileId,
@@ -95,9 +117,14 @@ class LibraryTrackDetails(
                 index = stored.entry?.let {
                     IndexValues(it.title, it.artist, it.album, it.composer, it.genre, it.durationMs, it.albumArtist, it.year, it.trackNumber)
                 },
-                tags = stored.track?.toTags(),
+                tags = tags,
                 user = identity?.let { userFacts(it) },
                 cover = coverOf(fileId, stored, identity),
+                decisions = records,
+                changedInFile = changed,
+                badgeState = stored.badgeState,
+                trace = TraceRuns.of(stored.trace),
+                target = identity?.let { id -> file.contentKey?.let { DecisionTarget(id, it, location) } },
             ),
         )
     }

@@ -20,7 +20,11 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -29,11 +33,15 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -64,7 +72,25 @@ import io.github.lorddetson.piplayer.R
 import io.github.lorddetson.piplayer.covers.CoverRequest
 import io.github.lorddetson.piplayer.covers.Covers
 import io.github.lorddetson.piplayer.library.Library
+import io.github.lorddetson.piplayer.identification.provider.ProviderId
+import io.github.lorddetson.piplayer.identification.score.HintField
+import io.github.lorddetson.piplayer.identification.score.Reason
+import io.github.lorddetson.piplayer.identification.score.Source
+import io.github.lorddetson.piplayer.library.details.AndroidPictureProbe
+import io.github.lorddetson.piplayer.library.details.Badge
+import io.github.lorddetson.piplayer.library.details.BadgeState
 import io.github.lorddetson.piplayer.library.details.CoverSource
+import io.github.lorddetson.piplayer.library.details.DecisionTarget
+import io.github.lorddetson.piplayer.library.details.IdentificationFacts
+import io.github.lorddetson.piplayer.library.details.ListDecision
+import io.github.lorddetson.piplayer.library.details.TraceRun
+import io.github.lorddetson.piplayer.library.details.TraceStep
+import io.github.lorddetson.piplayer.library.details.ValueSource
+import io.github.lorddetson.piplayer.library.values.DecisionKind
+import io.github.lorddetson.piplayer.ui.identification.IdentifyTarget
+import io.github.lorddetson.piplayer.ui.identification.LocalIdentify
+import io.github.lorddetson.piplayer.ui.identification.ReasonPart
+import io.github.lorddetson.piplayer.ui.identification.ReasonParts
 import io.github.lorddetson.piplayer.library.details.DetailField
 import io.github.lorddetson.piplayer.library.details.DetailRow
 import io.github.lorddetson.piplayer.library.details.DetailSection
@@ -96,12 +122,19 @@ import kotlinx.coroutines.withContext
 /**
  * The details of the song [fileId] of the library, or of the file opened from another app at [uri] (docs/library.md §18),
  * read off the main thread. A song of the library is read again whenever the library, a batch of the tag pass, the
- * identities, the mirrored favorites and plays or the own covers change, so that the screen follows it; an opened file is
- * read once for the life of the screen, since each read costs a `:tagger` call (docs/library.md §18.5).
+ * identities, the mirrored favorites and plays, the decided values, the covers on screen (own covers, decisions, online
+ * lookups) change, a late Cover Art Archive load finds a picture or an action of the screen ends, so that the screen
+ * follows it; an opened file is read once for the life of the screen, since each read costs a `:tagger` call
+ * (docs/library.md §18.5, §18.7).
  */
 class TrackDetailsViewModel(application: Application, private val fileId: Long?, private val uri: String?) : AndroidViewModel(application) {
 
     private val app = application
+
+    private val runner = DetailsActionRunner(viewModelScope, onError = { Log.w(TAG, "A decision of the details could not be saved", it) })
+
+    /** The screen's decisions (§18.7); none for a file opened from another app. */
+    val commands: DetailsCommands? = fileId?.let { DetailsCommands(LibraryDetailsActions(app), runner) }
 
     val state: StateFlow<DetailsState> = DetailsStates.of(
         viewModelScope,
@@ -113,12 +146,17 @@ class TrackDetailsViewModel(application: Application, private val fileId: Long?,
     private fun changes(): Flow<Unit> {
         if (fileId == null || !Library.mayRead(app)) return flow { emit(Unit) }
         return combine(
-            SongList.changes(app),
-            SongList.batches,
-            IdentityAttacher.changes,
-            Library.mirrorVersion(app),
-            Covers.own(app).version,
-        ) { _, _, _, _, _ -> }
+            listOf<Flow<Any?>>(
+                SongList.changes(app),
+                SongList.batches,
+                IdentityAttacher.changes,
+                Library.mirrorVersion(app),
+                Library.decisionVersion(app),
+                Covers.changes(app),
+                AndroidPictureProbe.lateLoads,
+                runner.reads,
+            ),
+        ) { }
     }
 
     private suspend fun read(): DetailsState.Found? = when {
@@ -174,7 +212,7 @@ fun TrackDetailsScreen(fileId: Long?, uri: String?, snackbar: SnackbarHostState,
                 style = MaterialTheme.typography.bodyLarge,
                 modifier = modifier.padding(16.dp),
             )
-            is DetailsState.Found -> DetailsContent(shown.details, shown.picture, snackbar, null, modifier)
+            is DetailsState.Found -> DetailsContent(shown.details, shown.picture, snackbar, model.commands, modifier)
         }
     }
 }
@@ -202,19 +240,89 @@ fun DetailsContent(details: TrackDetails, picture: ImageBitmap?, snackbar: Snack
             say(R.string.details_no_app)
         }
     }
+    commands?.let { Messages(it, snackbar) }
+    // Decisions need the song's identity (§18.7).
+    val decide = commands?.takeIf { details.target != null }
+    val identify = LocalIdentify.current
+    val list = rememberLazyListState()
     val sections = remember(details) { details.sections }
-    LazyColumn(modifier.testTag(DetailsTags.LIST)) {
-        item(key = "header") { Header(details, picture) }
+    val identificationShown = details.badge != null || details.identification != null || details.listDecision != null
+    // The header, then a heading and the rows of each section.
+    val identificationIndex = 1 + sections.sumOf { 1 + it.second.size }
+    val onBadge = { badge: Badge ->
+        val id = details.fileId
+        if (badge.state == BadgeState.FROM_TAGS) {
+            if (id != null) identify?.invoke(IdentifyTarget.Song(id))
+        } else {
+            scope.launch { list.animateScrollToItem(identificationIndex) }
+        }
+        Unit
+    }
+    LazyColumn(modifier.testTag(DetailsTags.LIST), state = list) {
+        item(key = "header") { Header(details, picture, onBadge) }
         for ((section, rows) in sections) {
-            item(key = section) { SectionHeading(section) }
-            items(rows) { row -> RowItem(row, copy, open) }
+            item(key = section) { SectionHeading(stringResource(sectionLabel(section))) }
+            // Only the first row of a field offers its decisions: the IDs are one field.
+            val firsts = rows.withIndex().filter { (i, row) -> row.decided && rows.subList(0, i).none { it.field.protected == row.field.protected } }
+                .mapTo(HashSet()) { it.index }
+            itemsIndexed(rows) { i, row ->
+                val target = details.target
+                RowItem(row, copy, open, if (decide != null && target != null && i in firsts) RowDecisions(decide, target) else null)
+            }
+        }
+        if (identificationShown) {
+            item(key = "identification") { SectionHeading(stringResource(R.string.details_section_identification), Modifier.testTag(DetailsTags.IDENTIFICATION)) }
+            details.badge?.let { badge -> item(key = "badge") { BadgeRow(badge) } }
+            details.identification?.let { facts -> item(key = "identified") { IdentificationRow(facts, decide, details.target) } }
+            details.listDecision?.let { state -> item(key = "list") { ListDecisionRow(state, decide) } }
+        }
+        if (details.trace.isNotEmpty()) {
+            item(key = "trace") { SectionHeading(stringResource(R.string.details_section_trace), Modifier.testTag(DetailsTags.TRACE)) }
+            items(details.trace) { run -> TraceRunRow(run) }
         }
     }
 }
 
-/** The header (docs/library.md §18.1): the loader's cover of a song of the library, the embedded [picture] of an opened file. */
+/** What a row can decide: its field's revert, or the choices of a field changed in the file (§18.7). */
+private class RowDecisions(val commands: DetailsCommands, val target: DecisionTarget)
+
+/** The message of each action that ends, with Undo for a revert (§18.7); a new message takes the place of the one shown. */
 @Composable
-private fun Header(details: TrackDetails, picture: ImageBitmap?) {
+private fun Messages(commands: DetailsCommands, snackbar: SnackbarHostState) {
+    val resources = LocalResources.current
+    LaunchedEffect(commands) {
+        commands.runner.outcomes.collect { outcome ->
+            snackbar.currentSnackbarData?.dismiss()
+            val undo = (outcome as? DetailsOutcome.Done)?.undo
+            launch {
+                val result = snackbar.showSnackbar(
+                    resources.getString(messageOf(outcome)),
+                    actionLabel = undo?.let { resources.getString(R.string.review_undo) },
+                    duration = SnackbarDuration.Short,
+                )
+                if (result == SnackbarResult.ActionPerformed && undo != null) commands.undo(undo)
+            }
+        }
+    }
+}
+
+private fun messageOf(outcome: DetailsOutcome): Int = when (outcome) {
+    is DetailsOutcome.Failed -> R.string.details_action_failed
+    is DetailsOutcome.Done -> when (outcome.action) {
+        DetailsAction.REVERT, DetailsAction.USE_FILE_VALUE -> R.string.details_reverted
+        DetailsAction.KEEP_VALUE -> R.string.details_value_kept
+        DetailsAction.UNDO_IDENTIFICATION -> R.string.details_identification_undone
+        DetailsAction.RESET -> R.string.details_reset_done
+        DetailsAction.UNDO -> R.string.details_undone
+    }
+}
+
+/**
+ * The header (docs/library.md §18.1): the loader's cover of a song of the library, the embedded [picture] of an opened
+ * file, and the metadata badge (§18.7), whose tap does [onBadge].
+ */
+@Composable
+private fun Header(details: TrackDetails, picture: ImageBitmap?, onBadge: (Badge) -> Unit) {
     Row(
         Modifier.testTag(DetailsTags.HEADER).padding(horizontal = 16.dp, vertical = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(16.dp),
@@ -232,33 +340,38 @@ private fun Header(details: TrackDetails, picture: ImageBitmap?) {
             details.artist?.let {
                 Text(it, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary, maxLines = 2)
             }
+            details.badge?.let { badge -> MetadataBadge(badge, onClick = { onBadge(badge) }, Modifier.padding(top = 4.dp)) }
         }
     }
 }
 
 @Composable
-private fun SectionHeading(section: DetailSection) {
+private fun SectionHeading(text: String, modifier: Modifier = Modifier) {
     Text(
-        text = stringResource(sectionLabel(section)),
+        text = text,
         style = MaterialTheme.typography.titleSmall,
         color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 4.dp).semantics { heading() },
+        modifier = modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 4.dp).semantics { heading() },
     )
 }
 
-/** A row: its label over its value, read by TalkBack as one; a long press copies, a link opens on a tap. */
-@OptIn(ExperimentalFoundationApi::class)
+/**
+ * A row: its label over its value and the value's source, read by TalkBack as one; a long press copies, a link opens on a
+ * tap. With [decisions], the first row of a decided field offers its revert, or the two choices when the file changed it.
+ */
+@OptIn(ExperimentalFoundationApi::class, ExperimentalLayoutApi::class)
 @Composable
-private fun RowItem(row: DetailRow, copy: (String, String) -> Unit, open: (String) -> Unit) {
+private fun RowItem(row: DetailRow, copy: (String, String) -> Unit, open: (String) -> Unit, decisions: RowDecisions?) {
     val label = stringResource(fieldLabel(row.field))
     val text = valueText(row)
-    val copied = (row.value as? DetailValue.MusicBrainz)?.id ?: text
-    val url = (row.value as? DetailValue.MusicBrainz)?.url
+    val id = (row.value as? DetailValue.MusicBrainz)?.id ?: (row.value as? DetailValue.AcoustId)?.id
+    val copied = id ?: text
+    val url = (row.value as? DetailValue.MusicBrainz)?.url ?: (row.value as? DetailValue.AcoustId)?.url
     val copyLabel = stringResource(R.string.details_copy)
     val base = Modifier.testTag(DetailsTags.row(row.field))
     val gestures = if (url != null) {
         base.combinedClickable(
-            onClickLabel = stringResource(R.string.details_open_musicbrainz),
+            onClickLabel = stringResource(if (row.value is DetailValue.AcoustId) R.string.details_open_acoustid else R.string.details_open_musicbrainz),
             role = Role.Button,
             onLongClickLabel = copyLabel,
             onLongClick = { copy(label, copied) },
@@ -274,12 +387,219 @@ private fun RowItem(row: DetailRow, copy: (String, String) -> Unit, open: (Strin
                 }
             }
     }
+    val source = row.source?.let { sourceText(it) }
+    val changed = if (row.changedInFile) stringResource(R.string.details_changed_in_file) else null
+    val notes = listOfNotNull(source, changed)
+    Column {
+        ListItem(
+            overlineContent = { Text(label) },
+            headlineContent = { Text(text, color = if (url != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface) },
+            supportingContent = if (notes.isEmpty()) null else ({ Column { notes.forEach { Text(it) } } }),
+            modifier = gestures,
+        )
+        val field = row.field.protected
+        if (decisions != null && field != null) {
+            FlowRow(Modifier.padding(start = 8.dp, end = 8.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                val commands = decisions.commands
+                val target = decisions.target
+                if (row.changedInFile) {
+                    TextButton(onClick = { commands.keepPiPlayersValue(target, field) }, Modifier.testTag(DetailsTags.keep(row.field))) {
+                        Text(stringResource(R.string.details_keep_value))
+                    }
+                    TextButton(onClick = { commands.useFilesValue(target, field) }, Modifier.testTag(DetailsTags.useFile(row.field))) {
+                        Text(stringResource(R.string.details_use_file_value))
+                    }
+                } else {
+                    TextButton(onClick = { commands.revert(target, field) }, Modifier.testTag(DetailsTags.revert(row.field))) {
+                        Text(stringResource(R.string.details_revert))
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** Where a value comes from (§18.7). */
+@Composable
+private fun sourceText(source: ValueSource): String = when (source.level) {
+    DecisionKind.LEVEL_USER_EDIT -> stringResource(R.string.details_source_edited)
+    DecisionKind.LEVEL_IDENTIFICATION -> source.provider?.let { stringResource(R.string.details_source_identified, providerName(it)) }
+        ?: stringResource(R.string.details_source_identified_plain)
+    DecisionKind.LEVEL_TAGS -> stringResource(R.string.details_source_tags)
+    DecisionKind.LEVEL_INDEX -> stringResource(R.string.details_source_index)
+    else -> stringResource(R.string.details_source_file_name)
+}
+
+/** The "Metadata" row of the Identification section: the badge's state (§18.7). */
+@Composable
+private fun BadgeRow(badge: Badge) {
     ListItem(
-        overlineContent = { Text(label) },
-        headlineContent = { Text(text, color = if (url != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface) },
-        modifier = gestures,
+        overlineContent = { Text(stringResource(R.string.details_metadata)) },
+        headlineContent = { Text(badgeLabel(badge)) },
+        modifier = Modifier.semantics(mergeDescendants = true) {},
     )
 }
+
+/** The newest identification not undone, with "Undo identification" while the song can decide (§18.7). */
+@Composable
+private fun IdentificationRow(facts: IdentificationFacts, commands: DetailsCommands?, target: DecisionTarget?) {
+    val locale = currentLocale()
+    val dates = DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT, locale)
+    val headline = listOfNotNull(
+        facts.provider?.let { providerName(it) },
+        facts.confidence?.let { NumberFormat.getPercentInstance(locale).format(it) },
+    ).joinToString(" · ").ifEmpty { stringResource(R.string.details_identification) }
+    val lines = listOfNotNull(
+        facts.reason?.let { reasonText(it) },
+        stringResource(R.string.details_identification_applied, dates.format(Date(facts.createdAt))),
+        facts.fetchedAt?.let { stringResource(R.string.details_identification_fetched, dates.format(Date(it))) },
+    )
+    Column {
+        ListItem(
+            overlineContent = { Text(stringResource(R.string.details_identification)) },
+            headlineContent = { Text(headline) },
+            supportingContent = { Text(lines.joinToString("\n")) },
+            modifier = Modifier.semantics(mergeDescendants = true) {},
+        )
+        if (commands != null && target != null) {
+            TextButton(
+                onClick = { commands.undoIdentification(target) },
+                modifier = Modifier.padding(start = 8.dp).testTag(DetailsTags.UNDO_IDENTIFICATION),
+            ) { Text(stringResource(R.string.details_undo_identification)) }
+        }
+    }
+}
+
+/** The Keep as-is or Skip that counts, with "Reset" while the song can decide (§18.7). */
+@Composable
+private fun ListDecisionRow(state: ListDecision, commands: DetailsCommands?) {
+    Column {
+        ListItem(
+            overlineContent = { Text(stringResource(R.string.smart_missing_info)) },
+            headlineContent = { Text(stringResource(if (state.skipped) R.string.review_skipped else R.string.review_kept)) },
+            modifier = Modifier.semantics(mergeDescendants = true) {},
+        )
+        if (commands != null) {
+            TextButton(onClick = { commands.reset(state) }, modifier = Modifier.padding(start = 8.dp).testTag(DetailsTags.RESET)) {
+                Text(stringResource(R.string.details_reset))
+            }
+        }
+    }
+}
+
+/** One run of the trace: its start, its outcome with the retry time, and its steps (§18.7). */
+@Composable
+private fun TraceRunRow(run: TraceRun) {
+    val locale = currentLocale()
+    val start = DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.MEDIUM, locale).format(Date(run.startedAt))
+    val outcome = run.outcome?.let { outcomeText(it) }
+    val retry = run.retryAt?.let { stringResource(R.string.trace_retry, DateFormat.getTimeInstance(DateFormat.SHORT, locale).format(Date(it))) }
+    val steps = run.steps.map { stepText(it) }
+    ListItem(
+        overlineContent = { Text(start) },
+        headlineContent = { Text(listOfNotNull(outcome, retry).joinToString(" · ")) },
+        supportingContent = if (steps.isEmpty()) null else ({ Text(steps.joinToString("\n")) }),
+        modifier = Modifier.semantics(mergeDescendants = true) {},
+    )
+}
+
+/** An outcome code of the trace in words; a code this build does not know as it is. */
+@Composable
+private fun outcomeText(code: String): String = when {
+    code == "found=high" -> stringResource(R.string.trace_outcome_high)
+    code == "found=medium" -> stringResource(R.string.trace_outcome_medium)
+    code == "found=no_match" -> stringResource(R.string.trace_outcome_no_match)
+    code == "no_key" -> stringResource(R.string.trace_outcome_no_key)
+    code == "unavailable" -> stringResource(R.string.trace_outcome_unavailable)
+    code.startsWith("provider_stopped") -> stringResource(R.string.trace_outcome_provider_stopped)
+    code == "unreadable" -> stringResource(R.string.trace_outcome_unreadable)
+    code == "disabled" -> stringResource(R.string.trace_outcome_disabled)
+    code == "no_network" -> stringResource(R.string.trace_outcome_no_network)
+    code == "captive_portal" -> stringResource(R.string.trace_outcome_captive_portal)
+    else -> code
+}
+
+/** A step of the trace: its stage, provider, HTTP status, results, best score, time and why it was skipped or failed. */
+@Composable
+private fun stepText(step: TraceStep): String {
+    val locale = currentLocale()
+    val resources = LocalResources.current
+    val seconds = NumberFormat.getNumberInstance(locale).apply { maximumFractionDigits = 2 }
+    return listOfNotNull(
+        stageText(step.stage),
+        step.provider?.let { providerCode(it) },
+        step.httpStatus?.let { stringResource(R.string.trace_http, it) },
+        step.resultCount?.let { resources.getQuantityString(R.plurals.trace_results, it, it) },
+        step.bestScore?.let { stringResource(R.string.trace_best, NumberFormat.getPercentInstance(locale).format(it)) },
+        step.elapsedMs?.let { stringResource(R.string.trace_seconds, seconds.format(it / 1_000.0)) },
+        step.skipped?.let { stringResource(R.string.trace_skipped, it) },
+        step.failed?.let { stringResource(R.string.trace_failed, it) },
+    ).joinToString(" · ")
+}
+
+@Composable
+private fun stageText(code: String): String = when (code) {
+    "local_read" -> stringResource(R.string.trace_stage_local_read)
+    "known_ids" -> stringResource(R.string.trace_stage_known_ids)
+    "isrc" -> stringResource(R.string.trace_stage_isrc)
+    "fingerprint" -> stringResource(R.string.trace_stage_fingerprint)
+    "text_search" -> stringResource(R.string.trace_stage_text_search)
+    "release_choice" -> stringResource(R.string.trace_stage_release_choice)
+    else -> code
+}
+
+/** A provider code of the trace by its name. */
+@Composable
+private fun providerCode(code: String): String = ProviderId.entries.firstOrNull { it.name.lowercase(Locale.ROOT) == code }
+    ?.let { providerName(it) } ?: code
+
+/** The reason of an identification (TI §4.1) as the review's card formats it: its parts joined by " · ". */
+@Composable
+private fun reasonText(reason: Reason): String {
+    val locale = currentLocale()
+    val percent = NumberFormat.getPercentInstance(locale)
+    val score = NumberFormat.getNumberInstance(locale).apply {
+        minimumFractionDigits = 2
+        maximumFractionDigits = 2
+    }
+    return ReasonParts.of(reason).map { part ->
+        when (part) {
+            is ReasonPart.Stage -> {
+                val name = stageName(part.source).let { if (part.byText) stringResource(R.string.review_stage_by_text, it) else it }
+                part.fingerprintScore?.let { stringResource(R.string.review_stage_with_score, name, score.format(it)) } ?: name
+            }
+            is ReasonPart.Duration -> stringResource(
+                R.string.review_reason_duration,
+                if (part.seconds == 0L) "±0" else String.format(locale, "%+d", part.seconds),
+            )
+            is ReasonPart.TitleMatch -> stringResource(R.string.review_reason_title, percent.format(part.percent / 100.0))
+            is ReasonPart.ArtistMatch -> stringResource(R.string.review_reason_artist, percent.format(part.percent / 100.0))
+            is ReasonPart.Differs -> stringResource(
+                when (part.field) {
+                    HintField.TITLE -> R.string.review_reason_title_differs
+                    HintField.ARTIST -> R.string.review_reason_artist_differs
+                },
+            )
+            is ReasonPart.AlsoFoundBy -> {
+                val name = stageName(part.source)
+                stringResource(R.string.review_reason_also, part.fingerprintScore?.let { stringResource(R.string.review_stage_with_score, name, score.format(it)) } ?: name)
+            }
+        }
+    }.joinToString(" · ")
+}
+
+@Composable
+private fun stageName(source: Source): String = stringResource(
+    when (source) {
+        Source.TAG_RECORDING_ID -> R.string.review_stage_tag_id
+        Source.ISRC -> R.string.review_stage_isrc
+        Source.FINGERPRINT -> R.string.review_stage_fingerprint
+        Source.TEXT_SEARCH -> R.string.review_stage_text
+    },
+)
+
+@Composable
+private fun currentLocale(): Locale = LocalConfiguration.current.locales.takeIf { !it.isEmpty }?.get(0) ?: Locale.ROOT
 
 /** A row's value as shown (docs/library.md §18.2). */
 @Composable

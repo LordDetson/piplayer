@@ -2066,7 +2066,9 @@ Decided in M3 step 22 by the recommendations (the owner's rule of 16.11 for M3).
   stored with the decision, TI §10.2), "From the tags" (3), "From the media index" (4) or "From the file name" (5). The
   source is that of the part the row shows (the title, the artist's credit as printed, the track number, the recording
   ID, TI §10.2), from the same resolution of the parts that the lists use (`MergedValues.parts`, TI §7.1), so a row
-  never shows one level's value with another's source. Genre, composer and the gains are not fields of the
+  never shows one level's value with another's source. Levels 1 and 2 come from the song identity's decisions in the
+  user database, resolved by the resolver that fills `decided_mirror` (TI §7.1), as plays are read there (§18.2), so a
+  decision shows at once and the provider of each value is known. Genre, composer and the gains are not fields of the
   protected-fields list: their source is the tags once read, else the media index. The rows of plays, of the file and
   the cover's size have no source; the cover's source row has one only while the decided cover shows.
 - **The fields `track_display` does not hold** (disc subtitle, date, original date, compilation, label, catalog number,
@@ -2092,8 +2094,9 @@ Decided in M3 step 22 by the recommendations (the owner's rule of 16.11 for M3).
 - **Identification section**, after the IDs:
   - "Metadata": the badge's state (below);
   - while the track has an identification that is not undone, the newest by row ID, which "Undo identification" undoes
-    (TI §7.1): its provider, its confidence as a percentage with the band's name, its reason (TI §4.1, formatted for the
-    locale as on the review's card), when it was applied and when its values were fetched, and "Undo identification".
+    (TI §7.1): its provider, its confidence as a percentage (a decision stores no runner-up, so no band is named), its
+    reason (TI §4.1, formatted for the locale as on the review's card), when it was applied and when its values were
+    fetched, and "Undo identification".
     Undoing it lets an older identification win again where no newer decision hides it; the screen says
     "Identification undone", and there is no redo (TI §7.1);
   - while the track has a Keep as-is or Skip that counts (TI §1): "Songs missing information" with "Kept as it is" or
