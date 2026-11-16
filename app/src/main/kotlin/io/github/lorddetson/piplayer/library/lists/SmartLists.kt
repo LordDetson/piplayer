@@ -64,12 +64,6 @@ object MissingInfoDecision {
         SKIPPED -> SKIPPED_VALUE
         else -> null
     }
-
-    /** Whether Songs missing information lists a song with [code]: every song but one kept as it is. */
-    fun listed(code: Int): Boolean = code != KEEP_AS_IS
-
-    /** Whether its row carries the Skip mark. */
-    fun marked(code: Int): Boolean = code == SKIPPED
 }
 
 /**

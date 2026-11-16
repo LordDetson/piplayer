@@ -37,11 +37,16 @@ class LibraryDecisions(private val decisions: Decisions, private val mirror: () 
     suspend fun revert(identityId: Long, fields: Set<ProtectedField>, contentKey: ByteArray? = null): Decisions.Committed? =
         committed { decisions.revert(identityId, fields, contentKey) }
 
+    /** `Decisions.keepAsIs`, then the mirror of the track. */
     suspend fun keepAsIs(identityId: Long, contentKey: ByteArray? = null): Decisions.Committed? =
         committed { decisions.keepAsIs(identityId, contentKey) }
 
-    suspend fun skip(identityId: Long, fileSize: Long, fileMtimeMs: Long, contentKey: ByteArray? = null): Decisions.Committed? =
-        committed { decisions.skip(identityId, fileSize, fileMtimeMs, contentKey) }
+    /**
+     * `Decisions.skip` with the stamp of the file it is made on as the library keeps it, [fileMtimeSeconds] in seconds
+     * (`audio_file.mtime`), then the mirror of the track.
+     */
+    suspend fun skip(identityId: Long, fileSize: Long, fileMtimeSeconds: Long, contentKey: ByteArray? = null): Decisions.Committed? =
+        committed { decisions.skip(identityId, fileSize, SkipLapse.mtimeMs(fileMtimeSeconds), contentKey) }
 
     /** `Decisions.undo`, then the mirror of the track. */
     suspend fun undo(decisionId: Long): Decisions.Committed? = committed { decisions.undo(decisionId) }

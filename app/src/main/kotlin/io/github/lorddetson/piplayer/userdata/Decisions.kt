@@ -38,7 +38,6 @@ class Decisions(private val database: UserDatabase, private val clock: () -> Lon
         val values: Map<DecidedField, String?>,
     )
 
-    /** The decided values of the identities with decisions, by content key in hex, read with the [counter] at that time. */
     /**
      * The decided values of the identities with decisions, by content key in hex, and the Keep as-is or Skip that counts
      * for each identity that has one (TI §1), read with the [counter] at that time.
@@ -95,20 +94,33 @@ class Decisions(private val database: UserDatabase, private val clock: () -> Lon
     suspend fun hasLiveSkips(): Boolean = dao.hasLiveSkips()
 
     /** Every Skip that counts (TI §1). */
-    suspend fun liveSkips(): List<LiveSkip> = dao.liveSkips().map {
-        LiveSkip(it.decisionId, it.identityId, Hex.text(it.contentKey), it.hintVolume, it.hintRelativePath, it.hintDisplayName, it.size, it.mtimeMs)
+    suspend fun liveSkips(): List<LiveSkip> = dao.liveSkips().map(::liveSkip)
+
+    /**
+     * The Skips that count among the decisions [decisionIds], of the identities that hold the content keys [keys] (in hex)
+     * and of those whose location hint has one of the file [names]: those a batch of the tag pass may let lapse (TI §1).
+     */
+    suspend fun liveSkipsOf(decisionIds: Collection<Long>, keys: Collection<String>, names: Collection<String>): List<LiveSkip> {
+        val rows = decisionIds.distinct().chunked(CHUNK).flatMap { dao.liveSkipsWithIds(it) } +
+            keys.distinct().chunked(CHUNK).flatMap { chunk -> dao.liveSkipsWithKeys(chunk.map(Hex::bytes)) } +
+            names.distinct().chunked(CHUNK).flatMap { dao.liveSkipsNamed(it) }
+        return rows.distinctBy { it.decisionId }.map(::liveSkip)
     }
+
+    private fun liveSkip(row: LiveSkipRow) = LiveSkip(
+        row.decisionId, row.identityId, Hex.text(row.contentKey), row.hintVolume, row.hintRelativePath, row.hintDisplayName, row.size,
+        row.mtimeMs,
+    )
 
     /**
      * Lets the Skips [decisionIds] lapse (TI §1): those that still count get `lapsed_at`, and the change counter rises
      * once, in one transaction. Null when none counted any more, and then nothing is written.
      */
     suspend fun lapse(decisionIds: Collection<Long>): Lapsed? = database.withWriteTransaction {
-        val live = decisionIds.distinct().mapNotNull { dao.decision(it) }
-            .filter { it.kind == DecisionKind.SKIP.code && it.undoneAt == null && it.lapsedAt == null }
+        val live = decisionIds.distinct().chunked(CHUNK).flatMap { dao.liveSkipsWithIds(it) }
         if (live.isEmpty()) return@withWriteTransaction null
         val now = clock()
-        for (chunk in live.map { it.id }.chunked(CHUNK)) dao.markLapsed(chunk, now)
+        for (chunk in live.map { it.decisionId }.chunked(CHUNK)) dao.markLapsed(chunk, now)
         database.user().countChange()
         Lapsed(live.mapTo(HashSet()) { it.identityId }, database.user().changeCounter())
     }

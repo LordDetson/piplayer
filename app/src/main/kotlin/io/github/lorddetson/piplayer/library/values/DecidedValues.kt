@@ -217,12 +217,12 @@ object DecisionResolver {
             if (decision.kind != DecisionKind.KEEP_AS_IS && decision.kind != DecisionKind.SKIP) continue
             if (newest == null || decision.id > newest.id) newest = decision
         }
-        val value = when (newest?.kind) {
-            DecisionKind.KEEP_AS_IS -> MissingInfoDecision.KEEP_AS_IS_VALUE
-            DecisionKind.SKIP -> MissingInfoDecision.SKIPPED_VALUE
+        val code = when (newest?.kind) {
+            DecisionKind.KEEP_AS_IS -> MissingInfoDecision.KEEP_AS_IS
+            DecisionKind.SKIP -> MissingInfoDecision.SKIPPED
             else -> return null
         }
-        return Decided(value, MISSING_INFO_LEVEL, newest.id)
+        return Decided(MissingInfoDecision.valueOf(code), MISSING_INFO_LEVEL, newest.id)
     }
 
     /** The level of the `decided_mirror` row of a Keep as-is or Skip: no precedence level, since it decides no value. */

@@ -62,13 +62,4 @@ class MissingReasonsTest {
         assertThat(MissingInfoDecision.valueOf(MissingInfoDecision.NONE)).isNull()
     }
 
-    @Test
-    fun `the list leaves out a song kept as it is and keeps a skipped one, marked`() {
-        assertThat(MissingInfoDecision.listed(MissingInfoDecision.NONE)).isTrue()
-        assertThat(MissingInfoDecision.listed(MissingInfoDecision.SKIPPED)).isTrue()
-        assertThat(MissingInfoDecision.listed(MissingInfoDecision.KEEP_AS_IS)).isFalse()
-        assertThat(MissingInfoDecision.marked(MissingInfoDecision.SKIPPED)).isTrue()
-        assertThat(MissingInfoDecision.marked(MissingInfoDecision.NONE)).isFalse()
-        assertThat(MissingInfoDecision.marked(MissingInfoDecision.KEEP_AS_IS)).isFalse()
-    }
 }

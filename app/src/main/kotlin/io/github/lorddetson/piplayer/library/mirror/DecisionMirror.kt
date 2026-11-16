@@ -447,31 +447,43 @@ class DecisionMirror(
     @VisibleForTesting
     internal suspend fun afterRead(read: List<Long>, failed: List<Long>) {
         val lapsed = running.withLock { if (ready()) lapseSkips((read + failed).distinct()) else null }
-        if (lapsed != null) mirrorIdentities(lapsed.identityIds, lapsed.counter)
+        if (lapsed != null) {
+            // As after a decision: a failed run leaves the lapse committed and asks for a whole run (TI §10.3).
+            try {
+                mirrorIdentities(lapsed.identityIds, lapsed.counter)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w(TAG, "The mirror of a lapse failed; a whole run follows", e)
+                request()
+            }
+        }
         if (read.isNotEmpty()) running.withLock { if (ready()) compareRead(read.distinct()) }
     }
 
     /**
-     * Lets lapse the Skips of the tracks of [fileIds] that no file holds the stamp of any more (TI §1): the Skip of the track
-     * a file belonged to before the read, as its row here names it, and of the track that holds the file's key now or whose
-     * location hint is the file's place, as after a sync forgot the key of a changed file.
+     * Lets lapse the Skips of the tracks of [fileIds] whose stamp no file of the track holds any more (TI §1): the Skip of
+     * the track a file belonged to before the read, as its row here names it, and of the track that holds the file's key
+     * now or whose location hint is the file's place, as after a sync forgot the key of a changed file. A file without a
+     * key yet that holds the stamp may be the skipped file, so it keeps the Skip.
      */
     private suspend fun lapseSkips(fileIds: List<Long>): Decisions.Lapsed? {
         if (fileIds.isEmpty() || !decisions.hasLiveSkips()) return null
-        val skips = decisions.liveSkips()
         val before = fileIds.chunked(DecidedMirrorDao.CHUNK).flatMap { library.decided().missingInfoOf(it) }
-            .filter { it.value == MissingInfoDecision.SKIPPED_VALUE }.mapTo(HashSet()) { it.decisionId }
+            .filter { it.value == MissingInfoDecision.SKIPPED_VALUE }.map { it.decisionId }
         val places = fileIds.chunked(DecidedMirrorDao.CHUNK).flatMap { library.decided().placesOf(it) }
-        val keys = places.mapNotNullTo(HashSet()) { it.contentKey }
+        val keys = places.mapNotNull { it.contentKey }
         val spots = places.mapTo(HashSet<Triple<String?, String?, String?>>()) { Triple(it.volume, it.relativePath, it.displayName) }
-        val candidates = skips.filter { skip ->
-            skip.decisionId in before || skip.contentKey in keys || Triple(skip.hintVolume, skip.hintRelativePath, skip.hintDisplayName) in spots
+        val beforeIds = before.toSet()
+        val keySet = keys.toSet()
+        val candidates = decisions.liveSkipsOf(before, keys, places.map { it.displayName }).filter { skip ->
+            skip.decisionId in beforeIds || skip.contentKey in keySet ||
+                Triple(skip.hintVolume, skip.hintRelativePath, skip.hintDisplayName) in spots
         }
-        if (candidates.isEmpty()) return null
-        val stamps = candidates.map { it.contentKey }.distinct().chunked(DecidedMirrorDao.CHUNK)
-            .flatMap { library.decided().stampsWithKeys(it) }.groupBy({ it.contentKey }, { SkipLapse.FileStamp(it.size, it.mtime) })
         val lapsing = candidates.filter { skip ->
-            SkipLapse.lapses(SkipLapse.Skip(skip.decisionId, skip.identityId, skip.size, skip.mtimeMs), stamps[skip.contentKey].orEmpty())
+            val seconds = skip.mtimeMs?.let(SkipLapse::mtimeSeconds)
+            val holders = if (skip.size == null || seconds == null) emptyList() else library.decided().keysWithStamp(skip.size, seconds)
+            SkipLapse.lapses(skip.contentKey, skip.size, skip.mtimeMs, holders)
         }
         return if (lapsing.isEmpty()) null else decisions.lapse(lapsing.map { it.decisionId })
     }

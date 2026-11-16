@@ -607,9 +607,10 @@ class DecisionMirrorTest {
         for (suffix in listOf("", "-wal", "-shm", "-journal")) File(file.path + suffix).delete()
     }
 
+    /** The size and modification time (seconds) of the file of [mediaStoreId], as the library keeps them. */
     private suspend fun stampOf(mediaStoreId: Long): Pair<Long, Long> {
         val file = library.library().files().single { it.mediaStoreId == mediaStoreId }
-        return file.size to SkipLapse.mtimeMs(file.mtime)
+        return file.size to file.mtime
     }
 
     private suspend fun skip(mediaStoreId: Long, keyOf: Long = mediaStoreId): Decisions.Committed {
@@ -785,6 +786,30 @@ class DecisionMirrorTest {
         sync.sync()
         readAndReport(StampReader(keys = mapOf(2L to 1L)))
 
+        assertThat(lapsedAt(skipped.decisionId)).isNull()
+        for (n in listOf(1L, 2L)) assertThat(display(n).missingInfoDecision).isEqualTo(MissingInfoDecision.SKIPPED)
+    }
+
+    @Test
+    fun aSkipStaysWhenACopyIsReadBeforeTheSkippedFileHasItsKeyAgain() = runBlocking<Unit> {
+        fileAndCopy()
+        val skipped = skip(1)
+        assertThat(user.decisions().decision(skipped.decisionId)?.fileMtime).isEqualTo(SkipLapse.mtimeMs(stampOf(1).second))
+
+        // As after a rebuild, no file has a key or a read yet; the copy is read, and the skipped file's read fails.
+        library.withWriteTransaction {
+            usePrepared("UPDATE audio_file SET content_key = NULL, reader_version = NULL, tag_pass_at = NULL") { it.step() }
+        }
+        readAndReport(
+            object : PassReader {
+                override suspend fun read(file: PassFile): PassRead =
+                    if (file.mediaStoreId == 1L) PassRead.OpenFailed else StampReader(keys = mapOf(2L to 1L)).read(file)
+            },
+        )
+
+        assertThat(lapsedAt(skipped.decisionId)).isNull()
+        // Once the skipped file is read again, unchanged, it holds the stamp with the track's key.
+        readAndReport(StampReader(keys = mapOf(2L to 1L)))
         assertThat(lapsedAt(skipped.decisionId)).isNull()
         for (n in listOf(1L, 2L)) assertThat(display(n).missingInfoDecision).isEqualTo(MissingInfoDecision.SKIPPED)
     }

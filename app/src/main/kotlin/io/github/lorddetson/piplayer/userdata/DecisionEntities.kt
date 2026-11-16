@@ -228,13 +228,20 @@ interface DecisionDao {
     suspend fun hasLiveSkips(): Boolean
 
     /** Every Skip that counts, with its identity's key and location hint (TI §1). */
-    @Query(
-        "SELECT d.id AS decisionId, d.identity_id AS identityId, i.content_key AS contentKey, i.hint_volume_name AS hintVolume, " +
-            "i.hint_relative_path AS hintRelativePath, i.hint_display_name AS hintDisplayName, d.file_size AS size, " +
-            "d.file_mtime AS mtimeMs FROM decision d JOIN track_identity i ON i.id = d.identity_id " +
-            "WHERE d.kind = 5 AND d.undone_at IS NULL AND d.lapsed_at IS NULL AND i.start_ms = 0",
-    )
+    @Query(LIVE_SKIPS)
     suspend fun liveSkips(): List<LiveSkipRow>
+
+    /** [liveSkips] of the decisions [ids] (at most 500 at once). */
+    @Query("$LIVE_SKIPS AND d.id IN (:ids)")
+    suspend fun liveSkipsWithIds(ids: List<Long>): List<LiveSkipRow>
+
+    /** [liveSkips] of the identities that hold [keys] (at most 500 at once). */
+    @Query("$LIVE_SKIPS AND i.content_key IN (:keys)")
+    suspend fun liveSkipsWithKeys(keys: List<ByteArray>): List<LiveSkipRow>
+
+    /** [liveSkips] of the identities whose location hint has one of the file [names] (at most 500 at once). */
+    @Query("$LIVE_SKIPS AND i.hint_display_name IN (:names)")
+    suspend fun liveSkipsNamed(names: List<String>): List<LiveSkipRow>
 
     /** Marks the Skips [ids] lapsed at [at], those that count only; how many it marked (at most 500 at once). */
     @Query("UPDATE decision SET lapsed_at = :at WHERE kind = 5 AND undone_at IS NULL AND lapsed_at IS NULL AND id IN (:ids)")
@@ -265,6 +272,12 @@ interface DecisionDao {
     suspend fun savedCover(id: Long): SavedCoverEntity?
 
     companion object {
+        /** The Skips that count, with their identities' keys and location hints; further conditions may follow. */
+        const val LIVE_SKIPS = "SELECT d.id AS decisionId, d.identity_id AS identityId, i.content_key AS contentKey, " +
+            "i.hint_volume_name AS hintVolume, i.hint_relative_path AS hintRelativePath, i.hint_display_name AS hintDisplayName, " +
+            "d.file_size AS size, d.file_mtime AS mtimeMs FROM decision d JOIN track_identity i ON i.id = d.identity_id " +
+            "WHERE d.kind = 5 AND d.undone_at IS NULL AND d.lapsed_at IS NULL AND i.start_ms = 0"
+
         /** The Keep as-is and Skip decisions with their identities' keys; the conditions follow. */
         const val LIVE_STATES = "SELECT d.id, d.identity_id AS identityId, d.kind, i.content_key AS contentKey FROM decision d " +
             "JOIN track_identity i ON i.id = d.identity_id AND i.start_ms = 0"

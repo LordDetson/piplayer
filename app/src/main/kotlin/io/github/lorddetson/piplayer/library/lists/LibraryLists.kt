@@ -615,10 +615,10 @@ class LibraryLists(
     }
 
     companion object {
-        /** What a list selects of a song, from `track_display d` and `audio_file f`. */
         /** Whether a song of Songs missing information carries the Skip mark (TI §1); a song kept as it is is not listed. */
         private const val SKIPPED = "d.missing_info_decision = ${MissingInfoDecision.SKIPPED} AS skipped"
 
+        /** What a list selects of a song, from `track_display d` and `audio_file f`. */
         private const val SONG_COLUMNS = "f.id AS fileId, f.media_store_id AS mediaStoreId, d.title, d.artist, d.album, " +
             "d.duration_ms AS durationMs, d.disc_number AS discNumber, f.relative_path AS relativePath"
 

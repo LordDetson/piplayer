@@ -4,46 +4,51 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 
 /**
- * When a Skip lapses (TI §1): once no file of its track holds the size and modification time it stored. The library
- * stores modification times in seconds, a Skip in milliseconds (TI §10.2).
+ * When a Skip lapses (TI §1): once no file of its track holds the size and modification time it stored, while no file
+ * without a key yet holds them either. The library stores modification times in seconds, a Skip in milliseconds (TI §10.2).
  */
 class SkipLapseTest {
 
+    private val key = "k1"
     private val size = 5_000_000L
-    private val mtimeSeconds = 1_700_000_000L
-    private val skip = SkipLapse.Skip(decisionId = 7, identityId = 3, size = size, mtimeMs = mtimeSeconds * 1_000)
+    private val mtimeMs = 1_700_000_000_000L
 
-    private fun file(size: Long = this.size, mtimeSeconds: Long = this.mtimeSeconds) = SkipLapse.FileStamp(size, mtimeSeconds)
+    private fun lapses(vararg holders: String?) = SkipLapse.lapses(key, size, mtimeMs, holders.toList())
 
     @Test
     fun `a Skip lasts while a file of its track holds its size and modification time`() {
-        assertThat(SkipLapse.lapses(skip, listOf(file()))).isFalse()
-        // A byte-identical copy that appears, with a time of its own, beside the skipped file.
-        assertThat(SkipLapse.lapses(skip, listOf(file(mtimeSeconds = 1_800_000_000), file()))).isFalse()
+        assertThat(lapses(key)).isFalse()
+        // A byte-identical copy beside the skipped file has a time of its own, so it holds nothing; another track's file
+        // with the same stamp does not count, the skipped file does.
+        assertThat(lapses("other", key)).isFalse()
     }
 
     @Test
-    fun `a file changed by a tagger lets it lapse`() {
-        assertThat(SkipLapse.lapses(skip, listOf(file(size = size + 4_096)))).isTrue()
-        assertThat(SkipLapse.lapses(skip, listOf(file(mtimeSeconds = mtimeSeconds + 1)))).isTrue()
-        // Its copy kept the old size, but not the time.
-        assertThat(SkipLapse.lapses(skip, listOf(file(size = size + 4_096), file(mtimeSeconds = 1_800_000_000)))).isTrue()
+    fun `a file changed by a tagger, or one that left the track's key, lets it lapse`() {
+        // No file holds the stamp any more.
+        assertThat(lapses()).isTrue()
+        // Only a file of another track holds it: the skipped file left the track's key.
+        assertThat(lapses("other")).isTrue()
     }
 
     @Test
-    fun `a track whose file left its key holds no file, and its Skip lapses`() {
-        assertThat(SkipLapse.lapses(skip, emptyList())).isTrue()
+    fun `a file without a key yet that holds the stamp may be the skipped file, so the Skip stays`() {
+        // After a rebuild, while the copy is read first; or when the skipped file's read failed.
+        assertThat(lapses(null)).isFalse()
+        assertThat(lapses("other", null)).isFalse()
     }
 
     @Test
     fun `a Skip that stored no size or time lapses at its first check`() {
-        assertThat(SkipLapse.lapses(skip.copy(size = null), listOf(file()))).isTrue()
-        assertThat(SkipLapse.lapses(skip.copy(mtimeMs = null), listOf(file()))).isTrue()
+        assertThat(SkipLapse.lapses(key, null, mtimeMs, listOf(key))).isTrue()
+        assertThat(SkipLapse.lapses(key, size, null, listOf(key))).isTrue()
     }
 
     @Test
-    fun `the times compare to the second the library keeps`() {
-        assertThat(SkipLapse.lapses(skip.copy(mtimeMs = mtimeSeconds * 1_000 + 500), listOf(file()))).isTrue()
-        assertThat(SkipLapse.mtimeMs(mtimeSeconds)).isEqualTo(mtimeSeconds * 1_000)
+    fun `the times convert to and from the second the library keeps`() {
+        assertThat(SkipLapse.mtimeMs(1_700_000_000)).isEqualTo(mtimeMs)
+        assertThat(SkipLapse.mtimeSeconds(mtimeMs)).isEqualTo(1_700_000_000)
+        // A time no file of the library can hold.
+        assertThat(SkipLapse.mtimeSeconds(mtimeMs + 500)).isNull()
     }
 }

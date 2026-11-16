@@ -193,9 +193,6 @@ interface IdentificationRunDao {
     suspend fun dropTracedRuns(contentKey: String, runIds: List<String>)
 }
 
-/** A file's content key with its size and modification time (seconds), as the lapse of a Skip compares them (TI §1). */
-data class FileStampRow(val contentKey: String, val size: Long, val mtime: Long)
-
 /** A file's place and content key. */
 data class FilePlaceRow(val fileId: Long, val volume: String, val relativePath: String, val displayName: String, val contentKey: String?)
 
@@ -217,9 +214,12 @@ interface DecidedMirrorDao {
     @Query("SELECT * FROM decided_mirror WHERE field = 'missing_info_decision' AND file_id IN (:fileIds)")
     suspend fun missingInfoOf(fileIds: List<Long>): List<DecidedMirrorEntity>
 
-    /** The size and modification time of the files that hold the content keys [keys] (at most [CHUNK] at once; TI §1). */
-    @Query("SELECT content_key AS contentKey, size, mtime FROM audio_file WHERE content_key IN (:keys)")
-    suspend fun stampsWithKeys(keys: List<String>): List<FileStampRow>
+    /**
+     * The content keys of the files with [size] and [mtime] (seconds), null for a file without a key yet: the files that
+     * hold a Skip's stamp (TI §1).
+     */
+    @Query("SELECT content_key FROM audio_file WHERE size = :size AND mtime = :mtime")
+    suspend fun keysWithStamp(size: Long, mtime: Long): List<String?>
 
     /** The places and keys of [fileIds] (at most [CHUNK] at once). */
     @Query(

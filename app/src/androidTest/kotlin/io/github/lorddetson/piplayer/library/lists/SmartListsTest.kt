@@ -257,7 +257,7 @@ class SmartListsTest {
         // Keep as-is takes Delta out of the list and its count; Skip leaves Golf listed and marks it.
         val kept = checkNotNull(decisions.keepAsIs(identityOf(4)))
         val file7 = library.library().files().single { it.mediaStoreId == 7L }
-        val skipped = checkNotNull(decisions.skip(identityOf(7), file7.size, file7.mtime * 1_000))
+        val skipped = checkNotNull(decisions.skip(identityOf(7), file7.size, file7.mtime))
 
         assertThat(shown(chosen)).containsExactly(2L, 7L, 3L)
         assertThat(shown(SongQuery.missingInfo(MissingReasons.COVER))).containsExactly(7L, 3L)
