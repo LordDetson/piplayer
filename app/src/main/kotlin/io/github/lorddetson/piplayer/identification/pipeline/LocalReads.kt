@@ -16,7 +16,10 @@ import java.util.Locale
 /** What the library database holds of a file for stage 0: its row, its track if the tag pass made one, and its [uri]. */
 data class StoredFile(val row: AudioFileEntity, val track: TrackEntity?, val uri: String)
 
-/** Reads of the library database for stage 0; there is no write, since stage 0 writes nothing there (TI §3 "One run"). */
+/**
+ * Reads of the library database for stage 0; there is no write, since stage 0 stores no tag values, key or length there
+ * (TI §3 "One run"). Only the failed-read count of a read through `:tagger` changes, by that read's own guard.
+ */
 fun interface StoredFiles {
     suspend fun file(fileId: Long): StoredFile?
 }

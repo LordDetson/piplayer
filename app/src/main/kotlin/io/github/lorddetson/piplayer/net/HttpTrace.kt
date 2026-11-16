@@ -5,9 +5,9 @@ import kotlin.coroutines.CoroutineContext
 
 /**
  * What the HTTP layer saw of the calls made in a coroutine that carries this element (TI §10.1, the identification
- * trace): [RetryingCaller] reports every attempt it sent, with the status of its answer, or none when the attempt got no
- * answer (a dropped connection, a failed lookup of the host). A call that the gate, a provider's stop or the network
- * check refused sent nothing and is not counted. Thread-safe: an answer may be read on any thread.
+ * trace): [RetryingCaller] reports every attempt it made, with the status of its answer, or none when the attempt got no
+ * answer (a dropped connection, and also a failed lookup of the host or a refused connection, which send no byte). A
+ * call that the gate, a provider's stop or the network check refused is no attempt and is not counted. Thread-safe: an answer may be read on any thread.
  */
 class HttpTrace : AbstractCoroutineContextElement(HttpTrace) {
 
@@ -38,7 +38,7 @@ class HttpTrace : AbstractCoroutineContextElement(HttpTrace) {
 }
 
 /**
- * The attempts of one stage at the HTTP layer: [requests] sent, the [lastStatus] of the last one (null when it got no
- * answer) and [elapsedMs], the time from sending to the answer added up over the answered ones.
+ * The attempts of one stage at the HTTP layer: [requests] made, answered or not, the [lastStatus] of the last one (null
+ * when it got no answer) and [elapsedMs], the time from sending to the answer added up over the answered ones.
  */
 data class HttpSummary(val requests: Int, val lastStatus: Int?, val elapsedMs: Long)

@@ -103,6 +103,12 @@ class IdentificationPipeline(
 
         /** The lookup job of the file as stage 0's key found it; null for none or one that could not be read. */
         private var job: LookupJobEntity? = null
+
+        /** The lookup job could not be read, so the run may only remove it, never overwrite it (TI §3 "One run"). */
+        private var jobUnknown = false
+
+        /** When the retry is due that stage 3 skipped as pending; null when it skipped none. */
+        private var pendingUntil: Long? = null
         private var answer = AcoustIdAnswer.NONE
 
         /** When AcoustID's empty answer came, by the services' clock. */
@@ -181,6 +187,7 @@ class IdentificationPipeline(
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
+            jobUnknown = true
             null
         }
 
@@ -210,11 +217,14 @@ class IdentificationPipeline(
             val stop = (services.status(ProviderId.ACOUSTID).value as? ProviderStatus.Stopped)?.reason
             val duration = durationMs
             val startedAt = services.clock.millis()
+            // A time more than the delay ahead was stored by a clock that ran ahead: it counts as due (TI §3.2).
+            val waitsUntil = job?.takeIf { it.status == STATUS_RETRY_LATER }?.nextAttemptAt
+                ?.takeIf { it > startedAt && it - startedAt <= RETRY_DELAY.inWholeMilliseconds }
             val reason = when {
                 confident -> SkipReason.STOPPED_EARLY
                 stage !is FingerprintStage.Available -> SkipReason.NO_KEY
                 stop != null -> SkipReason.PROVIDER_STOPPED
-                job?.status == STATUS_RETRY_LATER && (job?.nextAttemptAt ?: 0) > startedAt -> SkipReason.RETRY_PENDING
+                waitsUntil != null -> SkipReason.RETRY_PENDING.also { pendingUntil = waitsUntil }
                 job?.status == STATUS_FINAL -> SkipReason.EMPTY_RESULT_FINAL
                 duration == null -> SkipReason.NO_DURATION
                 else -> null
@@ -410,11 +420,12 @@ class IdentificationPipeline(
          */
         private suspend fun stored(outcome: IdentificationOutcome, ranking: Ranking, choice: ReleaseChoice): PipelineResult {
             val change = jobChange()
+            // Only a retry this run stored or waited for is reported, so never a time that has passed (TI §3.2).
             val waiting = when (change) {
-                is JobChange.Save -> change.job
+                is JobChange.Save -> change.job.nextAttemptAt
                 JobChange.Drop -> null
-                JobChange.Keep -> job
-            }?.takeIf { it.status == STATUS_RETRY_LATER }?.nextAttemptAt?.let(Instant::ofEpochMilli)
+                JobChange.Keep -> pendingUntil
+            }?.let(Instant::ofEpochMilli)
             val result = result(outcome, waiting)
             val key = file!!.target.contentKey
             val trace = RunTrace.rows(key, UUID.randomUUID().toString(), runStartedAt, result, ranking, runMark.elapsedNow())
@@ -440,6 +451,8 @@ class IdentificationPipeline(
 
         /** What this run does to the file's lookup job (TI §3.2, M3 part). */
         private fun jobChange(): JobChange {
+            // A job that could not be read may be final: only results, which remove any job, change it.
+            if (jobUnknown) return if (answer == AcoustIdAnswer.RESULTS) JobChange.Drop else JobChange.Keep
             val job = job
             return when (answer) {
                 AcoustIdAnswer.EMPTY -> when {
@@ -460,7 +473,8 @@ class IdentificationPipeline(
                         )
                     }
                 }
-                AcoustIdAnswer.RESULTS -> if (job != null) JobChange.Drop else JobChange.Keep
+                // Deleting a row that is not there costs nothing.
+                AcoustIdAnswer.RESULTS -> JobChange.Drop
                 AcoustIdAnswer.NONE ->
                     if (textCancels && job?.status == STATUS_RETRY_LATER) JobChange.Drop else JobChange.Keep
             }
