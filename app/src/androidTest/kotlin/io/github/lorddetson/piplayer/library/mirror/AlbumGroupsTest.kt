@@ -201,10 +201,10 @@ class AlbumGroupsTest {
     fun aTrackAUserEditMergedIntoAnAlbumCountsForItsGroupWhenAnotherTrackIsIdentified() = runBlocking<Unit> {
         library(listOf(track(1), track(2), track(3).copy(album = "Record (Remastered)")))
         val record = checkNotNull(albumKeyOf(1))
-        checkNotNull(decisions.edit(identityOf(3), mapOf(DecidedField.ALBUM to "Record")))
-
-        // The edited track is identified first, so the last write holds another track and reads the edited one's row.
+        // The odd track is identified first and then edited into the album: the newest decision wins the album field
+        // (TI §7.1), so the edit counts. The last write then holds another track and reads the edited one's row.
         identify(3)
+        checkNotNull(decisions.edit(identityOf(3), mapOf(DecidedField.ALBUM to "Record")))
         identify(1)
         for (track in 1L..3L) assertThat(albumKeyOf(track)).describedAs("track $track before the last").isEqualTo(record)
         identify(2)
