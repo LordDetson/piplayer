@@ -74,14 +74,17 @@ class ApplyIdentityTest {
     private suspend fun identityWithKey(n: Long): TrackIdentityEntity? =
         user.identities().identities().singleOrNull { Hex.text(it.contentKey) == key(n) }
 
-    /** A run of the real tag pass whose reader gives each file the key of its media ID; its batches ask the mirror. */
-    private suspend fun readByThePass() {
+    /**
+     * A run of the real tag pass whose reader gives each file the key of its media ID and the [tags] of its media ID; its
+     * batches ask the mirror.
+     */
+    private suspend fun readByThePass(tags: (Long) -> Map<String, List<String>> = { emptyMap() }) {
         TagPass(
             library, sync,
             object : PassReader {
                 override suspend fun read(file: PassFile): PassRead = PassRead.Replied(
                     TagReport(
-                        properties = mapOf("TITLE" to listOf("Tag ${file.mediaStoreId}")),
+                        properties = mapOf("TITLE" to listOf("Tag ${file.mediaStoreId}")) + tags(file.mediaStoreId),
                         audio = TagReport.Audio(60_000, 128, 44_100, 2),
                         content = TagReport.Content(key(file.mediaStoreId), "mp3", DurationPlan(60_000, DurationCheck.NONE)),
                     ),
@@ -268,6 +271,91 @@ class ApplyIdentityTest {
         assertThat(user.identities().identity(missing)?.missingSince).isEqualTo(now - 5_000)
         // The rest of the plan was written in the same transaction.
         assertThat(identityWithKey(3)).isNotNull()
+    }
+
+    @Test
+    fun anAttachPassThatPlannedANewIdentityForAFileApplyMadeOneForKeepsApplysAndWritesTheRestOfItsPlan() = runBlocking<Unit> {
+        index.volume().rows = listOf(row(1, path = "Music/Record/", name = "01.mp3"), row(3))
+        sync.sync()
+        library.library().setContent(fileId(1), key(1), 200_000, DurationSource.HEADER)
+        library.library().setContent(fileId(3), key(3), 200_000, DurationSource.HEADER)
+        // No identity matches file 1, so the pass plans a new one for its key; Apply makes one after the pass has read the
+        // identities and before it writes.
+        var applied: Decisions.Committed? = null
+        val racing = IdentityAttacher(
+            library, user, sync,
+            holders = {
+                if (applied == null) {
+                    val file = KeyedFile(
+                        fileId(1), key(1), Place(FakeMediaIndex.PRIMARY, "Music/Record/", "01.mp3"), size = 1, durationMs = 200_000,
+                        settled = true, recordingMbid = null, format = null, tagsRead = false,
+                    )
+                    applied = repository.apply(request(key(1), fileId = fileId(1)), libraryFile = ApplyFile(file))
+                }
+                user.user().identitiesHoldingData().toSet()
+            },
+            clock = { now },
+        )
+        try {
+            racing.attach()
+        } finally {
+            racing.close()
+        }
+
+        // Apply's identity keeps the key, and the pass's write of it is left out rather than failing the whole pass.
+        assertThat(identityWithKey(1)?.id).isEqualTo(checkNotNull(applied).identityId)
+        assertThat(identityWithKey(3)).isNotNull()
+        assertThat(user.identities().identities()).hasSize(2)
+    }
+
+    @Test
+    fun anAttachPassThatPlannedToMoveAnIdentityApplyMovedLeavesItWhereApplyPutIt() = runBlocking<Unit> {
+        val recording = "4e000000-1111-4222-8333-000000000005"
+        // File 5 lies elsewhere and its tags carry the recording MBID of the missing identity below.
+        index.volume().rows = listOf(row(5, path = "Music/Elsewhere/", name = "05.mp3", generation = 5))
+        sync.sync()
+        readByThePass { id -> if (id == 5L) mapOf("MUSICBRAINZ_TRACKID" to listOf(recording)) else emptyMap() }
+        // File 1 lies at the place the missing identity names; the tag pass has not read it, so the library has no key.
+        index.volume().rows = listOf(
+            row(5, path = "Music/Elsewhere/", name = "05.mp3", generation = 5),
+            row(1, path = "Music/Record/", name = "01.mp3", durationMs = 60_000, generation = 10),
+        )
+        sync.sync()
+        val missing = user.identities().add(
+            TrackIdentityEntity(
+                contentKey = Hex.bytes(key(9)), durationMs = 60_300, recordingMbid = Hex.mbidBytes(recording),
+                hintVolumeName = FakeMediaIndex.PRIMARY, hintRelativePath = "Music/Record/", hintDisplayName = "01.mp3",
+                hintSize = 1, createdAt = now - 10_000, missingSince = now - 5_000,
+            ),
+        )
+        // The pass's step 3 plans to give the missing identity file 5's key by the recording MBID. Before it writes, Apply on
+        // file 1 gives the identity file 1's key by the hinted place.
+        var applied: Decisions.Committed? = null
+        val racing = IdentityAttacher(
+            library, user, sync,
+            holders = {
+                if (applied == null) {
+                    val file = KeyedFile(
+                        fileId(1), key(1), Place(FakeMediaIndex.PRIMARY, "Music/Record/", "01.mp3"), size = 1, durationMs = 60_000,
+                        settled = true, recordingMbid = null, format = null, tagsRead = false,
+                    )
+                    applied = repository.apply(request(key(1), fileId = fileId(1)), libraryFile = ApplyFile(file))
+                }
+                user.user().identitiesHoldingData().toSet()
+            },
+            clock = { now },
+        )
+        try {
+            racing.attach()
+        } finally {
+            racing.close()
+        }
+
+        assertThat(checkNotNull(applied).identityId).isEqualTo(missing)
+        val kept = checkNotNull(user.identities().identity(missing))
+        assertThat(Hex.text(kept.contentKey)).isEqualTo(key(1))
+        assertThat(kept.hintRelativePath).isEqualTo("Music/Record/")
+        assertThat(kept.missingSince).isNull()
     }
 
     @Test

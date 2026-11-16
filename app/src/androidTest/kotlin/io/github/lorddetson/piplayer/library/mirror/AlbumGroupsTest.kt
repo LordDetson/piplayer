@@ -15,6 +15,7 @@ import io.github.lorddetson.piplayer.library.sync.IndexRow
 import io.github.lorddetson.piplayer.library.sync.LibrarySync
 import io.github.lorddetson.piplayer.library.sync.TrackDisplayWriter
 import io.github.lorddetson.piplayer.library.tagpass.DurationSource
+import io.github.lorddetson.piplayer.library.values.DecidedField
 import io.github.lorddetson.piplayer.userdata.DecisionFixtures.details
 import io.github.lorddetson.piplayer.userdata.DecisionFixtures.mbid
 import io.github.lorddetson.piplayer.userdata.DecisionFixtures.request
@@ -80,8 +81,8 @@ class AlbumGroupsTest {
         attacher.attach()
     }
 
-    private suspend fun identify(mediaStoreId: Long, album: String = "Record") =
-        checkNotNull(decisions.apply(request(key(mediaStoreId), details(album = album, release = 1, recording = mediaStoreId.toInt()), fileId = fileId(mediaStoreId))))
+    private suspend fun identify(mediaStoreId: Long, album: String = "Record", release: Int = 1) =
+        checkNotNull(decisions.apply(request(key(mediaStoreId), details(album = album, release = release, recording = mediaStoreId.toInt()), fileId = fileId(mediaStoreId))))
 
     private fun cover(name: String): String {
         File(dir, name).writeBytes(byteArrayOf(1, 2, 3))
@@ -180,5 +181,67 @@ class AlbumGroupsTest {
         sync.sync()
 
         for (track in listOf(1L, 2L, 5L)) assertThat(albumKeyOf(track)).describedAs("track $track").isEqualTo(own)
+    }
+
+    @Test
+    fun aUserEditOfTheAlbumMergesATrackIntoTheAlbumItNamesAndLeavesTheAlbumItCameFrom() = runBlocking<Unit> {
+        library(listOf(track(1), track(2), track(3).copy(album = "Record (Remastered)")))
+        val record = checkNotNull(albumKeyOf(1))
+        val remastered = checkNotNull(albumKeyOf(3))
+        assertThat(remastered).isNotEqualTo(record)
+
+        checkNotNull(decisions.edit(identityOf(3), mapOf(DecidedField.ALBUM to "Record")))
+
+        for (track in 1L..3L) assertThat(albumKeyOf(track)).describedAs("track $track").isEqualTo(record)
+        assertThat(LibraryLists(library).albums().map { it.key }).containsExactly(record)
+        assertThat(LibraryLists(library).album(record)?.songs).isEqualTo(3)
+    }
+
+    @Test
+    fun aTrackAUserEditMergedIntoAnAlbumCountsForItsGroupWhenAnotherTrackIsIdentified() = runBlocking<Unit> {
+        library(listOf(track(1), track(2), track(3).copy(album = "Record (Remastered)")))
+        val record = checkNotNull(albumKeyOf(1))
+        checkNotNull(decisions.edit(identityOf(3), mapOf(DecidedField.ALBUM to "Record")))
+
+        // The edited track is identified first, so the last write holds another track and reads the edited one's row.
+        identify(3)
+        identify(1)
+        for (track in 1L..3L) assertThat(albumKeyOf(track)).describedAs("track $track before the last").isEqualTo(record)
+        identify(2)
+
+        for (track in 1L..3L) assertThat(albumKeyOf(track)).describedAs("track $track").isEqualTo("mbid:$release")
+    }
+
+    @Test
+    fun newFilesInTheFoldersOfMoreThanSixteenIdentifiedAlbumsBringEachGroupsOwnKeyBack() = runBlocking<Unit> {
+        val albums = 1..17
+        fun folder(album: Int) = "Music/Album %02d/".format(album)
+        fun albumTrack(id: Long, album: Int) =
+            row(id, path = folder(album), album = "Album $album", artist = "Ann", albumArtist = "Ann", generation = id)
+        val identified = albums.flatMap { album -> listOf(albumTrack(album * 2L - 1, album), albumTrack(album * 2L, album)) }
+        // A file with a decided release in a folder of its own, which no group of the write is in.
+        val elsewhere = albumTrack(99, 99)
+        library(identified + elsewhere)
+        val own = albums.associateWith { album -> checkNotNull(albumKeyOf(album * 2L)) }
+        for (album in albums) {
+            identify(album * 2L - 1, album = "Album $album", release = album)
+            identify(album * 2L, album = "Album $album", release = album)
+        }
+        identify(99, album = "Album 99", release = 99)
+        for (album in albums) {
+            assertThat(albumKeyOf(album * 2L)).describedAs("album $album identified").isEqualTo("mbid:${mbid(album, 0x1e1)}")
+        }
+        val elsewhereKey = albumKeyOf(99)
+
+        // One sync brings a new file into the folder of every album: no row holds the groups' own keys.
+        index.volume().rows = identified + elsewhere + albums.map { album -> albumTrack(100L + album, album) }
+        sync.sync()
+
+        for (album in albums) {
+            for (track in listOf(album * 2L - 1, album * 2L, 100L + album)) {
+                assertThat(albumKeyOf(track)).describedAs("album $album, track $track").isEqualTo(own.getValue(album))
+            }
+        }
+        assertThat(albumKeyOf(99)).isEqualTo(elsewhereKey)
     }
 }

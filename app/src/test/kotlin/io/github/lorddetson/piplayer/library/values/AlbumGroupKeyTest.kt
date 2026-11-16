@@ -24,6 +24,9 @@ class AlbumGroupKeyTest {
     private fun decided(vararg parts: Pair<DecidedField, String?>) =
         FieldOverrides(parts.associate { (part, value) -> part to Decided(value, DecisionKind.LEVEL_IDENTIFICATION, 1) })
 
+    private fun edited(vararg parts: Pair<DecidedField, String?>) =
+        FieldOverrides(parts.associate { (part, value) -> part to Decided(value, DecisionKind.LEVEL_USER_EDIT, 2) })
+
     private fun read(tags: TrackTags = this.tags, overrides: FieldOverrides = FieldOverrides.NONE, path: String = this.path) =
         MergedValues.of("01.mp3", null, tags, read = true, overrides = overrides, volume = volume, relativePath = path)
 
@@ -116,5 +119,43 @@ class AlbumGroupKeyTest {
     @Test
     fun `a release that is no MBID makes no key`() {
         assertThat(AlbumKey.ofGroup(ownKey, listOf("not an mbid", "not an mbid"))).isEqualTo(ownKey)
+    }
+
+    @Test
+    fun `a user edit of the album, album artist or compilation makes the key as the tags would`() {
+        val values = read(overrides = edited(ALBUM to "Abbey Road", ALBUM_ARTIST to "The Beatles", COMPILATION to "1"))
+
+        assertThat(values.albumKey)
+            .isEqualTo(AlbumKey.of(TrackTags(album = "Abbey Road", albumArtist = "The Beatles", compilation = true), volume, path))
+        assertThat(values.albumGroup).isEqualTo(AlbumGroupFacts(null, decidedRelease = false, volume, path))
+    }
+
+    @Test
+    fun `a user edit of the album keeps the tags' album artist, and an identification's album artist does not count`() {
+        val mixed = FieldOverrides(
+            mapOf(
+                ALBUM to Decided("Abbey Road", DecisionKind.LEVEL_USER_EDIT, 2),
+                ALBUM_ARTIST to Decided("The Beatles", DecisionKind.LEVEL_IDENTIFICATION, 1),
+            ),
+        )
+
+        assertThat(read(overrides = mixed).albumKey).isEqualTo(AlbumKey.of(TrackTags(album = "Abbey Road", albumArtist = "Ann"), volume, path))
+        // A release MBID in the tags still makes the key.
+        assertThat(read(tags.copy(releaseMbid = other), edited(ALBUM to "Abbey Road")).albumKey).isEqualTo("mbid:$other")
+    }
+
+    @Test
+    fun `a user edit that empties the album leaves the file without an album`() {
+        assertThat(read(overrides = edited(ALBUM to null)).albumKey).isNull()
+        assertThat(read(overrides = edited(ALBUM to null)).albumGroup).isNull()
+    }
+
+    @Test
+    fun `an unread file's user edit of the album wins over the index's album`() {
+        val index = IndexValues(title = "Index song", album = "Index album", albumArtist = "Index artist")
+
+        val values = MergedValues.of("01.mp3", index, null, read = false, overrides = edited(ALBUM to "Record"), volume = volume, relativePath = path)
+
+        assertThat(values.albumKey).isEqualTo(AlbumKey.of(TrackTags(album = "Record", albumArtist = "Index artist"), volume, path))
     }
 }

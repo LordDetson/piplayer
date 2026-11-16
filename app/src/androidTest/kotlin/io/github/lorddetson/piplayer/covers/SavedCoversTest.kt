@@ -146,4 +146,20 @@ class SavedCoversTest {
         assertThat(covers.file(byEdit)).isNotNull()
         assertThat(dir.listFiles()!!).hasSize(2)
     }
+
+    @Test
+    fun aFileWhoseLengthDiffersFromItsRowGivesNoneUntilTheSameBytesAreSavedAgain() = runBlocking<Unit> {
+        val covers = SavedCovers(user, dir)
+        val bytes = jpeg(600, 500)
+        val id = checkNotNull(covers.save(bytes, release, SavedCovers.Source.RELEASE))
+        referByAChoice(id)
+        // A power loss left the renamed file cut short.
+        checkNotNull(covers.file(id)).writeBytes(bytes.copyOf(bytes.size - 5))
+
+        assertThat(covers.file(id)).isNull()
+        assertThat(SavedCovers(user, dir).file(id)).isNull()
+
+        assertThat(covers.save(bytes, release, SavedCovers.Source.RELEASE)).isEqualTo(id)
+        assertThat(checkNotNull(covers.file(id)).readBytes()).isEqualTo(bytes)
+    }
 }
