@@ -119,7 +119,7 @@ class ApplyIdentityTest {
         assertThat(identityWithKey(1)?.id).isEqualTo(made.id)
 
         // The file appears in the index, the tag pass stores its key, and the attach pass attaches the identity.
-        index.volume().rows = listOf(row(2), row(1, path = "Download/", name = "track_07.mp3"))
+        index.volume().rows = listOf(row(2), row(1, path = "Music/Downloads/", name = "track_07.mp3", generation = 10))
         sync.sync()
         readByThePass()
         attacher.attach()
@@ -127,7 +127,7 @@ class ApplyIdentityTest {
         val attached = checkNotNull(identityWithKey(1))
         assertThat(attached.id).isEqualTo(made.id)
         assertThat(attached.missingSince).isNull()
-        assertThat(attached.hintRelativePath).isEqualTo("Download/")
+        assertThat(attached.hintRelativePath).isEqualTo("Music/Downloads/")
         assertThat(attached.hintDisplayName).isEqualTo("track_07.mp3")
         assertThat(attached.durationMs).isEqualTo(60_000)
         assertThat(display(1).title).isEqualTo("Decided title")
