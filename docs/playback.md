@@ -1503,9 +1503,9 @@ history starts early. It is local only: nothing of it is ever sent. What is stor
   transition to the next song, a repeat-one replay, a repeat-all wrap, the end of the queue (§11.2), and the end of a
   song that "stop after current track" stops at (§6.4). It also ends so when the user moves on (below) while the
   position is at the end of the song as §4.3.1 defines it (its last 2 %, at most its last 5 s): "Next" pressed in the
-  fade-out, or the song after one that stop after current track paused at its end. A seek to the end that lets the song
-  end is listened to the end too, with the little listened time it has: the stored listened time and length tell such a
-  playback apart.
+  fade-out, or a new queue chosen while the last song stays at its end after stop after current track. A seek to the end
+  that lets the song end is listened to the end too, with the little listened time it has: the stored listened time and
+  length tell such a playback apart.
 - **Early skip**: the user moved on before the end after less than 30 s of listened time. 29.9 s is an early skip,
   30 s a late one.
 - **Late skip**: the user moved on before the end after 30 s of listened time or more. The share listened is the

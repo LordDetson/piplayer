@@ -1432,8 +1432,8 @@ the user's own library after 1.0; in M3 no screen shows it, and it never leaves 
 - Both tables are user data that refers to identities (§8.1): an identity they refer to is never deleted, and the
   attach pass counts them among the identities that hold data.
 - Both tables are in `user.db`, which backups and transfers take whole (§3.3); the backup rules need no change.
-- Size: 100 listenings a day give about 9 000 events in 90 days; with the folded counts of 15 000 identities they stay
-  within the size budget of `user.db` (TI §10.2).
+- Size: 100 listenings a day give about 9 000 events in 90 days; with the folded counts of 15 000 identities they take
+  about 0.64 MB of `user.db`, which its size budget counts (TI §10.2).
 
 Checks. JVM tests: the outcome rule of playback.md §12.7. Instrumented tests: `user.db` version 5 migrates to 6 with both
 tables empty (TI §11.2); an outcome written by its identity, a second outcome of the same playback ignored, one without
