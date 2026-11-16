@@ -89,7 +89,8 @@ object AppPipeline {
 
     /**
      * The app's pipeline: the app's services, whose gate is the user's stored choice (TI §9) and which a run waits to
-     * read, stage 0 through the library and `:tagger`, the library's fingerprint cache and the native encoder.
+     * read, stage 0 through the library and `:tagger`, the library's fingerprint cache, the native encoder and the
+     * library database's working rows of identification (TI §10.1).
      */
     fun of(context: Context): IdentificationPipeline = over(
         context = context,
