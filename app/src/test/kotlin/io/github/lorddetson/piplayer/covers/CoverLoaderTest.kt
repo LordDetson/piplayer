@@ -763,6 +763,16 @@ class CoverLoaderTest {
         assertThat(loader.load(CoverRequest.Track(1), 1080)).isNotNull()
         assertThat(loader.encoded(CoverRequest.Track(1), 1024)).isNotNull()
         assertThat(log.to(caaHost)).hasSize(1)
+
+        // Both uncached steps are on disk, so another process start (a new loader whose Cover Art Archive source holds
+        // no recent image) shows them without a request.
+        assertThat(disk.read("caa/${mbid(1)}/-@1536")).isInstanceOf(Cached.Picture::class.java)
+        assertThat(disk.read("caa/${mbid(1)}/-@1024")).isInstanceOf(Cached.Picture::class.java)
+        val restarted = caaLoader(1, songs = mapOf(1L to 1))
+        assertThat(restarted.load(CoverRequest.Track(1), 1080)).isNotNull()
+        assertThat(restarted.encoded(CoverRequest.Track(1), 1024)).isNotNull()
+        assertThat(log.to(caaHost)).isEmpty()
+        assertThat(log.to(archiveHost)).isEmpty()
     }
 
     @Test
