@@ -36,9 +36,6 @@ object FieldEdits {
         ProtectedField.ISRC,
     )
 
-    /** How the diff shows a list's items: a list the user leaves as it was equals the release's value. */
-    private const val LIST_SEPARATOR = ReviewDiff.LIST_SEPARATOR
-
     /** A track or disc number, which has a total beside it. */
     fun hasTotal(field: ProtectedField): Boolean = field == ProtectedField.TRACK_NUMBER || field == ProtectedField.DISC_NUMBER
 
@@ -65,7 +62,8 @@ object FieldEdits {
             val t = if (total.isEmpty()) null else positive(total) ?: return ParsedEntry.Invalid
             return ParsedEntry.Value(FieldValue.OfTotal(n, t))
         }
-        if (isList(field)) return ParsedEntry.Value(items(entry.text).takeIf { it.isNotEmpty() }?.let { FieldValue.Text(it.joinToString(LIST_SEPARATOR)) })
+        // Joined as the diff shows a list, so that a list the user leaves as it was equals the release's value.
+        if (isList(field)) return ParsedEntry.Value(items(entry.text).takeIf { it.isNotEmpty() }?.let { FieldValue.Text(it.joinToString(ReviewDiff.LIST_SEPARATOR)) })
         return ParsedEntry.Value(entry.text.trim().takeIf { it.isNotEmpty() }?.let(FieldValue::Text))
     }
 

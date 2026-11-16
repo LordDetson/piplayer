@@ -24,6 +24,8 @@ import io.github.lorddetson.piplayer.settings.ProtectedField
 import java.time.Instant
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
@@ -150,8 +152,8 @@ sealed interface Panel {
 
     /**
      * Choose cover (TI §5.2): the release index's [images], null while they load, what the index said ([indexNote]), the
-     * file's [embedded] pictures, null while they are read, the release image being fetched ([choosing]) and whether the
-     * last one [failed].
+     * file's [embedded] pictures, null while they are read and empty when the file could not be read now
+     * ([embeddedFailed]), the release image being fetched ([choosing]) and whether the last one [failed].
      */
     data class Covers(
         val images: List<CaaImage>? = null,
@@ -159,6 +161,7 @@ sealed interface Panel {
         val embedded: List<EmbeddedImage>? = null,
         val choosing: Int? = null,
         val failed: Boolean = false,
+        val embeddedFailed: Boolean = false,
     ) : Panel
 
     /** Edit fields: the [entries] as the user edits them, from [start], and the fields whose text is not a number ([invalid]). */
@@ -265,6 +268,10 @@ class ReviewModel(private val file: FileRef, private val backend: ReviewBackend,
 
     /** Counts the panels opened, so that the answer of a panel's request never reaches a later one. */
     private var panels = 0
+
+    /** The panels' requests, cancelled when a new run starts: nothing of one run's panels reaches the next. */
+    private var panelJob: Job = SupervisorJob(scope.coroutineContext[Job])
+    private val panelScope: CoroutineScope get() = CoroutineScope(scope.coroutineContext + panelJob)
 
     private class Index(val images: List<CaaImage>, val note: CoversNote?)
 
@@ -457,7 +464,7 @@ class ReviewModel(private val file: FileRef, private val backend: ReviewBackend,
         val group = groups[base.release.id]
         update { copy(panel = Panel.Editions(list = group, withoutSong = withoutSong[key].orEmpty(), chosen = edition.release.id)) }
         if (group != null) return
-        scope.launch {
+        panelScope.launch {
             val list = quietly { backend.editions(base, result) }
             if (list != null) groups[base.release.id] = list
             updatePanel<Panel.Editions>(generation) { copy(list = list, failed = list == null) }
@@ -481,7 +488,7 @@ class ReviewModel(private val file: FileRef, private val backend: ReviewBackend,
         val base = suggested[key] ?: shown
         val generation = panels
         update { copy(panel = panel.copy(opening = index, openFailed = false)) }
-        scope.launch {
+        panelScope.launch {
             val opened: SuggestedEdition?
             try {
                 opened = backend.openEdition(edition, base, result)
@@ -532,7 +539,7 @@ class ReviewModel(private val file: FileRef, private val backend: ReviewBackend,
         }
         val hint = result?.hint ?: TrackHint(null, null, result?.durationMs)
         updatePanel<Panel.Search>(generation) { copy(searching = true, note = null) }
-        scope.launch {
+        panelScope.launch {
             val (results, note) = try {
                 when (request) {
                     is ManualRequest.Search -> ManualResults.ofSearch(hint, backend.search(request.query)).let { it to nothingFound(it) }
@@ -566,7 +573,7 @@ class ReviewModel(private val file: FileRef, private val backend: ReviewBackend,
         val generation = panels
         val run = runs
         updatePanel<Panel.Search>(generation) { copy(choosing = index, note = null) }
-        scope.launch {
+        panelScope.launch {
             readCurrent()
             if (!editions.containsKey(key)) {
                 val release = chosen.release
@@ -611,7 +618,7 @@ class ReviewModel(private val file: FileRef, private val backend: ReviewBackend,
         // A load still in flight from an earlier opening fills this panel too.
         val run = runs
         if (index == null && indexLoads.add(releaseId)) {
-            scope.launch {
+            panelScope.launch {
                 val loaded = when (val answer = quietly { backend.releaseImages(releaseId) }) {
                     is CaaResult.Found -> Index(answer.value.images, null)
                     CaaResult.NotFound -> Index(emptyList(), CoversNote.NO_IMAGES)
@@ -630,7 +637,7 @@ class ReviewModel(private val file: FileRef, private val backend: ReviewBackend,
         val uri = result?.file?.uri
         if (embedded == null && uri != null && !embeddedLoading) {
             embeddedLoading = true
-            scope.launch {
+            panelScope.launch {
                 val read = quietly { backend.embeddedImages(uri) }
                 embeddedLoading = false
                 if (run != runs) return@launch
@@ -638,7 +645,7 @@ class ReviewModel(private val file: FileRef, private val backend: ReviewBackend,
                 if (read != null) embedded = read
                 update {
                     val covers = panel as? Panel.Covers
-                    if (covers == null) this else copy(panel = covers.copy(embedded = read.orEmpty()))
+                    if (covers == null) this else copy(panel = covers.copy(embedded = read.orEmpty(), embeddedFailed = read == null))
                 }
             }
         }
@@ -647,15 +654,23 @@ class ReviewModel(private val file: FileRef, private val backend: ReviewBackend,
     /** The 250 px thumbnail of a release image for the picker, fetched once; null without one. */
     suspend fun thumbnail(image: CaaImage): CoverImage? {
         val key = image.original.toString()
-        val load = thumbnails.getOrPut(key) {
-            scope.async {
+        thumbnails[key]?.let { return it.await() }
+        var own: Deferred<CoverImage?>? = null
+        // Lazy: it is in the map before its fetch can end, so that the failure below finds it.
+        val load = panelScope.async(start = CoroutineStart.LAZY) {
+            var keep = false
+            try {
                 val answer = quietly { backend.image(image, THUMBNAIL_PX) }
                 val thumbnail = (answer as? CaaResult.Found)?.value
-                // A busy or failed fetch is tried again when the row shows again.
-                if (thumbnail == null && answer != CaaResult.NotFound) thumbnails.remove(key)
+                keep = thumbnail != null || answer == CaaResult.NotFound
                 thumbnail
+            } finally {
+                // A busy, failed or cut-short fetch is tried again when the row shows again.
+                if (!keep && thumbnails[key] === own) thumbnails.remove(key)
             }
         }
+        own = load
+        thumbnails[key] = load
         return load.await()
     }
 
@@ -667,7 +682,7 @@ class ReviewModel(private val file: FileRef, private val backend: ReviewBackend,
         if (panel.choosing != null) return
         val generation = panels
         update { copy(panel = panel.copy(choosing = index, failed = false)) }
-        scope.launch {
+        panelScope.launch {
             val fetched = (quietly { backend.image(image, EMBED_PX) } as? CaaResult.Found)?.value
             if (fetched == null) {
                 updatePanel<Panel.Covers>(generation) { copy(choosing = null, failed = true) }
@@ -684,7 +699,7 @@ class ReviewModel(private val file: FileRef, private val backend: ReviewBackend,
         val picture = panel.embedded?.getOrNull(index) ?: return
         if (panel.choosing != null) return
         val generation = panels
-        scope.launch { chooseCover(generation, ProposedCover.Chosen(picture.bytes, picture.size, ProposedCover.Origin.EMBEDDED)) }
+        panelScope.launch { chooseCover(generation, ProposedCover.Chosen(picture.bytes, picture.size, ProposedCover.Origin.EMBEDDED)) }
     }
 
     /** Puts [chosen] on the cover line of the card, its checkbox by the size rule, and closes the picker. */
@@ -756,6 +771,11 @@ class ReviewModel(private val file: FileRef, private val backend: ReviewBackend,
     }
 
     private fun launchRun() {
+        panelJob.cancel()
+        panelJob = SupervisorJob(scope.coroutineContext[Job])
+        indexLoads.clear()
+        embeddedLoading = false
+        thumbnails.clear()
         val before = run
         (mutable.value as? ReviewState.Ended)?.let {
             kept = it.last
@@ -816,7 +836,7 @@ class ReviewModel(private val file: FileRef, private val backend: ReviewBackend,
         thumbnails.clear()
         edits = emptyMap()
         currentRead = false
-        val candidates = found?.ranking?.matches.orEmpty().filter { it.score >= Bands.MEDIUM - SCORE_TOLERANCE }
+        val candidates = found?.ranking?.matches.orEmpty().filter { Bands.of(it.score, null) != Band.NO_MATCH }
         if (found == null || candidates.isEmpty()) {
             mutable.value = ReviewState.Ended(
                 outcome, result.retryAt, keepOrSkip = keepOrSkip, last = kept, applied = appliedBefore, canEdit = canEdit, snippet = snippet,
@@ -962,9 +982,6 @@ class ReviewModel(private val file: FileRef, private val backend: ReviewBackend,
     }
 
     private companion object {
-        /** As the bands compare scores (TI §4.1). */
-        const val SCORE_TOLERANCE = 1e-9
-
         /** The cover picker's thumbnails, and the size a chosen release image is fetched at (TI §5.2: the embedding size). */
         const val THUMBNAIL_PX = 250
         const val EMBED_PX = 1200

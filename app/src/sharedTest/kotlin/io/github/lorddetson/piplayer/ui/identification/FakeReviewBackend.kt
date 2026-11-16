@@ -208,8 +208,13 @@ class FakeReviewBackend(
         return lookupAnswer
     }
 
+    /** When set, a release index waits for it. */
+    @Volatile
+    var indexGate: CompletableDeferred<Unit>? = null
+
     override suspend fun releaseImages(releaseId: String): CaaResult<CaaReleaseIndex> {
         calls += "index $releaseId"
+        indexGate?.await()
         return indexAnswer
     }
 

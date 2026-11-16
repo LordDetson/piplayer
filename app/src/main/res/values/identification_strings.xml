@@ -167,6 +167,7 @@
     <string name="review_covers_no_images">This release has no images in Cover Art Archive.</string>
     <string name="review_covers_failed">The images of this release could not be loaded.</string>
     <string name="review_covers_no_embedded">The file has no pictures.</string>
+    <string name="review_covers_embedded_failed">The pictures of the file could not be read now.</string>
     <string name="review_cover_image_failed">This image could not be loaded.</string>
     <string name="review_cover_chosen">Your choice</string>
     <string name="review_your_edit">Your edit</string>

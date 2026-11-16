@@ -384,6 +384,7 @@ class ReviewPanelsModelTest {
         model.openCovers()
         advanceUntilIdle()
         assertThat(model.panel<Panel.Covers>().embedded).isEmpty()
+        assertThat(model.panel<Panel.Covers>().embeddedFailed).isTrue()
 
         backend.embeddedFails = false
         backend.embedded = listOf(picture)
@@ -394,9 +395,32 @@ class ReviewPanelsModelTest {
         advanceUntilIdle()
 
         assertThat(model.panel<Panel.Covers>().embedded).containsExactly(picture)
+        assertThat(model.panel<Panel.Covers>().embeddedFailed).isFalse()
         assertThat(model.panel<Panel.Covers>().images).isEqualTo(index.images)
         assertThat(backend.calls.count { it.startsWith("embedded") }).isEqualTo(2)
         assertThat(backend.calls.count { it.startsWith("index") }).isEqualTo(1)
+    }
+
+    @Test
+    fun `a release index that a new run cut short is loaded again in it`() = runTest {
+        val backend = backend({
+            indexAnswer = CaaResult.Found(index)
+            indexGate = CompletableDeferred()
+            embedded = emptyList()
+        })
+        val model = started(backend)
+        model.openCovers()
+        advanceUntilIdle()
+        model.closePanel()
+        model.retry()
+        advanceUntilIdle()
+
+        backend.indexGate = null
+        model.openCovers()
+        advanceUntilIdle()
+
+        assertThat(model.panel<Panel.Covers>().images).isEqualTo(index.images)
+        assertThat(backend.calls.count { it.startsWith("index") }).isEqualTo(2)
     }
 
     @Test

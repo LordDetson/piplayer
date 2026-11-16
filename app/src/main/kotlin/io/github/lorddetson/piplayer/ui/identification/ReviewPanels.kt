@@ -247,6 +247,7 @@ private fun CoversPanel(panel: Panel.Covers, model: ReviewModel) {
         val embedded = panel.embedded
         when {
             embedded == null -> item { CircularProgressIndicator() }
+            panel.embeddedFailed -> item { Note(stringResource(R.string.review_covers_embedded_failed), error = true) }
             embedded.isEmpty() -> item { Note(stringResource(R.string.review_covers_no_embedded)) }
             else -> itemsIndexed(embedded) { index, picture ->
                 val size = picture.size

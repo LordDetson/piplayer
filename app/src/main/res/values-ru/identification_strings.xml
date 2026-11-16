@@ -156,6 +156,7 @@
     <string name="review_covers_no_images">У этого релиза нет изображений в Cover Art Archive.</string>
     <string name="review_covers_failed">Изображения этого релиза не удалось загрузить.</string>
     <string name="review_covers_no_embedded">В файле нет картинок.</string>
+    <string name="review_covers_embedded_failed">Картинки файла сейчас не удалось прочитать.</string>
     <string name="review_cover_image_failed">Это изображение не удалось загрузить.</string>
     <string name="review_cover_chosen">Ваш выбор</string>
     <string name="review_your_edit">Ваша правка</string>
