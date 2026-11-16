@@ -15,7 +15,7 @@ import io.github.lorddetson.piplayer.library.db.MediaIndexEntryEntity
 import io.github.lorddetson.piplayer.library.db.TrackEntity
 import io.github.lorddetson.piplayer.library.identity.Hex
 import io.github.lorddetson.piplayer.library.identity.LibraryTrackRefs
-import io.github.lorddetson.piplayer.library.values.DecisionContent
+import io.github.lorddetson.piplayer.library.mirror.FileValues
 import io.github.lorddetson.piplayer.library.values.IndexValues
 import io.github.lorddetson.piplayer.userdata.Decisions
 import io.github.lorddetson.piplayer.userdata.UserDatabase
@@ -88,7 +88,8 @@ class LibraryTrackDetails(
         val read = file.tagPassAt != null
         val tags = stored.track?.toTags()
         // The decisions of the song's identity, read from the user database as plays are (§18.2, §18.7).
-        val location = Decisions.LocationValues(file.volumeName, file.relativePath, file.displayName, DecisionContent.ofTags(tags.takeIf { read }))
+        // The values the tag pass compares, so that "Keep PiPlayer's value" takes the same parts (TI §7.1).
+        val location = FileValues.at(file.volumeName, file.relativePath, file.displayName, stored.track.takeIf { read })
         val records = identity?.let { decisions.storedOf(it).map(DecisionRecord::of) }
         val changed = identity?.let { id ->
             decisions.flaggedAt(id, location.volume, location.relativePath, location.displayName, records.orEmpty().map { it.values })

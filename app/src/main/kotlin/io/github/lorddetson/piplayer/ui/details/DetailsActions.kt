@@ -16,8 +16,11 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /** The decisions track details make (docs/library.md §18.7), each for the song's [DecisionTarget]. */
 interface DetailsActions {
@@ -74,21 +77,41 @@ class DetailsActionRunner(private val scope: CoroutineScope, private val onError
     /** Starts [block] for [action] unless an action runs; false when it was not started. */
     fun run(action: DetailsAction, block: suspend () -> DetailsOutcome): Boolean {
         if (!running.compareAndSet(expect = false, update = true)) return false
-        scope.launch {
-            val outcome = try {
-                block()
-            } catch (e: CancellationException) {
-                running.value = false
-                throw e
-            } catch (e: Exception) {
-                onError(e)
-                DetailsOutcome.Failed(action)
-            }
-            if (outcome is DetailsOutcome.Done) raised.update { it + 1 }
-            running.value = false
-            ended.tryEmit(outcome)
-        }
+        scope.launch { finish(action, block) }
         return true
+    }
+
+    /**
+     * Starts [block] for [action] once no action runs, in turn after the actions that run or wait (docs/library.md
+     * §18.7): the Undo of a message, which a tap while an action runs must not lose. It waits in the runner's [scope],
+     * so the end of its caller, a message that a newer one replaced, does not drop it.
+     */
+    fun queue(action: DetailsAction, block: suspend () -> DetailsOutcome) {
+        scope.launch {
+            waiting.withLock {
+                while (!running.compareAndSet(expect = false, update = true)) running.first { !it }
+            }
+            finish(action, block)
+        }
+    }
+
+    /** Waiting actions take their turns one at a time, in the order they came. */
+    private val waiting = Mutex()
+
+    /** Runs [block] while [running] is held for it, then frees it and reports the outcome. */
+    private suspend fun finish(action: DetailsAction, block: suspend () -> DetailsOutcome) {
+        val outcome = try {
+            block()
+        } catch (e: CancellationException) {
+            running.value = false
+            throw e
+        } catch (e: Exception) {
+            onError(e)
+            DetailsOutcome.Failed(action)
+        }
+        if (outcome is DetailsOutcome.Done) raised.update { it + 1 }
+        running.value = false
+        ended.tryEmit(outcome)
     }
 }
 
@@ -117,13 +140,11 @@ class DetailsCommands(private val actions: DetailsActions, val runner: DetailsAc
         done(DetailsAction.RESET, actions.undo(decision.decisionId))
     }
 
-    /** The Undo of a message: undoes [decisionId]. */
+    /** Undoes [decisionId], unless an action runs. */
     fun undo(decisionId: Long): Boolean = runner.run(DetailsAction.UNDO) { done(DetailsAction.UNDO, actions.undo(decisionId)) }
 
-    /** STUB: the Undo of a message, refused while an action runs, as before. */
-    fun undoWhenFree(decisionId: Long) {
-        undo(decisionId)
-    }
+    /** The Undo of a message once tapped: undoes [decisionId] when no action runs, waiting for one that does. */
+    fun undoWhenFree(decisionId: Long) = runner.queue(DetailsAction.UNDO) { done(DetailsAction.UNDO, actions.undo(decisionId)) }
 
     private fun reverting(action: DetailsAction, target: DecisionTarget, field: ProtectedField) = runner.run(action) {
         actions.revert(target, field)?.let { DetailsOutcome.Done(action, undo = it) } ?: DetailsOutcome.Failed(action)

@@ -9,10 +9,9 @@ import io.github.lorddetson.piplayer.identification.contract.IdentificationTarge
 import io.github.lorddetson.piplayer.library.Library
 import io.github.lorddetson.piplayer.library.db.LibraryAccess
 import io.github.lorddetson.piplayer.library.db.LibraryDatabase
-import io.github.lorddetson.piplayer.library.db.TrackEntity
 import io.github.lorddetson.piplayer.library.identity.Hex
+import io.github.lorddetson.piplayer.library.mirror.FileValues
 import io.github.lorddetson.piplayer.library.mirror.LibraryDecisions
-import io.github.lorddetson.piplayer.library.values.DecisionContent
 import io.github.lorddetson.piplayer.userdata.Decisions
 import io.github.lorddetson.piplayer.userdata.UserData
 import io.github.lorddetson.piplayer.userdata.UserDatabase
@@ -69,11 +68,9 @@ class ReviewDecisions(
         if (target !is IdentificationTarget.LibraryFile) return emptyList()
         val read = read { database ->
             val ids = (database.library().foundFilesWithKey(target.contentKey).map { it.fileId } + target.fileId).distinct()
-            database.library().readFilesOf(ids)
+            FileValues.ofRead(database.library(), ids)
         }
-        return read.sortedBy { if (it.fileId == target.fileId) 0 else 1 }.map {
-            Decisions.LocationValues(it.volume, it.relativePath, it.displayName, DecisionContent.ofTags(TrackEntity.tagsOf(it)))
-        }
+        return read.entries.sortedBy { if (it.key == target.fileId) 0 else 1 }.map { it.value }
     }
 
     /** [block] over the library database, off the main thread. */

@@ -8,7 +8,6 @@ import io.github.lorddetson.piplayer.library.db.DecidedMirrorDao
 import io.github.lorddetson.piplayer.library.db.DecidedMirrorEntity
 import io.github.lorddetson.piplayer.library.db.LibraryDatabase
 import io.github.lorddetson.piplayer.library.db.MirrorDao
-import io.github.lorddetson.piplayer.library.db.TrackEntity
 import io.github.lorddetson.piplayer.library.db.replaceAll
 import io.github.lorddetson.piplayer.library.identity.Hex
 import io.github.lorddetson.piplayer.library.lists.MissingInfoDecision
@@ -17,7 +16,6 @@ import io.github.lorddetson.piplayer.library.sync.LibrarySync
 import io.github.lorddetson.piplayer.library.sync.TrackDisplayWriter
 import io.github.lorddetson.piplayer.library.values.Decided
 import io.github.lorddetson.piplayer.library.values.DecidedField
-import io.github.lorddetson.piplayer.library.values.DecisionContent
 import io.github.lorddetson.piplayer.userdata.Decisions
 import io.github.lorddetson.piplayer.userdata.UserDatabase
 import kotlin.coroutines.cancellation.CancellationException
@@ -610,10 +608,7 @@ class DecisionMirror(
         if (decided.isEmpty()) return
         // The tags only of the files whose tracks have decided values.
         val identityOf = keys.mapNotNull { (file, key) -> key?.let(identityOfKey::get)?.takeIf { it in decided }?.let { file to it } }.toMap()
-        val items = identityOf.keys.toList().chunked(DecidedMirrorDao.CHUNK).flatMap { library.library().readFilesOf(it) }.map { read ->
-            identityOf.getValue(read.fileId) to
-                Decisions.LocationValues(read.volume, read.relativePath, read.displayName, DecisionContent.ofTags(TrackEntity.tagsOf(read)))
-        }
+        val items = FileValues.ofRead(library.library(), identityOf.keys).map { (fileId, values) -> identityOf.getValue(fileId) to values }
         decisions.filesChanged(items)
     }
 

@@ -115,6 +115,10 @@ interface LibraryDao {
     @Query("SELECT * FROM track WHERE file_id = :fileId ORDER BY start_ms LIMIT 1")
     suspend fun trackOf(fileId: Long): TrackEntity?
 
+    /** The tracks of [fileIds] (at most `MirrorDao.CHUNK` at once), each file's by their start. */
+    @Query("SELECT * FROM track WHERE file_id IN (:fileIds) ORDER BY file_id, start_ms")
+    suspend fun tracksOf(fileIds: List<Long>): List<TrackEntity>
+
     /** Null when there is no such file. */
     @Query("SELECT unsafe_count FROM audio_file WHERE id = :fileId")
     suspend fun unsafeCount(fileId: Long): Int?

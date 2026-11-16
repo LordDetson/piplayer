@@ -117,7 +117,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -307,10 +306,8 @@ private fun Messages(commands: DetailsCommands, snackbar: SnackbarHostState) {
                     actionLabel = undo?.let { resources.getString(R.string.review_undo) },
                     duration = SnackbarDuration.Short,
                 )
-                if (result == SnackbarResult.ActionPerformed && undo != null) {
-                    commands.runner.busy.first { !it }
-                    commands.undo(undo)
-                }
+                // Queued in the runner: an action that runs, or a newer message, does not lose it.
+                if (result == SnackbarResult.ActionPerformed && undo != null) commands.undoWhenFree(undo)
             }
         }
     }
