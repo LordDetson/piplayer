@@ -201,6 +201,9 @@ fun ReviewContent(
             else -> Column(scrolling, verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 OutcomeMessage(outcome, model::retry)
                 shown.retryAt?.let { RetryAt(it) }
+                // The run read the file before the call was blocked (TI §6, review screen B).
+                val snippet = shown.snippet
+                if (snippet != null && snippetPlayer != null) SnippetButton(snippetPlayer, snippet)
             }
         }
         ReviewState.Failed -> Column(scrolling) { Message(stringResource(R.string.review_failed), model::retry) }

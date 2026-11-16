@@ -530,7 +530,8 @@ class ReviewModelTest {
 
         val model = started(FakeReviewBackend(result(stopped, retryAt = at)))
 
-        assertThat(model.state.value).isEqualTo(ReviewState.Blocked(stopped, at))
+        // The run read the file before the call was blocked, so the snippet stays offered (review screen B).
+        assertThat(model.state.value).isEqualTo(ReviewState.Blocked(stopped, at, snippet = SnippetSource("content://media/external/audio/media/42", 213_200)))
     }
 
     @Test

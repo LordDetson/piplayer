@@ -1,6 +1,7 @@
 package io.github.lorddetson.piplayer.ui.identification
 
 import android.net.Uri
+import android.text.format.Formatter
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -24,6 +25,7 @@ import io.github.lorddetson.piplayer.TestFiles
 import io.github.lorddetson.piplayer.fakes.FakeMusicBrainz
 import io.github.lorddetson.piplayer.identification.caa.CaaReleaseIndex
 import io.github.lorddetson.piplayer.identification.caa.CaaResult
+import io.github.lorddetson.piplayer.identification.contract.IdentificationOutcome
 import io.github.lorddetson.piplayer.identification.musicbrainz.MusicBrainzJson
 import io.github.lorddetson.piplayer.identification.musicbrainz.RecordingDto
 import io.github.lorddetson.piplayer.identification.musicbrainz.RefLookup
@@ -169,10 +171,13 @@ class ReviewScreenBTest {
         compose.onNode(hasText("→ " + text(R.string.review_pixels, 500, 500), substring = true)).assertExists()
         compose.onNodeWithTag(ReviewTags.COVER_LINE).performScrollTo().assertIsOff()
 
+        // Over the same cover of known size, the embedded picture of unknown size replaces the release image on the line.
         click(R.string.review_choose_cover)
         waitFor(hasTestTag(ReviewTags.embeddedImage(0)))
         compose.onNodeWithTag(ReviewTags.embeddedImage(0)).performScrollTo().performClick()
-        waitFor(hasTestTag(ReviewTags.COVER_LINE))
+        waitFor(hasTestTag(ReviewTags.COVER_LINE) and hasText(text(R.string.review_cover_chosen)))
+        compose.onNode(hasText("→ " + Formatter.formatShortFileSize(context, 16))).assertExists()
+        compose.onNode(hasText(text(R.string.review_pixels, 500, 500), substring = true)).assertDoesNotExist()
         compose.onNodeWithTag(ReviewTags.COVER_LINE).performScrollTo().assertIsOff()
         assertThat(backend.calls).contains("image 2 1200", "embedded content://media/external/audio/media/42")
     }
@@ -240,6 +245,18 @@ class ReviewScreenBTest {
         waitForText(text(R.string.review_snippet_failed))
         compose.runOnUiThread { shown = false }
         compose.waitUntil(10_000) { snippet.stops == 2 }
+    }
+
+    @Test
+    fun theSnippetButtonIsThereAfterABlockedCallOnceTheRunReadTheFile() {
+        val snippet = FakeSnippet()
+        show(FakeReviewBackend(result(IdentificationOutcome.NoNetwork)), snippet)
+        waitForText(text(R.string.review_no_network))
+
+        click(R.string.review_play_snippet)
+
+        assertThat(snippet.played).containsExactly(Uri.parse("content://media/external/audio/media/42") to 213_200L)
+        compose.onNode(hasText(text(R.string.review_search_manually))).assertDoesNotExist()
     }
 
     /** A snippet player that records what the card asks of it; the test sets its state. */

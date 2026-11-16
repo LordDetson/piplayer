@@ -45,9 +45,15 @@ sealed interface ReviewState {
      * A pre-check or a blocked call ended the run before anything was found (TI §3): online lookups off, no network,
      * sign-in needed or a provider stopped. "Online lookups off" shows the disclosure; [answering] says that its Not now
      * is being stored, so that the other answer does nothing. [retryAt] is the retry time the run reported (TI §3.2),
-     * null for none.
+     * null for none. [snippet] is the file the snippet button plays when the blocked call came after the run read it
+     * (TI §6, review screen B), null otherwise; the disclosure does not show it.
      */
-    data class Blocked(val outcome: IdentificationOutcome, val retryAt: Instant? = null, val answering: Boolean = false) : ReviewState
+    data class Blocked(
+        val outcome: IdentificationOutcome,
+        val retryAt: Instant? = null,
+        val answering: Boolean = false,
+        val snippet: SnippetSource? = null,
+    ) : ReviewState
 
     /**
      * The run ended with [outcome]: found in its band, or no key, unreadable, unavailable. [retryAt] is the retry time the
@@ -248,6 +254,9 @@ class ReviewModel(private val file: FileRef, private val backend: ReviewBackend,
 
     /** The group lists by suggested release ID, and the editions without the song by card key. */
     private val groups = HashMap<String, EditionList>()
+
+    /** The group browses running by suggested release ID, whose answer a picker opened again meanwhile takes too. */
+    private val groupLoads = HashMap<String, Deferred<EditionList?>>()
     private val withoutSong = HashMap<String, Set<String>>()
 
     /** The manual results the manual card's index refers to, and the search panel as it was left. */
@@ -464,9 +473,24 @@ class ReviewModel(private val file: FileRef, private val backend: ReviewBackend,
         val group = groups[base.release.id]
         update { copy(panel = Panel.Editions(list = group, withoutSong = withoutSong[key].orEmpty(), chosen = edition.release.id)) }
         if (group != null) return
+        val id = base.release.id
+        val load = groupLoads[id] ?: run {
+            var own: Deferred<EditionList?>? = null
+            // Lazy: it is in the map before its browse can end, so that its end finds it there.
+            val started = panelScope.async(start = CoroutineStart.LAZY) {
+                try {
+                    quietly { backend.editions(base, result) }?.also { groups[id] = it }
+                } finally {
+                    // A failed browse is sent again at the next opening; a later run's browse stays.
+                    if (groupLoads[id] === own) groupLoads.remove(id)
+                }
+            }
+            own = started
+            groupLoads[id] = started
+            started
+        }
         panelScope.launch {
-            val list = quietly { backend.editions(base, result) }
-            if (list != null) groups[base.release.id] = list
+            val list = load.await()
             updatePanel<Panel.Editions>(generation) { copy(list = list, failed = list == null) }
         }
     }
@@ -744,12 +768,16 @@ class ReviewModel(private val file: FileRef, private val backend: ReviewBackend,
             update { copy(panel = panel.copy(invalid = invalid)) }
             return
         }
-        edits = edits + parsed.mapValues { (it.value as ParsedEntry.Value).value }
         val proposed = ReviewDiff.proposed(edition.details)
+        val values = parsed.mapValues { (it.value as ParsedEntry.Value).value }
+        // A value equal to the release's is no edit: no user value stays stored for it, so another release shows its own.
+        val (released, own) = values.entries.partition { (field, value) -> sameValue(value, proposed[field]) }
+        edits = edits - released.map { it.key }.toSet() + own.associate { it.key to it.value }
         val rebuilt = ReviewDiff.withEdits(ReviewDiff.lines(current, proposed, protected), current, proposed, edits)
-        // Every line keeps the tick the user gave it, but a field this save changed is ticked as the user's new value.
+        // Every line keeps the tick the user gave it, but a field this save changed is ticked: the user's value, or the
+        // release's line the user typed the release's value back into.
         val lines = rebuilt.map { line ->
-            if (line.edited && line.field in parsed) return@map line
+            if (line.field in parsed) return@map line.copy(ticked = true)
             card.lines.firstOrNull { it.field == line.field && it.edited == line.edited }?.let { line.copy(ticked = it.ticked) } ?: line
         }
         update { copy(panel = null, card = card.copy(lines = lines)) }
@@ -774,6 +802,7 @@ class ReviewModel(private val file: FileRef, private val backend: ReviewBackend,
         panelJob.cancel()
         panelJob = SupervisorJob(scope.coroutineContext[Job])
         indexLoads.clear()
+        groupLoads.clear()
         embeddedLoading = false
         thumbnails.clear()
         val before = run
@@ -810,7 +839,8 @@ class ReviewModel(private val file: FileRef, private val backend: ReviewBackend,
             IdentificationOutcome.CaptivePortal,
             is IdentificationOutcome.ProviderStopped,
             -> {
-                mutable.value = ReviewState.Blocked(outcome, result.retryAt)
+                // A call blocked after stage 0 read the file still lets the user hear it (TI §6, review screen B).
+                mutable.value = ReviewState.Blocked(outcome, result.retryAt, snippet = result.file?.let { SnippetSource(it.uri, result.durationMs) })
                 return
             }
             else -> Unit

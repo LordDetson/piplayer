@@ -157,6 +157,10 @@ class FakeReviewBackend(
     val editionLists: MutableMap<String, EditionList> = mutableMapOf()
     val editionListFailures: MutableSet<String> = mutableSetOf()
 
+    /** When set, browsing a group waits for it. */
+    @Volatile
+    var editionListGate: CompletableDeferred<Unit>? = null
+
     /** What choosing each edition gives, by release ID (null: does not contain the song); others fail. */
     val openedEditions: MutableMap<String, SuggestedEdition?> = mutableMapOf()
 
@@ -185,6 +189,7 @@ class FakeReviewBackend(
 
     override suspend fun editions(suggested: SuggestedEdition, result: PipelineResult): EditionList {
         calls += "editions ${suggested.release.id}"
+        editionListGate?.await()
         if (suggested.release.id in editionListFailures) throw IOException("MusicBrainz unavailable")
         return editionLists[suggested.release.id] ?: EditionList.NONE
     }

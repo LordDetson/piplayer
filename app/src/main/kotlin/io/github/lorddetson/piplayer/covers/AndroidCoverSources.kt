@@ -19,9 +19,6 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.IOException
 import java.nio.ByteBuffer
-import java.util.concurrent.ExecutionException
-import kotlin.coroutines.resume
-import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
@@ -30,7 +27,6 @@ import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 
 /** The picture embedded in a file, as Media3's extractors read it for playback (docs/library.md §13.1). */
@@ -61,20 +57,6 @@ object EmbeddedPictures {
             retriever.close()
         }
     }
-
-    private suspend fun <T> com.google.common.util.concurrent.ListenableFuture<T>.await(): T =
-        suspendCancellableCoroutine { continuation ->
-            addListener({
-                try {
-                    continuation.resume(get())
-                } catch (e: ExecutionException) {
-                    continuation.resumeWithException(e.cause ?: e)
-                } catch (e: java.util.concurrent.CancellationException) {
-                    continuation.cancel(e)
-                }
-            }, Runnable::run)
-            continuation.invokeOnCancellation { cancel(true) }
-        }
 }
 
 /** Decodes and encodes covers as bitmaps (docs/library.md §13.3). */

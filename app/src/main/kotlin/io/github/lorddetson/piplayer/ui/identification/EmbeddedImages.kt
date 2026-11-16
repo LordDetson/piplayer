@@ -10,12 +10,9 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.extractor.metadata.flac.PictureFrame
 import androidx.media3.extractor.metadata.id3.ApicFrame
 import androidx.media3.inspector.MetadataRetriever
+import io.github.lorddetson.piplayer.covers.await
 import io.github.lorddetson.piplayer.identification.caa.ImageHeader
-import java.util.concurrent.ExecutionException
-import kotlin.coroutines.resume
-import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.suspendCancellableCoroutine
 
 /**
  * Every picture embedded in a file, as the player's extractors read them (TI §6, review screen B): ID3 `APIC` frames, FLAC
@@ -59,18 +56,4 @@ object EmbeddedImages {
         Log.d(TAG, "The pictures of a file could not be read", e)
         null
     }
-
-    private suspend fun <T> com.google.common.util.concurrent.ListenableFuture<T>.await(): T =
-        suspendCancellableCoroutine { continuation ->
-            addListener({
-                try {
-                    continuation.resume(get())
-                } catch (e: ExecutionException) {
-                    continuation.resumeWithException(e.cause ?: e)
-                } catch (e: java.util.concurrent.CancellationException) {
-                    continuation.cancel(e)
-                }
-            }, Runnable::run)
-            continuation.invokeOnCancellation { cancel(true) }
-        }
 }

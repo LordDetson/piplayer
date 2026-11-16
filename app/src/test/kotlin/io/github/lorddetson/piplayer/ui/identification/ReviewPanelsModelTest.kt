@@ -3,13 +3,17 @@ package io.github.lorddetson.piplayer.ui.identification
 import io.github.lorddetson.piplayer.fakes.FakeMusicBrainz
 import io.github.lorddetson.piplayer.identification.caa.CaaReleaseIndex
 import io.github.lorddetson.piplayer.identification.caa.CaaResult
+import io.github.lorddetson.piplayer.identification.contract.IdentificationOutcome
 import io.github.lorddetson.piplayer.identification.musicbrainz.MusicBrainzJson
 import io.github.lorddetson.piplayer.identification.musicbrainz.RecordingDto
 import io.github.lorddetson.piplayer.identification.musicbrainz.RecordingSearchResponse
 import io.github.lorddetson.piplayer.identification.musicbrainz.RefLookup
 import io.github.lorddetson.piplayer.identification.musicbrainz.toCandidate
 import io.github.lorddetson.piplayer.identification.pipeline.FileRef
+import io.github.lorddetson.piplayer.identification.provider.ProviderId
+import io.github.lorddetson.piplayer.identification.provider.StopReason
 import io.github.lorddetson.piplayer.identification.release.EditionSource
+import io.github.lorddetson.piplayer.identification.release.SuggestedEdition
 import io.github.lorddetson.piplayer.identification.score.Band
 import io.github.lorddetson.piplayer.identification.text.MusicBrainzRef
 import io.github.lorddetson.piplayer.library.details.CoverSource
@@ -22,16 +26,19 @@ import io.github.lorddetson.piplayer.ui.identification.ReviewFixtures.result
 import java.time.Instant
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 
 /** Review screen B's panels on the review's state machine (TI §6, step 20; §11.1 M3 "Review screen B models"). */
+@OptIn(ExperimentalCoroutinesApi::class)
 class ReviewPanelsModelTest {
 
     private fun TestScope.started(backend: FakeReviewBackend, file: FileRef = libraryFile): ReviewModel {
@@ -73,6 +80,39 @@ class ReviewPanelsModelTest {
         assertThat(backend.calls.filter { it.startsWith("editions") }).containsExactly("editions ${ReviewFixtures.harborRelease.id}")
         assertThat(model.closePanel()).isTrue()
         assertThat(model.closePanel()).isFalse()
+    }
+
+    @Test
+    fun `a picker closed and opened again while its group is browsed waits for that browse`() = runTest {
+        val backend = backend({ editionListGate = CompletableDeferred() })
+        val model = started(backend)
+        model.openEditions()
+        runCurrent()
+        model.closePanel()
+
+        model.openEditions()
+        runCurrent()
+        backend.editionListGate!!.complete(Unit)
+        advanceUntilIdle()
+
+        assertThat(model.panel<Panel.Editions>().list).isEqualTo(ReviewFixtures.editionList())
+        assertThat(backend.calls.filter { it.startsWith("editions") }).containsExactly("editions ${ReviewFixtures.harborRelease.id}")
+    }
+
+    @Test
+    fun `a browse that failed is sent again at the next opening`() = runTest {
+        val backend = backend({ editionListFailures += ReviewFixtures.harborRelease.id })
+        val model = started(backend)
+        model.openEditions()
+        advanceUntilIdle()
+        model.closePanel()
+        backend.editionListFailures.clear()
+
+        model.openEditions()
+        advanceUntilIdle()
+
+        assertThat(model.panel<Panel.Editions>().list).isEqualTo(ReviewFixtures.editionList())
+        assertThat(backend.calls.filter { it.startsWith("editions") }).hasSize(2)
     }
 
     @Test
@@ -690,6 +730,44 @@ class ReviewPanelsModelTest {
     }
 
     @Test
+    fun `an edit taken back to the release's value is gone on another candidate too`() = runTest {
+        val live = ReviewFixtures.match(ReviewFixtures.LIVE_RECORDING, score = 0.62)
+        val liveDetails = ReviewFixtures.harborDetails.copy(recordingId = ReviewFixtures.LIVE_RECORDING, title = "Paper Lanterns (Live)")
+        val backend = FakeReviewBackend(result(found(ReviewFixtures.match(), live))).apply {
+            editions[ReviewFixtures.LIVE_RECORDING] = SuggestedEdition(ReviewFixtures.harborRelease, liveDetails, EditionSource.PICKED)
+        }
+        val model = started(backend)
+        model.openEditor()
+        model.editEntry(EditorEntry(ProtectedField.TITLE, "Mine"))
+        model.saveEdits()
+        model.openEditor()
+        model.editEntry(EditorEntry(ProtectedField.TITLE, "Paper Lanterns"))
+        model.saveEdits()
+
+        model.choose(1)
+        advanceUntilIdle()
+
+        assertThat(model.card.lines.none { it.edited }).isTrue()
+        assertThat(model.card.lines.single { it.field == ProtectedField.TITLE }.new).isEqualTo(FieldValue.Text("Paper Lanterns (Live)"))
+    }
+
+    @Test
+    fun `the release's value typed into an unticked line's field ticks the release's line`() = runTest {
+        val model = started(backend())
+        model.toggle(ProtectedField.TITLE)
+        model.openEditor()
+        assertThat(model.panel<Panel.Editor>().entries.single { it.field == ProtectedField.TITLE }.text).isEqualTo("track_07")
+
+        model.editEntry(EditorEntry(ProtectedField.TITLE, "Paper Lanterns"))
+        model.saveEdits()
+
+        val title = model.card.lines.single { it.field == ProtectedField.TITLE }
+        assertThat(title.edited).isFalse()
+        assertThat(title.new).isEqualTo(FieldValue.Text("Paper Lanterns"))
+        assertThat(title.ticked).isTrue()
+    }
+
+    @Test
     fun `the user's values stay through another edition`() = runTest {
         val model = started(backend({ openedEditions[ReviewFixtures.cdRelease.id] = ReviewFixtures.cdEdition }))
         model.openEditor()
@@ -845,8 +923,27 @@ class ReviewPanelsModelTest {
     }
 
     @Test
+    fun `a run that a blocked call stopped after reading the file offers the snippet and no panel`() = runTest {
+        listOf(
+            IdentificationOutcome.NoNetwork,
+            IdentificationOutcome.CaptivePortal,
+            IdentificationOutcome.Disabled,
+            IdentificationOutcome.ProviderStopped(ProviderId.MUSICBRAINZ, StopReason.USER_AGENT_REJECTED),
+        ).forEach { outcome ->
+            val model = started(FakeReviewBackend(result(outcome)))
+
+            val blocked = model.state.value as ReviewState.Blocked
+            assertThat(blocked.snippet).describedAs("$outcome").isEqualTo(SnippetSource("content://media/external/audio/media/42", 213_200))
+            model.openSearch()
+            assertThat(model.state.value).describedAs("$outcome").isEqualTo(blocked)
+        }
+        val unread = started(FakeReviewBackend(result(IdentificationOutcome.NoNetwork, read = false)))
+        assertThat((unread.state.value as ReviewState.Blocked).snippet).isNull()
+    }
+
+    @Test
     fun `a run that did not read the file offers no search and no snippet`() = runTest {
-        val model = started(FakeReviewBackend(result(io.github.lorddetson.piplayer.identification.contract.IdentificationOutcome.Unreadable, read = false)))
+        val model = started(FakeReviewBackend(result(IdentificationOutcome.Unreadable, read = false)))
 
         model.openSearch()
 
