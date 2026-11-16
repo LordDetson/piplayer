@@ -32,16 +32,17 @@ sealed interface ReviewState {
 
     /**
      * A pre-check or a blocked call ended the run before anything was found (TI §3): online lookups off, no network,
-     * sign-in needed or a provider stopped. "Online lookups off" shows the disclosure. [retryAt] is the retry time the
-     * run reported (TI §3.2), null for none.
+     * sign-in needed or a provider stopped. "Online lookups off" shows the disclosure; [answering] says that its Not now
+     * is being stored, so that the other answer does nothing. [retryAt] is the retry time the run reported (TI §3.2),
+     * null for none.
      */
-    data class Blocked(val outcome: IdentificationOutcome, val retryAt: Instant? = null) : ReviewState
+    data class Blocked(val outcome: IdentificationOutcome, val retryAt: Instant? = null, val answering: Boolean = false) : ReviewState
 
     /**
      * The run ended with [outcome]: found in its band, or no key, unreadable, unavailable. [retryAt] is the retry time the
      * run reported (TI §3.2), null for none. [candidates] are the recordings of at least 0.50, best first, and [card] the
      * chosen one's; null without a candidate. [keepOrSkip] says whether Keep as-is and Skip are offered (a library file
-     * with a content key), [last] the decision Undo undoes, [applied] whether an Apply stands that was not undone, [busy]
+     * whose content key an identity holds), [last] the decision Undo undoes, [applied] whether an Apply stands that was not undone, [busy]
      * whether an action runs, [loading] the candidate whose edition loads, and [note] what the last action said.
      */
     data class Ended(
@@ -131,7 +132,7 @@ class ReviewModel(private val file: FileRef, private val backend: ReviewBackend,
     private var appliedBefore = false
     private var result: PipelineResult? = null
 
-    /** The run's winner's band and its AcoustID track ID (TI §3.2). */
+    /** The run's winner's band and the AcoustID track ID of each recording the fingerprint found (TI §3.2). */
     private var found: IdentificationOutcome.Found? = null
 
     /** The old values and the cover shown now, read once a run found candidates. */
@@ -141,6 +142,9 @@ class ReviewModel(private val file: FileRef, private val backend: ReviewBackend,
 
     /** The editions known so far by recording ID; null for a candidate no release contains. */
     private val editions = HashMap<String, SuggestedEdition?>()
+
+    /** When each edition reached the review, by recording ID: the provenance's fetch time (TI §6, §7.1). */
+    private val fetchedAt = HashMap<String, Instant>()
 
     /** What each release's cover fetch gave, so a card fetches its cover once. */
     private val covers = HashMap<String, Fetched>()
@@ -174,9 +178,10 @@ class ReviewModel(private val file: FileRef, private val backend: ReviewBackend,
         launchRun()
     }
 
-    /** The disclosure's Enable: stores the answer, then runs again. */
+    /** The disclosure's Enable: stores the answer, then runs again; nothing once Not now was tapped. */
     fun enable() {
-        if ((mutable.value as? ReviewState.Blocked)?.outcome != IdentificationOutcome.Disabled) return
+        val blocked = mutable.value as? ReviewState.Blocked
+        if (blocked?.outcome != IdentificationOutcome.Disabled || blocked.answering) return
         mutable.value = ReviewState.Running()
         // The run's job from the start, so that Cancel while the answer is stored sends nothing afterwards.
         run = scope.launch {
@@ -185,12 +190,16 @@ class ReviewModel(private val file: FileRef, private val backend: ReviewBackend,
         }
     }
 
-    /** The disclosure's Not now: stores the answer and closes the screen. */
+    /** The disclosure's Not now: stores the answer and closes the screen; nothing once an answer was tapped. */
     fun notNow() {
-        if ((mutable.value as? ReviewState.Blocked)?.outcome != IdentificationOutcome.Disabled) return
+        val blocked = mutable.value as? ReviewState.Blocked
+        if (blocked?.outcome != IdentificationOutcome.Disabled || blocked.answering) return
+        val answering = blocked.copy(answering = true)
+        mutable.value = answering
         scope.launch {
             quietly { backend.notNow() }
-            mutable.value = ReviewState.Closed
+            // Unless something else (Cancel) changed the state meanwhile.
+            mutable.compareAndSet(answering, ReviewState.Closed)
         }
     }
 
@@ -226,6 +235,7 @@ class ReviewModel(private val file: FileRef, private val backend: ReviewBackend,
                 return@launch
             }
             editions[match.recordingId] = edition
+            fetchedAt[match.recordingId] = backend.now()
             update { copy(loading = null) }
             show(index, edition)
         }
@@ -241,7 +251,8 @@ class ReviewModel(private val file: FileRef, private val backend: ReviewBackend,
         val cover = (card.cover as? CoverState.Ready)?.line?.takeIf { it.ticked }
         val fields = ReviewDiff.fields(card.lines, cover)
         if (fields.isEmpty()) return
-        val provenance = Provenance.of(card.match, details, found?.acoustIdTrackId, backend.now())
+        val recording = card.match.recordingId
+        val provenance = Provenance.of(card.match, details, found?.acoustIdTrackIds?.get(recording), fetchedAt[recording] ?: backend.now())
         val request = ApplyRequest(target, details, fields, cover?.new?.source, provenance)
         act(ActionKind.APPLY, ReviewNote.APPLY_FAILED) { backend.apply(request, cover?.new) }
     }
@@ -316,7 +327,10 @@ class ReviewModel(private val file: FileRef, private val backend: ReviewBackend,
             }
             else -> Unit
         }
-        val keepOrSkip = result.file?.target is IdentificationTarget.LibraryFile
+        val endedAt = backend.now()
+        // Keep as-is and Skip are stored by the identity of the key, which they never make (TI §6).
+        val target = result.file?.target
+        val keepOrSkip = target is IdentificationTarget.LibraryFile && quietly { backend.canKeepOrSkip(target) } == true
         val found = outcome as? IdentificationOutcome.Found
         this.found = found
         val candidates = found?.ranking?.matches.orEmpty().filter { it.score >= Bands.MEDIUM - SCORE_TOLERANCE }
@@ -329,10 +343,12 @@ class ReviewModel(private val file: FileRef, private val backend: ReviewBackend,
         shown = ReviewDiff.shownCover(details)
         protected = quietly { backend.protectedFields() }.orEmpty()
         editions.clear()
+        fetchedAt.clear()
         covers.clear()
         val winner = candidates.first()
         val edition = found.choice.suggested?.takeIf { it.details.recordingId == winner.recordingId }
         editions[winner.recordingId] = edition
+        fetchedAt[winner.recordingId] = endedAt
         mutable.value = ReviewState.Ended(
             outcome, result.retryAt, candidates, cardOf(0, winner, edition), keepOrSkip, last = kept, applied = appliedBefore,
         )

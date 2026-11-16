@@ -408,11 +408,16 @@ class IdentificationPipeline(
                     browses = choice.trace,
                 )
             }
+            // Each recording the fingerprint found with the result that holds it, which a decision on it keeps (TI §6).
+            val acoustIdTrackIds = findings.filterIsInstance<StageFinding.Fingerprint>()
+                .flatMap { it.candidates }
+                .mapNotNull { candidate -> candidate.recordingId?.let { it to candidate.acoustIdTrackId } }
+                .toMap()
             val outcome = when {
-                ranking.band != Band.NO_MATCH -> IdentificationOutcome.Found(ranking, choice, acoustIdTrackId)
+                ranking.band != Band.NO_MATCH -> IdentificationOutcome.Found(ranking, choice, acoustIdTrackId, acoustIdTrackIds)
                 failed != null -> IdentificationOutcome.Unavailable(failed!!)
                 acoustIdStop != null -> IdentificationOutcome.ProviderStopped(ProviderId.ACOUSTID, acoustIdStop!!)
-                else -> IdentificationOutcome.finished(ranking, choice, acoustIdTrackId, services.fingerprintStage)
+                else -> IdentificationOutcome.finished(ranking, choice, acoustIdTrackId, services.fingerprintStage, acoustIdTrackIds)
             }
             return stored(outcome, ranking, choice)
         }

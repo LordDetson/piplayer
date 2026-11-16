@@ -45,6 +45,12 @@ interface ReviewBackend {
      */
     suspend fun apply(request: ApplyRequest, cover: CoverImage?): Long?
 
+    /**
+     * Whether Keep as-is and Skip can be stored for [target]: an identity holds its key (TI §6, §10.2). They make no
+     * identity, as Apply does, so a file the library has not read and attached yet has neither.
+     */
+    suspend fun canKeepOrSkip(target: IdentificationTarget.LibraryFile): Boolean
+
     /** Keep as-is for the track of [target] (TI §1); the decision's ID, or null when nothing was written. */
     suspend fun keepAsIs(target: IdentificationTarget.LibraryFile): Long?
 
@@ -60,6 +66,6 @@ interface ReviewBackend {
     /** The disclosure's Not now through the app's gate. */
     suspend fun notNow()
 
-    /** Now, for the provenance's fetch time. */
+    /** Now: when the run's or a candidate's release reached the review, the provenance's fetch time (TI §6, §7.1). */
     fun now(): Instant
 }

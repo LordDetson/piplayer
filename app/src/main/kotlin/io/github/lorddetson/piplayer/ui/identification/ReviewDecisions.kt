@@ -1,0 +1,93 @@
+package io.github.lorddetson.piplayer.ui.identification
+
+import android.content.Context
+import io.github.lorddetson.piplayer.covers.Covers
+import io.github.lorddetson.piplayer.covers.SavedCovers
+import io.github.lorddetson.piplayer.identification.caa.CoverImage
+import io.github.lorddetson.piplayer.identification.contract.ApplyRequest
+import io.github.lorddetson.piplayer.identification.contract.IdentificationTarget
+import io.github.lorddetson.piplayer.library.Library
+import io.github.lorddetson.piplayer.library.db.LibraryAccess
+import io.github.lorddetson.piplayer.library.db.LibraryDatabase
+import io.github.lorddetson.piplayer.library.db.TrackEntity
+import io.github.lorddetson.piplayer.library.identity.Hex
+import io.github.lorddetson.piplayer.library.mirror.LibraryDecisions
+import io.github.lorddetson.piplayer.library.values.DecisionContent
+import io.github.lorddetson.piplayer.userdata.Decisions
+import io.github.lorddetson.piplayer.userdata.UserData
+import io.github.lorddetson.piplayer.userdata.UserDatabase
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
+
+/**
+ * The review's decisions (TI §6, review screen A) over the library's [decisions], the [library] database for the files
+ * of a key, the [user] database for the identity that holds it and the [covers] Apply saves.
+ */
+class ReviewDecisions(
+    private val decisions: LibraryDecisions,
+    private val library: LibraryAccess,
+    private val user: UserDatabase,
+    private val covers: SavedCovers,
+) {
+
+    /** Whether an identity holds [target]'s key, which Keep as-is and Skip are stored by (TI §1, §6). */
+    suspend fun canKeepOrSkip(target: IdentificationTarget.LibraryFile): Boolean = identityOf(target) != null
+
+    /** Saves [cover] first when it is given, then stores [request] (TI §5.2, §7.1); the decision's ID, or null. */
+    suspend fun apply(request: ApplyRequest, cover: CoverImage?): Long? {
+        // The cover as part of Apply, never ahead of it (TI §5.2): the sweep deletes rows no decision refers to.
+        val savedCoverId = cover?.let { covers.save(it, request.details.releaseId) ?: error("The cover could not be saved") }
+        return decisions.apply(request, savedCoverId, locations(request.target))?.decisionId
+    }
+
+    /** Keep as-is by the identity of [target]'s key; null without one or when nothing was written. */
+    suspend fun keepAsIs(target: IdentificationTarget.LibraryFile): Long? {
+        val identity = identityOf(target) ?: return null
+        return decisions.keepAsIs(identity, Hex.bytes(target.contentKey))?.decisionId
+    }
+
+    /** Skip by the identity of [target]'s key, with the library's size and time of its file; null without one. */
+    suspend fun skip(target: IdentificationTarget.LibraryFile): Long? {
+        val identity = identityOf(target) ?: return null
+        val file = read { database -> database.library().file(target.fileId) } ?: return null
+        return decisions.skip(identity, file.size, file.mtime, Hex.bytes(target.contentKey))?.decisionId
+    }
+
+    /** Undoes [decisionId]; whether it was undone now. */
+    suspend fun undo(decisionId: Long): Boolean = decisions.undo(decisionId) != null
+
+    /** The identity that holds [target]'s key now (TI §1); none for a track that starts inside its file. */
+    private suspend fun identityOf(target: IdentificationTarget.LibraryFile): Long? =
+        if (target.startMs != 0L) null else withContext(Dispatchers.IO) { user.identities().idOfKey(Hex.bytes(target.contentKey)) }
+
+    /**
+     * The values each read file of [target]'s key holds at its location, the identified file first (TI §7.1): the
+     * references of the decision. None for a file opened from another app, which has no location in the library.
+     */
+    private suspend fun locations(target: IdentificationTarget): List<Decisions.LocationValues> {
+        if (target !is IdentificationTarget.LibraryFile) return emptyList()
+        val read = read { database ->
+            val ids = (database.library().foundFilesWithKey(target.contentKey).map { it.fileId } + target.fileId).distinct()
+            database.library().readFilesOf(ids)
+        }
+        return read.sortedBy { if (it.fileId == target.fileId) 0 else 1 }.map {
+            Decisions.LocationValues(it.volume, it.relativePath, it.displayName, DecisionContent.ofTags(TrackEntity.tagsOf(it)))
+        }
+    }
+
+    /** [block] over the library database, off the main thread. */
+    private suspend fun <T> read(block: suspend (LibraryDatabase) -> T): T =
+        withContext(Dispatchers.IO) {
+            // The block runs under the library's lock, held by its thread: the reads block that thread.
+            library.use { database -> runBlocking { block(database) } }
+        }
+
+    companion object {
+        /** Over the app's library and user databases and saved covers, as they are now (a rebuild reopens the library). */
+        fun of(context: Context): ReviewDecisions {
+            val app = context.applicationContext
+            return ReviewDecisions(Library.decisions(app), LibraryAccess.app(app), UserData.database(app), Covers.saved(app))
+        }
+    }
+}

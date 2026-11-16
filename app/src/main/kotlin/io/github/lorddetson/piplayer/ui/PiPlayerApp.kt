@@ -4,6 +4,7 @@ import android.content.ActivityNotFoundException
 import android.content.Context
 import androidx.compose.runtime.DisposableEffect
 import androidx.lifecycle.viewmodel.navigation3.rememberViewModelStoreNavEntryDecorator
+import androidx.navigation3.runtime.NavEntryDecorator
 import androidx.navigation3.runtime.rememberSaveableStateHolderNavEntryDecorator
 import io.github.lorddetson.piplayer.library.Library
 import io.github.lorddetson.piplayer.library.lists.LibraryLists
@@ -235,6 +236,8 @@ fun PiPlayerApp(viewModel: PlayerViewModel = viewModel()) {
             if (backStack.lastOrNull() != route) backStack.add(route)
         }
     }
+    // Every entry reaches "Identify" through LocalIdentify (TI §1).
+    val identifyDecorator = remember { NavEntryDecorator<NavKey> { entry -> CompositionLocalProvider(LocalIdentify provides identify) { entry.Content() } } }
     val context = LocalContext.current
     val currentMediaId = rememberCurrentMediaId(player)
     // An added entry plays a library song too (docs/playback.md §9.4).
@@ -293,118 +296,116 @@ fun PiPlayerApp(viewModel: PlayerViewModel = viewModel()) {
         playingLinks = null
         playingLinks = currentSongId?.let { linksOf(context, it) }
     }
-    CompositionLocalProvider(LocalIdentify provides identify) {
-        NavDisplay(
-            backStack = backStack,
-            onBack = { close() },
-            entryDecorators = listOf(rememberSaveableStateHolderNavEntryDecorator(), rememberViewModelStoreNavEntryDecorator()),
-            transitionSpec = { slideInVertically(initialOffsetY = { it }) togetherWith ExitTransition.KeepUntilTransitionsFinished },
-            popTransitionSpec = { EnterTransition.None togetherWith slideOutVertically(targetOffsetY = { it }) },
-            predictivePopTransitionSpec = { EnterTransition.None togetherWith slideOutVertically(targetOffsetY = { it }) },
-            entryProvider = entryProvider {
-                entry<SongsRoute> {
-                    OnboardingGate(
-                        onboarding,
-                        bottomBar = { MiniPlayer(host.player, host.cover, onOpen = host.openNowPlaying) },
-                        snackbarHost = { SnackbarHost(host.snackbar) },
-                    ) {
-                        LibraryScreen(host, onOpenSettings = { if (backStack.lastOrNull() != SettingsRoute) backStack.add(SettingsRoute) })
+    NavDisplay(
+        backStack = backStack,
+        onBack = { close() },
+        entryDecorators = listOf(rememberSaveableStateHolderNavEntryDecorator(), rememberViewModelStoreNavEntryDecorator(), identifyDecorator),
+        transitionSpec = { slideInVertically(initialOffsetY = { it }) togetherWith ExitTransition.KeepUntilTransitionsFinished },
+        popTransitionSpec = { EnterTransition.None togetherWith slideOutVertically(targetOffsetY = { it }) },
+        predictivePopTransitionSpec = { EnterTransition.None togetherWith slideOutVertically(targetOffsetY = { it }) },
+        entryProvider = entryProvider {
+            entry<SongsRoute> {
+                OnboardingGate(
+                    onboarding,
+                    bottomBar = { MiniPlayer(host.player, host.cover, onOpen = host.openNowPlaying) },
+                    snackbarHost = { SnackbarHost(host.snackbar) },
+                ) {
+                    LibraryScreen(host, onOpenSettings = { if (backStack.lastOrNull() != SettingsRoute) backStack.add(SettingsRoute) })
+                }
+            }
+            entry<AlbumRoute>(metadata = FROM_THE_SIDE) { route -> AlbumPage(route.key, host, onBack = { close() }) }
+            entry<ArtistRoute>(metadata = FROM_THE_SIDE) { route -> ArtistPage(route.key, host, onBack = { close() }) }
+            entry<LibraryFolderRoute>(metadata = FROM_THE_SIDE) { route ->
+                FolderPage(route.volume, route.relativePath, host, onBack = { close() })
+            }
+            entry<PlaylistRoute>(metadata = FROM_THE_SIDE) { route -> PlaylistPage(route.id, host, playlists, onBack = { close() }) }
+            entry<GenreRoute>(metadata = FROM_THE_SIDE) { route -> GenrePage(route.key, host, onBack = { close() }) }
+            entry<SmartListRoute>(metadata = FROM_THE_SIDE) { route ->
+                ListKind.of(route.kind)?.takeIf { it.smart }?.let { SmartListPage(it, host, onBack = { close() }) }
+            }
+            entry<QueueRoute>(metadata = FROM_THE_SIDE) {
+                QueueScreen(
+                    player = player,
+                    actions = QueueActions(
+                        remove = { entry -> viewModel.removeFromQueue(entry.row, entry.mediaId, entry.title) },
+                        move = { entry, from, to -> viewModel.moveInQueue(from, to, entry.mediaId) },
+                    ),
+                    snackbar = snackbar,
+                    onBack = { close() },
+                    menu = menu,
+                    selectionActions = QueueSelectionActions(
+                        addToQueue = viewModel::addToQueue,
+                        removeAll = viewModel::removeFromQueue,
+                        addToPlaylist = playlists.addSelected,
+                        favorites = favoriteBatch,
+                    ),
+                    restored = viewModel.restored.collectAsStateWithLifecycle().value,
+                )
+            }
+            entry<TrackDetailsRoute>(metadata = FROM_THE_SIDE) { route ->
+                TrackDetailsScreen(route.fileId, route.uri, snackbar, onBack = { close() })
+            }
+            entry<IdentifyRoute>(metadata = FROM_THE_SIDE) { route -> ReviewScreen(route.fileId, route.uri, onBack = { close() }) }
+            entry<SettingsRoute>(metadata = FROM_THE_SIDE) {
+                SettingsScreen(
+                    onBack = { close() },
+                    onOpenFolders = { if (backStack.lastOrNull() != FoldersRoute) backStack.add(FoldersRoute) },
+                    onOpenLicenses = { if (backStack.lastOrNull() != LicensesRoute) backStack.add(LicensesRoute) },
+                )
+            }
+            entry<LicensesRoute>(metadata = FROM_THE_SIDE) {
+                LicensesScreen(
+                    onBack = { close() },
+                    onOpen = { title, notice, texts ->
+                        if (backStack.lastOrNull() !is LicenseTextRoute) backStack.add(LicenseTextRoute(title, notice, texts))
+                    },
+                )
+            }
+            entry<LicenseTextRoute>(metadata = FROM_THE_SIDE) { route ->
+                LicenseTextScreen(route.title, route.notice, route.texts, onBack = { close() })
+            }
+            entry<FoldersRoute>(metadata = FROM_THE_SIDE) {
+                FoldersScreen(onBack = { close() })
+            }
+            entry<NowPlayingRoute> {
+                Box(Modifier.fillMaxSize()) {
+                    val links = playingLinks
+                    val scope = rememberCoroutineScope()
+                    // The keys are read again at the tap: the tag pass may have changed them since the song began.
+                    val openLatest = { route: (SongLinks) -> NavKey? ->
+                        scope.launch {
+                            val latest = currentSongId?.let { linksOf(context, it) }
+                            latest?.let(route)?.let(open)
+                        }
+                        Unit
                     }
-                }
-                entry<AlbumRoute>(metadata = FROM_THE_SIDE) { route -> AlbumPage(route.key, host, onBack = { close() }) }
-                entry<ArtistRoute>(metadata = FROM_THE_SIDE) { route -> ArtistPage(route.key, host, onBack = { close() }) }
-                entry<LibraryFolderRoute>(metadata = FROM_THE_SIDE) { route ->
-                    FolderPage(route.volume, route.relativePath, host, onBack = { close() })
-                }
-                entry<PlaylistRoute>(metadata = FROM_THE_SIDE) { route -> PlaylistPage(route.id, host, playlists, onBack = { close() }) }
-                entry<GenreRoute>(metadata = FROM_THE_SIDE) { route -> GenrePage(route.key, host, onBack = { close() }) }
-                entry<SmartListRoute>(metadata = FROM_THE_SIDE) { route ->
-                    ListKind.of(route.kind)?.takeIf { it.smart }?.let { SmartListPage(it, host, onBack = { close() }) }
-                }
-                entry<QueueRoute>(metadata = FROM_THE_SIDE) {
-                    QueueScreen(
-                        player = player,
-                        actions = QueueActions(
-                            remove = { entry -> viewModel.removeFromQueue(entry.row, entry.mediaId, entry.title) },
-                            move = { entry, from, to -> viewModel.moveInQueue(from, to, entry.mediaId) },
-                        ),
-                        snackbar = snackbar,
-                        onBack = { close() },
-                        menu = menu,
-                        selectionActions = QueueSelectionActions(
-                            addToQueue = viewModel::addToQueue,
-                            removeAll = viewModel::removeFromQueue,
-                            addToPlaylist = playlists.addSelected,
-                            favorites = favoriteBatch,
-                        ),
-                        restored = viewModel.restored.collectAsStateWithLifecycle().value,
-                    )
-                }
-                entry<TrackDetailsRoute>(metadata = FROM_THE_SIDE) { route ->
-                    TrackDetailsScreen(route.fileId, route.uri, snackbar, onBack = { close() })
-                }
-                entry<IdentifyRoute>(metadata = FROM_THE_SIDE) { route -> ReviewScreen(route.fileId, route.uri, onBack = { close() }) }
-                entry<SettingsRoute>(metadata = FROM_THE_SIDE) {
-                    SettingsScreen(
-                        onBack = { close() },
-                        onOpenFolders = { if (backStack.lastOrNull() != FoldersRoute) backStack.add(FoldersRoute) },
-                        onOpenLicenses = { if (backStack.lastOrNull() != LicensesRoute) backStack.add(LicensesRoute) },
-                    )
-                }
-                entry<LicensesRoute>(metadata = FROM_THE_SIDE) {
-                    LicensesScreen(
-                        onBack = { close() },
-                        onOpen = { title, notice, texts ->
-                            if (backStack.lastOrNull() !is LicenseTextRoute) backStack.add(LicenseTextRoute(title, notice, texts))
+                    NowPlaying(
+                        player,
+                        cover,
+                        onClose = { close() },
+                        controls = rememberExtraControls(viewModel, player),
+                        onOpenArtist = links?.artists?.firstOrNull()?.let {
+                            { openLatest { latest -> latest.artists.firstOrNull()?.let { ArtistRoute(it.key) } } }
+                        },
+                        onOpenAlbum = links?.albumKey?.let { { openLatest { latest -> latest.albumKey?.let(::AlbumRoute) } } },
+                        onOpenQueue = { if (backStack.lastOrNull() != QueueRoute) backStack.add(QueueRoute) },
+                        coverName = coverName,
+                        favorite = currentSongId?.let { id ->
+                            val checked by remember(id) { favorites.favoriteFlow(id) }.collectAsStateWithLifecycle(false)
+                            FavoriteState(checked) { favoriteActions.setById(id, !checked) }
+                        },
+                        more = currentMediaId?.let { mediaId ->
+                            { closeMenu ->
+                                val song = currentSongId?.let { Song(id = it, uri = mediaId, title = "", artist = null, album = null, durationMs = null) }
+                                TrackMenuItems(song, TrackMenuPlace.NOW_PLAYING, menu, closeMenu, openedUri = mediaId.takeIf { song == null })
+                            }
                         },
                     )
+                    SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).windowInsetsPadding(WindowInsets.navigationBars))
                 }
-                entry<LicenseTextRoute>(metadata = FROM_THE_SIDE) { route ->
-                    LicenseTextScreen(route.title, route.notice, route.texts, onBack = { close() })
-                }
-                entry<FoldersRoute>(metadata = FROM_THE_SIDE) {
-                    FoldersScreen(onBack = { close() })
-                }
-                entry<NowPlayingRoute> {
-                    Box(Modifier.fillMaxSize()) {
-                        val links = playingLinks
-                        val scope = rememberCoroutineScope()
-                        // The keys are read again at the tap: the tag pass may have changed them since the song began.
-                        val openLatest = { route: (SongLinks) -> NavKey? ->
-                            scope.launch {
-                                val latest = currentSongId?.let { linksOf(context, it) }
-                                latest?.let(route)?.let(open)
-                            }
-                            Unit
-                        }
-                        NowPlaying(
-                            player,
-                            cover,
-                            onClose = { close() },
-                            controls = rememberExtraControls(viewModel, player),
-                            onOpenArtist = links?.artists?.firstOrNull()?.let {
-                                { openLatest { latest -> latest.artists.firstOrNull()?.let { ArtistRoute(it.key) } } }
-                            },
-                            onOpenAlbum = links?.albumKey?.let { { openLatest { latest -> latest.albumKey?.let(::AlbumRoute) } } },
-                            onOpenQueue = { if (backStack.lastOrNull() != QueueRoute) backStack.add(QueueRoute) },
-                            coverName = coverName,
-                            favorite = currentSongId?.let { id ->
-                                val checked by remember(id) { favorites.favoriteFlow(id) }.collectAsStateWithLifecycle(false)
-                                FavoriteState(checked) { favoriteActions.setById(id, !checked) }
-                            },
-                            more = currentMediaId?.let { mediaId ->
-                                { closeMenu ->
-                                    val song = currentSongId?.let { Song(id = it, uri = mediaId, title = "", artist = null, album = null, durationMs = null) }
-                                    TrackMenuItems(song, TrackMenuPlace.NOW_PLAYING, menu, closeMenu, openedUri = mediaId.takeIf { song == null })
-                                }
-                            },
-                        )
-                        SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).windowInsetsPadding(WindowInsets.navigationBars))
-                    }
-                }
-            },
-        )
-    }
+            }
+        },
+    )
     if (CrashReports.promptEnabled) CrashPrompt(CrashReports.of(LocalContext.current))
 }
 

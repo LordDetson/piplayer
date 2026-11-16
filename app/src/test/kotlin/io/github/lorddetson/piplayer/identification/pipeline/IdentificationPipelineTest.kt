@@ -155,6 +155,19 @@ class IdentificationPipelineTest {
     }
 
     @Test
+    fun `each recording the fingerprint found is reported with the AcoustID track ID of its own result`() = runTest {
+        val pipeline = pipeline()
+        acoustId.on(SESSION, FakeAcoustId.CLOSE_SCORES)
+
+        val result = pipeline.runOpened()
+
+        assertThat(result.found().acoustIdTrackIds).containsExactly(
+            org.assertj.core.api.Assertions.entry("b0e4d1f2-1111-4111-8111-000000000001", CLOSE_SCORES_BEST),
+            org.assertj.core.api.Assertions.entry("b0e4d1f2-1111-4111-8111-000000000004", "b2e3f405-1627-4384-95a6-b7c8d9e0f1a2"),
+        )
+    }
+
+    @Test
     fun `a file that cannot be decoded skips the fingerprint and falls back to text search`() = runTest {
         val pipeline = pipeline()
         fingerprints.failure = DecodingException.UnsupportedFormat("audio/alac")

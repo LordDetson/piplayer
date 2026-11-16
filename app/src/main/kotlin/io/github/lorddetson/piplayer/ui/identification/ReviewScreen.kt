@@ -556,21 +556,22 @@ private fun CoverRow(line: CoverLine, onToggle: (ProtectedField) -> Unit, oldCov
         is ShownCover.Own -> stringResource(if (shown.song) R.string.details_cover_song_own else R.string.details_cover_album_own)
     }
     val new = imageFacts(line)
-    CheckRow(line.ticked, stringResource(R.string.review_line_description, label, old, new), Modifier.testTag(ReviewTags.COVER_LINE), {
-        onToggle(ProtectedField.COVER)
-    }) {
+    val anotherEdition = if (line.new.anotherEdition) stringResource(R.string.review_another_edition) else null
+    val own = (line.old as? ShownCover.Own)?.let {
+        stringResource(if (it.song) R.string.review_cover_own_song else R.string.review_cover_own_album)
+    }
+    // TalkBack reads the row by its description, so the notes shown under the values are part of it (TI §6).
+    val description = (listOf(stringResource(R.string.review_line_description, label, old, new)) + listOfNotNull(anotherEdition, own))
+        .joinToString(". ")
+    CheckRow(line.ticked, description, Modifier.testTag(ReviewTags.COVER_LINE), { onToggle(ProtectedField.COVER) }) {
         Text(label, style = MaterialTheme.typography.labelLarge)
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             oldCover?.invoke()
             Text(old, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Text("→ $new", style = MaterialTheme.typography.bodyMedium)
-        (line.old as? ShownCover.Own)?.let { own ->
-            Text(
-                stringResource(if (own.song) R.string.review_cover_own_song else R.string.review_cover_own_album),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+        for (note in listOfNotNull(anotherEdition, own)) {
+            Text(note, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }

@@ -93,15 +93,22 @@ object ReviewFixtures {
         return Ranking(matches.toList(), best?.let { Bands.gap(it, second) }, Bands.of(best, second))
     }
 
-    /** A run that found [matches] with the studio album as the winner's suggested edition ([edition], null for none). */
+    /**
+     * A run that found [matches] with the studio album as the winner's suggested edition ([edition], null for none). The
+     * best AcoustID result is [acoustIdTrackId], which holds the winner when the fingerprint found it; [acoustIdTrackIds]
+     * gives each recording the fingerprint found its own result.
+     */
     fun found(
         vararg matches: RecordingMatch = arrayOf(match()),
         edition: SuggestedEdition? = harborEdition,
         acoustIdTrackId: String? = "acoustid-track",
+        acoustIdTrackIds: Map<String, String> = listOfNotNull(
+            matches.firstOrNull()?.takeIf { acoustIdTrackId != null && Source.FINGERPRINT in it.reason.foundBy }?.let { it.recordingId to acoustIdTrackId!! },
+        ).toMap(),
     ): IdentificationOutcome.Found {
         val ranking = ranking(*matches)
         val choice = ReleaseChoice(ranking.best?.recordingId, null, emptyMap(), edition, emptyList())
-        return IdentificationOutcome.Found(ranking, choice, acoustIdTrackId)
+        return IdentificationOutcome.Found(ranking, choice, acoustIdTrackId, acoustIdTrackIds)
     }
 
     /** A run with [outcome] for [target]'s file; [read] false for a run that ended before stage 0. */

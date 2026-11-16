@@ -50,9 +50,16 @@ sealed interface IdentificationOutcome {
     /**
      * The run went through its stages: [ranking] holds the scored recordings, best first, in their [band] (TI §4.1;
      * [Band.NO_MATCH] when none reaches 0.50), [choice] the release choice of the winner (TI §4.2, [ReleaseChoice.NONE]
-     * without one), and [acoustIdTrackId] the AcoustID track ID of the best fingerprint result, if any (TI §3.2).
+     * without one), [acoustIdTrackId] the AcoustID track ID of the best fingerprint result, if any (TI §3.2), and
+     * [acoustIdTrackIds] the AcoustID track ID of the result that holds each recording the fingerprint found, by
+     * recording ID, which a decision on that recording keeps (TI §6, review screen A).
      */
-    data class Found(val ranking: Ranking, val choice: ReleaseChoice, val acoustIdTrackId: String?) : IdentificationOutcome {
+    data class Found(
+        val ranking: Ranking,
+        val choice: ReleaseChoice,
+        val acoustIdTrackId: String?,
+        val acoustIdTrackIds: Map<String, String> = emptyMap(),
+    ) : IdentificationOutcome {
         val band: Band get() = ranking.band
     }
 
@@ -85,9 +92,10 @@ sealed interface IdentificationOutcome {
             choice: ReleaseChoice,
             acoustIdTrackId: String?,
             fingerprintStage: FingerprintStage,
+            acoustIdTrackIds: Map<String, String> = emptyMap(),
         ): IdentificationOutcome {
             val noKey = (fingerprintStage as? FingerprintStage.Unavailable)?.reason == UnavailableReason.NoKey
-            return if (ranking.band == Band.NO_MATCH && noKey) NoKey else Found(ranking, choice, acoustIdTrackId)
+            return if (ranking.band == Band.NO_MATCH && noKey) NoKey else Found(ranking, choice, acoustIdTrackId, acoustIdTrackIds)
         }
 
         /** Causes looked through, so a cycle of causes cannot loop. */

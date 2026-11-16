@@ -267,6 +267,24 @@ class ReviewModelTest {
     }
 
     @Test
+    fun `a library file whose key no identity holds yet has neither Keep as-is nor Skip, but Apply`() = runTest {
+        val backend = FakeReviewBackend(result(found()))
+        backend.identityHeld = false
+
+        val model = started(backend)
+        model.keepAsIs()
+        model.skip()
+        advanceUntilIdle()
+
+        assertThat(model.ended.keepOrSkip).isFalse()
+        assertThat(backend.calls.filter { it.startsWith("keep") || it.startsWith("skip") }).isEmpty()
+        assertThat(model.ended.canApply).isTrue()
+        model.apply()
+        advanceUntilIdle()
+        assertThat(model.ended.last?.kind).isEqualTo(ActionKind.APPLY)
+    }
+
+    @Test
     fun `a failed action says so and changes nothing`() = runTest {
         val backend = FakeReviewBackend(result(found()))
         backend.applyAnswer = null
@@ -322,6 +340,53 @@ class ReviewModelTest {
         assertThat(backend.applied.single().first.provenance.recordingId).isEqualTo(ReviewFixtures.LIVE_RECORDING)
         // Found by text only: no AcoustID track ID in its provenance.
         assertThat(backend.applied.single().first.provenance.acoustIdTrackId).isNull()
+    }
+
+    @Test
+    fun `a chosen candidate the fingerprint found keeps the AcoustID track ID of its own result`() = runTest {
+        val fingerprinted = match(ReviewFixtures.LIVE_RECORDING, score = 0.62, title = "Paper Lanterns (live)", foundBy = listOf(Source.FINGERPRINT))
+        val backend = FakeReviewBackend(
+            result(
+                found(
+                    match(), fingerprinted,
+                    acoustIdTrackIds = mapOf(ReviewFixtures.harborDetails.recordingId to "acoustid-track", ReviewFixtures.LIVE_RECORDING to "acoustid-live"),
+                ),
+            ),
+        )
+        backend.editions[ReviewFixtures.LIVE_RECORDING] = liveEdition
+        val model = started(backend)
+
+        model.choose(1)
+        advanceUntilIdle()
+        model.apply()
+        advanceUntilIdle()
+
+        assertThat(backend.applied.single().first.provenance.recordingId).isEqualTo(ReviewFixtures.LIVE_RECORDING)
+        assertThat(backend.applied.single().first.provenance.acoustIdTrackId).isEqualTo("acoustid-live")
+    }
+
+    @Test
+    fun `the provenance's fetch time is when the release reached the review, not the time of Apply`() = runTest {
+        val runEnd = Instant.parse("2026-11-16T10:00:00Z")
+        val loaded = Instant.parse("2026-11-16T10:05:00Z")
+        val backend = FakeReviewBackend(result(found(match(), live)))
+        backend.editions[ReviewFixtures.LIVE_RECORDING] = liveEdition
+        backend.clock = runEnd
+        val model = started(backend)
+
+        backend.clock = Instant.parse("2026-11-16T10:03:00Z")
+        model.apply()
+        advanceUntilIdle()
+        model.undo()
+        advanceUntilIdle()
+        backend.clock = loaded
+        model.choose(1)
+        advanceUntilIdle()
+        backend.clock = Instant.parse("2026-11-16T11:00:00Z")
+        model.apply()
+        advanceUntilIdle()
+
+        assertThat(backend.applied.map { it.first.provenance.fetchedAt }).containsExactly(runEnd, loaded)
     }
 
     @Test
@@ -477,6 +542,26 @@ class ReviewModelTest {
         advanceUntilIdle()
 
         assertThat(backend.calls).endsWith("not now")
+        assertThat(model.state.value).isEqualTo(ReviewState.Closed)
+    }
+
+    @Test
+    fun `of Enable and Not now only the first answer counts, and Not now closes once its answer is stored`() = runTest {
+        val backend = FakeReviewBackend(result(IdentificationOutcome.Disabled, read = false), result(found()))
+        backend.notNowGate = CompletableDeferred()
+        val model = started(backend)
+
+        model.notNow()
+        advanceUntilIdle()
+        model.enable()
+        model.notNow()
+        advanceUntilIdle()
+
+        assertThat(backend.calls.filter { it == "not now" || it == "enable" }).containsExactly("not now")
+        assertThat(backend.calls.count { it.startsWith("identify") }).isEqualTo(1)
+        assertThat(model.state.value).isNotEqualTo(ReviewState.Closed)
+        backend.notNowGate!!.complete(Unit)
+        advanceUntilIdle()
         assertThat(model.state.value).isEqualTo(ReviewState.Closed)
     }
 

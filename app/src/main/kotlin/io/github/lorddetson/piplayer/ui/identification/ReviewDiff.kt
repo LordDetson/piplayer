@@ -149,6 +149,7 @@ object ReviewDiff {
      * One line per field of the protected-fields list, in its order, that is not [protected] and has an old or a new
      * value; the cover has a line of its own ([coverLine]). An equal pair and a changed line with a new value start
      * ticked; a line whose new value is empty while the old one is not starts unticked, since applying it clears the field.
+     * The compilation flag off is the release's value, not an empty one (TI §6), so it starts ticked.
      */
     fun lines(
         current: Map<ProtectedField, FieldValue>,

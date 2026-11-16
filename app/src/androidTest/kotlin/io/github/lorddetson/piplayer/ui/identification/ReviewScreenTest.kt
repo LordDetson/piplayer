@@ -22,6 +22,8 @@ import androidx.compose.ui.test.performScrollTo
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.github.lorddetson.piplayer.R
 import io.github.lorddetson.piplayer.TestFiles
+import io.github.lorddetson.piplayer.identification.caa.CaaResult
+import io.github.lorddetson.piplayer.identification.caa.CoverEntity
 import io.github.lorddetson.piplayer.identification.contract.IdentificationOutcome
 import io.github.lorddetson.piplayer.identification.pipeline.PipelineProgress
 import io.github.lorddetson.piplayer.identification.provider.ProviderId
@@ -213,6 +215,18 @@ class ReviewScreenTest {
         compose.waitUntilAtLeastOneExists(hasTestTag(ReviewTags.COVER_LINE), timeoutMillis = 10_000)
         compose.onNodeWithTag(ReviewTags.COVER_LINE).performScrollTo().assert(isCheckbox()).assertIsOff()
         compose.onNode(hasText(text(R.string.review_cover_own_song))).assertExists()
+        // TalkBack reads the line by its description, so the note is part of it.
+        compose.onNodeWithTag(ReviewTags.COVER_LINE).assert(hasContentDescription(text(R.string.review_cover_own_song), substring = true))
+    }
+
+    @Test
+    fun talkBackReadsFromAnotherEditionWithTheCoverLine() {
+        show(FakeReviewBackend(result(found()), coverResult = CaaResult.Found(ReviewFixtures.cover(CoverEntity.RELEASE_GROUP))))
+        waitForCard()
+
+        compose.waitUntilAtLeastOneExists(hasTestTag(ReviewTags.COVER_LINE), timeoutMillis = 10_000)
+        compose.onNodeWithTag(ReviewTags.COVER_LINE).performScrollTo()
+            .assert(hasContentDescription(text(R.string.review_another_edition), substring = true))
     }
 
     @Test

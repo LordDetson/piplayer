@@ -52,6 +52,18 @@ class FakeReviewBackend(
     @Volatile
     var enableGate: CompletableDeferred<Unit>? = null
 
+    /** When set, Not now waits for it before it answers. */
+    @Volatile
+    var notNowGate: CompletableDeferred<Unit>? = null
+
+    /** Whether an identity holds the key of a library target, which Keep as-is and Skip need. */
+    @Volatile
+    var identityHeld: Boolean = true
+
+    /** What [now] answers; the tests move it to tell the times of a run, a load and an Apply apart. */
+    @Volatile
+    var clock: Instant = NOW
+
     /** When set, another candidate's edition waits for it. */
     @Volatile
     var editionGate: CompletableDeferred<Unit>? = null
@@ -100,6 +112,9 @@ class FakeReviewBackend(
         return applyAnswer
     }
 
+    // A local read, as protectedFields is: not among the calls.
+    override suspend fun canKeepOrSkip(target: IdentificationTarget.LibraryFile): Boolean = identityHeld
+
     override suspend fun keepAsIs(target: IdentificationTarget.LibraryFile): Long? {
         calls += "keep ${target.fileId}"
         writeGate?.await()
@@ -125,9 +140,10 @@ class FakeReviewBackend(
 
     override suspend fun notNow() {
         calls += "not now"
+        notNowGate?.await()
     }
 
-    override fun now(): Instant = NOW
+    override fun now(): Instant = clock
 
     companion object {
         val NOW: Instant = Instant.parse("2026-11-16T10:00:00Z")
