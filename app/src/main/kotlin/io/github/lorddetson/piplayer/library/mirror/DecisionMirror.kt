@@ -31,6 +31,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -101,9 +102,13 @@ class DecisionMirror(
     private val pendingRead = LinkedHashSet<Long>()
     private val pendingFailed = LinkedHashSet<Long>()
 
-    /** Whether the background loop is making a run, and how many runs after a commit are under way. */
+    /** How many more times the checks after a batch have been made for each file whose checks failed (TI §1). */
+    private val checkTries = HashMap<Long, Int>()
+
+    /** Whether the background loop is making a run, how many runs after a commit and checks made again are under way. */
     private var working = false
     private var committing = 0
+    private var retrying = 0
 
     /** What the background loop takes at once. */
     private class Asked(
@@ -131,14 +136,18 @@ class DecisionMirror(
                         pendingFailed.clear()
                     }
                 }
-                // Before the mirror runs, which replace the rows that name a file's Skip before its read (TI §1).
+                // Before the mirror runs, which replace the rows that name a file's Skip before its read (TI §1). The run of
+                // files whose checks are made again waits for them.
+                var waiting = emptySet<Long>()
                 if (asked.read.isNotEmpty() || asked.failed.isNotEmpty()) {
                     try {
                         afterRead(asked.read, asked.failed)
+                        checked(asked.read + asked.failed)
                     } catch (e: CancellationException) {
                         throw e
                     } catch (e: Exception) {
                         Log.w(TAG, "The checks after a batch of the tag pass failed", e)
+                        waiting = checkAgain(asked.read, asked.failed)
                     }
                 }
                 try {
@@ -148,7 +157,7 @@ class DecisionMirror(
                         else -> {
                             if (asked.unlessRan) mirrorUnlessRan()
                             if (asked.ifChanged) mirrorIfChanged()
-                            val files = (asked.files + asked.read + asked.failed).distinct()
+                            val files = (asked.files + asked.read + asked.failed).distinct().filter { it !in waiting }
                             if (files.isNotEmpty()) mirrorFiles(files)
                         }
                     }
@@ -167,7 +176,7 @@ class DecisionMirror(
 
     /** Idle once nothing runs and nothing is asked for; called under [lock]. */
     private fun settle() {
-        if (!working && committing == 0 && !pendingAll && !pendingUnlessRan && !pendingIfChanged && pendingFiles.isEmpty() &&
+        if (!working && committing == 0 && retrying == 0 && !pendingAll && !pendingUnlessRan && !pendingIfChanged && pendingFiles.isEmpty() &&
             pendingRead.isEmpty() && pendingFailed.isEmpty()
         ) {
             idle.value = true
@@ -449,6 +458,41 @@ class DecisionMirror(
         }
     }
 
+    /** Forgets the tries of [files], whose checks have been made. */
+    private fun checked(files: List<Long>) {
+        synchronized(lock) { if (checkTries.isNotEmpty()) files.forEach(checkTries::remove) }
+    }
+
+    /**
+     * Asks for the failed checks of the files [read] and [failed] again after [retryDelay], those made fewer than
+     * [CHECK_RETRIES] more times (TI §1); the files it asks for, whose run waits for their checks. The others are
+     * mirrored without them.
+     */
+    private fun checkAgain(read: List<Long>, failed: List<Long>): Set<Long> {
+        val again = synchronized(lock) {
+            val files = (read + failed).filterTo(HashSet()) { (checkTries[it] ?: 0) < CHECK_RETRIES }
+            for (file in read + failed) if (file in files) checkTries[file] = (checkTries[file] ?: 0) + 1 else checkTries.remove(file)
+            if (files.isNotEmpty()) {
+                retrying++
+                idle.value = false
+            }
+            files
+        }
+        if (again.isEmpty()) return again
+        scope.launch {
+            try {
+                delay(retryDelay)
+                requestRead(read.filter { it in again }, failed.filter { it in again })
+            } finally {
+                synchronized(lock) {
+                    retrying--
+                    settle()
+                }
+            }
+        }
+        return again
+    }
+
     /**
      * The checks after a batch of the tag pass, before its run: the Skips that lapse with the files it tried (TI §1), which
      * are committed and mirrored as a decision is, then the comparison of the files it read with their decided values
@@ -492,9 +536,12 @@ class DecisionMirror(
                 Triple(skip.hintVolume, skip.hintRelativePath, skip.hintDisplayName) in spots
         }
         if (candidates.isEmpty()) return null
-        // The files with the candidates' sizes, in one read, and of them those with a candidate's time too.
-        val bySize = candidates.mapNotNull { it.size }.distinct().chunked(DecidedMirrorDao.CHUNK)
-            .flatMap { library.decided().filesWithSizes(it) }.groupBy { it.size }
+        // The files of the candidates' tracks, by the index of the keys, and the files without a key yet with a candidate's
+        // size; of them those with a candidate's size and time.
+        val bySize = (
+            candidates.map { it.contentKey }.distinct().chunked(DecidedMirrorDao.CHUNK).flatMap { library.decided().stampsWithKeys(it) } +
+                candidates.mapNotNull { it.size }.distinct().chunked(DecidedMirrorDao.CHUNK).flatMap { library.decided().unkeyedStamps(it) }
+            ).groupBy { it.size }
         val lapsing = candidates.filter { skip ->
             val seconds = skip.mtimeMs?.let(SkipLapse::mtimeSeconds)
             val holders = bySize[skip.size].orEmpty().filter { it.mtime == seconds }.map { it.contentKey }

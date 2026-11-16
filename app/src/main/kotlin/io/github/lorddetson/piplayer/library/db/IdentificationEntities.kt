@@ -218,11 +218,15 @@ interface DecidedMirrorDao {
     suspend fun missingInfoOf(fileIds: List<Long>): List<DecidedMirrorEntity>
 
     /**
-     * The files with one of [sizes] (at most [CHUNK] at once), with their modification time (seconds) and content key, null
-     * for a file without a key yet: those that may hold a Skip's stamp (TI §1).
+     * The size, modification time (seconds) and content key of the files that hold one of [keys] (at most [CHUNK] at once):
+     * those of Skips' tracks (TI §1).
      */
-    @Query(FILES_WITH_SIZES)
-    suspend fun filesWithSizes(sizes: List<Long>): List<FileStampRow>
+    @Query(STAMPS_WITH_KEYS)
+    suspend fun stampsWithKeys(keys: List<String>): List<FileStampRow>
+
+    /** The same of the files without a key yet that have one of [sizes] (at most [CHUNK] at once): they may hold a Skip's stamp. */
+    @Query(UNKEYED_STAMPS)
+    suspend fun unkeyedStamps(sizes: List<Long>): List<FileStampRow>
 
     /** The places and keys of [fileIds] (at most [CHUNK] at once). */
     @Query(
@@ -244,10 +248,12 @@ interface DecidedMirrorDao {
         /** File IDs bound at a time, under SQLite's limit of arguments. */
         const val CHUNK = 500
 
-        private const val FILES_WITH_SIZES = "SELECT size, mtime, content_key AS contentKey FROM audio_file WHERE size IN (:sizes)"
+        const val STAMPS_WITH_KEYS = "SELECT size, mtime, content_key AS contentKey FROM audio_file WHERE content_key IN (:keys)"
+        const val UNKEYED_STAMPS =
+            "SELECT size, mtime, content_key AS contentKey FROM audio_file WHERE content_key IS NULL AND size IN (:sizes)"
 
-        /** The queries that look up the files holding a Skip's stamp (TI §1). */
-        val STAMP_QUERIES = listOf(FILES_WITH_SIZES)
+        /** The queries that look up the files holding a Skip's stamp (TI §1), both by the index of the keys. */
+        val STAMP_QUERIES = listOf(STAMPS_WITH_KEYS, UNKEYED_STAMPS)
     }
 }
 
