@@ -15,9 +15,7 @@ import io.github.lorddetson.piplayer.identification.pipeline.AppPipeline
 import io.github.lorddetson.piplayer.identification.pipeline.FileRef
 import io.github.lorddetson.piplayer.identification.pipeline.PipelineProgress
 import io.github.lorddetson.piplayer.identification.pipeline.PipelineResult
-import io.github.lorddetson.piplayer.identification.release.EditionSource
 import io.github.lorddetson.piplayer.identification.release.ReleaseDetails
-import io.github.lorddetson.piplayer.identification.release.ReleaseDetailsExtractor
 import io.github.lorddetson.piplayer.identification.release.ReleaseRequest
 import io.github.lorddetson.piplayer.identification.release.SuggestedEdition
 import io.github.lorddetson.piplayer.identification.score.Bands
@@ -84,13 +82,10 @@ class AppReviewBackend(context: Context) : ReviewBackend {
             folder = result.file?.folder,
             country = Locale.getDefault().country.ifEmpty { null },
         )
-        // A recording the run browsed already has its releases ranked: only the top one is looked up (TI §4.2, §5.1).
-        val ranked = (result.outcome as? IdentificationOutcome.Found)?.choice?.ranked?.get(match.recordingId)
-        if (ranked != null) {
-            val top = ranked.firstOrNull() ?: return@withContext null
-            val release = services.releases.release(top.release.id) ?: return@withContext null
-            val details = ReleaseDetailsExtractor.extract(release, match.recordingId, request.trackNumberTag, request.durationMs)
-            return@withContext details?.let { SuggestedEdition(release, it, EditionSource.RANKING) }
+        // A recording the run browsed already has its releases ranked: no second browse (TI §4.2, §5.1).
+        val choice = (result.outcome as? IdentificationOutcome.Found)?.choice
+        if (choice != null && match.recordingId in choice.ranked) {
+            return@withContext services.releases.suggestionFor(choice, match.recordingId, request)
         }
         // Otherwise the candidate alone, as release choice ranks a winner, with the run's own file values.
         val ranking = Ranking(listOf(match), match.score, Bands.of(match.score, null))

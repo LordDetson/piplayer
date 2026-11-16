@@ -360,7 +360,12 @@ private fun CoverPicture(cover: CoverState) {
     val px = with(LocalDensity.current) { CARD_COVER_DP.dp.roundToPx() }
     // Decoded off the main thread at about the size it is drawn: an original can be thousands of pixels wide.
     val bitmap by produceState<ImageBitmap?>(null, image, px) { value = withContext(Dispatchers.Default) { decoded(image.bytes, px) } }
-    val shown = bitmap ?: return
+    val shown = bitmap
+    if (shown == null) {
+        // The place of the cover while it decodes, so that the text beside it does not move.
+        Box(Modifier.size(CARD_COVER_DP.dp))
+        return
+    }
     Image(
         shown,
         contentDescription = null,
@@ -424,7 +429,7 @@ private fun Confidence(score: Double, band: Band) {
 private fun percentFormat(): NumberFormat = NumberFormat.getPercentInstance(currentLocale())
 
 @Composable
-private fun currentLocale(): Locale = LocalConfiguration.current.locales[0]
+private fun currentLocale(): Locale = LocalConfiguration.current.locales.takeIf { !it.isEmpty }?.get(0) ?: Locale.ROOT
 
 /** The reason's parts joined by " · " (TI §6), numbers formatted for the locale. */
 @Composable

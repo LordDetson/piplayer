@@ -148,7 +148,11 @@ class ReleaseChooser(
      * other candidates, TI §6): the tagged release when it contains the recording (TI §4.2 step 0), otherwise the top of
      * its ranking, with one release lookup and no second browse. Null when [choice] did not browse it.
      */
-    suspend fun suggestionFor(choice: ReleaseChoice, recordingId: String, request: ReleaseRequest): SuggestedEdition? = null
+    suspend fun suggestionFor(choice: ReleaseChoice, recordingId: String, request: ReleaseRequest): SuggestedEdition? {
+        val ranked = choice.ranked[recordingId] ?: return null
+        request.tagReleaseId?.let { release(it) }?.let { suggestion(it, recordingId, request, EditionSource.TAG) }?.let { return it }
+        return ranked.firstOrNull()?.let { top -> release(top.release.id)?.let { suggestion(it, recordingId, request, EditionSource.RANKING) } }
+    }
 
     /** The edition picker's list (TI §4.2 step 6), browsed from the suggested release's group when it opens. */
     suspend fun editions(choice: ReleaseChoice, request: ReleaseRequest): EditionList {

@@ -122,6 +122,13 @@ class ReviewModel(private val file: FileRef, private val backend: ReviewBackend,
 
     private var started = false
     private var run: Job? = null
+
+    /** Counts the runs, so that progress of a run that was replaced never shows. */
+    private var runs = 0
+
+    /** The decision Undo undoes and whether an Apply stands, kept from one run of the screen to the next (Try again). */
+    private var kept: LastAction? = null
+    private var appliedBefore = false
     private var result: PipelineResult? = null
 
     /** The run's winner's band and its AcoustID track ID (TI §3.2). */
@@ -162,7 +169,8 @@ class ReviewModel(private val file: FileRef, private val backend: ReviewBackend,
     /** Try again: a new run, once no decision is being written, so that its Undo is not lost. */
     fun retry() {
         val now = mutable.value
-        if (now is ReviewState.Running || now == ReviewState.Closed || (now as? ReviewState.Ended)?.busy == true) return
+        val ended = now as? ReviewState.Ended
+        if (now is ReviewState.Running || now == ReviewState.Closed || ended?.busy == true || ended?.loading != null) return
         launchRun()
     }
 
@@ -270,11 +278,18 @@ class ReviewModel(private val file: FileRef, private val backend: ReviewBackend,
 
     private fun launchRun() {
         val before = run
+        (mutable.value as? ReviewState.Ended)?.let {
+            kept = it.last
+            appliedBefore = it.applied
+        }
+        val generation = ++runs
         mutable.value = ReviewState.Running()
         run = scope.launch {
             val result = try {
-                // Progress may come from another thread; it never replaces the state once the run is cancelled.
-                backend.identify(file) { progress -> mutable.update { if (it is ReviewState.Running) ReviewState.Running(progress) else it } }
+                // Progress may come from another thread; it never replaces the state once this run is cancelled or replaced.
+                backend.identify(file) { progress ->
+                    mutable.update { if (it is ReviewState.Running && generation == runs) ReviewState.Running(progress) else it }
+                }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -306,7 +321,7 @@ class ReviewModel(private val file: FileRef, private val backend: ReviewBackend,
         this.found = found
         val candidates = found?.ranking?.matches.orEmpty().filter { it.score >= Bands.MEDIUM - SCORE_TOLERANCE }
         if (found == null || candidates.isEmpty()) {
-            mutable.value = ReviewState.Ended(outcome, result.retryAt, keepOrSkip = keepOrSkip)
+            mutable.value = ReviewState.Ended(outcome, result.retryAt, keepOrSkip = keepOrSkip, last = kept, applied = appliedBefore)
             return
         }
         val details = quietly { backend.current(file) }
@@ -318,7 +333,9 @@ class ReviewModel(private val file: FileRef, private val backend: ReviewBackend,
         val winner = candidates.first()
         val edition = found.choice.suggested?.takeIf { it.details.recordingId == winner.recordingId }
         editions[winner.recordingId] = edition
-        mutable.value = ReviewState.Ended(outcome, result.retryAt, candidates, cardOf(0, winner, edition), keepOrSkip)
+        mutable.value = ReviewState.Ended(
+            outcome, result.retryAt, candidates, cardOf(0, winner, edition), keepOrSkip, last = kept, applied = appliedBefore,
+        )
         fetchCover()
     }
 
