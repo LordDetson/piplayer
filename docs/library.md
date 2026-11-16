@@ -1143,13 +1143,15 @@ Covers for controllers outside PiPlayer (part B, §13.8): a content provider tha
 
 ### 13.6 The session
 
-- The session still shows the picture the player reads from the stream (playback.md §2.6). When the current song has an
-  own cover (its own or its album's) or a decided cover (§13.1 step 3, M3), that cover replaces it, as JPEG bytes
-  loaded for 1024 px (a copy is at most 1500 px anyway); when the tag pass found no picture in the file, the system
-  thumbnail loaded for 512 px stands in, so that a folder image reaches the notification too, and without one the lazy
-  Cover Art Archive cover of §13.1 step 6 does, at that size. A file opened from another app keeps the stream's
-  picture. The service looks again at each change of the current item, of own covers, of decided values and of online
-  lookups (`SessionCovers`).
+- The session shows the current library song's cover by the order of §13.1, as JPEG bytes from the loader, and never the
+  picture the player reads from the stream (TI §7.1, playback.md §2.6; M3 step 21, before which the stream's picture
+  stood in while no own cover, decided cover or thumbnail replaced it). An own cover (its own or its album's), a decided
+  cover (§13.1 step 3) and the embedded picture are loaded for 1024 px (a copy is at most 1500 px anyway); when the tag
+  pass found no picture in the file, the system thumbnail is loaded for 512 px, so that a folder image reaches the
+  notification too, and without one the lazy Cover Art Archive cover of §13.1 step 6, at that size. A song without any
+  cover shows none. A file opened from another app keeps the stream's picture. The service looks again at each change of
+  the current item, of own covers, of decided values and of online lookups (`SessionCovers`); a look that fails (a
+  database that cannot be read) leaves the picture shown as it is.
 - Since part B the playing library song's metadata also carries its cover URI (§13.8.6) next to the picture. Items of
   the queue carry no artwork.
 
@@ -1186,8 +1188,8 @@ Instrumented tests (on GitHub Actions, API 30 and 36):
   have a decided cover or a release.
 - On the screen: a song row, an album row and tile, and the album page show an own album cover; a song's own cover
   wins over its album's; the placeholder without a cover; Now Playing and the mini player show an own cover.
-- Through the service: an own cover replaces the stream's picture in the session, and the stream's picture is kept
-  without one.
+- Through the service: an own cover replaces the picture in the session; a library song shows the embedded picture as
+  the loader reads it and never the stream's, and a file opened from another app keeps the stream's (M3).
 
 ### 13.8 Covers for controllers (part B)
 
@@ -1301,9 +1303,9 @@ once a second.
   for controllers that cannot load URIs.
 - The session's URI also names the picture it shows: its version ends with the CRC-32 of that picture in base 36
   (`.../s/1234/k3x90000` without a picture, `.../s/1234/k3x900001a2b3c` with one). Media3's bitmap cache matches the
-  URI before the picture, so under one URI the picture loaded first (before the stream's arrived, or before an own
+  URI before the picture, so under one URI the picture loaded first (before the loader's arrived, or before a decided
   cover replaced it) would stay. Any version names the song alike (§13.8.4).
-- Where the metadata has the URI and no picture (the stream's picture not read yet, or a song without one), Media3
+- Where the metadata has the URI and no picture (the loader's picture not there yet, or a song without one), Media3
   loads the URI itself for the notification and the platform session, inside PiPlayer, through the provider. The
   notification may then show a cover it showed nothing for before. For a song without any cover that load fails,
   quickly once memory knows (§13.8.4), and Media3 logs it.
@@ -1338,7 +1340,7 @@ mode is refused; a cover without a picture fails to open; browse results of a Me
 carry cover URIs and no artwork data or bitmaps, and so do search results; after an own cover changes, the tree gives
 a new URI that serves the new picture, and the playing song's URI changes through the service; the playing song's
 session metadata carries its URI next to its picture (an added entry its song's, an opened file none), the URI changes
-with the picture shown, the platform session still gets the stream's cover, its listeners hear a new URI, and the same
+with the picture shown, the platform session gets the song's cover from the loader, its listeners hear a new URI, and the same
 again is no news; the provider is the only exported component besides the activity, the service and Media3's; a
 reader that never reads, one that reads a page now and then, and one that has gone do not keep the writer, and one that
 takes nothing does not hold up a second reader on the same thread; a caller over its share of open covers is refused

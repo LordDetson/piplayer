@@ -228,13 +228,23 @@ is heard as a click. The becoming-noisy broadcast is protected, so emulator test
 
 - The session's player shows the queue item's metadata and nothing of what the extractor finds in the stream, so that
   fields PiPlayer leaves empty show nothing, not raw tags (TI §7.1). It stays a `ForwardingPlayer` that filters both the
-  value it gives and what its listeners hear, because the session keeps what it hears. The stream's cover stays: the
-  embedded picture is the third source of library.md §13.1 anyway. Since M2a step 13 an own cover replaces it, and the
-  system thumbnail stands in for a file the tag pass found without a picture (library.md §13.6). The playing library
-  song also carries the content URI of its cover for controllers in other apps (library.md §13.8.6).
-- While the tag pass lands its batches (library.md §5), the playing item and the next one come up to date in place, each
-  when its values differ, with the same URI: playback does not prepare again. The next item after a transition catches up
-  at that transition. The other items of a queue wait, because each change costs every controller a new timeline.
+  value it gives and what its listeners hear, because the session keeps what it hears. A library song shows the picture
+  of the cover the resolver chose (library.md §13.1, §13.6): its own or its album's cover, its decided cover, the
+  embedded picture, the system thumbnail or the lazy Cover Art Archive cover, and none without one. The picture the
+  extractor reads from the stream is never shown for it (M3 step 21; until then it stood in while no own cover replaced
+  it). A file opened from another app keeps the stream's picture (§5.2). The playing library song also carries the
+  content URI of its cover for controllers in other apps (library.md §13.8.6).
+- Queue items come up to date in place, each only when what it shows differs from the library's values: title, artist,
+  album, duration, and no cover of its own (a queue item never carries one, library.md §13.8.6). They keep their URI, so
+  playback does not prepare again. The values are read again from the library for the items compared, not taken from a
+  list a screen keeps, which a decision does not change. Each change costs every controller a new timeline, so only
+  these items are compared:
+  - while the tag pass lands its batches (library.md §5), the playing item and the next one;
+  - at each transition, the new playing item and the new next one, so that the items the other rules leave catch up as
+    they come;
+  - after Apply, Undo or any other change of decided values (TI §7.1), the playing item and, in play order after it,
+    at most 20 queued items of the files the change touched; the next item of another track stays as it is, also for
+    gapless playback. When the touched files are not known, the playing and the next item.
 
 ### 2.5 Checks
 
@@ -1359,8 +1369,8 @@ through the media library service: a tree of nodes, each a folder or a song.
   generated library whole took about 145 ms of a cold bucket's 230 ms, building them 37 ms and weighing them 29 ms; the
   outline takes about 115 ms.
 - The tree keeps the outlines and bucket layouts of its last four lists while the library's revision, the hidden files,
-  the collation and the tag pass (each of its batches) stay, and the albums, artists and folders once for each revision,
-  hidden files, collation and order. The results of the last search are kept the same way. The tap on a song reads its
+  the collation, the tag pass (each of its batches) and the decided values (each mirror run that changed them, TI §7.1)
+  stay, and the albums, artists and folders once for each revision, hidden files, collation, decided values and order. The results of the last search are kept the same way. The tap on a song reads its
   list for the queue as the app's tap does (§2.3). The genres are kept like the artists, and a genre's outline like an
   artist's. Playlists, smart lists and the Playlists node are read anew for every browse, play and add, as the app reads
   them (library.md §16.4, §17.3): edits, plays and favorites change them without changing the library's revision, so
