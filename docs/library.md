@@ -1104,7 +1104,9 @@ Covers for controllers outside PiPlayer (part B, §13.8): a content provider tha
   (twelve song rows of one album and its album tile, the details' header and their probe, Now Playing and the session).
   Each load decodes the shared answer for its own step. A load that is cancelled (its row scrolls away) leaves the
   request to the others; the request is cancelled only when no load waits for it any more. A load that starts after the
-  shared request has ended finds the picture in the disk cache, or the failure entry of a missing one.
+  shared request has ended finds the picture in the disk cache, or the failure entry of a missing one; so that one
+  coming in before the loads that waited have written the disk cache sends nothing either, the images of the latest
+  requests are kept in memory as they came, at most 4 MB, the least recently used going first.
 - A Cover Art Archive load holds none of the four places of the loader: the local steps of a cover run in a place, and
   the Cover Art Archive step runs after the place is given back, so the covers of other rows load from the device while
   it waits for its turn at the limiter. A row that scrolls away cancels it like any load: a wait at the limiter ends
