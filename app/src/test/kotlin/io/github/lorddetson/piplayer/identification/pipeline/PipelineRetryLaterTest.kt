@@ -221,7 +221,9 @@ class PipelineRetryLaterTest {
         assertThat(acoustIdRequests()).isEqualTo(4)
         assertThat(result.fingerprintStage()).isInstanceOf(StageResult.Failed::class.java)
         assertThat(store.jobs[KEY]).isEqualTo(due)
-        assertThat(result.retryAt).isEqualTo(java.time.Instant.ofEpochMilli(due.nextAttemptAt!!))
+        // The retry was due and the next Identify asks again: no time to wait for is reported.
+        assertThat(result.retryLater).isFalse()
+        assertThat(result.retryAt).isNull()
     }
 
     @Test
@@ -235,6 +237,10 @@ class PipelineRetryLaterTest {
 
         assertThat(result.fingerprintStage()).isEqualTo(StageResult.Skipped(SkipReason.STOPPED_EARLY))
         assertThat(store.jobs[KEY]).isEqualTo(job)
+        // A confirmed match does not report a retry it never waited for.
+        assertThat((result.outcome as IdentificationOutcome.Found).band).isEqualTo(Band.HIGH)
+        assertThat(result.retryLater).isFalse()
+        assertThat(result.retryAt).isNull()
     }
 
     @Test
@@ -248,6 +254,81 @@ class PipelineRetryLaterTest {
 
         assertThat(acoustIdRequests()).isEqualTo(1)
         assertThat(result.fingerprintStage()).isEqualTo(StageResult.Ran(1))
+        // Results remove the job that is still in the table, although it could not be read.
+        assertThat(store.jobs).isEmpty()
+    }
+
+    @Test
+    fun `an empty result after a job that cannot be read leaves a final job final`() = runTest {
+        val pipeline = pipeline()
+        val final = LookupJobEntity(KEY, null, "lookup", "final", 2, null, "acoustid_empty")
+        store.jobs[KEY] = final
+        store.readFailure = IllegalStateException("database closed")
+        nothingFound()
+
+        val result = pipeline.identify()
+
+        assertThat(acoustIdRequests()).isEqualTo(1)
+        assertThat(result.fingerprintStage()).isEqualTo(StageResult.Ran(0))
+        assertThat(store.jobs[KEY]).isEqualTo(final)
+        assertThat(result.retryAt).isNull()
+    }
+
+    @Test
+    fun `a text candidate after a job that cannot be read leaves a final job final`() = runTest {
+        val pipeline = pipeline()
+        val final = LookupJobEntity(KEY, null, "lookup", "final", 2, null, "acoustid_empty")
+        store.jobs[KEY] = final
+        store.readFailure = IllegalStateException("database closed")
+        acoustIdAnswers(FakeAcoustId.EMPTY)
+
+        val result = pipeline.identify()
+
+        assertThat((result.outcome as IdentificationOutcome.Found).band).isEqualTo(Band.MEDIUM)
+        assertThat(store.jobs[KEY]).isEqualTo(final)
+    }
+
+    @Test
+    fun `a retry time exactly an hour ahead waits`() = runTest {
+        val pipeline = pipeline()
+        val job = waiting(clock.after(1.hours))
+        store.jobs[KEY] = job
+        nothingFound()
+
+        val result = pipeline.identify()
+
+        assertThat(acoustIdRequests()).isZero()
+        assertThat(result.fingerprintStage()).isEqualTo(StageResult.Skipped(SkipReason.RETRY_PENDING))
+        assertThat(result.retryAt).isEqualTo(clock.after(1.hours))
+        assertThat(store.jobs[KEY]).isEqualTo(job)
+    }
+
+    @Test
+    fun `a retry time more than an hour ahead, stored while the clock ran ahead, counts as due`() = runTest {
+        val pipeline = pipeline()
+        nothingFound()
+        pipeline.identify()
+        // The clock was a day ahead at the first run and has been corrected since.
+        clock.advance((-24).hours)
+
+        val result = pipeline.identify()
+
+        assertThat(acoustIdRequests()).isEqualTo(2)
+        assertThat(result.fingerprintStage()).isEqualTo(StageResult.Ran(0))
+        assertThat(store.jobs[KEY]!!.status).isEqualTo("final")
+        assertThat(result.retryAt).isNull()
+    }
+
+    @Test
+    fun `a retry time a millisecond more than an hour ahead counts as due`() = runTest {
+        val pipeline = pipeline()
+        store.jobs[KEY] = waiting(clock.after(1.hours).plusMillis(1))
+        nothingFound()
+
+        val result = pipeline.identify()
+
+        assertThat(acoustIdRequests()).isEqualTo(1)
+        assertThat(result.fingerprintStage()).isEqualTo(StageResult.Ran(0))
     }
 
     private companion object {
