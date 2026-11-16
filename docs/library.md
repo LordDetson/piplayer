@@ -1191,7 +1191,7 @@ Instrumented tests (on GitHub Actions, API 30 and 36):
 - Through the service: an own cover replaces the picture in the session; a library song shows the embedded picture as
   the loader reads it and never the stream's, and a file opened from another app keeps the stream's (M3).
 - Through the activity and the service: a library song whose file carries an embedded picture shows it in the mini
-  player and on Now Playing, and a file opened from another app shows the stream's picture there (M3 step 21c).
+  player and on Now Playing, and a file opened from another app shows the stream's picture there (M3).
 
 ### 13.8 Covers for controllers (part B)
 

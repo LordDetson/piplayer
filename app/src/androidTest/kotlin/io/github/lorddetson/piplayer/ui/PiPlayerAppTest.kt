@@ -103,30 +103,39 @@ class PiPlayerAppTest {
     private val libraryFile = object : ExternalResource() {
         override fun before() {
             deleteLeftovers()
-            val store = insert(NAME, TestFiles.assets.open(COVER_FIXTURE).use { it.readBytes() })
-            index.volume().rows = listOf(
-                row(store, "Bravo", path = FOLDER, name = NAME, artist = "Artist 2", album = "Album 2", durationMs = 2_000),
-            )
-            val id = runBlocking {
-                Library.sync(context).sync()
-                Library.sync(context).awaitIdle()
-                Library.database(context).library().files().single { it.mediaStoreId == store }.id
+            try {
+                val store = insert(NAME, TestFiles.assets.open(COVER_FIXTURE).use { it.readBytes() })
+                // The index row names the file as the media index holds it.
+                val (path, name) = placeOf(checkNotNull(inserted))
+                index.volume().rows = listOf(
+                    row(store, "Bravo", path = path, name = name, artist = "Artist 2", album = "Album 2", durationMs = 2_000),
+                )
+                val id = runBlocking {
+                    Library.sync(context).sync()
+                    Library.sync(context).awaitIdle()
+                    Library.database(context).library().files().single { it.mediaStoreId == store }.id
+                }
+                // As on a device, the tag pass finds the picture, so the cover order takes it at its embedded step.
+                eventually("the tag pass has found Bravo's picture", 30.seconds) {
+                    runBlocking { Covers.facts(context).file(id)?.embedded == true }
+                }
+                bravo = checkNotNull(SongList.songsById(context, listOf(id))[id]) { "No song $id" }
+            } catch (e: Throwable) {
+                // A rule whose start fails is not finished.
+                after()
+                throw e
             }
-            // As on a device, the tag pass finds the picture, so the cover order takes it at its embedded step.
-            eventually("the tag pass has found Bravo's picture", 30.seconds) {
-                runBlocking { Covers.facts(context).file(id)?.embedded == true }
-            }
-            bravo = checkNotNull(SongList.songsById(context, listOf(id))[id]) { "No song $id" }
         }
 
         override fun after() {
             inserted?.let { uri -> runCatching { context.contentResolver.delete(uri, null, null) } }
+            inserted = null
         }
     }
 
     private val songs = SongSourceRule {
         listOf(
-            // An ID the test's library does not hold, so that no file of the library stands behind Alpha.
+            // An ID the test's library does not hold, so that Bravo's file does not stand behind Alpha too.
             SongSourceRule.song(1, "Alpha", PlaybackTesting.LONG_FIXTURE).copy(id = ALPHA_ID),
             bravo,
         )
@@ -254,7 +263,10 @@ class PiPlayerAppTest {
         assertThat(play.bottom.value).isLessThanOrEqualTo((window.bottom - navigationBar + 0.5.dp).value)
     }
 
-    /** The color at the middle of the one picture [matcher] finds; null without exactly one, or while it goes away. */
+    /**
+     * The color at the middle of the one picture [matcher] finds; null without exactly one, or while it goes away or has
+     * no size yet.
+     */
     private fun centerColor(matcher: SemanticsMatcher): Int? = try {
         val nodes = compose.onAllNodes(matcher, useUnmergedTree = true)
         if (nodes.fetchSemanticsNodes().size != 1) {
@@ -265,6 +277,8 @@ class PiPlayerAppTest {
     } catch (_: AssertionError) {
         null
     } catch (_: IllegalStateException) {
+        null
+    } catch (_: IllegalArgumentException) {
         null
     }
 
@@ -307,10 +321,11 @@ class PiPlayerAppTest {
 
         assertThat(result.resultCode).isEqualTo(SessionResult.RESULT_SUCCESS)
         controller.waitUntil("the opened file is the current item") { currentMediaItem?.mediaId == file }
-        assertThat(QueueIds.fileId(file)).describedAs("no file of the library").isNull()
         awaitFrontCover("the mini player", cover and inMiniPlayer)
         openNowPlaying()
         awaitFrontCover("Now Playing", cover and inNowPlaying)
+        // The screens take it from the session's metadata: no cover loader knows an opened file (docs/playback.md §5.2).
+        assertThat(onMain { controller.mediaMetadata.artworkData }).describedAs("the stream's picture in the session").isNotNull()
     }
 
     @Test
@@ -380,6 +395,12 @@ class PiPlayerAppTest {
         resolver.update(uri, ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }, null, null)
         return ContentUris.parseId(uri)
     }
+
+    /** The relative path and display name the media index gives the file [uri]. */
+    private fun placeOf(uri: Uri): Pair<String, String> =
+        context.contentResolver.query(uri, arrayOf(MediaStore.MediaColumns.RELATIVE_PATH, MediaStore.MediaColumns.DISPLAY_NAME), null, null, null)
+            ?.use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) to cursor.getString(1) else null }
+            ?: error("No row for $uri in the media index")
 
     /** Files of an earlier run that died before its clean-up; the app may delete its own files. */
     private fun deleteLeftovers() {
