@@ -47,11 +47,15 @@ data class Identity(
 }
 
 /**
- * The library's file of an Apply target that no identity holds yet (TI §10.2 "An identity at Apply"), with the content
- * key stage 0 computed; null when the file is gone.
+ * A library file at Apply (TI §10.2 "An identity at Apply"): [file] with the content key stage 0 computed, and [heldKey],
+ * the key the library still stores for it when no other file holds that key. An identity that holds [heldKey] is the
+ * file's own, whose audio changed in place since the attach pass last ran.
  */
+data class ApplyFile(val file: KeyedFile, val heldKey: String? = null)
+
+/** The library's file of an Apply target that no identity holds yet, with stage 0's key; null when the file is gone. */
 fun interface ApplyFiles {
-    suspend fun file(fileId: Long, contentKey: String): KeyedFile?
+    suspend fun file(fileId: Long, contentKey: String): ApplyFile?
 
     companion object {
         /** No library: a library target without an identity gets none. */

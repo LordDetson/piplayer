@@ -244,9 +244,7 @@ interface DecidedMirrorDao {
             "t.release_mbid AS tagRelease FROM audio_file f " +
             "LEFT JOIN decided_mirror m ON m.file_id = f.id AND m.field = 'release_mbid' " +
             "LEFT JOIN track t ON t.file_id = f.id AND t.start_ms = 0 AND f.tag_pass_at IS NOT NULL " +
-            "WHERE f.volume_name = :volume AND f.relative_path >= :from AND f.relative_path < :until " +
-            "AND instr(substr(f.relative_path, length(:from) + 1), '/') = length(f.relative_path) - length(:from) " +
-            "AND (m.file_id IS NOT NULL OR t.release_mbid IS NOT NULL)",
+            "WHERE $FOLDER_AND_ONE_BELOW AND (m.file_id IS NOT NULL OR t.release_mbid IS NOT NULL)",
     )
     suspend fun folderReleases(volume: String, from: String, until: String): List<FolderReleaseRow>
 
@@ -271,6 +269,14 @@ interface DecidedMirrorDao {
         val STAMP_QUERIES = listOf(STAMPS_WITH_KEYS, UNKEYED_STAMPS)
     }
 }
+
+/**
+ * The files `f` of `:volume` in the folder `:from` or one folder below it, `:until` ending the range of the folder's paths
+ * (`:from` and [FolderKey.AFTER_PATHS]): a range of the index on volume and path, and the folders further below dropped
+ * on the path alone, before anything is joined. SQLite numbers the parameters 1, 2 and 3 in this order.
+ */
+internal const val FOLDER_AND_ONE_BELOW = "f.volume_name = :volume AND f.relative_path >= :from AND f.relative_path < :until " +
+    "AND instr(substr(f.relative_path, length(:from) + 1), '/') = length(f.relative_path) - length(:from)"
 
 /** A file's release MBIDs for the folder hint of the release ranking (TI §4.2 key 1). */
 data class FolderReleaseRow(

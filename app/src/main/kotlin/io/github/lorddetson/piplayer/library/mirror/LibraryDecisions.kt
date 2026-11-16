@@ -34,7 +34,7 @@ class LibraryDecisions(
         // Only for a target without an identity, and before the user database's transaction: the library's lock and the
         // user database's are never held at once. An identity made meanwhile is used all the same.
         val target = request.target
-        val file = if (target is IdentificationTarget.LibraryFile && !decisions.hasIdentity(target)) {
+        val file = if (target is IdentificationTarget.LibraryFile && target.startMs == 0L && !decisions.hasIdentity(target)) {
             files.file(target.fileId, target.contentKey)
         } else {
             null

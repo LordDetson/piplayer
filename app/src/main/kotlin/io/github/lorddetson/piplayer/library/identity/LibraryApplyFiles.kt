@@ -16,10 +16,17 @@ class LibraryApplyFiles(
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) : ApplyFiles {
 
-    override suspend fun file(fileId: Long, contentKey: String): KeyedFile? = withContext(ioDispatcher) {
+    override suspend fun file(fileId: Long, contentKey: String): ApplyFile? = withContext(ioDispatcher) {
         // The block runs under the library's lock, which is held by its thread: the read blocks that thread.
-        val row = library.use { database -> runBlocking { database.library().applyFile(fileId) } } ?: return@withContext null
-        KeyedFile(
+        val (row, shared) = library.use { database ->
+            runBlocking {
+                val row = database.library().applyFile(fileId) ?: return@runBlocking null
+                // Whether another file holds the key the library still stores for this one.
+                val shared = row.contentKey.isEmpty() || database.library().foundFilesWithKey(row.contentKey).any { it.fileId != fileId }
+                row to shared
+            }
+        } ?: return@withContext null
+        val file = KeyedFile(
             fileId = row.fileId,
             contentKey = contentKey,
             place = Place(row.volume, row.relativePath, row.displayName),
@@ -30,5 +37,6 @@ class LibraryApplyFiles(
             format = row.format,
             tagsRead = false,
         )
+        ApplyFile(file, heldKey = row.contentKey.takeIf { !shared && it != contentKey })
     }
 }

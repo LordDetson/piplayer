@@ -2,6 +2,7 @@ package io.github.lorddetson.piplayer.library.sync
 
 import androidx.room3.PooledConnection
 import androidx.sqlite.SQLiteStatement
+import io.github.lorddetson.piplayer.library.db.FOLDER_AND_ONE_BELOW
 import io.github.lorddetson.piplayer.library.db.FolderKey
 import io.github.lorddetson.piplayer.library.values.AlbumGroupFacts
 import io.github.lorddetson.piplayer.library.values.AlbumKey
@@ -14,69 +15,112 @@ import kotlinx.serialization.json.buildJsonArray
 /**
  * Settles the album groups of a write of display rows (docs/library.md §6.2): the files whose album keys come from their
  * own values and are equal form a group, and they take the key of a release MBID only when every one of them ends up
- * with it. The display writer calls it in the transaction of every write, after the rows are written with the keys of
- * the files' own values.
+ * with it. The display writer asks for [before] ahead of a write and calls [settleAlbumGroups] after it, in the write's
+ * transaction, once the rows hold the keys of the files' own values.
  */
 internal object AlbumGroupKeys {
+
+    /** What a write has to settle, known before its rows are replaced. */
+    sealed interface Before {
+        /** The write holds every file: its own values settle every group. */
+        data object EveryFile : Before
+
+        /** No file of the library has a decided release MBID: every key is a file's own, as the rows are written. */
+        data object NoRelease : Before
+
+        /** The keys the rows of the written files held, for the groups that a file leaves. */
+        class Keys(val keys: Map<Long, String>) : Before
+    }
 
     /** A file of a group that the write did not touch: its own album key, its release and the key its row holds. */
     private class Stored(val fileId: Long, val ownKey: String?, val release: String?, val storedKey: String?)
 
+    /** What a write of [fileIds] has to settle; read before the write replaces their rows. */
+    suspend fun PooledConnection.before(fileIds: List<Long>): Before {
+        // Counting the files is only worth it for a write that may hold all of them.
+        if (fileIds.size >= EVERY_FILE_FROM && fileIds.size >= count(FILE_COUNT)) return Before.EveryFile
+        if (count(DECIDED_RELEASES) == 0L) return Before.NoRelease
+        return usePrepared(KEYS_OF) { statement ->
+            statement.bindText(1, buildJsonArray { fileIds.forEach { add(it) } }.toString())
+            Before.Keys(buildMap { while (statement.step()) if (!statement.isNull(1)) put(statement.getLong(0), statement.getText(1)) })
+        }
+    }
+
     /**
-     * Gives each file of the groups of [fileIds] (written with [values], in the same order) the key its group holds. A
-     * write of every file settles every group from [values] alone. A smaller one, while some file of the library has a
-     * decided release MBID, reads the other files of its groups: for a key of an album and folder, the files whose rows
-     * hold it, or when none does (the group holds a release's key, or the write holds all of it) the files that may have
-     * taken a release's key, which all have a decided release; for a key of a tag release MBID, the files whose tags
-     * carry it.
+     * Gives each file of the groups of [fileIds] (written with [values], in the same order) the key its group holds, and
+     * so too the files of the groups they left. A write of every file settles every group from [values] alone. A
+     * smaller one reads the other files of each group: for a key of an album and folder, the files whose rows hold it
+     * as their own, or when none does (the group holds a release's key, or the write holds all of it) the files of its
+     * album folder and the folders one below it, or past [FOLDERS_ONE_BY_ONE] such groups the files with a decided
+     * release, since only they can hold a release's key that is not their own; for a key of a tag release MBID, the
+     * files whose tags carry it.
      */
-    suspend fun PooledConnection.settleAlbumGroups(fileIds: List<Long>, values: List<DisplayValues>) {
+    suspend fun PooledConnection.settleAlbumGroups(fileIds: List<Long>, values: List<DisplayValues>, before: Before) {
+        if (before == Before.NoRelease) return
         val groups = HashMap<String, MutableList<Pair<Long, AlbumGroupFacts>>>()
         for (i in fileIds.indices) {
             val facts = values[i].albumGroup ?: continue
             val key = values[i].albumKey ?: continue
             groups.getOrPut(key) { ArrayList() } += fileIds[i] to facts
         }
-        if (groups.isEmpty()) return
-        val updates = LinkedHashMap<Long, String>()
-        if (fileIds.size >= count(FILE_COUNT)) {
-            // Every file is here: no other file can belong to a group, and only a decided release can move one.
+        val updates = HashMap<Long, String>()
+        if (before == Before.EveryFile) {
+            // No other file can belong to a group, and only a decided release can move one.
             for ((key, members) in groups) {
                 if (members.none { it.second.decidedRelease }) continue
                 val target = AlbumKey.ofGroup(key, members.map { it.second.release })
                 if (target != key) members.forEach { (fileId, _) -> updates[fileId] = target }
             }
         } else {
-            // Without a decided release anywhere every key is a file's own, as the rows were written.
-            if (count(DECIDED_RELEASES) == 0L) return
-            val written = fileIds.toHashSet()
-            val (released, own) = groups.keys.partition { it.startsWith(AlbumKey.RELEASE_PREFIX) }
-            // A statement for all groups at once, so that a whole run of the decision mirror reads no folder by folder.
-            val holding = select(HOLDING, own).filter { it.fileId !in written && it.ownKey == it.storedKey }.groupBy { it.ownKey }
-            val tagged = select(TAGGED, released).filter { it.fileId !in written }.groupBy { it.ownKey }
-            val unheld = own.filter { it !in holding }
-            val elsewhere = when {
-                unheld.isEmpty() -> emptyMap()
-                // A few groups read their album folders; more read the files with a decided release, once.
-                unheld.size <= FOLDERS_ONE_BY_ONE -> unheld.associateWith { key -> inFolder(groups.getValue(key).first().second) }
-                else -> select(DECIDED, null).groupBy { it.ownKey }
-            }
-            for ((key, members) in groups) {
-                val others = when {
-                    key.startsWith(AlbumKey.RELEASE_PREFIX) -> tagged[key]
-                    else -> holding[key] ?: elsewhere[key]
-                }.orEmpty().filter { it.fileId !in written && it.ownKey == key }
-                val target = AlbumKey.ofGroup(key, members.map { it.second.release } + others.map { it.release })
-                if (target != key) members.forEach { (fileId, _) -> updates[fileId] = target }
-                for (other in others) if (other.storedKey != target) updates[other.fileId] = target
-            }
+            settleWithStored(fileIds, values, groups, (before as Before.Keys).keys, updates)
         }
-        for ((fileId, key) in updates) {
+        // One statement per key.
+        for ((key, files) in updates.entries.groupBy({ it.value }, { it.key })) {
             usePrepared(SET_KEY) { statement ->
                 statement.bindText(1, key)
-                statement.bindLong(2, fileId)
+                statement.bindText(2, buildJsonArray { files.forEach { add(it) } }.toString())
                 statement.step()
             }
+        }
+    }
+
+    private suspend fun PooledConnection.settleWithStored(
+        fileIds: List<Long>,
+        values: List<DisplayValues>,
+        groups: Map<String, List<Pair<Long, AlbumGroupFacts>>>,
+        keysBefore: Map<Long, String>,
+        updates: MutableMap<Long, String>,
+    ) {
+        val written = fileIds.toHashSet()
+        // The groups the written files left: a key a row held that is no longer the file's.
+        val left = HashMap<String, Long>()
+        for (i in fileIds.indices) {
+            val old = keysBefore[fileIds[i]] ?: continue
+            if (old != values[i].albumKey && old !in groups) left.putIfAbsent(old, fileIds[i])
+        }
+        if (groups.isEmpty() && left.isEmpty()) return
+        val keys = groups.keys + left.keys
+        val (released, own) = keys.partition { it.startsWith(AlbumKey.RELEASE_PREFIX) }
+        // A statement for all groups at once, so that a whole run of the decision mirror reads no folder by folder.
+        val holding = select(HOLDING, own).filter { it.fileId !in written && it.ownKey == it.storedKey }.groupBy { it.ownKey }
+        val tagged = select(TAGGED, released).filter { it.fileId !in written }.groupBy { it.ownKey }
+        // A group left behind is found by the files that hold its key; with none, nothing of it is left to move back.
+        val unheld = own.filter { it !in holding && it in groups }
+        val elsewhere = when {
+            unheld.isEmpty() -> emptyMap()
+            unheld.size <= FOLDERS_ONE_BY_ONE -> unheld.associateWith { key -> inFolder(groups.getValue(key).first().second) }
+            else -> select(DECIDED, null).groupBy { it.ownKey }
+        }
+        for (key in keys) {
+            val members = groups[key].orEmpty()
+            val others = when {
+                key.startsWith(AlbumKey.RELEASE_PREFIX) -> tagged[key]
+                else -> holding[key] ?: elsewhere[key]
+            }.orEmpty().filter { it.fileId !in written && it.ownKey == key }
+            if (members.isEmpty() && others.isEmpty()) continue
+            val target = AlbumKey.ofGroup(key, members.map { it.second.release } + others.map { it.release })
+            if (target != key) members.forEach { (fileId, _) -> updates[fileId] = target }
+            for (other in others) if (other.storedKey != target) updates[other.fileId] = target
         }
     }
 
@@ -127,6 +171,9 @@ internal object AlbumGroupKeys {
 
     private fun SQLiteStatement.text(i: Int): String? = if (isNull(i)) null else getText(i)
 
+    /** A write of fewer files than this does not count the library's: it settles as a write of some of them. */
+    private const val EVERY_FILE_FROM = 500
+
     /** Up to this many groups whose rows hold none of their keys read their album folders one by one. */
     private const val FOLDERS_ONE_BY_ONE = 16
 
@@ -136,7 +183,9 @@ internal object AlbumGroupKeys {
     private const val DECIDED_RELEASES =
         "SELECT EXISTS(SELECT 1 FROM decided_mirror WHERE field = 'release_mbid' AND value IS NOT NULL)"
 
-    private const val SET_KEY = "UPDATE track_display SET album_key = ? WHERE file_id = ?"
+    private const val KEYS_OF = "SELECT file_id, album_key FROM track_display WHERE file_id IN (SELECT value FROM json_each(?))"
+
+    private const val SET_KEY = "UPDATE track_display SET album_key = ? WHERE file_id IN (SELECT value FROM json_each(?))"
 
     // What a file's own album key and its release are made of, as the display writer resolves them (MergedValues).
     private const val COLUMNS = "SELECT f.id, f.volume_name, f.relative_path, t.file_id IS NOT NULL, t.album, t.album_artist, " +
@@ -162,8 +211,6 @@ internal object AlbumGroupKeys {
     private const val DECIDED = COLUMNS + "decided_mirror m JOIN audio_file f ON f.id = m.file_id " + READ_TRACK +
         "LEFT JOIN media_index_entry e ON e.file_id = f.id " + DISPLAY + "WHERE m.field = 'release_mbid' AND m.value IS NOT NULL"
 
-    /** The files of a folder and of the folders one below it, filtered on the path before anything is joined. */
-    private const val IN_FOLDER = COLUMNS + "audio_file f " + READ_TRACK + JOINS + DISPLAY +
-        "WHERE f.volume_name = ?1 AND f.relative_path >= ?2 AND f.relative_path < ?3 " +
-        "AND instr(substr(f.relative_path, length(?2) + 1), '/') = length(f.relative_path) - length(?2)"
+    /** The files of a folder and of the folders one below it. */
+    private const val IN_FOLDER = COLUMNS + "audio_file f " + READ_TRACK + JOINS + DISPLAY + "WHERE " + FOLDER_AND_ONE_BELOW
 }

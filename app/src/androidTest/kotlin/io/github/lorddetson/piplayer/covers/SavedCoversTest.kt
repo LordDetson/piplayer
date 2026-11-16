@@ -3,7 +3,10 @@ package io.github.lorddetson.piplayer.covers
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.github.lorddetson.piplayer.TestFiles
 import io.github.lorddetson.piplayer.library.identity.Hex
+import io.github.lorddetson.piplayer.library.values.DecidedField
+import io.github.lorddetson.piplayer.userdata.ReleaseChoiceEntity
 import io.github.lorddetson.piplayer.userdata.SavedCoverEntity
+import io.github.lorddetson.piplayer.userdata.TrackMetadataEntity
 import io.github.lorddetson.piplayer.userdata.UserDatabase
 import java.io.File
 import java.security.MessageDigest
@@ -93,11 +96,18 @@ class SavedCoversTest {
         assertThat(dir.listFiles().orEmpty()).isEmpty()
     }
 
+    /** A release choice of an identification that refers to the saved cover [id]. */
+    private suspend fun referByAChoice(id: Long) = user.decisions().addReleaseChoice(
+        ReleaseChoiceEntity(releaseMbid = Hex.mbidBytes(release)!!, releaseGroupMbid = null, values = byteArrayOf(), savedCoverId = id, fetchedAt = 1),
+    )
+
     @Test
     fun aFileNoRowNamesIsDeletedWhenTheCoversAreFirstUsedAndARowWithoutItsFileGivesNone() = runBlocking<Unit> {
         val earlier = SavedCovers(user, dir)
         val kept = checkNotNull(earlier.save(jpeg(10, 10), release, SavedCovers.Source.RELEASE))
         val lost = checkNotNull(earlier.save(jpeg(20, 20), release, SavedCovers.Source.RELEASE))
+        referByAChoice(kept)
+        referByAChoice(lost)
         val lostFile = checkNotNull(earlier.file(lost))
         // A process that died between a file and its row, and a temporary file, left behind; a restore lost a file.
         File(dir, "${"0".repeat(64)}.jpg").writeBytes(jpeg(30, 30))
@@ -113,5 +123,27 @@ class SavedCoversTest {
         assertThat(covers.file(lost)).isNull()
         assertThat(user.decisions().savedCover(lost)).isNotNull()
         assertThat(covers.file(12_345)).isNull()
+    }
+
+    @Test
+    fun aRowNoDecisionRefersToGoesWithItsFileWhenTheCoversAreFirstUsed() = runBlocking<Unit> {
+        val earlier = SavedCovers(user, dir)
+        val byChoice = checkNotNull(earlier.save(jpeg(10, 10), release, SavedCovers.Source.RELEASE))
+        val byEdit = checkNotNull(earlier.save(jpeg(20, 20), release, SavedCovers.Source.RELEASE_INDEX))
+        // Saved for an Apply that never committed.
+        val orphan = checkNotNull(earlier.save(jpeg(30, 30), release, SavedCovers.Source.RELEASE))
+        val orphanFile = checkNotNull(earlier.file(orphan))
+        referByAChoice(byChoice)
+        // An edit's cover row holds the saved cover's ID in decimal digits, also when the edit is undone.
+        user.decisions().addMetadata(listOf(TrackMetadataEntity(decisionId = 77, field = DecidedField.COVER.code, value = "$byEdit".toByteArray())))
+
+        val covers = SavedCovers(user, dir)
+        covers.load()
+
+        assertThat(user.decisions().savedCover(orphan)).isNull()
+        assertThat(orphanFile).doesNotExist()
+        assertThat(covers.file(byChoice)).isNotNull()
+        assertThat(covers.file(byEdit)).isNotNull()
+        assertThat(dir.listFiles()!!).hasSize(2)
     }
 }

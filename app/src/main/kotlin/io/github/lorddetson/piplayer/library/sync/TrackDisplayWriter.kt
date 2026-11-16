@@ -190,6 +190,8 @@ class TrackDisplayWriter(private val database: LibraryDatabase) {
             val idChunks = fileIds.chunked(CHUNK_SIZE)
             check(idChunks.size == chunks.size) { "${chunks.size} chunks of values for ${idChunks.size} chunks of files" }
             suspend fun rows(c: Int) = idChunks[c].zip(chunks[c].await())
+            // What the album groups need of the rows before they are replaced (docs/library.md §6.2).
+            val groupsBefore = with(AlbumGroupKeys) { before(fileIds) }
             replaceInChunks("track_display", COLUMNS, idChunks.indices.map { c -> suspend { rows(c) } }) { (id, values) ->
                 display(id, values)
             }
@@ -236,7 +238,7 @@ class TrackDisplayWriter(private val database: LibraryDatabase) {
             }
             // The keys were written as the files' own; a group whose files all end up with one release takes its key, in
             // the same transaction (docs/library.md §6.2).
-            with(AlbumGroupKeys) { settleAlbumGroups(fileIds, idChunks.indices.flatMap { c -> chunks[c].await() }) }
+            with(AlbumGroupKeys) { settleAlbumGroups(fileIds, idChunks.indices.flatMap { c -> chunks[c].await() }, groupsBefore) }
         }
 
         private fun SqlRows.Row.display(id: Long, values: DisplayValues) {

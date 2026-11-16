@@ -7,6 +7,7 @@ import io.github.lorddetson.piplayer.identification.caa.CoverImage
 import io.github.lorddetson.piplayer.identification.caa.ImageFormat
 import io.github.lorddetson.piplayer.identification.caa.ImageHeader
 import io.github.lorddetson.piplayer.library.identity.Hex
+import io.github.lorddetson.piplayer.library.values.DecidedField
 import io.github.lorddetson.piplayer.userdata.SavedCoverEntity
 import io.github.lorddetson.piplayer.userdata.UserDatabase
 import java.io.File
@@ -105,9 +106,14 @@ class SavedCovers(
         return withContext(ioDispatcher) { File(dir, row.path).takeIf { it.isFile } }
     }
 
-    /** Deletes the files no row names, unless that was done in this instance; holds the lock. */
+    /**
+     * Deletes the rows no decision refers to (saved for an Apply that never committed) and then the files no row names,
+     * unless that was done in this instance; holds the lock. A cover saved in this process is never swept: the sweep
+     * comes before the first save.
+     */
     private suspend fun swept() {
         if (loaded) return
+        database.withWriteTransaction { usePrepared(UNREFERENCED) { it.step() } }
         val named = database.useReaderConnection { connection ->
             connection.usePrepared(PATHS) { statement ->
                 buildSet { while (statement.step()) add(statement.getText(0)) }
@@ -147,5 +153,12 @@ class SavedCovers(
 
         private const val SAME_COVER = "SELECT id FROM saved_cover WHERE hash = ? AND release_mbid IS ? ORDER BY id LIMIT 1"
         private const val PATHS = "SELECT path FROM saved_cover"
+
+        // An identification refers to its cover through its release choice, an edit through a cover row of its own, whose
+        // value is the ID in decimal digits (TI §10.2); undone decisions keep theirs.
+        private val UNREFERENCED = "DELETE FROM saved_cover WHERE " +
+            "id NOT IN (SELECT saved_cover_id FROM release_choice WHERE saved_cover_id IS NOT NULL) AND " +
+            "id NOT IN (SELECT CAST(CAST(value AS TEXT) AS INTEGER) FROM track_metadata WHERE field = ${DecidedField.COVER.code} " +
+            "AND value IS NOT NULL)"
     }
 }

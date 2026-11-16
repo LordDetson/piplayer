@@ -152,6 +152,23 @@ class AlbumGroupsTest {
     }
 
     @Test
+    fun theRestOfAGroupTakesTheReleaseWhenItsLastFileWithoutItLeaves() = runBlocking<Unit> {
+        library(listOf(track(1), track(2), track(3)))
+        val own = checkNotNull(albumKeyOf(1))
+        identify(1)
+        identify(2)
+        assertThat(albumKeyOf(1)).isEqualTo(own)
+
+        // File 3's album changes: it leaves the group, whose other files all end up with the release.
+        index.volume().rows = listOf(track(1), track(2), track(3).copy(album = "Another record", generationModified = 30))
+        sync.sync()
+
+        assertThat(albumKeyOf(1)).isEqualTo("mbid:$release")
+        assertThat(albumKeyOf(2)).isEqualTo("mbid:$release")
+        assertThat(albumKeyOf(3)).isNotEqualTo(own).isNotEqualTo("mbid:$release")
+    }
+
+    @Test
     fun aNewFileInTheAlbumsFolderBringsTheGroupsOwnKeyBack() = runBlocking<Unit> {
         library(listOf(track(1), track(2)))
         val own = checkNotNull(albumKeyOf(1))

@@ -182,6 +182,41 @@ class ApplyIdentityTest {
     }
 
     @Test
+    fun applyOnAFileWhoseAudioChangedInPlaceGivesItsKeyToTheIdentityThatStillHoldsTheOldOne() = runBlocking<Unit> {
+        index.volume().rows = listOf(row(1, path = "Music/Record/", name = "01.mp3"))
+        sync.sync()
+        library.library().setContent(fileId(1), key(9), 200_000, DurationSource.HEADER)
+        attacher.attach()
+        val own = checkNotNull(identityWithKey(9)).id
+
+        // A gain tool rewrote the frames: stage 0 reads key 1, while the library and the identity still hold key 9.
+        val applied = checkNotNull(decisions.apply(request(key(1), fileId = fileId(1))))
+
+        assertThat(applied.identityId).isEqualTo(own)
+        val moved = checkNotNull(user.identities().identity(own))
+        assertThat(Hex.text(moved.contentKey)).isEqualTo(key(1))
+        assertThat(moved.missingSince).isNull()
+        assertThat(user.identities().identities()).hasSize(1)
+    }
+
+    @Test
+    fun applyOnAFileWhoseOldKeyAnotherFileHoldsMakesANewIdentity() = runBlocking<Unit> {
+        // Files 1 and 2 are byte-identical copies; file 1 changed in place.
+        index.volume().rows = listOf(row(1, path = "Music/Record/", name = "01.mp3"), row(2, path = "Music/Copy/", name = "01.mp3"))
+        sync.sync()
+        library.library().setContent(fileId(1), key(9), 200_000, DurationSource.HEADER)
+        library.library().setContent(fileId(2), key(9), 200_000, DurationSource.HEADER)
+        attacher.attach()
+        val copies = checkNotNull(identityWithKey(9)).id
+
+        val applied = checkNotNull(decisions.apply(request(key(1), fileId = fileId(1))))
+
+        assertThat(applied.identityId).isNotEqualTo(copies)
+        assertThat(identityWithKey(9)?.id).isEqualTo(copies)
+        assertThat(identityWithKey(1)?.id).isEqualTo(applied.identityId)
+    }
+
+    @Test
     fun anAttachPassPlannedBeforeApplyMadeAnIdentityKeepsItAndWritesTheRestOfItsPlan() = runBlocking<Unit> {
         index.volume().rows = listOf(row(1, path = "Music/Record/", name = "01.mp3"), row(3))
         sync.sync()
@@ -206,7 +241,7 @@ class ApplyIdentityTest {
                         fileId(1), key(1), Place(FakeMediaIndex.PRIMARY, "Music/Record/", "01.mp3"), size = 1, durationMs = 290_000,
                         settled = true, recordingMbid = null, format = null, tagsRead = false,
                     )
-                    applied = repository.apply(request(key(1), fileId = fileId(1)), libraryFile = file)
+                    applied = repository.apply(request(key(1), fileId = fileId(1)), libraryFile = ApplyFile(file))
                 }
                 user.user().identitiesHoldingData().toSet()
             },

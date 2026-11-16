@@ -4,10 +4,10 @@ import androidx.room3.withReadTransaction
 import androidx.room3.withWriteTransaction
 import io.github.lorddetson.piplayer.identification.contract.ApplyRequest
 import io.github.lorddetson.piplayer.identification.contract.IdentificationTarget
+import io.github.lorddetson.piplayer.library.identity.ApplyFile
 import io.github.lorddetson.piplayer.library.identity.Hex
 import io.github.lorddetson.piplayer.library.identity.IdentityAttacher
 import io.github.lorddetson.piplayer.library.identity.IdentityMatcher
-import io.github.lorddetson.piplayer.library.identity.KeyedFile
 import io.github.lorddetson.piplayer.library.values.Decided
 import io.github.lorddetson.piplayer.library.values.DecidedField
 import io.github.lorddetson.piplayer.library.values.DecisionContent
@@ -162,7 +162,7 @@ class Decisions(private val database: UserDatabase, private val clock: () -> Lon
         request: ApplyRequest,
         savedCoverId: Long? = null,
         atDecision: List<LocationValues> = emptyList(),
-        libraryFile: KeyedFile? = null,
+        libraryFile: ApplyFile? = null,
     ): Committed? =
         database.withWriteTransaction {
             val identity = identityAtApply(request.target, libraryFile) ?: return@withWriteTransaction null
@@ -450,7 +450,7 @@ class Decisions(private val database: UserDatabase, private val clock: () -> Lon
      * as hints; a library file, [libraryFile], gets the missing identity hinted at its place
      * ([IdentityMatcher.atApply]) or else a new one with its place. Null when none can be (no file for a library target).
      */
-    private suspend fun identityAtApply(target: IdentificationTarget, libraryFile: KeyedFile?): Long? {
+    private suspend fun identityAtApply(target: IdentificationTarget, libraryFile: ApplyFile?): Long? {
         if (target.startMs != 0L) return null
         val dao = database.identities()
         val key = Hex.bytes(target.contentKey)
@@ -466,9 +466,13 @@ class Decisions(private val database: UserDatabase, private val clock: () -> Lon
                 ),
             )
             is IdentificationTarget.LibraryFile -> {
-                val file = libraryFile?.takeIf { it.fileId == target.fileId }?.copy(contentKey = target.contentKey) ?: return null
-                val missing = dao.missingIdentities()
-                val taker = IdentityMatcher.atApply(file, missing.map(IdentityAttacher::identity))
+                val file = libraryFile?.file?.takeIf { it.fileId == target.fileId }?.copy(contentKey = target.contentKey) ?: return null
+                // The identity of the key the library still stores for this file alone counts as missing: the file's audio
+                // changed in place, and the attach pass has not seen it yet.
+                val held = libraryFile.heldKey?.let { dao.idOfKey(Hex.bytes(it)) }?.let { dao.identity(it) }
+                val missing = dao.missingIdentities() + listOfNotNull(held?.takeIf { it.missingSince == null })
+                val candidates = missing.map { IdentityAttacher.identity(it).let { identity -> identity.copy(missingSince = identity.missingSince ?: now) } }
+                val taker = IdentityMatcher.atApply(file, candidates)
                 if (taker == null) {
                     dao.add(
                         TrackIdentityEntity(

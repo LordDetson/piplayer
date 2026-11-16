@@ -567,9 +567,9 @@ keeps playing meanwhile, and the crash leaves a native crash report of `:tagger`
       group holds a release's key, or the write holds all of it) the files of the album folder and the folders one
       below it (more than 16 such groups read the files with a decided release instead, once, since only they can hold
       a release's key that is not their own); for a key of a release MBID from the tags, the files whose tags carry
-      it. A file without an album of its own belongs to no group. A group that a file leaves (its tags name another
-      album, or the sync deletes it) is settled with the next write of one of its files; until then it keeps the key
-      it had.
+      it. A file without an album of its own belongs to no group. The write reads the keys its rows held before it
+      replaces them, so a group that a written file leaves (its tags now name another album) is settled in the same
+      write. A group that the sync deletes a file of keeps its keys until the next write of one of its files.
     - The index gives the track number with the disc in its thousands (`2005` is disc 2, track 5); the resolver splits it.
       The year is the first four digits of the date, or else of the original date; from the index, its year.
 - `display_artist` lists each artist of a file in order: all the artists of its tags once read, otherwise the displayed
