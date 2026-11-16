@@ -1,6 +1,7 @@
 package io.github.lorddetson.piplayer.userdata
 
 import androidx.room3.testing.MigrationTestHelper
+import androidx.room3.useWriterConnection
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -219,6 +220,12 @@ class UserDatabaseTest {
             assertThat(decisions.releaseChoiceCount()).isZero()
             assertThat(decisions.fileStates(7)).isEmpty()
             assertThat(decisions.savedCover(1)).isNull()
+            // So do the listening outcomes (docs/library.md §15.7).
+            assertThat(opened.listens().events()).isEmpty()
+            assertThat(opened.listens().stats()).isEmpty()
+            assertThat(Listens(opened).record(7, startedAt = 9, listenedMs = 10, durationMs = 1_000, ListenOutcome.EARLY_SKIP)).isEqualTo(7)
+            assertThat(opened.listens().events()).containsExactly(ListenEventEntity(9, 7, 10, 1_000, ListenOutcome.EARLY_SKIP.code))
+            assertThat(opened.user().changeCounter()).isEqualTo(11)
             opened.identities().add(identity(8).copy(contentKey = io.github.lorddetson.piplayer.library.identity.Hex.bytes("%064x".format(8))))
             val applied = checkNotNull(Decisions(opened).apply(DecisionFixtures.request("%064x".format(8))))
             assertThat(applied.counter).isEqualTo(12)
@@ -344,5 +351,88 @@ class UserDatabaseTest {
         val read = favorites.favoriteIdentities((1L..1_200L).toList())
 
         assertThat(read).hasSize(600).allMatch { it % 2 == 1L }
+    }
+
+    @Test
+    fun aListeningOutcomeIsWrittenOnceByItsIdentityAndRaisesNoCounter() = runBlocking<Unit> {
+        val dao = database.user()
+        val listens = Listens(database)
+        database.identities().add(identity(1))
+        database.identities().add(identity(4))
+
+        assertThat(listens.record(1, startedAt = 5, listenedMs = 29_900, durationMs = 180_000, ListenOutcome.EARLY_SKIP)).isEqualTo(1)
+        // A playback keeps its first outcome (docs/playback.md §12.3).
+        assertThat(listens.record(1, startedAt = 5, listenedMs = 180_000, durationMs = 180_000, ListenOutcome.FINISHED)).isEqualTo(1)
+        assertThat(listens.record(1, startedAt = 6, listenedMs = 90_000, durationMs = null, ListenOutcome.LATE_SKIP)).isEqualTo(1)
+        // An identity deleted since the read goes to the identity that holds its key now (§8.1); with none, nothing.
+        assertThat(listens.record(7, startedAt = 8, listenedMs = 200_000, durationMs = 200_000, ListenOutcome.FINISHED, ByteArray(32) { 4 }))
+            .isEqualTo(4)
+        assertThat(listens.record(9, startedAt = 9, listenedMs = 1_000, durationMs = 200_000, ListenOutcome.EARLY_SKIP)).isNull()
+        assertThat(listens.record(9, startedAt = 9, listenedMs = 1_000, durationMs = 200_000, ListenOutcome.EARLY_SKIP, ByteArray(32) { 9 }))
+            .isNull()
+
+        assertThat(database.listens().events()).containsExactly(
+            ListenEventEntity(5, 1, 29_900, 180_000, ListenOutcome.EARLY_SKIP.code),
+            ListenEventEntity(6, 1, 90_000, null, ListenOutcome.LATE_SKIP.code),
+            ListenEventEntity(8, 4, 200_000, 200_000, ListenOutcome.FINISHED.code),
+        )
+        // Nothing of it is mirrored.
+        assertThat(dao.changeCounter()).isZero()
+        assertThat(dao.rulesCounter()).isZero()
+
+        listens.clear()
+        assertThat(database.listens().events()).isEmpty()
+    }
+
+    @Test
+    fun listeningsOlderThanNinetyDaysAreFoldedWithThePlays() = runBlocking<Unit> {
+        val day = 24L * 60 * 60 * 1_000
+        val now = 1_800_000_000_000L
+        val listens = Listens(database)
+        for (id in 1L..3L) database.identities().add(identity(id))
+        // Identity 1 has an earlier fold: its counts add up.
+        database.useWriterConnection { connection ->
+            connection.usePrepared(
+                "INSERT INTO listen_stats (identity_id, early_skips, late_skips, finished, listened_ms, last_started_at) " +
+                    "VALUES (1, 4, 3, 2, 1000, 7)",
+            ) { it.step() }
+        }
+        val old = now - 91 * day
+        listens.record(1, old, 10_000, 180_000, ListenOutcome.EARLY_SKIP)
+        listens.record(1, old + 1, 60_000, 180_000, ListenOutcome.LATE_SKIP)
+        listens.record(1, old + 2, 180_000, 180_000, ListenOutcome.FINISHED)
+        listens.record(2, old + 3, 5_000, null, ListenOutcome.EARLY_SKIP)
+        // Exactly 90 days old stays, as a play does (docs/library.md §15.5).
+        listens.record(2, now - 90 * day, 7_000, 180_000, ListenOutcome.EARLY_SKIP)
+        listens.record(3, now - day, 180_000, 180_000, ListenOutcome.FINISHED)
+        PlayStats(database).record(1, old, 120_000)
+        val counter = database.user().changeCounter()
+
+        PlayStats(database).fold(now)
+
+        assertThat(database.listens().stats()).containsExactly(
+            ListenStatsEntity(1, earlySkips = 5, lateSkips = 4, finished = 3, listenedMs = 1_000 + 250_000, lastStartedAt = old + 2),
+            ListenStatsEntity(2, earlySkips = 1, lateSkips = 0, finished = 0, listenedMs = 5_000, lastStartedAt = old + 3),
+        )
+        assertThat(database.listens().events().map { it.identityId to it.startedAt })
+            .containsExactly(2L to now - 90 * day, 3L to now - day)
+        assertThat(database.plays().stats().single().playCount).isEqualTo(1)
+        // The fold changes nothing mirrored.
+        assertThat(database.user().changeCounter()).isEqualTo(counter)
+    }
+
+    @Test
+    fun listeningOutcomesHoldTheirIdentities() = runBlocking<Unit> {
+        for (id in 1L..3L) database.identities().add(identity(id))
+        Listens(database).record(1, startedAt = 5, listenedMs = 1_000, durationMs = 180_000, ListenOutcome.EARLY_SKIP)
+        database.useWriterConnection { connection ->
+            connection.usePrepared(
+                "INSERT INTO listen_stats (identity_id, early_skips, late_skips, finished, listened_ms, last_started_at) " +
+                    "VALUES (2, 1, 0, 0, 1000, 7)",
+            ) { it.step() }
+        }
+
+        // The attach pass never deletes them, and counts them among the identities that hold data (docs/library.md §8.1).
+        assertThat(database.user().identitiesHoldingData()).containsExactlyInAnyOrder(1L, 2L)
     }
 }

@@ -23,11 +23,16 @@ class PlayStats(private val database: UserDatabase) {
     suspend fun setListened(identityId: Long, startedAt: Long, listenedMs: Long) =
         dao.setListened(identityId, startedAt, listenedMs)
 
-    /** Folds the events that started before [now] minus 90 days into `play_stats`; the mirrored values stay the same. */
+    /**
+     * Folds the events that started before [now] minus 90 days into `play_stats`, and the listening outcomes as old into
+     * `listen_stats` (docs/library.md §15.7), in one transaction; the mirrored values stay the same.
+     */
     suspend fun fold(now: Long) = database.withWriteTransaction {
         val before = now - KEEP_EVENTS_MS
         dao.foldInto(before)
         dao.deleteEventsBefore(before)
+        database.listens().foldInto(before)
+        database.listens().deleteEventsBefore(before)
     }
 
     /** Forgets every play; tests start so. */

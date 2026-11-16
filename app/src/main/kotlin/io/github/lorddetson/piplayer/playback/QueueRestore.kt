@@ -5,6 +5,9 @@ import io.github.lorddetson.piplayer.library.songs.Song
 /** Where a restored queue starts and how far into that song (docs/playback.md §4.3). */
 data class QueueStart(val index: Int, val positionMs: Long)
 
+/** A saved playback that a restore ends as listened to the end (docs/playback.md §12.5), with its song's length. */
+data class FinishedPlayback(val mediaId: String, val durationMs: Long?)
+
 /** What sits at a row of the restored queue: a library song or a file opened from another app. */
 sealed interface QueueSlot {
     data class Library(val song: Song) : QueueSlot
@@ -101,6 +104,24 @@ object QueueRestore {
     fun endedSavedPlayback(snapshot: PlaybackSnapshot, resumes: Boolean, currentFileId: Long?): String? {
         if (resumes || snapshot.listen?.counted != true || snapshot.songId < 0) return null
         return currentFileId?.toString()
+    }
+
+    /**
+     * The saved playback of [snapshot] that a restore finishes (docs/playback.md §12.5): when the restore moved [chosen],
+     * the saved item itself at its saved position, off the end of its song to [start], the playback was listened to the
+     * end. Only a library song whose file [currentFileId] is known now; null for a resumed, a gone or an opened one.
+     */
+    fun finishedSavedPlayback(
+        order: List<QueueSlot>,
+        chosen: QueueStart,
+        start: QueueStart,
+        snapshot: PlaybackSnapshot,
+        currentFileId: Long?,
+    ): FinishedPlayback? {
+        if (snapshot.listen == null || snapshot.songId < 0 || currentFileId == null) return null
+        if (start == chosen || !resumesSavedItem(order, chosen, snapshot, currentFileId)) return null
+        val durationMs = snapshot.durationMs.takeIf { it > 0 } ?: order[chosen.index].durationMs
+        return FinishedPlayback(currentFileId.toString(), durationMs)
     }
 
     /** The longest end of a song in which a saved position counts as its end (docs/playback.md §4.3.1). */

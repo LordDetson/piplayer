@@ -22,6 +22,8 @@ object UserData {
 
     fun plays(context: Context) = PlayStats(database(context))
 
+    fun listens(context: Context) = Listens(database(context))
+
     fun playlists(context: Context) = Playlists(database(context))
 
     /** The decisions of identification in the user database alone; the app goes through `Library.decisions`. */

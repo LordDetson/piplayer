@@ -388,4 +388,70 @@ class QueueRestoreTest {
         assertThat(QueueRestore.endedSavedPlayback(snapshot.copy(listen = null), resumes = false, currentFileId = 20)).isNull()
         assertThat(QueueRestore.endedSavedPlayback(openSnapshot, resumes = false, currentFileId = null)).isNull()
     }
+
+    private val started = ListenProgress(listenedMs = 20_000, counted = false, startedAt = 1_700_000_000_000)
+
+    @Test
+    fun `a saved playback that the restore moves off the end of its song was listened to the end`() {
+        // Saved 1 s before the end of song 20, which is file 21 now; the restore moved on to the next song.
+        val snapshot = librarySnapshot(songId = 20, row = 1, positionMs = 179_000).copy(durationMs = 180_000, listen = started)
+        val chosen = QueueRestore.choose(three, snapshot, currentFileId = 20)!!
+        val moved = QueueRestore.offTheEnd(three, chosen, PlaybackSnapshot.REPEAT_OFF, playOrder = null)
+
+        assertThat(QueueRestore.finishedSavedPlayback(three, chosen, moved, snapshot, currentFileId = 20))
+            .isEqualTo(FinishedPlayback("20", durationMs = 180_000))
+        // An uncounted playback too: the outcome does not depend on the play counting.
+        assertThat(QueueRestore.finishedSavedPlayback(three, chosen, moved, snapshot.copy(listen = counted), currentFileId = 20))
+            .isEqualTo(FinishedPlayback("20", durationMs = 180_000))
+        // Back to the start of the same song, the last one with repeat off.
+        val replay = QueueRestore.offTheEnd(three.take(2), chosen, PlaybackSnapshot.REPEAT_OFF, playOrder = null)
+        assertThat(replay).isEqualTo(QueueStart(1, 0))
+        assertThat(QueueRestore.finishedSavedPlayback(three.take(2), chosen, replay, snapshot, currentFileId = 20))
+            .isEqualTo(FinishedPlayback("20", durationMs = 180_000))
+    }
+
+    @Test
+    fun `a finished saved playback without a saved length has the queue item's`() {
+        val snapshot = librarySnapshot(songId = 20, row = 1, positionMs = 179_000).copy(durationMs = 0, listen = started)
+        val chosen = QueueRestore.choose(three, snapshot, currentFileId = 20)!!
+        val moved = QueueRestore.offTheEnd(three, chosen, PlaybackSnapshot.REPEAT_OFF, playOrder = null)
+
+        assertThat(QueueRestore.finishedSavedPlayback(three, chosen, moved, snapshot, currentFileId = 20))
+            .isEqualTo(FinishedPlayback("20", durationMs = 180_000))
+    }
+
+    @Test
+    fun `a resumed, a gone, an opened or a progressless playback is not finished at the restore`() {
+        val snapshot = librarySnapshot(songId = 20, row = 1, positionMs = 90_000).copy(durationMs = 180_000, listen = started)
+        val chosen = QueueRestore.choose(three, snapshot, currentFileId = 20)!!
+        // Resumed where it was: it goes on, and its own end decides.
+        assertThat(QueueRestore.finishedSavedPlayback(three, chosen, chosen, snapshot, currentFileId = 20)).isNull()
+
+        // Gone from the queue: the saved row plays another song from its start; whether it was skipped is not known.
+        val atEnd = snapshot.copy(positionMs = 179_000)
+        val gone = listOf(three[0], three[2])
+        val fallback = QueueRestore.choose(gone, atEnd, currentFileId = 20)!!
+        assertThat(QueueRestore.finishedSavedPlayback(gone, fallback, fallback, atEnd, currentFileId = 20)).isNull()
+        // Its file not known any more.
+        val unknown = QueueRestore.choose(three, atEnd, currentFileId = null)!!
+        assertThat(QueueRestore.finishedSavedPlayback(three, unknown, QueueStart(2, 0), atEnd, currentFileId = null)).isNull()
+        // Without saved progress: a song played to its end was written when the queue ended.
+        val bare = atEnd.copy(listen = null)
+        val bareChosen = QueueRestore.choose(three, bare, currentFileId = 20)!!
+        val bareMoved = QueueRestore.offTheEnd(three, bareChosen, PlaybackSnapshot.REPEAT_OFF, playOrder = null)
+        assertThat(QueueRestore.finishedSavedPlayback(three, bareChosen, bareMoved, bare, currentFileId = 20)).isNull()
+
+        // An opened file at its end has no identity to write for.
+        val open = opened(0, "a")
+        val openOrder = listOf<QueueSlot>(QueueSlot.Open(open), three[0])
+        val openSnapshot = PlaybackSnapshot(
+            queue = null, openItems = listOf(open), songId = -1, row = 0, positionMs = 29_900, shuffle = false,
+            repeatMode = PlaybackSnapshot.REPEAT_OFF, title = null, artist = null, album = null, durationMs = 30_000,
+            uri = open.uri, listen = started,
+        )
+        val openChosen = QueueRestore.choose(openOrder, openSnapshot, currentFileId = null)!!
+        val openMoved = QueueRestore.offTheEnd(openOrder, openChosen, PlaybackSnapshot.REPEAT_OFF, playOrder = null)
+        assertThat(openMoved).isEqualTo(QueueStart(1, 0))
+        assertThat(QueueRestore.finishedSavedPlayback(openOrder, openChosen, openMoved, openSnapshot, currentFileId = null)).isNull()
+    }
 }

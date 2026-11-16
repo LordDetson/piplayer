@@ -10,6 +10,8 @@ import io.github.lorddetson.piplayer.library.identity.Hex
 import io.github.lorddetson.piplayer.library.lists.LibraryLists
 import io.github.lorddetson.piplayer.library.tagpass.DurationSource
 import io.github.lorddetson.piplayer.ui.GrantAudioPermission
+import io.github.lorddetson.piplayer.userdata.ListenEventEntity
+import io.github.lorddetson.piplayer.userdata.ListenOutcome
 import io.github.lorddetson.piplayer.userdata.PlayEventEntity
 import io.github.lorddetson.piplayer.userdata.UserData
 import kotlinx.coroutines.runBlocking
@@ -22,7 +24,8 @@ import org.junit.runner.RunWith
 
 /**
  * The service's recorder of plays (docs/library.md §15.5): a library song's play by its identity in `user.db`, mirrored
- * into its play count; opened files and songs whose tags are not read are not recorded.
+ * into its play count, and the outcome of every listening (docs/playback.md §12); opened files and songs whose tags
+ * are not read are not recorded.
  */
 @RunWith(AndroidJUnit4::class)
 class LibraryPlayRecorderTest {
@@ -84,6 +87,30 @@ class LibraryPlayRecorderTest {
         recorder.flush()
 
         assertThat(UserData.database(context).plays().events()).isEmpty()
+    }
+
+    @Test
+    fun aListeningOutcomeOfALibrarySongIsRecordedByItsIdentity() = runBlocking<Unit> {
+        Library.sync(context).awaitIdle()
+        val file = fileOf(1)
+        Library.database(context).library().setContent(file, key(1), 200_000, DurationSource.HEADER)
+        Library.identities(context).attach()
+        val identity = checkNotNull(UserData.database(context).identities().idOfKey(Hex.bytes(key(1))))
+        val counter = UserData.database(context).user().changeCounter()
+
+        recorder.listened(file.toString(), startedAt = 1_000, listenedMs = 12_000, durationMs = 200_000, ListenOutcome.EARLY_SKIP)
+        // An entry an edit added plays the same file (docs/playback.md §9.4).
+        recorder.listened(QueueIds.added(3, file), startedAt = 2_000, listenedMs = 200_000, durationMs = 200_000, ListenOutcome.FINISHED)
+        // Opened files and songs whose tags are not read have no identity (docs/playback.md §12.1).
+        recorder.listened("content://open/song", startedAt = 3_000, listenedMs = 50_000, durationMs = null, ListenOutcome.LATE_SKIP)
+        recorder.listened(fileOf(2).toString(), startedAt = 4_000, listenedMs = 50_000, durationMs = null, ListenOutcome.LATE_SKIP)
+        recorder.flush()
+
+        assertThat(UserData.database(context).listens().events()).containsExactly(
+            ListenEventEntity(1_000, identity, 12_000, 200_000, ListenOutcome.EARLY_SKIP.code),
+            ListenEventEntity(2_000, identity, 200_000, 200_000, ListenOutcome.FINISHED.code),
+        )
+        assertThat(UserData.database(context).user().changeCounter()).isEqualTo(counter)
     }
 
     private companion object {

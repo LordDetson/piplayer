@@ -2,7 +2,7 @@
   "formatVersion": 1,
   "database": {
     "version": 6,
-    "identityHash": "45c96f8cbc925303268107b210124eab",
+    "identityHash": "992948aed52f24813e96a0619a64425d",
     "entities": [
       {
         "tableName": "library_folder_rule",
@@ -866,11 +866,101 @@
             "id"
           ]
         }
+      },
+      {
+        "tableName": "listen_event",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`started_at` INTEGER NOT NULL, `identity_id` INTEGER NOT NULL, `listened_ms` INTEGER NOT NULL, `duration_ms` INTEGER, `outcome` INTEGER NOT NULL, PRIMARY KEY(`started_at`, `identity_id`)) WITHOUT ROWID",
+        "fields": [
+          {
+            "fieldPath": "startedAt",
+            "columnName": "started_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "identityId",
+            "columnName": "identity_id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "listenedMs",
+            "columnName": "listened_ms",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "durationMs",
+            "columnName": "duration_ms",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "outcome",
+            "columnName": "outcome",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "started_at",
+            "identity_id"
+          ]
+        },
+        "withoutRowId": true
+      },
+      {
+        "tableName": "listen_stats",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`identity_id` INTEGER NOT NULL, `early_skips` INTEGER NOT NULL, `late_skips` INTEGER NOT NULL, `finished` INTEGER NOT NULL, `listened_ms` INTEGER NOT NULL, `last_started_at` INTEGER, PRIMARY KEY(`identity_id`))",
+        "fields": [
+          {
+            "fieldPath": "identityId",
+            "columnName": "identity_id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "earlySkips",
+            "columnName": "early_skips",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lateSkips",
+            "columnName": "late_skips",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "finished",
+            "columnName": "finished",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "listenedMs",
+            "columnName": "listened_ms",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastStartedAt",
+            "columnName": "last_started_at",
+            "affinity": "INTEGER"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "identity_id"
+          ]
+        }
       }
     ],
     "setupQueries": [
       "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
-      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '45c96f8cbc925303268107b210124eab')"
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '992948aed52f24813e96a0619a64425d')"
     ]
   }
 }

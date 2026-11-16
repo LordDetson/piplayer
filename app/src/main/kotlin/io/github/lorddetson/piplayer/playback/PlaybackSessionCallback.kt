@@ -70,6 +70,11 @@ class PlaybackSessionCallback(
     private val onRestore: (mediaId: String, progress: ListenProgress) -> Unit = { _, _ -> },
     /** The saved playback that the restore does not resume, under its song's media ID: it has ended (docs/playback.md §11.3). */
     private val onRestoreEnded: (mediaId: String, progress: ListenProgress) -> Unit = { _, _ -> },
+    /**
+     * The saved playback that the restore moved off the end of its song, under its song's media ID and with its length: it
+     * was listened to the end (docs/playback.md §12.5).
+     */
+    private val onRestoreFinished: (mediaId: String, progress: ListenProgress, durationMs: Long?) -> Unit = { _, _, _ -> },
     /** The restored item moved from its end back to its own start: a new playback of it (docs/playback.md §4.3.1). */
     onReplay: () -> Unit = {},
     private val onQueueRequest: (QueueState?) -> Unit,
@@ -845,7 +850,8 @@ class PlaybackSessionCallback(
         // A start moved off the end is a new playback (§4.3.1, §11.3).
         val resumes = start == chosen && QueueRestore.resumesSavedItem(order, start, snapshot, currentFileId)
         val ended = QueueRestore.endedSavedPlayback(snapshot, resumes, currentFileId)
-        return RestoredQueue(items, start, QueueState(libraryRequest, openItems, libraryId, edits), shuffled, resumes, ended)
+        val finished = QueueRestore.finishedSavedPlayback(order, chosen, start, snapshot, currentFileId)
+        return RestoredQueue(items, start, QueueState(libraryRequest, openItems, libraryId, edits), shuffled, resumes, ended, finished)
     }
 
     /**
@@ -867,6 +873,7 @@ class PlaybackSessionCallback(
         val listen = snapshot.listen ?: return
         if (!restored.resumes) {
             restored.endedMediaId?.let { onRestoreEnded(it, listen) }
+            restored.finished?.let { onRestoreFinished(it.mediaId, listen, it.durationMs) }
             return
         }
         restored.items.getOrNull(restored.start.index)?.let { onRestore(it.mediaId, listen) }
@@ -999,6 +1006,8 @@ class PlaybackSessionCallback(
         val resumes: Boolean = false,
         /** The media ID under which the saved playback ends, when the restore does not resume it (§11.3). */
         val endedMediaId: String? = null,
+        /** The saved playback that the restore moved off the end of its song (§12.5). */
+        val finished: FinishedPlayback? = null,
     )
 
     /**

@@ -23,6 +23,9 @@ class PlayCounter(private val clock: () -> Long, private val thresholdOf: (Long?
     /** The media ID of the current playback, or null between playbacks. */
     val mediaId: String? get() = current?.mediaId
 
+    /** The length of the current playback's song as far as it is known, or null. */
+    val durationMs: Long? get() = current?.durationMs
+
     /** Starts a playback of [mediaId], which started at [startedAt] by the wall clock, going on from [resume] if given. */
     fun start(mediaId: String, durationMs: Long?, startedAt: Long, playing: Boolean, resume: ListenProgress? = null) {
         current = Playback(

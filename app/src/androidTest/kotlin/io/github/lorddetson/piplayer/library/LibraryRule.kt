@@ -44,7 +44,7 @@ class LibraryRule(private val index: () -> MediaIndex? = { null }) : ExternalRes
     }
 
     companion object {
-        /** No folder rules, no track identities, favorites or plays, and the default hidden files (docs/library.md §3.4, §3.5, §8, §15). */
+        /** No folder rules, no track identities, favorites, plays or listening outcomes, and the default hidden files (docs/library.md §3.4, §3.5, §8, §15). */
         suspend fun cleanUserData() {
             val context = TestFiles.targetContext
             val rules = UserData.folderRules(context)
@@ -56,6 +56,8 @@ class LibraryRule(private val index: () -> MediaIndex? = { null }) : ExternalRes
             // Favorites and plays refer to identities too (docs/library.md §15).
             UserData.favorites(context).clear()
             UserData.plays(context).clear()
+            // And so do the listening outcomes (docs/library.md §15.7).
+            UserData.listens(context).clear()
             // Playlist entries refer to identities and places of the test before (docs/library.md §16).
             UserData.playlists(context).clear()
             // Decisions refer to identities too (TI §10.2), and a new identity may take an old one's ID.

@@ -23,6 +23,7 @@ import io.github.lorddetson.piplayer.playback.PlaybackTesting.onMain
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.shell
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.throughout
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.waitUntil
+import io.github.lorddetson.piplayer.userdata.ListenOutcome
 import java.io.File
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.TimeUnit
@@ -56,6 +57,10 @@ class SnippetPlayerTest {
 
         override fun ended(mediaId: String, startedAt: Long, listenedMs: Long) {
             recorded += "ended $mediaId"
+        }
+
+        override fun listened(mediaId: String, startedAt: Long, listenedMs: Long, durationMs: Long?, outcome: ListenOutcome) {
+            recorded += "listened $mediaId $outcome"
         }
     }
 
