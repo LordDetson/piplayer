@@ -35,13 +35,19 @@ object SongList {
     var sourceOverride: SongSource? = null
 
     /**
-     * A kept list with the library's revision and the hidden files it was read with; the key is null for a test's own
-     * source, which has neither. [read] numbers the read that gave it. [frozen] keeps its order while the tag pass changes
+     * What a list was read with: the library's [revision], the [hidden] files and the [decisions], the stamp of the decided
+     * values (`Library.decisionStamp`, TI §7.1). A kept list holds while all three do (docs/library.md §1.4, §3.5).
+     */
+    internal data class ListKey(val revision: Long?, val hidden: HiddenFiles, val decisions: Any?)
+
+    /**
+     * A kept list with the [ListKey] it was read with; the key is null for a test's own source, which has none. [read]
+     * numbers the read that gave it. [frozen] keeps its order while the tag pass changes
      * titles, [resortDue] asks for one fresh read after a pass that changed rows (docs/library.md §5.4).
      */
     private class Kept(
         val songs: List<Song>,
-        val key: Pair<Long?, HiddenFiles>?,
+        val key: ListKey?,
         val read: Long,
         val frozen: Boolean,
         val resortDue: Boolean,
@@ -83,7 +89,7 @@ object SongList {
         Library.awaitReady(app, READY_TIMEOUT_MS)
         val hidden = LibrarySettings(app).readHiddenFiles()
         return Library.read(app) { database ->
-            load(LibrarySongSource(database, hidden, query), Library.revision() to hidden, fresh, query, Library.collation())
+            load(LibrarySongSource(database, hidden, query), key(hidden), fresh, query, Library.collation())
         }
     }
 
@@ -153,23 +159,29 @@ object SongList {
             Library.read(context) { LibrarySongSource(it, hidden, query).firstSongs(count) }
         }
 
+    /** The key of a list read now with [hidden]: the stamps are taken before the read, so a change during it reads again. */
+    private fun key(hidden: HiddenFiles) = ListKey(Library.revision(), hidden, Library.decisionStamp())
+
     /**
      * A new value whenever the lists may be read: once the library is ready, after every sync that changed its files,
-     * and after every change of the hidden files (docs/library.md §3.5). A test's own source is always ready.
+     * after every change of the hidden files and after every run of the decision mirror that changed what it mirrors,
+     * such as Apply, Undo, an edit or a revert (docs/library.md §1.4, §3.5, TI §7.1); a run that changed nothing gives
+     * none. A test's own source is always ready. The value is the [ListKey] of a list read now.
      */
-    fun changes(context: Context): Flow<Any> = Library.status(context)
-        .filter { it.ready || sourceOverride != null }
-        .combine(LibrarySettings(context).hiddenFiles) { status, hidden -> status.revision to hidden }
+    fun changes(context: Context): Flow<Any> = combine(
+        Library.status(context).filter { it.ready || sourceOverride != null },
+        LibrarySettings(context).hiddenFiles,
+        Library.decisionVersion(context),
+    ) { status, hidden, _ -> ListKey(status.revision, hidden, Library.decisionStamp()) }
         .distinctUntilChanged()
 
     /**
      * A new value whenever [query]'s list may be read: [changes], and for a smart list also after every run of the mirror,
-     * which follows every change of favorites, plays and own covers and every attach pass (docs/library.md §17.4), and
-     * after every run of the decision mirror that changed what it mirrors, such as a Keep as-is or a Skip (TI §1).
+     * which follows every change of favorites, plays and own covers and every attach pass (docs/library.md §17.4).
      */
     fun changes(context: Context, query: SongQuery): Flow<Any> =
         if (query.kind.smart) {
-            combine(changes(context), Library.mirrorVersion(context), Library.decisionVersion(context)) { a, b, c -> Triple(a, b, c) }
+            combine(changes(context), Library.mirrorVersion(context), ::Pair)
         } else {
             changes(context)
         }
@@ -182,7 +194,7 @@ object SongList {
     @VisibleForTesting
     internal fun load(
         source: SongSource,
-        key: Pair<Long?, HiddenFiles>? = null,
+        key: ListKey? = null,
         fresh: Boolean = false,
         query: SongQuery = SongQuery.SONGS,
         collation: String? = null,
@@ -230,13 +242,16 @@ object SongList {
     }
 
     /**
-     * The list of [query] last loaded, or null before its first load and once a sync or a change of the hidden files has
-     * changed it since: a tap must not expand against a list the screen no longer shows.
+     * The list of [query] last loaded, or null before its first load and once a sync, a change of the hidden files or a
+     * decision has changed it since (docs/library.md §1.4, §3.5): a tap must not expand against a list the screen no
+     * longer shows.
      */
     fun current(query: SongQuery = SongQuery.SONGS): List<Song>? {
         val kept = synchronized(lock) { kept[query] } ?: return null
-        val (revision, hidden) = kept.key ?: return kept.songs
-        return kept.songs.takeIf { revision == Library.revision() && hidden == (LibrarySettings.latest ?: hidden) }
+        val (revision, hidden, decisions) = kept.key ?: return kept.songs
+        return kept.songs.takeIf {
+            revision == Library.revision() && hidden == (LibrarySettings.latest ?: hidden) && decisions == Library.decisionStamp()
+        }
     }
 
     /** The list of [query] as it was last read with [key], unless it no longer holds; null for a test's own source. */

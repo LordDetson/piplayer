@@ -363,11 +363,12 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     /**
-     * Loads the current song's cover once per song (docs/library.md §13.5): a library song's from the cover loader, a file
-     * opened from another app's from the session's metadata. The controller lives in the service's process and shares
-     * the bytes of the metadata, so the same picture comes as the same array. A new song shows no cover until its own is
-     * loaded. A library song falls back to the stream's picture when the loader finds nothing, such as for a file the
-     * library does not hold yet; that picture may arrive after the loader has finished.
+     * Loads the current song's cover once per song (docs/library.md §13.5): a library song's from the cover loader only,
+     * a file opened from another app's from the session's metadata. The session gives no picture of the stream for a
+     * library song (TI §7.1 "System surfaces", docs/library.md §13.6), so a library song the loader finds no cover for
+     * shows none; the stream's picture serves only a file opened from another app, which no loader knows. The controller
+     * lives in the service's process and shares the bytes of the metadata, so the same picture comes as the same array;
+     * the player may read it a moment after the song starts. A new song shows no cover until its own is loaded.
      */
     private fun showCover(reload: Boolean = false) {
         val controller = controller ?: return

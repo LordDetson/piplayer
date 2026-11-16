@@ -51,7 +51,8 @@ class SelectedSongs(val songs: List<Song>, val target: QueueTarget)
  * A song list (docs/playback.md §2.1, §2.2, docs/library.md §1.4, §6): the Songs tab, or the songs of an album, artist
  * or folder page as [base] names them, in the order chosen for [list] and with the search typed. It shows "Loading" until
  * the library is ready, then reads the list when the screen first starts with the permission, after every sync that
- * changed the library, and whenever the order or the search changes. The first time, its first page is shown ahead of
+ * changed the library, a change of the hidden files or a run of the decision mirror that changed decided values
+ * ([SongList.changes], §3.5), and whenever the order or the search changes. The first time, its first page is shown ahead of
  * the whole list. A return from the background reads nothing unless the library changed or the tag pass has ended and
  * left the list to sort anew, once, on the same song (§5.4).
  */

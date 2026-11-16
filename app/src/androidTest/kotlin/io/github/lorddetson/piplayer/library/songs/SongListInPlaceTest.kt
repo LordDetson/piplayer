@@ -204,7 +204,7 @@ class SongListInPlaceTest {
 
     @Test
     fun aKeptSongIsFoundAlsoWhenTheListIsOutOfDate() {
-        SongList.load(SongSource { listOf(song(1, "A")) }, key = -1L to HiddenFiles())
+        SongList.load(SongSource { listOf(song(1, "A")) }, key = SongList.ListKey(-1L, HiddenFiles(), decisions = null))
         assertThat(SongList.current()).describedAs("the list of another revision").isNull()
 
         SongList.applyInPlace(listOf(row(1, "Z")))

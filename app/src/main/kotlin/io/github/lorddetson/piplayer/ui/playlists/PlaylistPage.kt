@@ -117,8 +117,8 @@ sealed interface PlaylistHeader {
 
 /**
  * A playlist's page (docs/library.md §16.3): the playlist's name and count, and its entries with their songs, read and
- * resolved off the main thread again whenever the entries, the library, its hidden files, a batch of the tag pass or the
- * identities change.
+ * resolved off the main thread again whenever the entries, the library, its hidden files, a batch of the tag pass, the
+ * identities or the decided values ([SongList.changes], TI §7.1) change.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class PlaylistPageViewModel(
