@@ -425,7 +425,10 @@ Instrumented tests on the API 30, 36 and 37 emulators:
 - Through the activity and the service: a tapped song brings up the mini player; it opens Now Playing; back returns to
   the list; a predictive back gesture in progress keeps Now Playing on screen and moved, cancelling keeps it, finishing
   returns to the list; back on the list is left to the system; the mini player's background reaches the bottom edge and
-  its controls stay above the navigation bar; a cover from the file shows on Now Playing.
+  its controls stay above the navigation bar; a library song whose file carries an embedded picture shows that picture
+  in the mini player and on Now Playing, taken through the cover order (library.md §13.1) from a file the library holds,
+  since the session gives a library song no picture of the stream (§2.6); a file opened from another app shows the
+  picture the player read from it there (§5.2).
 - Through the service: covers of MP3, FLAC, Ogg Vorbis, Opus and MP4 fixtures reach a controller, a front cover wins
   over a back cover, a file without one has none, and the platform session gets title, artist and cover; the format
   line of each decoding fixture; shuffle with the start song first and every song once, turned on in the middle of the
