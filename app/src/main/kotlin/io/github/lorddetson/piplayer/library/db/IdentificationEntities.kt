@@ -221,7 +221,7 @@ interface DecidedMirrorDao {
      * The files with one of [sizes] (at most [CHUNK] at once), with their modification time (seconds) and content key, null
      * for a file without a key yet: those that may hold a Skip's stamp (TI §1).
      */
-    @Query("SELECT size, mtime, content_key AS contentKey FROM audio_file WHERE size IN (:sizes)")
+    @Query(FILES_WITH_SIZES)
     suspend fun filesWithSizes(sizes: List<Long>): List<FileStampRow>
 
     /** The places and keys of [fileIds] (at most [CHUNK] at once). */
@@ -243,6 +243,11 @@ interface DecidedMirrorDao {
     companion object {
         /** File IDs bound at a time, under SQLite's limit of arguments. */
         const val CHUNK = 500
+
+        private const val FILES_WITH_SIZES = "SELECT size, mtime, content_key AS contentKey FROM audio_file WHERE size IN (:sizes)"
+
+        /** The queries that look up the files holding a Skip's stamp (TI §1). */
+        val STAMP_QUERIES = listOf(FILES_WITH_SIZES)
     }
 }
 

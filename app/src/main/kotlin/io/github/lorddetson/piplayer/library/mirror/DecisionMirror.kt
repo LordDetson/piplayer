@@ -21,6 +21,8 @@ import io.github.lorddetson.piplayer.library.values.DecisionContent
 import io.github.lorddetson.piplayer.userdata.Decisions
 import io.github.lorddetson.piplayer.userdata.UserDatabase
 import kotlin.coroutines.cancellation.CancellationException
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -78,6 +80,14 @@ class DecisionMirror(
     /** Called by each range of a whole run's comparison once it holds its reader connection (tests). */
     @VisibleForTesting
     internal var onScanPart: suspend () -> Unit = {}
+
+    /** Called before the checks after a batch of the tag pass (tests: checks that fail). */
+    @VisibleForTesting
+    internal var beforeChecks: suspend () -> Unit = {}
+
+    /** How long failed checks after a batch wait before they are made again (TI §1). */
+    @VisibleForTesting
+    internal var retryDelay: Duration = 5.seconds
 
     private val running = Mutex()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -446,6 +456,7 @@ class DecisionMirror(
      */
     @VisibleForTesting
     internal suspend fun afterRead(read: List<Long>, failed: List<Long>) {
+        beforeChecks()
         val lapsed = running.withLock { if (ready()) lapseSkips((read + failed).distinct()) else null }
         if (lapsed != null) {
             // As after a decision: a failed run leaves the lapse committed and asks for a whole run (TI §10.3).
@@ -547,6 +558,10 @@ class DecisionMirror(
 
     internal companion object {
         private const val TAG = "DecisionMirror"
+
+        /** How many more times failed checks after a batch are made (TI §1). */
+        @VisibleForTesting
+        internal const val CHECK_RETRIES = 3
         private const val DECIDED_TABLE = "decided_mirror"
 
         // In file order, which the comparison's search needs.

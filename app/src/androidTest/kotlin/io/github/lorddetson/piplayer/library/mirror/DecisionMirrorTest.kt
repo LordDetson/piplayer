@@ -7,6 +7,7 @@ import io.github.lorddetson.piplayer.TestFiles
 import io.github.lorddetson.piplayer.library.FakeMediaIndex
 import io.github.lorddetson.piplayer.library.FakeMediaIndex.Companion.row
 import io.github.lorddetson.piplayer.library.FakeRules
+import io.github.lorddetson.piplayer.library.db.DecidedMirrorDao
 import io.github.lorddetson.piplayer.library.db.DecidedMirrorEntity
 import io.github.lorddetson.piplayer.library.db.LibraryDatabase
 import io.github.lorddetson.piplayer.library.db.TrackDisplayEntity
@@ -711,15 +712,145 @@ class DecisionMirrorTest {
 
     /** A run of the real tag pass that reports what it stored to the mirror, as the app's does. */
     private suspend fun readAndReport(reader: PassReader = StampReader()) {
+        pass(reader) { read, failed -> mirror.requestRead(read, failed) }
+        mirror.awaitIdle()
+    }
+
+    /** A run of the real tag pass with [reader], whose batches report what they stored to [onStored]. */
+    private suspend fun pass(reader: PassReader, onStored: (List<Long>, List<Long>) -> Unit) {
         TagPass(
             library, sync, reader,
             cyrillicLanguage = { false },
             legacyEncoding = { null },
             decodedEncoding = DecodedEncoding.InMemory(),
             crashBackoff = 1.milliseconds,
-            onStored = { read, failed -> mirror.requestRead(read, failed) },
+            onStored = onStored,
         ).run()
-        mirror.awaitIdle()
+    }
+
+    /** The audio of file 1 was encoded again, or a tagger wrote it: a new size and time, so the sync forgets its key. */
+    private suspend fun changeFileOne() {
+        index.volume().rows = listOf(row(1).copy(size = 9_000, modifiedSeconds = 1_800_000_000, generationModified = 70))
+        sync.sync()
+        assertThat(library.library().files().single().contentKey).isNull()
+    }
+
+    /** A skipped file that changed, whose rows a whole run then took away: only its place names its Skip (TI §1). */
+    private suspend fun skippedThenChangedAndCleared(): Decisions.Committed {
+        library(listOf(row(1)))
+        readAndReport()
+        val skipped = skip(1)
+        val file = library.library().files().single()
+        val identity = checkNotNull(user.identities().identity(identityOf(1)))
+        assertThat(listOf(identity.hintVolumeName, identity.hintRelativePath, identity.hintDisplayName))
+            .containsExactly(file.volumeName, file.relativePath, file.displayName)
+
+        changeFileOne()
+        mirror.mirrorAll()
+        assertThat(library.decided().valuesOf(listOf(fileId(1)))).isEmpty()
+        return skipped
+    }
+
+    @Test
+    fun aChangedSkippedFileWhoseRowsAWholeRunTookAwayIsFoundByItsTracksLocationHint() = runBlocking<Unit> {
+        val skipped = skippedThenChangedAndCleared()
+
+        readAndReport(StampReader(keys = mapOf(1L to 9L)))
+
+        assertThat(lapsedAt(skipped.decisionId)).isNotNull()
+        assertThat(display(1).missingInfoDecision).isEqualTo(MissingInfoDecision.NONE)
+    }
+
+    @Test
+    fun aChangedSkippedFileWhoseReadFailsLetsTheSkipLapseToo() = runBlocking<Unit> {
+        val skipped = skippedThenChangedAndCleared()
+
+        readAndReport(
+            object : PassReader {
+                override suspend fun read(file: PassFile): PassRead = PassRead.OpenFailed
+            },
+        )
+
+        assertThat(lapsedAt(skipped.decisionId)).isNotNull()
+    }
+
+    @Test
+    fun aLapseWhoseMirrorRunFailsStaysCommittedAndAsksForAWholeRun() = runBlocking<Unit> {
+        library(listOf(row(1)))
+        readAndReport()
+        val skipped = skip(1)
+        changeFileOne()
+        val reported = mutableListOf<Pair<List<Long>, List<Long>>>()
+        pass(StampReader()) { read, failed -> reported += read to failed }
+        // The second look of this mirror, its run after the lapse, fails, as a full disk would make its transaction fail.
+        val looks = AtomicInteger()
+        val flaky = DecisionMirror(library, user, sync, ready = {
+            if (looks.incrementAndGet() == 2) throw IllegalStateException("The library database cannot be written") else true
+        })
+        try {
+            for ((read, failed) in reported) flaky.afterRead(read, failed)
+
+            assertThat(lapsedAt(skipped.decisionId)).isNotNull()
+            flaky.awaitIdle()
+            assertThat(flaky.wholeRuns).isEqualTo(1)
+            assertThat(display(1).missingInfoDecision).isEqualTo(MissingInfoDecision.NONE)
+            assertThat(library.library().mirroredChangeCounter()).isEqualTo(user.user().changeCounter())
+        } finally {
+            flaky.close()
+        }
+    }
+
+    @Test
+    fun checksAfterABatchThatFailAreMadeAgainBeforeTheBatchsMirrorRun() = runBlocking<Unit> {
+        fileAndCopy()
+        // The Skip is made on the copy, a place the track's hint does not name: only the copy's row finds it after its read.
+        val skipped = skip(2, keyOf = 1)
+        val failures = AtomicInteger(1)
+        mirror.retryDelay = 10.milliseconds
+        mirror.beforeChecks = { if (failures.getAndDecrement() > 0) throw IllegalStateException("The user database is busy") }
+
+        // The copy's audio was encoded again.
+        index.volume().rows = listOf(row(1), row(2).copy(size = 9_000, modifiedSeconds = 1_800_000_000, generationModified = 70))
+        sync.sync()
+        readAndReport(StampReader(keys = mapOf(2L to 9L)))
+
+        assertThat(failures.get()).describedAs("checks made again").isNegative()
+        assertThat(lapsedAt(skipped.decisionId)).isNotNull()
+        for (n in listOf(1L, 2L)) assertThat(display(n).missingInfoDecision).isEqualTo(MissingInfoDecision.NONE)
+    }
+
+    @Test
+    fun checksThatKeepFailingLeaveTheFilesMirroredAfterTheLastTry() = runBlocking<Unit> {
+        library(listOf(row(1)))
+        readAndReport()
+        decisions.apply(request(key(1), fields = setOf(ProtectedField.TITLE)))
+        assertThat(display(1).title).isEqualTo("Song")
+        val tries = AtomicInteger()
+        mirror.retryDelay = 10.milliseconds
+        mirror.beforeChecks = {
+            tries.incrementAndGet()
+            throw IllegalStateException("The user database is busy")
+        }
+
+        // The file's key changes: once the checks give up, its run takes the decided title away.
+        changeFileOne()
+        readAndReport(StampReader(keys = mapOf(1L to 9L)))
+
+        assertThat(tries.get()).isEqualTo(1 + DecisionMirror.CHECK_RETRIES)
+        assertThat(display(1).title).isEqualTo("Tag 1")
+    }
+
+    @Test
+    fun theLapseLooksUpTheFilesThatHoldAStampByTheIndexOfTheKeys() = runBlocking<Unit> {
+        library(listOf(row(1)))
+        for (sql in DecidedMirrorDao.STAMP_QUERIES) {
+            val plan = library.useReaderConnection { connection ->
+                connection.usePrepared("EXPLAIN QUERY PLAN " + sql.replace(Regex(":\\w+"), "?")) { statement ->
+                    buildList { while (statement.step()) add(statement.getText(3)) }
+                }
+            }
+            assertThat(plan).describedAs(sql).isNotEmpty().noneMatch { it.startsWith("SCAN") }
+        }
     }
 
     /** File 1 and its copy 2, which has the same size and a time of its own, both read by the tag pass. */
