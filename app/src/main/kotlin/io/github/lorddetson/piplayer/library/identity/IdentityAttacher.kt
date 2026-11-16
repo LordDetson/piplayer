@@ -4,9 +4,11 @@ import android.util.Log
 import androidx.room3.withWriteTransaction
 import io.github.lorddetson.piplayer.library.db.KeyedFileRow
 import io.github.lorddetson.piplayer.library.db.LibraryDatabase
+import io.github.lorddetson.piplayer.library.db.UnreadPlace
 import io.github.lorddetson.piplayer.library.playlists.PlaylistHints
 import io.github.lorddetson.piplayer.library.sync.LibrarySync
 import io.github.lorddetson.piplayer.library.tagpass.DurationSource
+import io.github.lorddetson.piplayer.library.tagpass.TagPass
 import io.github.lorddetson.piplayer.tagging.TagReadGuard
 import io.github.lorddetson.piplayer.userdata.TrackIdentityEntity
 import io.github.lorddetson.piplayer.userdata.UserDatabase
@@ -115,16 +117,20 @@ class IdentityAttacher(
         val now = clock()
         // The places of the files the tag pass has not read yet and will still read, at which a missing identity waits
         // (TI §10.2). They are read first: a file the tag pass reads in between is then also keyed, and step 1 attaches.
-        val (files, unread) = sync.exclusive {
+        val (files, unreadPlaces) = sync.exclusive {
             val dao = library.library()
-            val unreadPlaces = dao.unreadPlaces(TagReadGuard.UNSAFE_COUNT)
-            dao.keyedFiles().map(::keyed) to unreadPlaces.mapTo(HashSet()) { Place(it.volume, it.relativePath, it.displayName) }
+            val unreadPlaces = dao.unreadPlaces(TagPass.READER_VERSION, TagReadGuard.UNSAFE_COUNT)
+            dao.keyedFiles().map(::keyed) to unreadPlaces
         }
+        fun UnreadPlace.place() = Place(volume, relativePath, displayName)
+        val unread = unreadPlaces.mapTo(HashSet()) { it.place() }
+        // Only a file the tag pass has not tried yet holds back the file step 3 would give the waiting identity.
+        val untried = unreadPlaces.filterNot { it.tried }.mapTo(HashSet()) { it.place() }
         val dao = user.identities()
         val stored = dao.identities()
         val holding = holders()
         val hints = playlists?.identityHints().orEmpty()
-        val plan = IdentityMatcher.plan(files, stored.map(::identity), holding, now, unread)
+        val plan = IdentityMatcher.plan(files, stored.map(::identity), holding, now, unread, untried)
         if (!plan.isEmpty) {
             write(plan, stored.associateBy { it.id }, now)
             changes.value++

@@ -385,15 +385,17 @@ interface LibraryDao {
     /**
      * The places of the files the tag pass has not read yet and will still read, at which a missing identity waits for
      * that read (TI §10.2 "An identity at Apply", docs/library.md §8.2): not tried yet, or tried with a failure that a
-     * later process tries again (an empty reader version), below [unsafeCount] failures and outside excluded folders,
-     * as [unreadFiles] picks them.
+     * later process tries again (an empty reader version) or that a reader newer than its [readerVersion] reads again,
+     * below [unsafeCount] failures and outside excluded folders, as [unreadFiles] picks them; each says whether the tag
+     * pass has tried it.
      */
     @Query(
-        "SELECT id AS fileId, volume_name AS volume, relative_path AS relativePath, display_name AS displayName " +
-            "FROM audio_file WHERE tag_pass_at IS NULL AND (tag_failure IS NULL OR reader_version IS NULL) " +
+        "SELECT volume_name AS volume, relative_path AS relativePath, display_name AS displayName, " +
+            "tag_failure IS NOT NULL AS tried FROM audio_file WHERE tag_pass_at IS NULL " +
+            "AND (tag_failure IS NULL OR reader_version IS NULL OR reader_version < :readerVersion) " +
             "AND unsafe_count < :unsafeCount AND folder_rule != 2",
     )
-    suspend fun unreadPlaces(unsafeCount: Int): List<StoredPlace>
+    suspend fun unreadPlaces(readerVersion: Int, unsafeCount: Int): List<UnreadPlace>
 
     /**
      * The file [fileId] as Apply gives it an identity (TI §10.2 "An identity at Apply"), also before the tag pass has
@@ -619,6 +621,9 @@ data class SongPlaceRow(val fileId: Long, val albumKey: String?, val volume: Str
 
 /** A file with its ID and place, as a rebuild keeps it (docs/library.md §8.5). */
 data class StoredPlace(val fileId: Long, val volume: String, val relativePath: String, val displayName: String)
+
+/** The place of a file the tag pass will still read, and whether it has tried the file (TI §10.2 "An identity at Apply"). */
+data class UnreadPlace(val volume: String, val relativePath: String, val displayName: String, val tried: Boolean)
 
 /** A file with its place, key, stored length and display values, as a playlist entry finds it (docs/library.md §16.2). */
 data class PlaylistFileRow(

@@ -90,7 +90,8 @@ object IdentityMatcher {
     /**
      * The changes that attach [identities] to [files]: [holdingData] are the identities that user data refers to, which
      * are never deleted; [now] is the time of the pass; [unread] are the places of the library's files that the tag pass
-     * has not read yet and will still read, at which a missing identity waits ([waitsForRead]).
+     * has not read yet and will still read, at which a missing identity waits ([waitsForRead]); [untried] are those of
+     * them the tag pass has not tried yet, for which a waiting identity also holds back the file step 3 would give it.
      */
     fun plan(
         files: List<KeyedFile>,
@@ -98,6 +99,7 @@ object IdentityMatcher {
         holdingData: Set<Long>,
         now: Long,
         unread: Set<Place> = emptySet(),
+        untried: Set<Place> = unread,
     ): AttachPlan {
         val filesByKey = files.groupBy { it.contentKey }
         val heldKeys = identities.mapTo(HashSet()) { it.contentKey }
@@ -140,10 +142,14 @@ object IdentityMatcher {
             if (mbid in pendingMbids) continue
             val file = unattachedByMbid[mbid]?.singleOrNull() ?: continue
             if (!withinWindow(file.durationMs, identity.durationMs)) continue
-            unattached -= file
             // One that waits for the read of the file at its hint still counted above, so that no other one takes the
-            // file, and the file is held back without a new identity, so that this step can still give it once it ends.
-            if (waitsForRead(identity, unread)) continue
+            // file. Until the tag pass has tried that file, the file here is held back without a new identity, so that
+            // this step can still give it once the wait ends; a file the tag pass fails on in every process holds none.
+            if (waitsForRead(identity, unread)) {
+                if (identity.hint in untried) unattached -= file
+                continue
+            }
+            unattached -= file
             result[identity.id] = identity.following(file)
         }
 
@@ -179,8 +185,8 @@ object IdentityMatcher {
      * Whether the missing [identity] waits for the tag pass to read the file at its hint (TI §10.2 "An identity at
      * Apply"): [unread] are the places of the library's files that the tag pass has not read yet and will still read.
      * Apply may have given the identity the key stage 0 computed for that file, which the library holds only once the tag
-     * pass has read it, so steps 3 to 5 do not move it meanwhile, and the file step 3 would give it gets no new identity;
-     * step 2 only gives it the file at its hint, so it runs.
+     * pass has read it, so steps 3 to 5 do not move it meanwhile, and until the tag pass has tried the file at its hint,
+     * the file step 3 would give it gets no new identity; step 2 only gives it the file at its hint, so it runs.
      */
     fun waitsForRead(identity: Identity, unread: Set<Place>): Boolean = identity.hint?.let { it in unread } == true
 
