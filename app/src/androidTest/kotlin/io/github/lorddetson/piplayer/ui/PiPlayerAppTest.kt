@@ -39,14 +39,12 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionResult
-import androidx.room3.withWriteTransaction
 import androidx.test.espresso.Espresso
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import io.github.lorddetson.piplayer.MainActivity
 import io.github.lorddetson.piplayer.R
 import io.github.lorddetson.piplayer.TestFiles
-import io.github.lorddetson.piplayer.covers.Covers
 import io.github.lorddetson.piplayer.library.FakeMediaIndex
 import io.github.lorddetson.piplayer.library.FakeMediaIndex.Companion.row
 import io.github.lorddetson.piplayer.library.Library
@@ -76,15 +74,20 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.ExternalResource
 import org.junit.rules.RuleChain
+import org.junit.runner.Description
 import org.junit.runner.RunWith
+import org.junit.runners.model.Statement
 
 /**
  * The app with the playback service: the mini player, Now Playing, back and predictive back, edge-to-edge, and the
  * picture embedded in a file there (docs/playback.md §3.1 to §3.4, §3.9; docs/library.md §13.5).
  *
- * Bravo is a file of the library, over a test index whose row is a real file of the media index, so that it plays and
- * the cover loader reads its picture: since M3 step 21 the session gives a library song no picture of the stream, so its
- * cover comes only through the cover order (docs/library.md §13.1, §13.6). Alpha is a song of the test's own list only.
+ * In a test marked [WithLibraryFile], Bravo is a file of the library, over a test index whose row is a real file of the
+ * media index, so that it plays and the cover loader reads its picture: since M3 step 21 the session gives a library song
+ * no picture of the stream, so its cover comes only through the cover order (docs/library.md §13.1, §13.6). That order
+ * tries the embedded picture and then the system thumbnail of the same file, so the test shows "embedded or thumbnail"
+ * and does not tell the two steps apart. In the other tests Bravo, like Alpha, is a song of the test's own list only,
+ * without a picture, so that only that one test puts a file into the device's media index.
  */
 @OptIn(ExperimentalTestApi::class)
 @RunWith(AndroidJUnit4::class)
@@ -93,14 +96,28 @@ class PiPlayerAppTest {
     private val context = TestFiles.targetContext
     private val index = FakeMediaIndex()
 
-    /** Bravo as the library gives it. */
+    /** Bravo as the library gives it in a test marked [WithLibraryFile], else a song of the test's own list. */
     private lateinit var bravo: Song
     private var inserted: Uri? = null
 
-    /** Puts Bravo's file into the media index and the library before the list is read and the activity starts. */
+    /**
+     * In a test marked [WithLibraryFile], puts Bravo's file into the media index and the library before the list is read
+     * and the activity starts.
+     */
     private val libraryFile = object : ExternalResource() {
+        private var wanted = false
+
+        override fun apply(base: Statement, description: Description): Statement {
+            wanted = description.getAnnotation(WithLibraryFile::class.java) != null
+            return super.apply(base, description)
+        }
+
         override fun before() {
             deleteLeftovers()
+            if (!wanted) {
+                bravo = SongSourceRule.song(2, "Bravo").copy(id = ALPHA_ID + 1)
+                return
+            }
             try {
                 val store = insert(NAME, TestFiles.assets.open(COVER_FIXTURE).use { it.readBytes() })
                 // The index row names the file as the media index holds it.
@@ -111,18 +128,8 @@ class PiPlayerAppTest {
                 val id = runBlocking {
                     Library.sync(context).sync()
                     Library.sync(context).awaitIdle()
-                    val database = Library.database(context)
-                    // What the tag pass stores on a device once it finds the picture; the test runner keeps the pass off.
-                    database.withWriteTransaction {
-                        usePrepared("UPDATE audio_file SET embedded_cover_present = 1 WHERE media_store_id = ?") { statement ->
-                            statement.bindLong(1, store)
-                            statement.step()
-                        }
-                    }
-                    database.library().files().single { it.mediaStoreId == store }.id
+                    Library.database(context).library().files().single { it.mediaStoreId == store }.id
                 }
-                // So the cover order takes the picture at its embedded step (docs/library.md §13.1).
-                check(runBlocking { Covers.facts(context).file(id)?.embedded } == true) { "Bravo's picture is not marked as found" }
                 bravo = checkNotNull(SongList.songsById(context, listOf(id))[id]) { "No song $id" }
             } catch (e: Throwable) {
                 // JUnit does not call after() when before() fails.
@@ -139,7 +146,7 @@ class PiPlayerAppTest {
 
     private val songs = SongSourceRule {
         listOf(
-            // An ID the test's library does not hold, so that Bravo's file does not stand behind Alpha too.
+            // IDs the test's library does not hold, so that Bravo's file does not stand behind Alpha too.
             SongSourceRule.song(1, "Alpha", PlaybackTesting.LONG_FIXTURE).copy(id = ALPHA_ID),
             bravo,
         )
@@ -290,11 +297,15 @@ class PiPlayerAppTest {
     private fun near(color: Int, expected: Int) =
         listOf(16, 8, 0).all { shift -> kotlin.math.abs((color shr shift and 0xFF) - (expected shr shift and 0xFF)) <= 12 }
 
-    /** Waits until [matcher] finds one cover whose middle has the color of the fixture's front cover. */
-    private fun awaitFrontCover(where: String, matcher: SemanticsMatcher) {
+    /**
+     * Waits until [matcher] finds one cover whose middle has the color of the fixture's front cover, failing at once when
+     * [current] is given and the session's current item is no longer that one.
+     */
+    private fun awaitFrontCover(where: String, matcher: SemanticsMatcher, current: String? = null) {
         var shown: Int? = null
         try {
             compose.waitUntil(timeoutMillis = 10_000) {
+                current?.let(::assertCurrent)
                 shown = centerColor(matcher)
                 shown?.let { near(it, FRONT_COLOR) } == true
             }
@@ -305,6 +316,7 @@ class PiPlayerAppTest {
     }
 
     @Test
+    @WithLibraryFile
     fun aLibrarySongsEmbeddedPictureShowsInTheMiniPlayerAndOnNowPlaying() {
         playAndPause("Bravo")
         assertThat(onMain { controller.currentMediaItem?.mediaId }?.let(QueueIds::fileId)).describedAs("a song of the library")
@@ -313,6 +325,11 @@ class PiPlayerAppTest {
         awaitFrontCover("the mini player", cover and inMiniPlayer)
         openNowPlaying()
         awaitFrontCover("Now Playing", cover and inNowPlaying)
+    }
+
+    /** Fails unless the session's current item is [mediaId]. */
+    private fun assertCurrent(mediaId: String) {
+        assertThat(onMain { controller.currentMediaItem?.mediaId }).describedAs("the session's current item").isEqualTo(mediaId)
     }
 
     @Test
@@ -324,12 +341,20 @@ class PiPlayerAppTest {
         val result = onMain { controller.sendCustomCommand(PlaybackSessionCallback.OPEN_COMMAND, arguments) }.get(10, TimeUnit.SECONDS)
 
         assertThat(result.resultCode).isEqualTo(SessionResult.RESULT_SUCCESS)
-        controller.waitUntil("the opened file is the current item") { currentMediaItem?.mediaId == file }
-        awaitFrontCover("the mini player", cover and inMiniPlayer)
+        controller.waitUntil("the opened file plays") { isPlaying && currentMediaItem?.mediaId == file }
+        /*
+         * The file lasts 2 s and goes in after the current item of a queue an earlier test left (docs/playback.md §5.1),
+         * so it is paused to stay the subject: the next item must not answer for it.
+         */
+        onMain { controller.pause() }
+        assertCurrent(file)
+        awaitFrontCover("the mini player", cover and inMiniPlayer, current = file)
         openNowPlaying()
-        awaitFrontCover("Now Playing", cover and inNowPlaying)
+        awaitFrontCover("Now Playing", cover and inNowPlaying, current = file)
         // The screens take it from the session's metadata: no cover loader knows an opened file (docs/playback.md §5.2).
-        assertThat(onMain { controller.mediaMetadata.artworkData }).describedAs("the stream's picture in the session").isNotNull()
+        val (current, artwork) = onMain { controller.currentMediaItem?.mediaId to controller.mediaMetadata.artworkData }
+        assertThat(current).describedAs("the session's current item").isEqualTo(file)
+        assertThat(artwork).describedAs("the stream's picture in the session").isNotNull()
     }
 
     @Test
@@ -436,3 +461,8 @@ class PiPlayerAppTest {
         const val ALPHA_ID = 1_000_000L
     }
 }
+
+/** A test of [PiPlayerAppTest] whose Bravo is a file of the library, put into the device's media index for it alone. */
+@Target(AnnotationTarget.FUNCTION)
+@Retention(AnnotationRetention.RUNTIME)
+private annotation class WithLibraryFile
