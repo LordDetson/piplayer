@@ -10,7 +10,7 @@ import org.junit.jupiter.api.Test
 
 /**
  * The debug spike's fingerprint cache (TI §3 "One run"): it decodes the way the app's does but keeps what it finds in
- * memory, so a spike run, whose gate is not the user's, writes nothing to the library database.
+ * memory, so a spike run, whose gate is not the user's, writes nothing to the library database's fingerprint cache.
  */
 class SpikeFingerprintCacheTest {
 

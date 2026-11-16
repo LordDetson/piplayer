@@ -9,7 +9,7 @@ import java.util.concurrent.ConcurrentHashMap
 /**
  * The debug spike's fingerprint cache (TI §3 "One run"): [decode] decodes a file as the app's cache does, and what it
  * finds stays in memory with the AcoustID track ID of its lookup. A spike run sends behind its own gate, not the user's
- * choice, so it writes nothing to the library database, whose cache the app's own runs fill.
+ * choice, so it writes nothing to the library database's fingerprint cache, which the app's own runs fill.
  */
 class SpikeFingerprintCache(private val decode: suspend (LocalFile) -> ComputedFingerprint) : FingerprintCache {
 

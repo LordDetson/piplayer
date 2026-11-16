@@ -22,7 +22,8 @@ import kotlin.time.TimeSource
  * own, with one rate limiter per provider (TI §8, §9), behind [SpikeGate], which is open only while a spike run goes on.
  * The app's services stay behind the user's own choice, so in a debug process the spike can send while lookups are off.
  * For that reason its fingerprints stay in a cache of its own in memory ([SpikeFingerprintCache]): a spike run writes
- * nothing to the library database.
+ * nothing to the library database's fingerprint cache. Its reads through `:tagger` still keep the read counts every
+ * read keeps (TI §7.2 step 11).
  */
 object SpikeServices {
 

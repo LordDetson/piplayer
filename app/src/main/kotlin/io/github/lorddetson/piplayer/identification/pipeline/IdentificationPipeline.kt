@@ -41,7 +41,8 @@ import kotlin.time.TimeSource
 class IdentificationPipeline(
     private val services: IdentificationServices,
     private val local: LocalStage,
-    private val fingerprints: FingerprintCache,
+    /** The fingerprint cache of stage 3; readable so that a test can check which cache a pipeline was built over. */
+    internal val fingerprints: FingerprintCache,
     private val encoder: FingerprintEncoder,
     private val country: () -> String? = { Locale.getDefault().country.ifEmpty { null } },
     private val timeSource: TimeSource = TimeSource.Monotonic,

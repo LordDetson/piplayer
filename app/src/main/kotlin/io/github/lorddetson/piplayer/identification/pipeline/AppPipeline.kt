@@ -91,23 +91,24 @@ object AppPipeline {
      * The app's pipeline: the app's services, whose gate is the user's stored choice (TI §9) and which a run waits to
      * read, stage 0 through the library and `:tagger`, the library's fingerprint cache and the native encoder.
      */
-    fun of(context: Context): IdentificationPipeline = over(context, IdentificationServices.of(context))
+    fun of(context: Context): IdentificationPipeline = over(
+        context = context,
+        services = IdentificationServices.of(context),
+        fingerprints = LibraryFingerprintCache(context.applicationContext, LibraryAccess.app(context)),
+    )
 
     /**
-     * The same parts over [services], such as the debug spike's own, with [fingerprints] instead of the library's
-     * fingerprint cache when given (the spike keeps its own in memory, TI §3 "One run").
+     * The same stage 0 and encoder over [services] and [fingerprints], such as the debug spike's own, which keeps its
+     * fingerprints in memory (TI §3 "One run"). The cache has no default, so a caller always names the one it fills.
      */
     fun over(
         context: Context,
         services: IdentificationServices,
-        fingerprints: FingerprintCache? = null,
-    ): IdentificationPipeline {
-        val library = LibraryAccess.app(context)
-        return IdentificationPipeline(
-            services = services,
-            local = AndroidLocalStage(context, Tagger.client(context), library),
-            fingerprints = fingerprints ?: LibraryFingerprintCache(context.applicationContext, library),
-            encoder = ChromaprintEncoder,
-        )
-    }
+        fingerprints: FingerprintCache,
+    ): IdentificationPipeline = IdentificationPipeline(
+        services = services,
+        local = AndroidLocalStage(context, Tagger.client(context), LibraryAccess.app(context)),
+        fingerprints = fingerprints,
+        encoder = ChromaprintEncoder,
+    )
 }
