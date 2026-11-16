@@ -125,6 +125,7 @@ class ReviewScreenTest {
             text(R.string.review_stage_with_score, text(R.string.review_stage_fingerprint), score),
             text(R.string.review_reason_duration, "+1"),
             text(R.string.review_reason_title, percent.format(0.92)),
+            text(R.string.review_reason_also, text(R.string.review_stage_text)),
         ).joinToString(" · ")
         compose.onNodeWithTag(ReviewTags.REASON).assert(hasText(reason))
     }
@@ -220,7 +221,7 @@ class ReviewScreenTest {
         show(backend)
 
         waitForText(text(R.string.identification_disclosure_title))
-        compose.onNode(hasText(text(R.string.identification_enable)) and isButton()).performScrollTo().performClick()
+        compose.onNode(hasText(text(R.string.identification_enable)) and isButton()).performClick()
 
         waitForCard()
         assertThat(backend.calls.take(3)).containsExactly("identify ${ReviewFixtures.libraryFile}", "enable", "identify ${ReviewFixtures.libraryFile}")
@@ -232,7 +233,7 @@ class ReviewScreenTest {
         show(backend)
 
         waitForText(text(R.string.identification_disclosure_title))
-        compose.onNode(hasText(text(R.string.identification_not_now)) and isButton()).performScrollTo().performClick()
+        compose.onNode(hasText(text(R.string.identification_not_now)) and isButton()).performClick()
 
         compose.waitUntil(10_000) { closed }
         assertThat(backend.calls).endsWith("not now")
