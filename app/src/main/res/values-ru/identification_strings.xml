@@ -126,4 +126,46 @@
     <string name="review_skip_failed">«Пропустить» не удалось сохранить.</string>
     <string name="review_undo_failed">Отменить не удалось.</string>
     <string name="review_edition_failed">Релиз этого варианта не удалось загрузить.</string>
+    <!-- Экран проверки B (TI §6, шаг 20) -->
+    <string name="review_choose_edition">Выбрать издание</string>
+    <string name="review_search_manually">Искать вручную</string>
+    <string name="review_choose_cover">Выбрать обложку</string>
+    <string name="review_edit_fields">Изменить поля</string>
+    <string name="review_close">Закрыть</string>
+    <string name="review_suggested_edition">Предложенное издание</string>
+    <string name="review_chosen_edition">Показано в карточке</string>
+    <string name="review_without_song">Нет этой песни</string>
+    <string name="review_editions_partial">Список неполный: %1$d из %2$d изданий</string>
+    <string name="review_editions_failed">Издания не удалось загрузить.</string>
+    <string name="review_edition_open_failed">Это издание не удалось загрузить.</string>
+    <plurals name="review_track_count">
+        <item quantity="one">%d трек</item>
+        <item quantity="few">%d трека</item>
+        <item quantity="many">%d треков</item>
+        <item quantity="other">%d трека</item>
+    </plurals>
+    <string name="review_search_label">Название и исполнитель или ссылка MusicBrainz</string>
+    <string name="review_search">Найти</string>
+    <string name="review_search_refused">Вставьте ссылку на запись или релиз MusicBrainz.</string>
+    <string name="review_search_nothing">Ничего не найдено.</string>
+    <string name="review_search_not_found">В MusicBrainz нет записи или релиза с этим ID.</string>
+    <string name="review_search_failed">Поиск не удалось отправить, или ответа нет.</string>
+    <string name="review_band_low">Низкая уверенность</string>
+    <string name="review_covers_release">Этот релиз</string>
+    <string name="review_covers_embedded">В файле</string>
+    <string name="review_covers_no_images">У этого релиза нет изображений в Cover Art Archive.</string>
+    <string name="review_covers_failed">Изображения этого релиза не удалось загрузить.</string>
+    <string name="review_covers_no_embedded">В файле нет картинок.</string>
+    <string name="review_cover_image_failed">Это изображение не удалось загрузить.</string>
+    <string name="review_cover_chosen">Ваш выбор</string>
+    <string name="review_your_edit">Ваша правка</string>
+    <string name="review_save">Сохранить</string>
+    <string name="review_editor_total">Всего</string>
+    <string name="review_editor_digits">Только цифры</string>
+    <string name="review_editor_list">Значения через ;</string>
+    <string name="review_edit_failed">Сохранено, но ваши значения сохранить не удалось.</string>
+    <string name="review_play_snippet">Прослушать фрагмент</string>
+    <string name="review_stop_snippet">Остановить фрагмент</string>
+    <string name="review_snippet_failed">Фрагмент не удалось воспроизвести.</string>
+    <string name="review_snippet_refused">Фрагмент сейчас не играет: звук занят звонком.</string>
 </resources>

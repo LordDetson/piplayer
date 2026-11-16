@@ -139,4 +139,44 @@
     <string name="review_skip_failed">Skip could not be saved.</string>
     <string name="review_undo_failed">It could not be undone.</string>
     <string name="review_edition_failed">The release of this candidate could not be loaded.</string>
+    <!-- Review screen B (TI §6, step 20) -->
+    <string name="review_choose_edition">Choose edition</string>
+    <string name="review_search_manually">Search manually</string>
+    <string name="review_choose_cover">Choose cover</string>
+    <string name="review_edit_fields">Edit fields</string>
+    <string name="review_close">Close</string>
+    <string name="review_suggested_edition">Suggested edition</string>
+    <string name="review_chosen_edition">Shown on the card</string>
+    <string name="review_without_song">Does not contain this song</string>
+    <string name="review_editions_partial">Partial list: %1$d of %2$d editions</string>
+    <string name="review_editions_failed">The editions could not be loaded.</string>
+    <string name="review_edition_open_failed">This edition could not be loaded.</string>
+    <plurals name="review_track_count">
+        <item quantity="one">%d track</item>
+        <item quantity="other">%d tracks</item>
+    </plurals>
+    <string name="review_search_label">Title and artist, or a MusicBrainz link</string>
+    <string name="review_search">Search</string>
+    <string name="review_search_refused">Paste a link to a MusicBrainz recording or release.</string>
+    <string name="review_search_nothing">Nothing found.</string>
+    <string name="review_search_not_found">MusicBrainz knows no recording or release with this ID.</string>
+    <string name="review_search_failed">The search could not be sent or got no answer.</string>
+    <string name="review_band_low">Low confidence</string>
+    <string name="review_covers_release">This release</string>
+    <string name="review_covers_embedded">In the file</string>
+    <string name="review_covers_no_images">This release has no images in Cover Art Archive.</string>
+    <string name="review_covers_failed">The images of this release could not be loaded.</string>
+    <string name="review_covers_no_embedded">The file has no pictures.</string>
+    <string name="review_cover_image_failed">This image could not be loaded.</string>
+    <string name="review_cover_chosen">Your choice</string>
+    <string name="review_your_edit">Your edit</string>
+    <string name="review_save">Save</string>
+    <string name="review_editor_total">Total</string>
+    <string name="review_editor_digits">Digits only</string>
+    <string name="review_editor_list">Separate values with ;</string>
+    <string name="review_edit_failed">Saved, but your own values could not be saved.</string>
+    <string name="review_play_snippet">Play snippet</string>
+    <string name="review_stop_snippet">Stop snippet</string>
+    <string name="review_snippet_failed">The snippet could not be played.</string>
+    <string name="review_snippet_refused">The snippet cannot play now: a call holds the sound.</string>
 </resources>

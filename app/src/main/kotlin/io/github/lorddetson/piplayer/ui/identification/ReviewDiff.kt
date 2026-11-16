@@ -29,9 +29,16 @@ sealed interface FieldValue {
 
 /**
  * One line of the diff: [field] with its [old] value (what track details show now) and its [new] one (the chosen
- * release's), null for none, and whether its checkbox is [ticked].
+ * release's, or the user's own when [edited]: TI §6, review screen B), null for none, and whether its checkbox is
+ * [ticked].
  */
-data class DiffLine(val field: ProtectedField, val old: FieldValue?, val new: FieldValue?, val ticked: Boolean) {
+data class DiffLine(
+    val field: ProtectedField,
+    val old: FieldValue?,
+    val new: FieldValue?,
+    val ticked: Boolean,
+    val edited: Boolean = false,
+) {
 
     /** The old and the new value are the same: the line says "No change". */
     val unchanged: Boolean get() = sameValue(old, new)
@@ -52,14 +59,51 @@ sealed interface ShownCover {
     data class Known(val width: Int, val height: Int, val bytes: Long?) : ShownCover
 }
 
+/** A cover the card proposes (TI §6): the release's front image, or an image the cover picker chose. */
+sealed interface ProposedCover {
+    val bytes: ByteArray
+
+    /** From the image header; null when the format does not say it without decoding (WebP). */
+    val size: PictureSize?
+
+    /** A release group's front image, taken from another edition (TI §5.2). */
+    val anotherEdition: Boolean
+
+    /** The release's front image of TI §5.2, which Apply stores with the identification. */
+    class Front(val image: CoverImage) : ProposedCover {
+        override val bytes: ByteArray get() = image.bytes
+        override val size: PictureSize? get() = image.size
+        override val anotherEdition: Boolean get() = image.anotherEdition
+
+        override fun equals(other: Any?): Boolean = other is Front && other.image === image
+
+        override fun hashCode(): Int = System.identityHashCode(image)
+
+        override fun toString(): String = "Front($image)"
+    }
+
+    /** An image the cover picker chose from [origin] (TI §6, review screen B), which Apply stores as the user's edit. */
+    class Chosen(override val bytes: ByteArray, override val size: PictureSize?, val origin: Origin) : ProposedCover {
+        override val anotherEdition: Boolean get() = false
+
+        override fun toString(): String = "Chosen($origin, $size, ${bytes.size} bytes)"
+    }
+
+    /** Where a chosen image comes from. */
+    enum class Origin { RELEASE_INDEX, EMBEDDED }
+}
+
 /**
  * The cover line of the diff: the cover shown now ([old]), the proposed image ([new]) and whether its checkbox is
  * [ticked].
  */
-data class CoverLine(val old: ShownCover, val new: CoverImage, val ticked: Boolean) {
+data class CoverLine(val old: ShownCover, val new: ProposedCover, val ticked: Boolean) {
 
     /** An own cover wins, so it stays on top whatever Apply saves. */
     val ownStaysOnTop: Boolean get() = old is ShownCover.Own
+
+    /** The image is the cover picker's, which Apply stores as the user's edit. */
+    val chosen: Boolean get() = new is ProposedCover.Chosen
 }
 
 /** Builds the diff of the review (TI §6, review screen A). */
@@ -171,19 +215,69 @@ object ReviewDiff {
      */
     suspend fun coverLine(shown: ShownCover, image: CoverImage?, protected: Set<ProtectedField> = emptySet()): CoverLine? {
         if (image?.source == null || ProtectedField.COVER in protected) return null
-        val ticked = when (shown) {
-            // A saved cover ranks below own covers: it would change nothing shown while the own cover stays.
-            is ShownCover.Own -> false
-            ShownCover.None -> CoverSizeRule.startsTicked(image.size, CurrentCover.None, NO_PROBE)
-            ShownCover.Thumbnail -> CoverSizeRule.startsTicked(image.size, CurrentCover.SystemThumbnail, NO_PROBE)
-            is ShownCover.Known -> CoverSizeRule.startsTicked(image.size, CurrentCover.Known(PictureSize(shown.width, shown.height)), NO_PROBE)
+        return CoverLine(shown, ProposedCover.Front(image), startsTicked(shown, image.size))
+    }
+
+    /**
+     * The cover line for an image the cover picker [chosen] (TI §6, review screen B): its checkbox starts by the size rule
+     * against the cover [shown] now, as the proposed cover's does. Null with the cover protected.
+     */
+    suspend fun chosenLine(shown: ShownCover, chosen: ProposedCover.Chosen, protected: Set<ProtectedField> = emptySet()): CoverLine? {
+        if (ProtectedField.COVER in protected) return null
+        return CoverLine(shown, chosen, startsTicked(shown, chosen.size))
+    }
+
+    /** Whether a cover of [size] starts ticked over the cover [shown] now (TI §5.2, §6). */
+    private suspend fun startsTicked(shown: ShownCover, size: PictureSize?): Boolean = when (shown) {
+        // A saved cover ranks below own covers: it would change nothing shown while the own cover stays.
+        is ShownCover.Own -> false
+        ShownCover.None -> CoverSizeRule.startsTicked(size, CurrentCover.None, NO_PROBE)
+        ShownCover.Thumbnail -> CoverSizeRule.startsTicked(size, CurrentCover.SystemThumbnail, NO_PROBE)
+        is ShownCover.Known -> CoverSizeRule.startsTicked(size, CurrentCover.Known(PictureSize(shown.width, shown.height)), NO_PROBE)
+    }
+
+    /**
+     * [lines] with the user's [edits] of Edit fields (TI §6, review screen B) over the release's [proposed] values: an
+     * edited field's line holds the user's value as its new one, marked as edited and ticked; an edit equal to the
+     * release's value is none and leaves the release's line. A field without a line gets one, in the list's order.
+     */
+    fun withEdits(
+        lines: List<DiffLine>,
+        current: Map<ProtectedField, FieldValue>,
+        proposed: Map<ProtectedField, FieldValue>,
+        edits: Map<ProtectedField, FieldValue?>,
+    ): List<DiffLine> {
+        // An edit equal to the release's value (an emptied field where the release has none included) is no edit.
+        val real = edits.filter { (field, value) -> field != ProtectedField.COVER && !sameValue(value, proposed[field]) }
+        if (real.isEmpty()) return lines
+        val byField = lines.associateBy { it.field }
+        return ProtectedField.entries.mapNotNull { field ->
+            if (field in real) {
+                DiffLine(field, current[field]?.takeIf(::present), real[field]?.takeIf(::present), ticked = true, edited = true)
+            } else {
+                byField[field]
+            }
         }
-        return CoverLine(shown, image, ticked)
     }
 
     /** The fields Apply stores: the ticked lines' and the cover when its line is ticked. */
     fun fields(lines: List<DiffLine>, cover: CoverLine?): Set<ProtectedField> =
         lines.filter { it.ticked }.mapTo(LinkedHashSet()) { it.field }.apply { if (cover?.ticked == true) add(ProtectedField.COVER) }
+
+    /**
+     * What Apply stores of a card (TI §6, review screen B): the identification's fields (the ticked lines with the
+     * release's values, and the proposed cover when ticked), and the user's own values (the ticked edited lines) with the
+     * ticked chosen cover for the edit decision after it.
+     */
+    fun split(lines: List<DiffLine>, cover: CoverLine?): ApplyParts {
+        val ticked = lines.filter { it.ticked }
+        val identification = ticked.filter { !it.edited }.mapTo(LinkedHashSet()) { it.field }
+        val coverTicked = cover?.ticked == true
+        if (coverTicked && cover?.new is ProposedCover.Front) identification += ProtectedField.COVER
+        val edits = ticked.filter { it.edited }.associate { it.field to it.new }
+        val chosen = (cover?.new as? ProposedCover.Chosen)?.takeIf { coverTicked }
+        return ApplyParts(identification, edits, chosen)
+    }
 
     /** The ID rows of track details, which the diff takes as one set. */
     private val ID_FIELDS = listOf(
@@ -205,6 +299,19 @@ object ReviewDiff {
     private fun text(value: String?): FieldValue.Text? = value?.trim()?.takeIf { it.isNotEmpty() }?.let(FieldValue::Text)
 
     private fun plain(id: String): String? = id.trim().lowercase().takeIf { it.isNotEmpty() }
+}
+
+/**
+ * What Apply stores (TI §6, review screen B): the [identification]'s fields, and the user's own [edits] with the
+ * [chosen] cover, which go into one edit decision after it.
+ */
+data class ApplyParts(
+    val identification: Set<ProtectedField>,
+    val edits: Map<ProtectedField, FieldValue?>,
+    val chosen: ProposedCover.Chosen?,
+) {
+    /** Whether anything goes into the edit decision. */
+    val hasEdit: Boolean get() = edits.isNotEmpty() || chosen != null
 }
 
 /** Whether [value] is a value at all: the compilation flag off and an empty set of IDs are none. */

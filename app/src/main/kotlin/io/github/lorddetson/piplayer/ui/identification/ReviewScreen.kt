@@ -1,6 +1,7 @@
 package io.github.lorddetson.piplayer.ui.identification
 
 import android.app.Application
+import androidx.activity.compose.BackHandler
 import android.graphics.BitmapFactory
 import android.text.format.DateFormat
 import android.text.format.Formatter
@@ -38,7 +39,11 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
@@ -77,6 +82,8 @@ import io.github.lorddetson.piplayer.identification.release.ReleaseDetailsExtrac
 import io.github.lorddetson.piplayer.identification.score.Band
 import io.github.lorddetson.piplayer.identification.score.HintField
 import io.github.lorddetson.piplayer.identification.score.Source
+import io.github.lorddetson.piplayer.playback.PlaybackConnection
+import io.github.lorddetson.piplayer.playback.snippet.SnippetPlayer
 import io.github.lorddetson.piplayer.settings.ProtectedField
 import io.github.lorddetson.piplayer.ui.covers.LibraryCover
 import io.github.lorddetson.piplayer.ui.settings.protectedFieldLabel
@@ -95,7 +102,25 @@ object ReviewTags {
     const val REASON = "review_reason"
     const val COVER_LINE = "review_cover_line"
 
+    /** Review screen B (step 20): the panel shown in place of the card, its rows and fields, and the snippet. */
+    const val PANEL = "review_panel"
+    const val SEARCH_FIELD = "review_search_field"
+    const val SNIPPET = "review_snippet"
+    const val SNIPPET_PROGRESS = "review_snippet_progress"
+
     fun line(field: ProtectedField) = "review_line_${field.stored}"
+
+    fun edition(index: Int) = "review_edition_$index"
+
+    fun result(index: Int) = "review_result_$index"
+
+    fun coverImage(index: Int) = "review_cover_image_$index"
+
+    fun embeddedImage(index: Int) = "review_embedded_image_$index"
+
+    fun editorField(field: ProtectedField) = "review_editor_${field.stored}"
+
+    fun editorTotal(field: ProtectedField) = "review_editor_${field.stored}_total"
 }
 
 /** The review of one file, which runs its identification once when the screen first opens (TI §6). */
@@ -113,12 +138,29 @@ fun ReviewScreen(fileId: Long?, uri: String?, onBack: () -> Unit) {
     val app = LocalContext.current.applicationContext as Application
     val file = fileId?.let { FileRef.Library(it) } ?: FileRef.Opened(uri.orEmpty())
     val model = viewModel(key = "review ${fileId ?: uri}") { ReviewViewModel(app, file) }
+    // The snippet's player pauses and resumes the main player through a controller of the playback service (TI §6).
+    var snippet by remember { mutableStateOf<SnippetPlayer?>(null) }
+    DisposableEffect(app) {
+        val connection = PlaybackConnection(app)
+        var disposed = false
+        // Both run on the main thread; a connection that comes after the screen went makes no player.
+        connection.whenConnected { if (!disposed) snippet = SnippetPlayer.create(app, this) }
+        onDispose {
+            disposed = true
+            snippet?.stop()
+            snippet = null
+            connection.release()
+        }
+    }
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text(stringResource(R.string.identify), modifier = Modifier.semantics { heading() }) },
                 navigationIcon = {
-                    IconButton(onClick = onBack) { Icon(painterResource(R.drawable.ic_back), stringResource(R.string.library_back)) }
+                    // Back closes a panel of review screen B first.
+                    IconButton(onClick = { if (!model.review.closePanel()) onBack() }) {
+                        Icon(painterResource(R.drawable.ic_back), stringResource(R.string.library_back))
+                    }
                 },
             )
         },
@@ -129,13 +171,14 @@ fun ReviewScreen(fileId: Long?, uri: String?, onBack: () -> Unit) {
             Modifier.padding(padding),
             // The cover the loader resolves now (docs/library.md §13.1); an opened file shows only its line's text.
             oldCover = fileId?.let { id -> { LibraryCover(CoverRequest.Track(id), null, size = COVER_DP.dp, shape = RoundedCornerShape(4.dp)) } },
+            snippetPlayer = snippet,
         )
     }
 }
 
 /**
- * The review of [model] (TI §6, review screen A); [onBack] closes it. [oldCover] draws the cover shown now beside the
- * cover line, and [snippet] is the place of the snippet button on the card (step 20).
+ * The review of [model] (TI §6, review screens A and B); [onBack] closes it. [oldCover] draws the cover shown now beside
+ * the cover line, and [snippetPlayer] plays the snippet of the card's button (step 20), none without a player.
  */
 @Composable
 fun ReviewContent(
@@ -143,10 +186,13 @@ fun ReviewContent(
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
     oldCover: (@Composable () -> Unit)? = null,
-    snippet: (@Composable () -> Unit)? = null,
+    snippetPlayer: SnippetPlayer? = null,
 ) {
     val state by model.state.collectAsStateWithLifecycle()
     LaunchedEffect(state) { if (state == ReviewState.Closed) onBack() }
+    // Leaving the review stops the snippet as the card closing does (TI §6).
+    if (snippetPlayer != null) DisposableEffect(snippetPlayer) { onDispose { snippetPlayer.stop() } }
+    BackHandler(enabled = (state as? ReviewState.Ended)?.panel != null) { model.closePanel() }
     val scrolling = modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)
     when (val shown = state) {
         is ReviewState.Running -> Progress(shown.progress, model::cancel, scrolling)
@@ -158,7 +204,10 @@ fun ReviewContent(
             }
         }
         ReviewState.Failed -> Column(scrolling) { Message(stringResource(R.string.review_failed), model::retry) }
-        is ReviewState.Ended -> Ended(shown, model, scrolling, oldCover, snippet)
+        is ReviewState.Ended -> when (val panel = shown.panel) {
+            null -> Ended(shown, model, scrolling, oldCover, snippetPlayer)
+            else -> ReviewPanel(panel, model, modifier)
+        }
         ReviewState.Closed -> Unit
     }
 }
@@ -243,17 +292,20 @@ private fun Ended(
     model: ReviewModel,
     modifier: Modifier,
     oldCover: (@Composable () -> Unit)?,
-    snippet: (@Composable () -> Unit)?,
+    snippetPlayer: SnippetPlayer?,
 ) {
     Column(modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
         val card = state.card
         if (card == null) OutcomeMessage(state.outcome, model::retry)
         state.retryAt?.let { RetryAt(it) }
+        val snippet = state.snippet
+        if (card != null) CandidateCard(card)
+        // Whenever the run read the file, with a card or without (TI §6, review screen B).
+        if (snippet != null && snippetPlayer != null) SnippetButton(snippetPlayer, snippet)
         if (card != null) {
-            CandidateCard(card)
-            snippet?.invoke()
             if (card.edition == null) Text(stringResource(R.string.review_no_edition), style = MaterialTheme.typography.bodyMedium)
-            if (state.candidates.size > 1) Candidates(state, model::choose)
+            // A manual card keeps the run's candidates listed, to go back to.
+            if (state.candidates.size > 1 || (card.manual && state.candidates.isNotEmpty())) Candidates(state, model::choose)
         }
         Status(state, model::undo)
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -261,6 +313,19 @@ private fun Ended(
             if (state.keepOrSkip) {
                 OutlinedButton(onClick = model::keepAsIs, enabled = !state.busy) { Text(stringResource(R.string.review_keep_as_is)) }
                 OutlinedButton(onClick = model::skip, enabled = !state.busy) { Text(stringResource(R.string.review_skip)) }
+            }
+            // Review screen B: the panels (TI §6, step 20).
+            val panels = state.canOpenPanel
+            if (card?.edition != null) {
+                OutlinedButton(onClick = model::openEditions, enabled = panels) { Text(stringResource(R.string.review_choose_edition)) }
+                if (ProtectedField.COVER !in card.protectedFields) {
+                    OutlinedButton(onClick = model::openCovers, enabled = panels) { Text(stringResource(R.string.review_choose_cover)) }
+                }
+                OutlinedButton(onClick = model::openEditor, enabled = panels) { Text(stringResource(R.string.review_edit_fields)) }
+            }
+            // The snippet's file is the one the run read, which search needs too.
+            if (snippet != null) {
+                OutlinedButton(onClick = model::openSearch, enabled = panels) { Text(stringResource(R.string.review_search_manually)) }
             }
         }
         if (card != null && card.edition != null) Diff(card, model::toggle, oldCover)
@@ -301,6 +366,7 @@ private fun Status(state: ReviewState.Ended, onUndo: () -> Unit) {
                 ReviewNote.UNDO_FAILED -> R.string.review_undo_failed
                 ReviewNote.UNDONE -> R.string.review_undone
                 ReviewNote.EDITION_FAILED -> R.string.review_edition_failed
+                ReviewNote.EDIT_FAILED -> R.string.review_edit_failed
             },
         )
     }
@@ -375,7 +441,7 @@ private fun CoverPicture(cover: CoverState) {
 }
 
 /** [bytes] decoded at the largest power-of-two reduction whose short side still covers [px]. */
-private fun decoded(bytes: ByteArray, px: Int): ImageBitmap? {
+internal fun decoded(bytes: ByteArray, px: Int): ImageBitmap? {
     val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
     BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
     var sample = 1
@@ -411,9 +477,13 @@ private fun imageFacts(line: CoverLine): String {
 @Composable
 private fun Confidence(score: Double, band: Band) {
     val percent = percentFormat().format(score)
-    val bandName = stringResource(if (band == Band.HIGH) R.string.review_band_high else R.string.review_band_medium)
+    val bandName = stringResource(bandName(band))
     val description = stringResource(R.string.review_confidence_description, percent, bandName)
-    val color = if (band == Band.HIGH) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.tertiary
+    val color = when (band) {
+        Band.HIGH -> MaterialTheme.colorScheme.primary
+        Band.MEDIUM -> MaterialTheme.colorScheme.tertiary
+        Band.NO_MATCH -> MaterialTheme.colorScheme.outline
+    }
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -429,7 +499,7 @@ private fun Confidence(score: Double, band: Band) {
 private fun percentFormat(): NumberFormat = NumberFormat.getPercentInstance(currentLocale())
 
 @Composable
-private fun currentLocale(): Locale = LocalConfiguration.current.locales.takeIf { !it.isEmpty }?.get(0) ?: Locale.ROOT
+internal fun currentLocale(): Locale = LocalConfiguration.current.locales.takeIf { !it.isEmpty }?.get(0) ?: Locale.ROOT
 
 /** The reason's parts joined by " · " (TI §6), numbers formatted for the locale. */
 @Composable
@@ -487,7 +557,7 @@ private fun Candidates(state: ReviewState.Ended, onChoose: (Int) -> Unit) {
         modifier = Modifier.semantics { heading() },
     )
     state.candidates.take(MAX_CANDIDATES).forEachIndexed { index, match ->
-        val selected = state.card?.index == index
+        val selected = state.card?.let { !it.manual && it.index == index } == true
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
@@ -529,11 +599,15 @@ private fun DiffRow(line: DiffLine, onToggle: (ProtectedField) -> Unit) {
     val old = valueText(line.old)
     val new = valueText(line.new)
     val noChange = stringResource(R.string.review_no_change)
-    val description = if (line.unchanged) {
-        stringResource(R.string.review_line_unchanged_description, label, old, noChange)
-    } else {
-        stringResource(R.string.review_line_description, label, old, new)
-    }
+    val yourEdit = if (line.edited) stringResource(R.string.review_your_edit) else null
+    val description = listOfNotNull(
+        if (line.unchanged) {
+            stringResource(R.string.review_line_unchanged_description, label, old, noChange)
+        } else {
+            stringResource(R.string.review_line_description, label, old, new)
+        },
+        yourEdit,
+    ).joinToString(". ")
     CheckRow(line.ticked, description, Modifier.testTag(ReviewTags.line(line.field)), { onToggle(line.field) }) {
         Text(label, style = MaterialTheme.typography.labelLarge)
         if (line.unchanged) {
@@ -543,6 +617,7 @@ private fun DiffRow(line: DiffLine, onToggle: (ProtectedField) -> Unit) {
             Text(old, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Text("→ $new", style = MaterialTheme.typography.bodyMedium)
         }
+        yourEdit?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary) }
     }
 }
 
@@ -557,11 +632,12 @@ private fun CoverRow(line: CoverLine, onToggle: (ProtectedField) -> Unit, oldCov
     }
     val new = imageFacts(line)
     val anotherEdition = if (line.new.anotherEdition) stringResource(R.string.review_another_edition) else null
+    val chosen = if (line.chosen) stringResource(R.string.review_cover_chosen) else null
     val own = (line.old as? ShownCover.Own)?.let {
         stringResource(if (it.song) R.string.review_cover_own_song else R.string.review_cover_own_album)
     }
     // TalkBack reads the row by its description, so the notes shown under the values are part of it (TI §6).
-    val description = (listOf(stringResource(R.string.review_line_description, label, old, new)) + listOfNotNull(anotherEdition, own))
+    val description = (listOf(stringResource(R.string.review_line_description, label, old, new)) + listOfNotNull(chosen, anotherEdition, own))
         .joinToString(". ")
     CheckRow(line.ticked, description, Modifier.testTag(ReviewTags.COVER_LINE), { onToggle(ProtectedField.COVER) }) {
         Text(label, style = MaterialTheme.typography.labelLarge)
@@ -570,7 +646,7 @@ private fun CoverRow(line: CoverLine, onToggle: (ProtectedField) -> Unit, oldCov
             Text(old, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Text("→ $new", style = MaterialTheme.typography.bodyMedium)
-        for (note in listOfNotNull(anotherEdition, own)) {
+        for (note in listOfNotNull(chosen, anotherEdition, own)) {
             Text(note, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }

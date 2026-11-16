@@ -33,6 +33,9 @@ enum class EditionSource {
 
     /** The top of the release ranking (TI §4.2 step 2). */
     RANKING,
+
+    /** Chosen by the user in the review: in the edition picker, or a release looked up by manual search (TI §6). */
+    PICKED,
 }
 
 /**
