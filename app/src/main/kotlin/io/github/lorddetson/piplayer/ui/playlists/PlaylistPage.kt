@@ -118,7 +118,8 @@ sealed interface PlaylistHeader {
 /**
  * A playlist's page (docs/library.md §16.3): the playlist's name and count, and its entries with their songs, read and
  * resolved off the main thread again whenever the entries, the library, its hidden files, a batch of the tag pass, the
- * identities or the decided values ([SongList.changes], TI §7.1) change.
+ * identities or the decided values (TI §7.1) change; the latter also by a run for the pass's batches, as the page reads
+ * after every batch anyway (docs/library.md §3.5).
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class PlaylistPageViewModel(
@@ -144,7 +145,8 @@ class PlaylistPageViewModel(
         SongList.changes(application),
         SongList.batches,
         IdentityAttacher.changes,
-    ) { rows, _, _, _ -> rows }
+        Library.decisionVersion(application),
+    ) { rows, _, _, _, _ -> rows }
         .mapLatest { rows -> withContext(Dispatchers.IO) { Library.playlists(application).itemsOf(rows) } }
         .catch { emit(emptyList()) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), null)

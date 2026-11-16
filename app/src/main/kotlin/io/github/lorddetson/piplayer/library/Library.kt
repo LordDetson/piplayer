@@ -184,6 +184,19 @@ object Library {
      */
     fun decisionStamp(): Any? = opened.value?.decisions?.let { it to it.version.value }
 
+    /**
+     * Raised with [decisionVersion], except for a run made only for the tag pass's batches while the pass runs, whose values
+     * the song lists and tabs take after the pass (docs/library.md §3.5). It follows the library as [decisionVersion] does.
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    fun listDecisionVersion(context: Context): Flow<Long> {
+        opened(context)
+        return opened.filterNotNull().flatMapLatest { it.decisions.listVersion }
+    }
+
+    /** What tells the decided values the lists follow apart ([listDecisionVersion]), as [decisionStamp] does for all. */
+    fun listDecisionStamp(): Any? = opened.value?.decisions?.let { it to it.listVersion.value }
+
     /** Raised after every run of the mirror; it follows the library across [reopen] and a rebuild. */
     @OptIn(ExperimentalCoroutinesApi::class)
     fun mirrorVersion(context: Context): Flow<Long> {
@@ -460,7 +473,8 @@ object Library {
             ready = { sync.status.value.known },
         )
         // Before the first sync no file is known, and nothing could be matched.
-        val decisions = DecisionMirror(database, user, sync, ready = { sync.status.value.known })
+        // A run for the tag pass's batches waits in the lists while the pass runs (docs/library.md §3.5).
+        val decisions = DecisionMirror(database, user, sync, ready = { sync.status.value.known }, inPass = SongList::takeInPass)
         // The identity writes the decision mirror last followed, and whether the attach pass has run in this process.
         val identitiesSeen = java.util.concurrent.atomic.AtomicLong(IdentityAttacher.changes.value)
         val firstPass = java.util.concurrent.atomic.AtomicBoolean(true)

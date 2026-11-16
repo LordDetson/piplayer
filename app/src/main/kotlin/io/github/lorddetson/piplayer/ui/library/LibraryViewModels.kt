@@ -44,9 +44,9 @@ sealed interface GroupsState<out T> {
 /**
  * Reads a list of groups of the library (docs/library.md §6.5): when the screen starts, after every sync that changed
  * the library, a change of the hidden files or a run of the decision mirror that changed decided values ([SongList.changes],
- * §3.5), when the order or the search changes, and once more at the first start
- * after a pass of the tag pass that changed rows; never during a pass for its batches, so that nothing is grouped again
- * under the user's finger.
+ * §3.5), when the order or the search changes, and once more at the first start after a pass of the tag pass that changed
+ * rows; never during a pass for its batches, nor for the decision mirror's runs for those batches, which count as a change
+ * of the pass, so that nothing is grouped again under the user's finger.
  */
 @OptIn(FlowPreview::class)
 abstract class GroupsViewModel<T>(application: Application, val list: ListName?) : AndroidViewModel(application) {

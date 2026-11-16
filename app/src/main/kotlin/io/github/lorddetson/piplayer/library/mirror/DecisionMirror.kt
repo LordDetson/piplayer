@@ -34,6 +34,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -51,6 +52,11 @@ class DecisionMirror(
     private val sync: LibrarySync,
     /** Whether the library knows its files; before its first sync there is nothing to match. */
     private val ready: () -> Boolean = { true },
+    /**
+     * Asked when a run made only for batches of the tag pass changed values: whether the pass still runs, so that the
+     * lists take those values after it, as they take the batches' own (docs/library.md §3.5, §5.4). True also counts the
+     * run as a change of the pass.
+     */
     private val inPass: () -> Boolean = { false },
 ) {
     private val decisions = Decisions(user)
@@ -60,7 +66,14 @@ class DecisionMirror(
     /** Raised after every run that changed decided values, so that lists, Now Playing and the session read again. */
     val version: StateFlow<Long> = mutableVersion.asStateFlow()
 
-    val listVersion: StateFlow<Long> get() = version
+    private val mutableListVersion = MutableStateFlow(0L)
+
+    /**
+     * Raised with [version], except for a run made only for batches of the tag pass that ended while the pass ran
+     * ([inPass]): the song lists and the tabs follow this one, so that nothing is read or grouped again for each batch
+     * (docs/library.md §3.5, §6.5).
+     */
+    val listVersion: StateFlow<Long> = mutableListVersion.asStateFlow()
 
     /** The files each run that raised [version] changed (TI §7.1). */
     private val changes = DecidedChanges()
@@ -71,14 +84,18 @@ class DecisionMirror(
      */
     fun filesChangedAfter(seen: Long, upTo: Long): Set<Long>? = changes.after(seen, upTo)
 
-    /** Raises [version] for a run that changed [files], once they are kept for [filesChangedAfter]. Whether it changed any. */
-    private fun raised(files: List<Long>): Boolean {
+    /**
+     * Raises [version] for a run that changed [files], once they are kept for [filesChangedAfter], and [listVersion] unless
+     * the run was made only [forBatches] of the tag pass and the pass still runs. Whether it changed any.
+     */
+    private fun raised(files: List<Long>, forBatches: Boolean = false): Boolean {
         if (files.isEmpty()) return false
         synchronized(changes) {
             val next = mutableVersion.value + 1
             changes.record(next, files)
             mutableVersion.value = next
         }
+        if (!forBatches || !inPass()) mutableListVersion.update { it + 1 }
         return true
     }
 
@@ -193,7 +210,8 @@ class DecisionMirror(
                             if (asked.unlessRan && !deferred) mirrorUnlessRan()
                             if (asked.ifChanged && !deferred) mirrorIfChanged()
                             val files = (asked.files + asked.read + asked.failed).distinct().filter { it !in waiting }
-                            if (files.isNotEmpty()) mirrorFiles(files)
+                            // Only the files of batches of the tag pass, or other files too (docs/library.md §3.5).
+                            if (files.isNotEmpty()) mirrorFiles(files, forBatches = asked.files.isEmpty())
                         }
                     }
                 } catch (e: CancellationException) {
@@ -263,8 +281,11 @@ class DecisionMirror(
         raised(changed)
     }
 
-    /** The run after a batch of the tag pass: the files [fileIds], by the keys they hold now. Whether values changed. */
-    suspend fun mirrorFiles(fileIds: Collection<Long>): Boolean = running.withLock {
+    /**
+     * The run after a batch of the tag pass: the files [fileIds], by the keys they hold now; [forBatches] when they are only
+     * files the pass's batches read ([listVersion]). Whether values changed.
+     */
+    suspend fun mirrorFiles(fileIds: Collection<Long>, forBatches: Boolean = false): Boolean = running.withLock {
         if (!ready()) return@withLock false
         val changed = sync.exclusive {
             val ids = fileIds.distinct()
@@ -283,7 +304,7 @@ class DecisionMirror(
             }
             write(differing(ids, desired, existing), desired, counter = null)
         }
-        raised(changed)
+        raised(changed, forBatches)
     }
 
     /**
