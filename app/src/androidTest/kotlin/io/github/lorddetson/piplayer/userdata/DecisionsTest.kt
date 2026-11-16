@@ -266,8 +266,8 @@ class DecisionsTest {
     fun undoingANewerDecisionGivesASecondLocationTheOlderOnesReferencesBack() = runBlocking<Unit> {
         val identity = identity(1)
         decisions.apply(request(key(1), fields = setOf(ProtectedField.TITLE, ProtectedField.ARTIST)), atDecision = listOf(here, copy))
-        val edit = checkNotNull(decisions.edit(identity, mapOf(DecidedField.TITLE to "Mine"), atDecision = listOf(here, copy)))
-        assertThat(decisions.fileChanged(identity, copy)).isEmpty()
+        // An edit from a screen that knows no location values: it stores no references of its own.
+        val edit = checkNotNull(decisions.edit(identity, mapOf(DecidedField.TITLE to "Mine")))
 
         decisions.undo(edit.decisionId)
 
