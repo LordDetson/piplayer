@@ -150,10 +150,6 @@ interface DecidedMirrorDao {
     @Query("SELECT * FROM decided_mirror ORDER BY file_id, field")
     suspend fun all(): List<DecidedMirrorEntity>
 
-    /** Every file with a content key, which decided values may belong to (TI §10.3). */
-    @Query("SELECT id, content_key FROM audio_file WHERE content_key IS NOT NULL")
-    suspend fun keyedFiles(): List<FileKeyRow>
-
     /** The files that hold the content keys [keys] (at most [CHUNK] at once). */
     @Query("SELECT id, content_key FROM audio_file WHERE content_key IN (:keys)")
     suspend fun filesWithKeys(keys: List<String>): List<FileKeyRow>

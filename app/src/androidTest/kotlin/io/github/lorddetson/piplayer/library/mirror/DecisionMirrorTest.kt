@@ -37,6 +37,7 @@ import java.util.concurrent.atomic.AtomicInteger
 import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -487,6 +488,51 @@ class DecisionMirrorTest {
         assertThat(mirror.mirrorAll()).isTrue()
         assertThat(library.decided().valuesOf(listOf(fileId(2)))).isEmpty()
         assertThat(display(1).title).isEqualTo("Song")
+    }
+
+    @Test
+    fun aWholeRunPutsRightADecidedFileWhoseRowsChangedBehindItsBack() = runBlocking<Unit> {
+        library(listOf(row(1), row(2), row(3), row(4), row(5)))
+        for (n in 1L..5L) decisions.apply(request(key(n), details(title = "Decided $n", recording = n.toInt())))
+        val ids = (1L..5L).associateWith { fileId(it) }
+        val mirrored = library.decided().valuesOf(ids.values.toList())
+        fun title(n: Long) = mirrored.single { it.fileId == ids.getValue(n) && it.field == "title" }
+
+        // A value, a level and a decision changed, a part gone, and a part this build does not know.
+        library.decided().saveValues(
+            listOf(title(1).copy(value = "Stray"), title(2).copy(level = DecisionKind.LEVEL_USER_EDIT), title(3).copy(decisionId = 999)),
+        )
+        library.decided().saveValues(listOf(DecidedMirrorEntity(ids.getValue(5), "mood", "Calm", 2, title(5).decisionId)))
+        library.withWriteTransaction {
+            usePrepared("DELETE FROM decided_mirror WHERE file_id = ${ids.getValue(4)} AND field = 'artist'") { it.step() }
+        }
+        assertThat(mirror.mirrorAll()).isTrue()
+
+        assertThat(library.decided().valuesOf(ids.values.toList())).containsExactlyInAnyOrderElementsOf(mirrored)
+        for (n in 1L..5L) assertThat(display(n).title).isEqualTo("Decided $n")
+        assertThat(mirror.mirrorAll()).isFalse()
+    }
+
+    @Test
+    fun aWholeRunComparesAgainTheFilesWhoseKeysMovedWhileItWaitedForTheSync() = runBlocking<Unit> {
+        library(listOf(row(1), row(2)))
+        decisions.apply(request(key(1), fields = setOf(ProtectedField.TITLE)))
+        assertThat(display(1).title).isEqualTo("Song")
+
+        val run = sync.exclusive {
+            // The run compares before it holds off the sync, then waits for it.
+            val run = async(Dispatchers.IO) { mirror.mirrorAll() }
+            delay(1_000)
+            // Meanwhile the tag pass finds file 1 changed and file 2 a copy of the decided song.
+            library.library().setContent(fileId(1), key(3), 200_000, DurationSource.HEADER)
+            library.library().setContent(fileId(2), key(1), 200_000, DurationSource.HEADER)
+            run
+        }
+
+        assertThat(run.await()).isTrue()
+        assertThat(display(2).title).isEqualTo("Song")
+        assertThat(display(1).title).isEqualTo("Song 1")
+        assertThat(library.decided().valuesOf(listOf(fileId(1)))).isEmpty()
     }
 
     @Test

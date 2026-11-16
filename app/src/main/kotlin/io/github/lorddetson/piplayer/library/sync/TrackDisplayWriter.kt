@@ -73,12 +73,16 @@ class TrackDisplayWriter(private val database: LibraryDatabase) {
         database.withWriteTransaction { write(rows.map { it.fileId }, resolved) }
     }
 
-    /** The inputs of [fileIds]. */
-    internal suspend fun inputsOf(fileIds: List<Long>): List<DisplayInput> = fileIds.chunked(CHUNK).flatMap { chunk ->
-        val reads = dao.readFilesOf(chunk).associateBy { it.fileId }
-        val decided = overridesOf(database.decided().valuesOf(chunk))
-        dao.indexInputsOf(chunk).map { it.toInput(reads[it.fileId], decided[it.fileId]) }
-    }
+    /**
+     * The inputs of [fileIds], with their [decided] values when the caller has them at hand (the decision mirror, which
+     * writes them), or else as `decided_mirror` holds them.
+     */
+    internal suspend fun inputsOf(fileIds: List<Long>, decided: Map<Long, FieldOverrides>? = null): List<DisplayInput> =
+        fileIds.chunked(CHUNK).flatMap { chunk ->
+            val reads = dao.readFilesOf(chunk).associateBy { it.fileId }
+            val values = decided ?: overridesOf(database.decided().valuesOf(chunk))
+            dao.indexInputsOf(chunk).map { it.toInput(reads[it.fileId], values[it.fileId]) }
+        }
 
     /** The inputs of every file. */
     internal suspend fun allInputs(): List<DisplayInput> {

@@ -84,8 +84,11 @@ enum class DecidedField(
 
         fun ofName(name: String): DecidedField? = byName[name]
 
+        // Once: the resolver asks for the parts of every field of every track that a whole run of the mirror resolves.
+        private val byGroup = entries.groupBy { it.group }
+
         /** The parts of [field], in code order. */
-        fun partsOf(field: ProtectedField): List<DecidedField> = entries.filter { it.group == field }
+        fun partsOf(field: ProtectedField): List<DecidedField> = byGroup[field].orEmpty()
 
         /** The items of a list or credit value. */
         fun items(value: String?): List<String> = if (value.isNullOrEmpty()) emptyList() else value.split(SEPARATOR)

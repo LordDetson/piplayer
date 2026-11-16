@@ -12,6 +12,11 @@ import io.github.lorddetson.piplayer.library.values.DecisionResolver
 import io.github.lorddetson.piplayer.library.values.DecisionValues
 import io.github.lorddetson.piplayer.settings.ProtectedField
 import java.nio.ByteBuffer
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.withContext
 
 /**
  * The decisions of identification in the user database (TI §7.1, §10.2): Apply, Edit fields, a per-field revert and
@@ -152,13 +157,44 @@ class Decisions(private val database: UserDatabase, private val clock: () -> Lon
         identityIds.distinct().chunked(CHUNK).flatMap { dao.keysOf(it) }.associate { it.identityId to Hex.text(it.contentKey) }
 
     /** Every identity's decided values and the change counter, in one read transaction (TI §10.3). */
-    suspend fun snapshot(): Snapshot = database.withReadTransaction {
-        val counter = database.user().changeCounter()
-        val decisions = dao.liveValueDecisions()
-        val metadata = dao.liveMetadata().groupBy { it.decisionId }
-        val decided = resolved(decisions, metadata, choicesOf(decisions))
-        val keys = dao.decidedKeys().associate { it.identityId to Hex.text(it.contentKey) }
-        Snapshot(counter, decided.mapNotNull { (identity, values) -> keys[identity]?.let { it to values } }.toMap())
+    suspend fun snapshot(): Snapshot {
+        val read = database.withReadTransaction {
+            val counter = database.user().changeCounter()
+            val decisions = dao.liveValueDecisions()
+            Read(
+                counter = counter,
+                decisions = decisions,
+                metadata = dao.liveMetadata(),
+                choices = decisions.mapNotNull { it.releaseChoiceId }.distinct().chunked(CHUNK).flatMap { dao.releaseChoices(it) },
+                keys = dao.decidedKeys(),
+            )
+        }
+        // Decoding and resolving made up most of a whole run with a decision on each of 20 000 files (TI §11.2), so they
+        // run after the transaction, on every core.
+        return withContext(Dispatchers.Default) {
+            val choices = read.choices.parallel { rows -> rows.map { it.id to choice(it) } }.toMap()
+            val metadata = read.metadata.groupBy { it.decisionId }
+            val decided = read.decisions.groupBy { it.identityId }.entries.toList()
+                .parallel { own -> own.mapNotNull { (identity, decisions) -> resolvedOne(decisions, metadata, choices)?.let { identity to it } } }
+                .toMap()
+            val keys = read.keys.associate { it.identityId to Hex.text(it.contentKey) }
+            Snapshot(read.counter, decided.mapNotNull { (identity, values) -> keys[identity]?.let { it to values } }.toMap())
+        }
+    }
+
+    /** What [snapshot] reads in its transaction. */
+    private class Read(
+        val counter: Long,
+        val decisions: List<DecisionEntity>,
+        val metadata: List<TrackMetadataEntity>,
+        val choices: List<ReleaseChoiceEntity>,
+        val keys: List<DecisionKeyRow>,
+    )
+
+    /** [transform] of this list's items in parts, a few per core, on the calling dispatcher; in order. */
+    private suspend fun <T, R> List<T>.parallel(transform: (List<T>) -> List<R>): List<R> = coroutineScope {
+        if (size < PARALLEL_FROM) return@coroutineScope transform(this@parallel)
+        chunked((size + PARTS - 1) / PARTS).map { part -> async { transform(part) } }.awaitAll().flatten()
     }
 
     /**
@@ -272,10 +308,20 @@ class Decisions(private val database: UserDatabase, private val clock: () -> Lon
 
     private suspend fun choicesOf(decisions: List<DecisionEntity>): Map<Long, Choice> =
         decisions.mapNotNull { it.releaseChoiceId }.distinct().chunked(CHUNK).flatMap { dao.releaseChoices(it) }
-            .associate { it.id to Choice(ReleaseValues.decode(it.values), it.savedCoverId) }
+            .associate { it.id to choice(it) }
 
-    /** A release choice as the decisions read it. */
-    private class Choice(val values: ReleaseValues, val savedCoverId: Long?)
+    private fun choice(row: ReleaseChoiceEntity) = Choice(ReleaseValues.decode(row.values), row.savedCoverId)
+
+    /**
+     * A release choice as the decisions read it, with the values of each of its discs put together once: a choice serves
+     * every track of its release.
+     */
+    private class Choice(val values: ReleaseValues, val savedCoverId: Long?) {
+        private val ofDiscs = values.discs.mapValues { (disc, _) -> values.forDisc(disc) }
+
+        /** `ReleaseValues.forDisc`. */
+        fun forDisc(disc: Int?): Map<DecidedField, String?> = disc?.let(ofDiscs::get) ?: values.values
+    }
 
     private fun values(
         decisions: List<DecisionEntity>,
@@ -287,7 +333,7 @@ class Decisions(private val database: UserDatabase, private val clock: () -> Lon
         for (row in metadata[decision.id].orEmpty()) DecidedField.ofCode(row.field)?.let { values[it] = DecisionCodec.decode(it, row.value) }
         if (kind == DecisionKind.APPLY) {
             decision.releaseChoiceId?.let { choices[it] }?.let { choice ->
-                values += choice.values.forDisc(values[DecidedField.DISC_NUMBER]?.toIntOrNull())
+                values += choice.forDisc(values[DecidedField.DISC_NUMBER]?.toIntOrNull())
                 values[DecidedField.COVER] = choice.savedCoverId?.toString()
             }
             values[DecidedField.RECORDING_MBID] = Hex.mbidText(decision.recordingMbid)
@@ -301,8 +347,15 @@ class Decisions(private val database: UserDatabase, private val clock: () -> Lon
         metadata: Map<Long, List<TrackMetadataEntity>>,
         choices: Map<Long, Choice>,
     ): Map<Long, Map<DecidedField, Decided>> = decisions.groupBy { it.identityId }
-        .mapValues { (_, own) -> DecisionResolver.resolve(values(own, metadata, choices)) }
-        .filterValues { it.isNotEmpty() }
+        .mapNotNull { (identity, own) -> resolvedOne(own, metadata, choices)?.let { identity to it } }
+        .toMap()
+
+    /** The decided values that win among [own], the decisions of one identity; null when none does. */
+    private fun resolvedOne(
+        own: List<DecisionEntity>,
+        metadata: Map<Long, List<TrackMetadataEntity>>,
+        choices: Map<Long, Choice>,
+    ): Map<DecidedField, Decided>? = DecisionResolver.resolve(values(own, metadata, choices)).takeIf { it.isNotEmpty() }
 
     private fun FileStateEntity.at(location: LocationValues) =
         volumeName == location.volume && relativePath == location.relativePath && displayName == location.displayName
@@ -319,5 +372,11 @@ class Decisions(private val database: UserDatabase, private val clock: () -> Lon
     private companion object {
         /** IDs bound at a time, under SQLite's limit of arguments. */
         const val CHUNK = 500
+
+        /** Below this many items [parallel] does not split. */
+        const val PARALLEL_FROM = 256
+
+        /** The parts [parallel] splits into: a few per core of a phone, so that a slow part leaves no core idle for long. */
+        val PARTS = Runtime.getRuntime().availableProcessors() * 4
     }
 }
