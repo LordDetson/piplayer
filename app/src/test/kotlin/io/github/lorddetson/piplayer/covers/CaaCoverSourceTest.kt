@@ -13,8 +13,10 @@ import io.github.lorddetson.piplayer.net.OnlineConsent
 import java.time.Instant
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
@@ -30,10 +32,12 @@ class CaaCoverSourceTest {
 
     /** What the fake client was asked, and what it answers. */
     private val asked = mutableListOf<Pair<List<CoverSource>, CoverSize>>()
+    private val originals = mutableListOf<Boolean>()
     private var answer: suspend () -> CaaResult<CoverImage> = { CaaResult.NotFound }
 
-    private val fronts = CaaFronts { sources, size ->
+    private val fronts = CaaFronts { sources, size, orOriginal ->
         asked += sources to size
+        originals += orOriginal
         answer()
     }
 
@@ -128,6 +132,109 @@ class CaaCoverSourceTest {
         assertThat(load.isCompleted).isTrue()
         assertThat(load.await().exceptionOrNull()).isInstanceOf(GateClosedException::class.java)
         assertThat(cancelled).isTrue()
+    }
+
+    @Test
+    fun rowsAndHeadersTakeNoOriginalWhileLargerViewsDo() = runTest {
+        // An original can be tens of MB: a row or a header without its thumbnail shows none (docs/library.md §13.3).
+        listOf(96, 256, 384, 512, 768, 1536).forEach { source.load(step, it) }
+
+        assertThat(originals).containsExactly(false, false, false, false, true, true)
+    }
+
+    @Test
+    fun loadsOfOneImageAtTheSameTimeShareOneRequestAndEachDecodesItForItsStep() = runTest {
+        val release = CompletableDeferred<Unit>()
+        answer = {
+            release.await()
+            CaaResult.Found(image("front"))
+        }
+
+        val rows = listOf(96, 128, 256).map { async { source.load(step, it) } }
+        val header = async { source.load(step, 384) }
+        val otherRelease = async { source.load(CoverStep.Caa(CoverRelease(GROUP)), 96) }
+        advanceUntilIdle()
+        release.complete(Unit)
+
+        assertThat(rows.map { it.await() }).containsExactly("front@96", "front@128", "front@256")
+        assertThat(header.await()).isEqualTo("front@384")
+        assertThat(otherRelease.await()).isEqualTo("front@96")
+        // One `front-250` for the rows, one `front-500` for the header, one for the other release.
+        assertThat(asked.map { it.second }).containsExactlyInAnyOrder(CoverSize.LIST, CoverSize.DISPLAY, CoverSize.LIST)
+
+        // A load just after the request ended, before the disk cache has the picture, takes the image it found.
+        assertThat(source.load(step, 192)).isEqualTo("front@192")
+        assertThat(asked).hasSize(3)
+    }
+
+    @Test
+    fun aCancelledLoadLeavesTheSharedRequestToTheOthers() = runTest {
+        val release = CompletableDeferred<Unit>()
+        var cancelled = false
+        answer = {
+            try {
+                release.await()
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                cancelled = true
+                throw e
+            }
+            CaaResult.Found(image("front"))
+        }
+        val leaving = async { source.load(step, 96) }
+        val staying = async { source.load(step, 96) }
+        advanceUntilIdle()
+
+        leaving.cancel()
+        advanceUntilIdle()
+        release.complete(Unit)
+
+        assertThat(staying.await()).isEqualTo("front@96")
+        assertThat(cancelled).isFalse()
+        assertThat(asked).hasSize(1)
+    }
+
+    @Test
+    fun theSharedRequestIsCancelledWhenNoLoadWaitsForItAnyMore() = runTest {
+        var cancelled = false
+        answer = {
+            try {
+                awaitCancellation()
+            } finally {
+                cancelled = true
+            }
+        }
+        val loads = (1..3).map { async { source.load(step, 96) } }
+        advanceUntilIdle()
+
+        loads.forEach { it.cancel() }
+        advanceUntilIdle()
+
+        assertThat(cancelled).isTrue()
+        assertThat(asked).hasSize(1)
+    }
+
+    @Test
+    fun theGateClosingEndsALoadAtOnceEvenWhileItsRequestCannotStopAtOnce() = runTest {
+        // A body read in a blocking call does not see the cancellation until it returns.
+        val started = CompletableDeferred<Unit>()
+        val bodyRead = CompletableDeferred<Unit>()
+        answer = {
+            started.complete(Unit)
+            withContext(NonCancellable) { bodyRead.await() }
+            CaaResult.Found(image("front"))
+        }
+        val load = async { runCatching { source.load(step, 96) } }
+        started.await()
+
+        gate.set(OnlineConsent.NONE)
+        advanceUntilIdle()
+
+        try {
+            assertThat(load.isCompleted).isTrue()
+            assertThat(load.await().exceptionOrNull()).isInstanceOf(GateClosedException::class.java)
+        } finally {
+            bodyRead.complete(Unit)
+        }
     }
 
     private companion object {

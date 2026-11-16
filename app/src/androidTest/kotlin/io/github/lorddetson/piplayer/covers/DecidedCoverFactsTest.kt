@@ -115,24 +115,28 @@ class DecidedCoverFactsTest {
     }
 
     @Test
-    fun anAlbumsDecidedCoverAndReleaseAreThoseOfItsFirstSongWithOneByDiscTrackAndName() = runBlocking<Unit> {
+    fun anAlbumsDecidedCoversAndReleasesAreThoseOfItsSongsByDiscTrackAndNameEachOnce() = runBlocking<Unit> {
         val red = albumKey(1)
-        assertThat(facts.albumDecidedCover(red)).isNull()
-        assertThat(facts.albumRelease(red)).isNull()
+        assertThat(facts.albumDecidedCovers(red)).isEmpty()
+        assertThat(facts.albumReleases(red)).isEmpty()
 
         decide(3, "cover" to "30", "release_mbid" to DECIDED_RELEASE, "release_group_mbid" to DECIDED_GROUP)
-        assertThat(facts.albumDecidedCover(red)).isEqualTo(30)
-        assertThat(facts.albumRelease(red)).isEqualTo(CoverRelease(DECIDED_RELEASE, DECIDED_GROUP))
+        assertThat(facts.albumDecidedCovers(red)).containsExactly(30)
+        assertThat(facts.albumReleases(red)).containsExactly(CoverRelease(DECIDED_RELEASE, DECIDED_GROUP))
 
         decide(2, "cover" to "20", "release_mbid" to OTHER_RELEASE)
-        assertThat(facts.albumDecidedCover(red)).isEqualTo(20)
-        assertThat(facts.albumRelease(red)).isEqualTo(CoverRelease(OTHER_RELEASE, null))
+        assertThat(facts.albumDecidedCovers(red)).containsExactly(20, 30)
+        assertThat(facts.albumReleases(red)).containsExactly(CoverRelease(OTHER_RELEASE, null), CoverRelease(DECIDED_RELEASE, DECIDED_GROUP))
 
-        // An empty decided cover and a decided field without a release are passed over.
+        // An empty decided cover and a decided field without a release are passed over; a value two songs share counts once.
         decide(1, "cover" to null, "release_mbid" to null)
-        assertThat(facts.albumDecidedCover(red)).isEqualTo(20)
-        assertThat(facts.albumRelease(red)).isEqualTo(CoverRelease(OTHER_RELEASE, null))
-        assertThat(facts.albumDecidedCover("no such album")).isNull()
+        assertThat(facts.albumDecidedCovers(red)).containsExactly(20, 30)
+        assertThat(facts.albumReleases(red)).containsExactly(CoverRelease(OTHER_RELEASE, null), CoverRelease(DECIDED_RELEASE, DECIDED_GROUP))
+        decide(1, "cover" to "30", "release_mbid" to DECIDED_RELEASE, "release_group_mbid" to DECIDED_GROUP)
+        assertThat(facts.albumDecidedCovers(red)).containsExactly(30, 20)
+        assertThat(facts.albumReleases(red)).containsExactly(CoverRelease(DECIDED_RELEASE, DECIDED_GROUP), CoverRelease(OTHER_RELEASE, null))
+        assertThat(facts.albumDecidedCovers("no such album")).isEmpty()
+        assertThat(facts.albumReleases("no such album")).isEmpty()
     }
 
     @Test

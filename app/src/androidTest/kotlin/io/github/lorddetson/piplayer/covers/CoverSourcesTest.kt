@@ -183,7 +183,7 @@ class CoverSourcesTest {
         val gate = TestServices.openGate()
         val asked = mutableListOf<CoverSize>()
         val caa = AndroidCoverSources.caa(
-            fronts = { sources, size ->
+            fronts = { sources, size, _ ->
                 asked += size
                 val url = "https://caa.test/release/${sources.first().mbid}/front-250".toHttpUrl()
                 CaaResult.Found(

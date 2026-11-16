@@ -1,6 +1,7 @@
 package io.github.lorddetson.piplayer.covers
 
 import io.github.lorddetson.piplayer.fakes.FakeCaa
+import io.github.lorddetson.piplayer.library.details.DetailsCover
 import io.github.lorddetson.piplayer.fakes.RecordingRequestLog
 import io.github.lorddetson.piplayer.fakes.TestServices
 import io.github.lorddetson.piplayer.identification.caa.CoverArtArchiveClient
@@ -525,13 +526,13 @@ class CoverLoaderTest {
     private val failures = InMemoryFailureCache()
     private lateinit var log: RecordingRequestLog
 
-    /** Albums by key, each with the release of [mbid]. */
-    private class AlbumFacts(val releases: Map<String, CoverRelease>) : CoverFacts {
-        override suspend fun file(fileId: Long): CoverFile? = null
+    /** Albums by key, each with the release of [mbid], and songs by file ID, without pictures of their own. */
+    private class AlbumFacts(val releases: Map<String, CoverRelease>, val files: Map<Long, CoverFile> = emptyMap()) : CoverFacts {
+        override suspend fun file(fileId: Long): CoverFile? = files[fileId]
         override suspend fun albumFile(albumKey: String): CoverFile? = null
         override suspend fun artistAlbums(artistKey: String): List<ArtistAlbum> = emptyList()
         override suspend fun artistFile(artistKey: String): CoverFile? = null
-        override suspend fun albumRelease(albumKey: String) = releases[albumKey]
+        override suspend fun albumReleases(albumKey: String) = listOfNotNull(releases[albumKey])
     }
 
     private object NoOwn : OwnCoverIndex {
@@ -551,11 +552,20 @@ class CoverLoaderTest {
 
     private fun mbid(i: Int) = "%08x-0000-4000-8000-%012x".format(i, i)
 
-    /** A loader whose plan is the real one for albums [1..count], each with a release that the fake has images of. */
-    private fun TestScope.caaLoader(count: Int, withImages: Boolean = true): CoverLoader<String> {
+    /**
+     * A loader whose plan is the real one for albums [1..count], each with a release that the fake has images of, and for
+     * the songs [songs] (file ID to album number), which the tag pass found without a picture.
+     */
+    private fun TestScope.caaLoader(
+        count: Int,
+        withImages: Boolean = true,
+        songs: Map<Long, Int> = emptyMap(),
+        configure: FakeCaa.() -> Unit = {},
+    ): CoverLoader<String> {
         log = RecordingRequestLog { testScheduler.currentTime }
         val fake = FakeCaa { archiveServer.url("/") }
         if (withImages) (1..count).forEach { fake.withImages(mbid(it)) }
+        fake.configure()
         caaServer.dispatcher = log.wrap(fake)
         archiveServer.dispatcher = log.wrap(fake.archive)
         val io = StandardTestDispatcher(testScheduler)
@@ -568,10 +578,15 @@ class CoverLoaderTest {
             baseUrl = caaServer.url("/"),
             ioDispatcher = io,
         )
-        val caa = CaaCoverSource(client::cover, onlineGate, onlineGate.consent.map { it.allows(OnlineConsent.CURRENT_DISCLOSURE_VERSION) }) { bytes, size ->
+        val caa = CaaCoverSource({ sources, size, orOriginal -> client.cover(sources, size, orOriginal) }, onlineGate, onlineGate.consent.map { it.allows(OnlineConsent.CURRENT_DISCLOSURE_VERSION) }) { bytes, size ->
             "caa ${bytes.size}@$size"
         }
-        val facts = AlbumFacts((1..count).associate { "album$it" to CoverRelease(mbid(it)) })
+        val facts = AlbumFacts(
+            (1..count).associate { "album$it" to CoverRelease(mbid(it)) },
+            songs.mapValues { (id, album) ->
+                CoverFile(id, "content://media/$id", size = id, mtime = id, embedded = false, albumKey = "album$album", release = CoverRelease(mbid(album)))
+            },
+        )
         return CoverLoader(
             plan = { request -> CoverPlan.of(request, facts, NoOwn, online = onlineGate.isOpen()) },
             sources = { step, size -> if (step is CoverStep.Caa) caa.load(step, size) else sources.load(step, size) },
@@ -677,5 +692,89 @@ class CoverLoaderTest {
         advanceUntilIdle()
         assertThat(again.map { it.await() }).doesNotContainNull()
         assertThat(log.to(caaHost)).hasSize(5)
+    }
+
+    // Loads of one image at the same time share one request (docs/library.md §13.3).
+
+    private val archiveHost get() = "${archiveServer.hostName}:${archiveServer.port}"
+
+    @Test
+    fun songRowsAndTheAlbumTileOfOneReleaseShareOneRequest() = runTest {
+        // Twelve songs of one album without pictures of their own, and its tile, scrolled into view together.
+        val loader = caaLoader(1, songs = (1L..12L).associateWith { 1 })
+
+        val rows = (1L..12L).map { async { loader.load(CoverRequest.Track(it), 135) } } +
+            async { loader.load(CoverRequest.Album("album1"), 96) }
+        advanceUntilIdle()
+
+        assertThat(rows.map { it.await() }).allSatisfy { assertThat(it).startsWith("caa ") }
+        assertThat(log.to(caaHost)).hasSize(1)
+        assertThat(log.to(caaHost).single().path).endsWith("/front-250")
+    }
+
+    @Test
+    fun aRowThatLeavesTheScreenLeavesTheSharedRequestToTheOthers() = runTest {
+        val loader = caaLoader(2, songs = mapOf(1L to 2, 2L to 2, 3L to 2))
+        // Another album takes the limiter's turn first, so the songs wait for theirs.
+        val first = async { loader.load(CoverRequest.Album("album1"), 96) }
+        advanceTimeBy(100)
+        val songs = (1L..3L).map { async { loader.load(CoverRequest.Track(it), 96) } }
+        advanceTimeBy(100)
+
+        songs[0].cancel()
+        songs[1].cancel()
+        advanceUntilIdle()
+
+        assertThat(first.await()).isNotNull()
+        assertThat(songs[2].await()).startsWith("caa ")
+        assertThat(log.to(caaHost)).hasSize(2)
+    }
+
+    @Test
+    fun theDetailsHeaderAndTheirSingleStepShareOneRequest() = runTest {
+        val loader = caaLoader(1, songs = mapOf(1L to 1))
+        val px = DetailsCover.caaProbePx(2.8125f)
+
+        val header = async { loader.load(CoverRequest.Track(1), px) }
+        val probe = async { loader.step(CoverStep.Caa(CoverRelease(mbid(1))), px) }
+        advanceUntilIdle()
+
+        assertThat(header.await()).isNotNull()
+        assertThat(probe.await()).isNotNull()
+        assertThat(log.to(caaHost)).hasSize(1)
+    }
+
+    @Test
+    fun nowPlayingAndTheSessionShareOneRequestAndNowPlayingLoadsItOnce() = runTest {
+        val loader = caaLoader(1, songs = mapOf(1L to 1))
+
+        // Now Playing on a 1080 px wide screen and the session's picture of the same song.
+        val nowPlaying = async { loader.load(CoverRequest.Track(1), 1080) }
+        val session = async { loader.encoded(CoverRequest.Track(1), 1024) }
+        advanceUntilIdle()
+        assertThat(nowPlaying.await()).isNotNull()
+        assertThat(session.await()).isNotNull()
+        assertThat(log.to(caaHost)).hasSize(1)
+        assertThat(log.to(caaHost).single().path).endsWith("/front-1200")
+
+        // Shown again, and in a new player screen with an empty memory: from the disk cache.
+        assertThat(loader.load(CoverRequest.Track(1), 1080)).isNotNull()
+        loader.invalidate()
+        assertThat(loader.load(CoverRequest.Track(1), 1080)).isNotNull()
+        assertThat(loader.encoded(CoverRequest.Track(1), 1024)).isNotNull()
+        assertThat(log.to(caaHost)).hasSize(1)
+    }
+
+    @Test
+    fun aRowWhoseThumbnailTheImageHostLacksLoadsNoOriginalWhileNowPlayingFallsBackToIt() = runTest {
+        val loader = caaLoader(1, songs = mapOf(1L to 1)) { withoutThumbnails(mbid(1), "front-250", "front-1200") }
+
+        assertThat(loader.load(CoverRequest.Track(1), 96)).isNull()
+        // Only the thumbnail on the image host: no original.
+        assertThat(log.to(archiveHost)).hasSize(1)
+        assertThat(log.to(archiveHost).single().path).contains("_thumb250")
+
+        assertThat(loader.load(CoverRequest.Track(1), 1080)).isNotNull()
+        assertThat(log.to(archiveHost).map { it.path }).anySatisfy { assertThat(it).doesNotContain("_thumb") }
     }
 }

@@ -2,13 +2,18 @@ package io.github.lorddetson.piplayer.library.details
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.github.lorddetson.piplayer.TestFiles
+import android.graphics.Bitmap
+import android.graphics.Color
+import io.github.lorddetson.piplayer.covers.AndroidCoverSources
 import io.github.lorddetson.piplayer.covers.CoverCopy
+import io.github.lorddetson.piplayer.covers.CoverLoader
+import io.github.lorddetson.piplayer.covers.CoverSources
+import io.github.lorddetson.piplayer.covers.ImageCodec
 import io.github.lorddetson.piplayer.covers.CoverPlan
 import io.github.lorddetson.piplayer.covers.CoverRequest
 import io.github.lorddetson.piplayer.covers.CoverStep
 import io.github.lorddetson.piplayer.covers.LibraryCoverFacts
 import io.github.lorddetson.piplayer.covers.OwnCovers
-import io.github.lorddetson.piplayer.covers.SavedCoverIndex
 import io.github.lorddetson.piplayer.covers.SavedCovers
 import io.github.lorddetson.piplayer.library.db.DecidedMirrorEntity
 import io.github.lorddetson.piplayer.library.db.replaceDecided
@@ -51,6 +56,7 @@ import io.github.lorddetson.piplayer.library.values.TrackTags
 import io.github.lorddetson.piplayer.userdata.PlayStats
 import io.github.lorddetson.piplayer.userdata.TrackIdentityEntity
 import io.github.lorddetson.piplayer.userdata.UserDatabase
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.util.Collections
 import kotlinx.coroutines.runBlocking
@@ -449,46 +455,95 @@ class LibraryTrackDetailsTest {
         assertThat(probe.asked).noneMatch { it.startsWith("caa") }
     }
 
+    /** A real JPEG of 8 by 8 pixels, which the loader's sources decode; [shade] makes its bytes differ. */
+    private fun realJpeg(shade: Int): ByteArray {
+        val bitmap = Bitmap.createBitmap(8, 8, Bitmap.Config.ARGB_8888).apply { eraseColor(Color.rgb(shade, 0, 0)) }
+        return ByteArrayOutputStream().also { bitmap.compress(Bitmap.CompressFormat.JPEG, 90, it) }.toByteArray()
+    }
+
+    /** Loaders whose pictures are the steps that gave them, so a test can tell which source the loader shows. */
+    private object StepCodec : ImageCodec<CoverStep> {
+        override fun encode(image: CoverStep): ByteArray? = null
+        override fun decode(bytes: ByteArray, size: Int): CoverStep? = null
+        override fun weight(image: CoverStep): Long = 1
+    }
+
     @Test
-    fun theSourceIsAlwaysTheFirstStepOfTheLoadersPlanThatHasAPicture() {
+    fun theSourceIsAlwaysTheOneTheLoaderShows() {
+        // The loader with the production plan (the facts, the own covers and the index of saved covers it is built with)
+        // and the production sources for own and saved covers; the file's pictures and Cover Art Archive are the probe's.
         val fileId = readTags(coverPresent = true, coverBytes = 1_000, release = TAG_RELEASE)
+        val identity = addIdentity()
+        val album = albumKey(fileId)
         online = true
         val facts = LibraryCoverFacts(access, user)
-        val savedIndex = SavedCoverIndex { id -> runBlocking { saved.file(id)?.name } }
-        var decided = false
-        for (case in 0 until 16) {
-            val withSaved = case and 1 != 0
-            probe.embedded = if (case and 2 != 0) PictureSize(500, 500) else null
-            probe.thumbnail = case and 4 != 0
-            probe.caa = case and 8 != 0
-            if (withSaved && !decided) {
-                decideCover(fileId)
-                decided = true
-            } else if (!withSaved && decided) {
-                decide(fileId, "cover" to null)
-                decided = false
+        val local = AndroidCoverSources(context, ownDir, saved)
+        val sources = CoverSources { step, size ->
+            val shown = when (step) {
+                is CoverStep.Own, is CoverStep.Saved -> local.load(step, size) != null
+                is CoverStep.Embedded -> probe.embedded != null
+                is CoverStep.Thumbnail -> probe.thumbnail
+                is CoverStep.Caa -> probe.caa
+            }
+            if (shown) step else null
+        }
+        val savedBytes = realJpeg(200)
+        for (case in 0 until 3 * 3 * 3 * 8) {
+            // Each own cover and the decided cover: none, there, or its file gone (after a restore).
+            val songOwn = case % 3
+            val albumOwn = case / 3 % 3
+            val decided = case / 9 % 3
+            val pictures = case / 27
+            probe.embedded = if (pictures and 1 != 0) PictureSize(500, 500) else null
+            probe.thumbnail = pictures and 2 != 0
+            probe.caa = pictures and 4 != 0
+            runBlocking {
+                when (songOwn) {
+                    0 -> own.removeTrack(identity)
+                    else -> {
+                        File(ownDir, "song$case.jpg").writeBytes(realJpeg(case % 200))
+                        own.setTrack(identity, CoverCopy("song$case.jpg", 8, 8))
+                        if (songOwn == 2) File(ownDir, "song$case.jpg").delete()
+                    }
+                }
+                when (albumOwn) {
+                    0 -> own.removeAlbum(album)
+                    else -> {
+                        File(ownDir, "album$case.jpg").writeBytes(realJpeg(case % 200 + 1))
+                        own.setAlbum(album, CoverCopy("album$case.jpg", 8, 8))
+                        if (albumOwn == 2) File(ownDir, "album$case.jpg").delete()
+                    }
+                }
+                when (decided) {
+                    0 -> decide(fileId, "cover" to null)
+                    else -> {
+                        val id = checkNotNull(saved.save(savedBytes, DECIDED_RELEASE, SavedCovers.Source.RELEASE))
+                        decide(fileId, "cover" to id.toString())
+                        if (decided == 2) checkNotNull(saved.file(id)).delete()
+                    }
+                }
+            }
+            val loader = CoverLoader(
+                plan = { request -> CoverPlan.of(request, facts, own.also { it.load() }, saved.names(), online) },
+                sources = sources,
+                codec = StepCodec,
+                disk = null,
+                memoryWeight = 1_000,
+            )
+
+            val step = runBlocking { loader.load(CoverRequest.Track(fileId), 96) }
+            val expected = when (step) {
+                null -> CoverSource.NONE
+                is CoverStep.Own -> if (step.fileName == own.track(identity)) CoverSource.SONG_OWN else CoverSource.ALBUM_OWN
+                is CoverStep.Saved -> CoverSource.SAVED
+                is CoverStep.Embedded -> CoverSource.EMBEDDED
+                is CoverStep.Thumbnail -> CoverSource.THUMBNAIL
+                is CoverStep.Caa -> CoverSource.CAA
             }
 
-            val steps = runBlocking { CoverPlan.of(CoverRequest.Track(fileId), facts, own, savedIndex, online) }
-            val expected = steps.firstOrNull { step ->
-                when (step) {
-                    is CoverStep.Own -> File(ownDir, step.fileName).isFile
-                    is CoverStep.Saved -> true
-                    is CoverStep.Embedded -> probe.embedded != null
-                    is CoverStep.Thumbnail -> probe.thumbnail
-                    is CoverStep.Caa -> probe.caa
-                }
-            }?.let { step ->
-                when (step) {
-                    is CoverStep.Own -> CoverSource.SONG_OWN
-                    is CoverStep.Saved -> CoverSource.SAVED
-                    is CoverStep.Embedded -> CoverSource.EMBEDDED
-                    is CoverStep.Thumbnail -> CoverSource.THUMBNAIL
-                    is CoverStep.Caa -> CoverSource.CAA
-                }
-            } ?: CoverSource.NONE
-
-            assertThat(read(fileId).value(COVER_SOURCE)).describedAs("case $case: $steps").isEqualTo(DetailValue.Cover(expected))
+            assertThat(read(fileId).value(COVER_SOURCE))
+                .describedAs("case $case: song own $songOwn, album own $albumOwn, decided $decided, pictures $pictures")
+                .isEqualTo(DetailValue.Cover(expected))
         }
     }
 

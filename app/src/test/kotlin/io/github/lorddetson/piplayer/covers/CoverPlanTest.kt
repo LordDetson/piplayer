@@ -29,15 +29,15 @@ class CoverPlanTest {
         val albums: Map<String, CoverFile> = emptyMap(),
         val artistAlbums: Map<String, List<ArtistAlbum>> = emptyMap(),
         val artistFiles: Map<String, CoverFile> = emptyMap(),
-        val albumCovers: Map<String, Long> = emptyMap(),
-        val albumReleases: Map<String, CoverRelease> = emptyMap(),
+        val albumCovers: Map<String, List<Long>> = emptyMap(),
+        val albumReleases: Map<String, List<CoverRelease>> = emptyMap(),
     ) : CoverFacts {
         override suspend fun file(fileId: Long) = files[fileId]
         override suspend fun albumFile(albumKey: String) = albums[albumKey]
         override suspend fun artistAlbums(artistKey: String) = artistAlbums[artistKey].orEmpty()
         override suspend fun artistFile(artistKey: String) = artistFiles[artistKey]
-        override suspend fun albumDecidedCover(albumKey: String) = albumCovers[albumKey]
-        override suspend fun albumRelease(albumKey: String) = albumReleases[albumKey]
+        override suspend fun albumDecidedCovers(albumKey: String) = albumCovers[albumKey].orEmpty()
+        override suspend fun albumReleases(albumKey: String) = albumReleases[albumKey].orEmpty()
     }
 
     /** Saved covers by row ID, their files named as SavedCovers names them. */
@@ -125,7 +125,8 @@ class CoverPlanTest {
 
         val steps = plan(CoverRequest.Artist("ann"), facts, Own(albums = mapOf("y" to "y.jpg")))
 
-        assertThat(steps).containsExactly(Own("y.jpg"), Embedded(second), Thumbnail(second))
+        // The album with an embedded picture and the first album follow, in case the chosen one gives no picture.
+        assertThat(steps).containsExactly(Own("y.jpg"), Embedded(second), Thumbnail(second), Embedded(first), Thumbnail(first))
     }
 
     @Test
@@ -136,7 +137,7 @@ class CoverPlanTest {
         val withPicture = Facts(albums = albums, artistAlbums = mapOf("ann" to listOf(ArtistAlbum("x", false), ArtistAlbum("y", true))))
         val without = Facts(albums = albums, artistAlbums = mapOf("ann" to listOf(ArtistAlbum("x", false), ArtistAlbum("y", false))))
 
-        assertThat(plan(CoverRequest.Artist("ann"), withPicture)).containsExactly(Embedded(second), Thumbnail(second))
+        assertThat(plan(CoverRequest.Artist("ann"), withPicture)).containsExactly(Embedded(second), Thumbnail(second), Thumbnail(first))
         assertThat(plan(CoverRequest.Artist("ann"), without)).containsExactly(Thumbnail(first))
     }
 
@@ -213,8 +214,8 @@ class CoverPlanTest {
         val song = file(3)
         val facts = Facts(
             albums = mapOf("a" to song),
-            albumCovers = mapOf("a" to 5L),
-            albumReleases = mapOf("a" to CoverRelease(RELEASE, GROUP)),
+            albumCovers = mapOf("a" to listOf(5L)),
+            albumReleases = mapOf("a" to listOf(CoverRelease(RELEASE, GROUP))),
         )
 
         val steps = plan(CoverRequest.Album("a"), facts, Own(albums = mapOf("a" to "a.jpg")), online = true)
@@ -225,7 +226,7 @@ class CoverPlanTest {
 
     @Test
     fun anAlbumWithoutSongsStillHasItsReleaseWhileOnline() {
-        val facts = Facts(albumReleases = mapOf("a" to CoverRelease(RELEASE)))
+        val facts = Facts(albumReleases = mapOf("a" to listOf(CoverRelease(RELEASE))))
 
         assertThat(plan(CoverRequest.Album("a"), facts, online = true)).containsExactly(Caa(CoverRelease(RELEASE)))
     }
@@ -245,27 +246,67 @@ class CoverPlanTest {
         val second = file(2, album = "y")
         val facts = Facts(
             albums = mapOf("x" to first, "y" to second),
-            albumCovers = mapOf("y" to 6L),
+            albumCovers = mapOf("y" to listOf(6L)),
             artistAlbums = mapOf("ann" to listOf(ArtistAlbum("x", embedded = true), ArtistAlbum("y", embedded = false, decided = true))),
         )
 
-        assertThat(plan(CoverRequest.Artist("ann"), facts)).containsExactly(Saved(6, "hash6.jpg"), Embedded(second), Thumbnail(second))
-        // An own cover still comes first.
-        assertThat(plan(CoverRequest.Artist("ann"), facts, Own(albums = mapOf("x" to "x.jpg")))).containsExactly(Own("x.jpg"), Embedded(first), Thumbnail(first))
+        // A decided cover whose file is gone gives way to the album with an embedded picture.
+        assertThat(plan(CoverRequest.Artist("ann"), facts)).containsExactly(
+            Saved(6, "hash6.jpg"), Embedded(second), Thumbnail(second), Embedded(first), Thumbnail(first),
+        )
+        // An own cover still comes first, each album once.
+        assertThat(plan(CoverRequest.Artist("ann"), facts, Own(albums = mapOf("x" to "x.jpg")))).containsExactly(
+            Own("x.jpg"), Embedded(first), Thumbnail(first), Saved(6, "hash6.jpg"), Embedded(second), Thumbnail(second),
+        )
     }
 
     @Test
-    fun anArtistWithoutLocalPicturesTakesTheFirstAlbumWithAReleaseOnlyWhileOnline() {
+    fun anArtistsLocalPicturesComeBeforeTheCoverArtArchiveStepOfTheFirstAlbumWithARelease() {
+        // The first album may have a folder image as its thumbnail, which no fact shows: turning online lookups on must not
+        // replace it with another album's Cover Art Archive cover.
         val first = file(1, album = "x", embedded = false)
         val second = file(2, album = "y", embedded = false)
         val facts = Facts(
             albums = mapOf("x" to first, "y" to second),
-            albumReleases = mapOf("y" to CoverRelease(RELEASE)),
+            albumReleases = mapOf("y" to listOf(CoverRelease(RELEASE))),
             artistAlbums = mapOf("ann" to listOf(ArtistAlbum("x", false), ArtistAlbum("y", false, release = true))),
         )
 
-        assertThat(plan(CoverRequest.Artist("ann"), facts, online = true)).containsExactly(Thumbnail(second), Caa(CoverRelease(RELEASE)))
+        assertThat(plan(CoverRequest.Artist("ann"), facts, online = true)).containsExactly(Thumbnail(first), Caa(CoverRelease(RELEASE)))
         assertThat(plan(CoverRequest.Artist("ann"), facts, online = false)).containsExactly(Thumbnail(first))
+    }
+
+    @Test
+    fun anArtistsCoverArtArchiveStepComesLastAfterAnAlbumWithAPictureAndSkipsAReleaseThatIsNotAnMbid() {
+        val first = file(1, album = "x", embedded = false)
+        val second = file(2, album = "y")
+        val third = file(3, album = "z", embedded = false)
+        val facts = Facts(
+            albums = mapOf("x" to first, "y" to second, "z" to third),
+            albumReleases = mapOf("x" to listOf(CoverRelease("not an mbid")), "z" to listOf(CoverRelease(RELEASE, GROUP))),
+            artistAlbums = mapOf(
+                "ann" to listOf(ArtistAlbum("x", false, release = true), ArtistAlbum("y", true), ArtistAlbum("z", false, release = true)),
+            ),
+        )
+
+        assertThat(plan(CoverRequest.Artist("ann"), facts, online = true)).containsExactly(
+            Embedded(second), Thumbnail(second), Thumbnail(first), Caa(CoverRelease(RELEASE, GROUP)),
+        )
+    }
+
+    @Test
+    fun anAlbumTriesEachDecidedCoverOfItsSongsAndTakesTheFirstReleaseThatIsAnMbid() {
+        val song = file(3)
+        val facts = Facts(
+            albums = mapOf("a" to song),
+            // 42 has no row; 5 may have lost its file, which only the load can tell.
+            albumCovers = mapOf("a" to listOf(5L, 42L, 6L)),
+            albumReleases = mapOf("a" to listOf(CoverRelease("junk"), CoverRelease(RELEASE, GROUP))),
+        )
+
+        assertThat(plan(CoverRequest.Album("a"), facts, online = true)).containsExactly(
+            Saved(5, "hash5.jpg"), Saved(6, "hash6.jpg"), Embedded(song), Thumbnail(song), Caa(CoverRelease(RELEASE, GROUP)),
+        )
     }
 
     @Test

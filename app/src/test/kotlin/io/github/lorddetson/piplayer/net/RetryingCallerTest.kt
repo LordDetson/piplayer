@@ -5,7 +5,15 @@ import java.io.IOException
 import java.net.UnknownHostException
 import kotlin.random.Random
 import kotlin.time.Duration.Companion.milliseconds
+import java.util.concurrent.TimeUnit
+import kotlin.time.Duration.Companion.seconds
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.testTimeSource
@@ -182,5 +190,45 @@ class RetryingCallerTest {
 
         server.enqueue(ok())
         assertThat(caller().get()).isEqualTo("ok")
+    }
+
+    @Test
+    fun `cancelling a call while its body is read ends it at once, closes the call and pauses nothing`(): Unit = runBlocking {
+        // Real time: a body of 64 bytes at one byte each 500 ms takes 32 s to read.
+        server.enqueue(MockResponse.Builder().body("x".repeat(64)).throttleBody(1, 500, TimeUnit.MILLISECONDS).build())
+        val limiter = RateLimiter(interval)
+        // A retry would pause the limiter for 30 to 60 s.
+        val caller = RetryingCaller(
+            HttpClients.create(TestServices.USER_AGENT, TestServices.openGate()),
+            limiter,
+            RetryPolicy(maxRetries = 3, baseDelay = 60.seconds, maxDelay = 60.seconds),
+            Dispatchers.IO,
+            CallGuard {},
+        )
+        val reading = CompletableDeferred<Unit>()
+        val scope = CoroutineScope(Dispatchers.Default)
+        try {
+            val call = scope.async {
+                caller.execute(
+                    request = Request.Builder().url(server.url("/")).build(),
+                    giveUp = { attempts, cause -> Unavailable(attempts, cause) },
+                    paused = { Paused() },
+                ) { response ->
+                    reading.complete(Unit)
+                    CallOutcome.Success(response.body.string())
+                }
+            }
+            withTimeout(10_000) { reading.await() }
+
+            call.cancel()
+            // At once, not when the body would have been read.
+            withTimeout(5_000) { call.join() }
+
+            assertThat(call.isCancelled).isTrue()
+            // No backoff pause: the next caller waits at most the interval.
+            limiter.acquire(maxWait = 5.seconds)
+        } finally {
+            scope.cancel()
+        }
     }
 }
