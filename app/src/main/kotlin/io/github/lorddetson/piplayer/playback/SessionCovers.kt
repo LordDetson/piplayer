@@ -86,7 +86,8 @@ class SessionCovers(
             own.load()
             val file = Covers.facts(context).file(fileId) ?: return null
             // A decided cover replaces the stream's picture as an own cover does (docs/library.md §13.6).
-            val chosen = file.identityId?.let(own::track) != null || file.albumKey?.let(own::album) != null || file.decidedCover != null
+            val chosen = file.identityId?.let(own::track) != null || file.albumKey?.let(own::album) != null ||
+                file.decidedCover?.let { Covers.saved(context).file(it) } != null
             val px = when {
                 chosen -> OWN_PX
                 file.embedded == false -> THUMBNAIL_PX

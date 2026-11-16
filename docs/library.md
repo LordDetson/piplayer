@@ -1083,7 +1083,9 @@ Covers for controllers outside PiPlayer (part B, §13.8): a content provider tha
   live entry (a 404 for 7 days, a 503 for 5 minutes and up) answers without a request, and a call the gate, a missing
   network or the provider's stop blocks sends nothing. Steps up to 256 px load `front-250` (lists and tiles), up to
   512 px `front-500`, larger ones `front-1200`, each with the fallbacks of TI §5.2. The step is in a cover's plan only
-  while online lookups are on, and the load checks the gate again before it asks the client. A found image is decoded
+  while online lookups are on, and the load checks the gate again before it asks the client. A plan waits until the
+  setting has been read at start (at most 5 seconds, TI §9), so that a cover planned before is not left without the
+  step; for the same reason reading the setting at start does not count as turning it on. A found image is decoded
   for its step and kept in both caches under the step's key (`caa/<release>/<release group>`); a cover Cover Art
   Archive does not have is remembered in memory only, as the failure entry already keeps its 404, and a busy or
   blocked answer is not remembered at all.
@@ -1939,7 +1941,9 @@ are in playback.md §9.1. The owner left the open choices to the recommendations
 - The Cover Art Archive step is in the plan only while online lookups are on, as in the loader. The details ask the
   loader for that step alone at 250 px: from its caches when they hold it, otherwise through the Cover Art Archive
   client, with its gate, limiter and failure entries (§13.3), so opening the details sends at most the request the
-  header's own cover would send, and nothing while online lookups are off.
+  header's own cover would send, and nothing while online lookups are off. They wait for it at most 3 seconds, so a
+  load that waits for its turn or for the network never keeps the other values from showing: it goes on and fills the
+  caches, the source shows "None" meanwhile, and the next read of the details (§18.1) finds it.
 - The size: for an own cover the width and height stored with it (§13.2); for a saved cover those of its `saved_cover`
   row, read from the image header when it was saved (none for WebP, TI §10.2); for an embedded picture the size of the
   picture read again from the file (only its header is decoded) and its size in bytes from the tag pass. Decision: the

@@ -9,7 +9,11 @@ import io.github.lorddetson.piplayer.covers.CoverStep
 import io.github.lorddetson.piplayer.covers.Covers
 import io.github.lorddetson.piplayer.covers.EmbeddedPictures
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.withContext
 
 /**
@@ -40,7 +44,12 @@ class AndroidPictureProbe(context: Context) : PictureProbe {
      * Whether the lazy Cover Art Archive [step] has a picture, loaded by the loader as a list would load it: from its caches,
      * otherwise through the client with its gate, limiter and failure entries (docs/library.md §18.3).
      */
-    override suspend fun online(step: CoverStep.Caa): Boolean = safely { Covers.loader(app).step(step, CAA_PX) != null } ?: false
+    override suspend fun online(step: CoverStep.Caa): Boolean {
+        val load = probes.async { safely { Covers.loader(app).step(step, CAA_PX) != null } ?: false }
+        // A load that waits longer, at the limiter or for the network, keeps the details from showing; it goes on in the
+        // background and fills the caches, so the next read of the details finds it.
+        return withTimeoutOrNull(CAA_WAIT_MS) { load.await() } ?: false
+    }
 
     /** [block], or null when the file cannot be read now: details then show no such picture. */
     private suspend fun <T> safely(block: suspend () -> T?): T? = try {
@@ -60,5 +69,11 @@ class AndroidPictureProbe(context: Context) : PictureProbe {
 
         /** Cover Art Archive's list size, `front-250` (docs/library.md §13.3). */
         const val CAA_PX = 250
+
+        /** How long the details wait for a Cover Art Archive load (docs/library.md §18.3). */
+        const val CAA_WAIT_MS = 3_000L
+
+        /** Cover Art Archive loads of the details, which outlive a read given up after [CAA_WAIT_MS]. */
+        private val probes = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     }
 }

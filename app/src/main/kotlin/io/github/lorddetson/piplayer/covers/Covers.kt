@@ -31,12 +31,15 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import io.github.lorddetson.piplayer.library.tagpass.TagPassState
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 
 /** The library database's answers for covers (docs/library.md §13.1), with each file's identity from [user]. */
 class LibraryCoverFacts(
@@ -159,6 +162,8 @@ object Covers {
             CoverLoader(
                 plan = { request ->
                     own.load()
+                    // Closed until the settings are read: a plan made before would leave out the lazy step for nothing.
+                    withTimeoutOrNull(IdentificationServices.GATE_READ_TIMEOUT) { gate.awaitLoaded() }
                     CoverPlan.of(request, facts(app), own, names, online = gate.isOpen())
                 },
                 sources = AndroidCoverSources(
@@ -173,7 +178,7 @@ object Covers {
                 memoryWeight = memoryWeight(),
                 failures = { e ->
                     // Online lookups off, no network or a busy Cover Art Archive are expected; they need no stack trace.
-                    if (e is SendBlockedException || e is CaaBusyException || e is CaaException) {
+                    if (e is SendBlockedException || e is CaaBusyException || e is CaaException.Paused || e is CaaException.Unavailable) {
                         android.util.Log.d(TAG, "A Cover Art Archive cover could not be loaded now: ${e.message}")
                     } else {
                         android.util.Log.i(TAG, "A cover could not be loaded now", e)
@@ -188,7 +193,11 @@ object Covers {
                         IdentityAttacher.changes,
                         LibrarySettings(app).hiddenFiles,
                         Library.decisionVersion(app),
-                        gate.open,
+                        // From the settings' first read on, so that reading them at start is no change.
+                        flow {
+                            gate.awaitLoaded()
+                            emitAll(gate.open)
+                        },
                     )
                         .collect { change ->
                             loader.invalidate()

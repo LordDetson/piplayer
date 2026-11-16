@@ -1,5 +1,7 @@
 package io.github.lorddetson.piplayer.library.details
 
+import io.github.lorddetson.piplayer.covers.CoverFacts
+import io.github.lorddetson.piplayer.covers.CoverFile
 import io.github.lorddetson.piplayer.covers.CoverPlan
 import io.github.lorddetson.piplayer.covers.CoverRequest
 import io.github.lorddetson.piplayer.covers.CoverStep
@@ -119,20 +121,25 @@ class LibraryTrackDetails(
     private suspend fun coverOf(fileId: Long, stored: Stored, identity: Long?): CoverDetail {
         own.load()
         val names = saved?.names() ?: SavedCoverIndex.NONE
-        val steps = CoverPlan.of(CoverRequest.Track(fileId), facts, own, names, online())
-        for (step in steps) detailOf(step, stored, identity)?.let { return it }
+        val file = facts.file(fileId) ?: return CoverDetail(CoverSource.NONE)
+        // The plan reads the same facts of the file, not a second copy of them.
+        val once = object : CoverFacts by facts {
+            override suspend fun file(fileId: Long): CoverFile? = if (fileId == file.fileId) file else facts.file(fileId)
+        }
+        val steps = CoverPlan.of(CoverRequest.Track(fileId), once, own, names, online())
+        for (step in steps) detailOf(step, stored, identity, file.albumKey)?.let { return it }
         return CoverDetail(CoverSource.NONE)
     }
 
     /** What [step] shows, or null when it has no picture. */
-    private suspend fun detailOf(step: CoverStep, stored: Stored, identity: Long?): CoverDetail? = when (step) {
+    private suspend fun detailOf(step: CoverStep, stored: Stored, identity: Long?, albumKey: String?): CoverDetail? = when (step) {
         is CoverStep.Own -> if (!copyExists(step.fileName)) {
             null
         } else if (identity != null && own.track(identity) == step.fileName) {
             // Copies have names of their own, so the song's and the album's never share one.
             user.covers().trackCover(identity)?.let { CoverDetail(CoverSource.SONG_OWN, it.width, it.height) }
         } else {
-            stored.albumKey()?.let { user.covers().albumCover(it) }?.let { CoverDetail(CoverSource.ALBUM_OWN, it.width, it.height) }
+            albumKey?.let { user.covers().albumCover(it) }?.let { CoverDetail(CoverSource.ALBUM_OWN, it.width, it.height) }
         }
         is CoverStep.Saved -> saved?.file(step.id)?.takeIf { it.name == step.fileName }?.let {
             user.decisions().savedCover(step.id)?.let { row -> CoverDetail(CoverSource.SAVED, row.width, row.height, row.bytes) }
@@ -142,9 +149,6 @@ class LibraryTrackDetails(
         is CoverStep.Thumbnail -> if (probe.hasThumbnail(step.file.uri)) CoverDetail(CoverSource.THUMBNAIL) else null
         is CoverStep.Caa -> if (probe.online(step)) CoverDetail(CoverSource.CAA) else null
     }
-
-    /** The album key the file's display row holds. */
-    private suspend fun Stored.albumKey(): String? = facts.file(file.id)?.albumKey
 
     /** A reference whose copy is gone counts as no own cover (docs/library.md §13.2). */
     private fun copyExists(fileName: String) = File(own.dir, fileName).isFile
