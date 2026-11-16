@@ -78,7 +78,7 @@ class PlaybackService : MediaLibraryService() {
         // Debug builds journal the audio path; release builds do nothing here (§8.3).
         AudioJournal.attach(this, player)
         // Before the session's own listener, so that a skipped song's error never reaches the controllers (§2.4).
-        player.addListener(BrokenSongSkipper(player, ::stopped))
+        player.addListener(BrokenSongSkipper(player, onStop = ::stopped))
         player.addListener(MediaButtons.listener(this, ::showButtons))
         val effects = AudioEffectSession(
             open = { sendBroadcast(effectIntent(AudioEffect.ACTION_OPEN_AUDIO_EFFECT_CONTROL_SESSION, it)) },

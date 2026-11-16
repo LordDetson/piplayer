@@ -161,6 +161,9 @@ class PlayTracker(
         failed = true
     }
 
+    /** The service's skipper gave the current song up (docs/playback.md §12.3). */
+    fun songFailed() = Unit
+
     override fun onPlaybackStateChanged(playbackState: Int) {
         // The queue ended (§11.2): nothing may end this playback before the process goes, so a counted one gets its
         // listened time now. It stays the current playback; should it go on, its end writes the time again.

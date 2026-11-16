@@ -1,7 +1,11 @@
 package io.github.lorddetson.piplayer.playback
 
+import android.graphics.Bitmap
+import android.graphics.Color
+import android.net.Uri
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -9,6 +13,7 @@ import io.github.lorddetson.piplayer.TestFiles
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.fileItem
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.onMain
 import io.github.lorddetson.piplayer.userdata.ListenOutcome
+import java.io.File
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -52,6 +57,10 @@ class PlayTrackerTest {
 
     @Volatile
     private var now = 10_000L
+
+    /** While set, every reading of the test clock moves it on by 1 ms, as time passes between the player's reports. */
+    @Volatile
+    private var ticking = false
     private var wall = 1_800_000_000_000L
     private lateinit var player: ExoPlayer
     private lateinit var tracker: PlayTracker
@@ -67,11 +76,33 @@ class PlayTrackerTest {
     private fun item(id: String, asset: String = PlaybackTesting.LONG_FIXTURE): MediaItem =
         fileItem(asset).buildUpon().setMediaId(id).build()
 
-    private fun start(vararg items: MediaItem, repeat: Int = Player.REPEAT_MODE_OFF, listener: Player.Listener? = null) {
+    /**
+     * A song whose file is a small JPEG: Media3 opens it without an error, but it has no audio that can be played
+     * (docs/playback.md §2.4).
+     */
+    private fun noAudioItem(id: String): MediaItem {
+        val file = File(TestFiles.targetContext.cacheDir, "tracker-no-audio.mp3")
+        val bitmap = Bitmap.createBitmap(16, 16, Bitmap.Config.ARGB_8888).apply { eraseColor(Color.RED) }
+        file.outputStream().use { bitmap.compress(Bitmap.CompressFormat.JPEG, 90, it) }
+        return MediaItem.Builder().setUri(Uri.fromFile(file)).setMediaId(id).build()
+    }
+
+    /**
+     * Plays [items] with the tracker listening; with [skipper], the service's skipper of broken songs listens first and
+     * tells the tracker of a song it gives up, as the service wires them (docs/playback.md §2.4, §12.3).
+     */
+    private fun start(
+        vararg items: MediaItem,
+        repeat: Int = Player.REPEAT_MODE_OFF,
+        listener: Player.Listener? = null,
+        skipper: Boolean = false,
+    ) {
         onMain {
             player = PlaybackPlayer.builder(TestFiles.targetContext).build()
             listener?.let(player::addListener)
-            tracker = PlayTracker(player, recorder, clock = { now }, wallClock = { wall }, thresholdOf = { 3_000L })
+            if (skipper) player.addListener(BrokenSongSkipper(player, onStop = { _, _ -> }, onFailing = { tracker.songFailed() }))
+            val clock = { if (ticking) ++now else now }
+            tracker = PlayTracker(player, recorder, clock = clock, wallClock = { wall }, thresholdOf = { 3_000L })
             tracker.start()
             player.repeatMode = repeat
             player.setMediaItems(items.toList())
@@ -449,6 +480,138 @@ class PlayTrackerTest {
         assertThat(outcomes).containsExactly(Outcome("a", ListenOutcome.FINISHED, 42, 20_000, 180_000))
         // The current playback is untouched.
         assertThat(onMain { tracker.progress() }?.listenedMs).isEqualTo(0)
+    }
+
+    @Test
+    fun aNewQueueWhoseFirstEntryPlaysTheSameFileWritesNoOutcome() {
+        start(item("42"))
+        listen(5_000)
+
+        // Recently played chosen at the playing song: the queue is one of added entries (docs/playback.md §12.3).
+        onMain { player.setMediaItems(listOf(item("42/a1"), item("7/a2")), 0, 0) }
+        awaitPlayer("the new queue plays") { mediaItemCount == 2 && isPlaying }
+        assertThat(outcomes).isEmpty()
+
+        listen(6_000)
+        onMain { player.setMediaItems(listOf(item("43/a3"))) }
+        awaitPlayer("another song is the queue") { currentMediaItem?.mediaId == "43/a3" }
+
+        assertThat(outcomes()).containsExactly("42/a1" to ListenOutcome.EARLY_SKIP)
+        assertThat(outcomes.single().listenedMs).isEqualTo(6_000)
+    }
+
+    @Test
+    fun aPlaybackErrorFollowedByNextWritesNoOutcome() {
+        start(item("a"), item("b"))
+        listen(5_000)
+
+        // The player reports a failure of the song, and the user moves on from it (docs/playback.md §12.3).
+        onMain { tracker.onPlayerError(PlaybackException("broken", null, PlaybackException.ERROR_CODE_DECODING_FAILED)) }
+        onMain { player.seekToNextMediaItem() }
+        awaitPlayer("b is current") { currentMediaItem?.mediaId == "b" }
+
+        assertThat(outcomes).isEmpty()
+    }
+
+    @Test
+    fun anErrorFollowedByARetryThatPlaysWritesTheOutcomeAsUsual() {
+        start(item("a"), item("b"))
+        listen(5_000)
+        onMain {
+            tracker.onPlayerError(PlaybackException("broken", null, PlaybackException.ERROR_CODE_DECODING_FAILED))
+            player.pause()
+        }
+        awaitPlayer("it pauses") { !isPlaying }
+
+        onMain { player.play() }
+        awaitPlayer("it plays again") { isPlaying }
+        listen(1_000)
+        onMain { player.seekToNextMediaItem() }
+        awaitPlayer("b is current") { currentMediaItem?.mediaId == "b" }
+
+        assertThat(outcomes()).containsExactly("a" to ListenOutcome.EARLY_SKIP)
+        assertThat(outcomes.single().listenedMs).isEqualTo(6_000)
+    }
+
+    @Test
+    fun aSongWithoutPlayableAudioThatTheSkipperMovesPastWritesNoOutcome() {
+        start(item("a"), noAudioItem("x"), item("b"), skipper = true)
+        listen(5_000)
+
+        // The player gets ready on x and plays it for a moment before the skipper moves on (docs/playback.md §12.3).
+        ticking = true
+        onMain { player.seekToNextMediaItem() }
+        awaitPlayer("b plays") { currentMediaItem?.mediaId == "b" && isPlaying }
+        ticking = false
+
+        assertThat(onMain { outcomes() }).containsExactly("a" to ListenOutcome.EARLY_SKIP)
+    }
+
+    @Test
+    fun aSongWithoutPlayableAudioReachedByAGaplessTransitionWritesNoOutcome() {
+        ticking = true
+        start(item("a", PlaybackTesting.SHORT_FIXTURE), noAudioItem("x"), item("b"), skipper = true)
+
+        // a plays into x while playing, and the skipper moves past x on its tracks (docs/playback.md §2.4, §12.3).
+        awaitPlayer("b plays") { currentMediaItem?.mediaId == "b" && isPlaying }
+        ticking = false
+
+        assertThat(onMain { outcomes() }).containsExactly("a" to ListenOutcome.FINISHED)
+    }
+
+    @Test
+    fun aRestoredItemThatTheLengthCheckMovesToTheNextSongWasListenedToTheEnd() {
+        val check = RestoredEndCheck()
+        onMain {
+            player = PlaybackPlayer.builder(TestFiles.targetContext).build()
+            tracker = PlayTracker(player, recorder, clock = { now }, wallClock = { wall }, thresholdOf = { 3_000L })
+            tracker.start()
+            tracker.resume("a", ListenProgress(listenedMs = 20_000, counted = false, startedAt = 42))
+            // Restored paused at the end of the 12 s song, whose queue item carries no length (docs/playback.md §4.3.1).
+            player.setMediaItems(listOf(item("a"), item("b")), 0, SongSourceRule.LONG_FIXTURE_MS)
+            check.watch(player, "a", 0, SongSourceRule.LONG_FIXTURE_MS)
+            player.prepare()
+        }
+        try {
+            awaitPlayer("b is current") { currentMediaItem?.mediaId == "b" }
+
+            val ended = onMain { outcomes.single() }
+            assertThat(Triple(ended.mediaId, ended.outcome, ended.startedAt)).isEqualTo(Triple("a", ListenOutcome.FINISHED, 42L))
+            assertThat(ended.listenedMs).isEqualTo(20_000)
+            assertThat(ended.durationMs).isNotNull()
+            assertThat(ended.durationMs!!).isCloseTo(SongSourceRule.LONG_FIXTURE_MS, within(100L))
+        } finally {
+            onMain { check.cancel() }
+        }
+    }
+
+    @Test
+    fun stopAfterCurrentTrackEndsTheSongAsListenedToTheEndBeforeTheNextOne() {
+        start(item("a"), item("b"))
+        onMain { EndOfSongPause(player, onChange = {}).also(player::addListener).setStopAfterCurrent(true) }
+        listen(4_000)
+
+        onMain { player.seekTo(10_500) }
+        awaitPlayer("b waits paused") { currentMediaItem?.mediaId == "b" && !playWhenReady }
+
+        assertThat(onMain { outcomes() }).containsExactly("a" to ListenOutcome.FINISHED)
+        assertThat(outcomes.single().listenedMs).isEqualTo(4_000)
+    }
+
+    @Test
+    fun stopAfterCurrentTrackAtTheLastSongFollowedByANewQueueWasListenedToTheEnd() {
+        start(item("a"))
+        onMain { EndOfSongPause(player, onChange = {}).also(player::addListener).setStopAfterCurrent(true) }
+        listen(4_000)
+        onMain { player.seekTo(10_500) }
+        awaitPlayer("it stops at the end") { !playWhenReady }
+
+        // The last song stays at its end; a new queue of another song comes after it (docs/playback.md §12.2).
+        onMain { player.setMediaItems(listOf(item("b"))) }
+        awaitPlayer("b is the queue") { currentMediaItem?.mediaId == "b" }
+
+        assertThat(onMain { outcomes() }).containsExactly("a" to ListenOutcome.FINISHED)
+        assertThat(outcomes.single().listenedMs).isEqualTo(4_000)
     }
 
     private companion object {

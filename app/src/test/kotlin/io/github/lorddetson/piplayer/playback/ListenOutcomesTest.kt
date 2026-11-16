@@ -105,6 +105,25 @@ class ListenOutcomesTest {
     }
 
     @Test
+    fun `a new queue whose first entry plays the same file is the same song, whatever its entry`() {
+        val changed = Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED
+        // A list ranked by plays, or "play selected songs", builds added entries (docs/playback.md §12.3).
+        assertThat(ListenOutcomes.endOf(changed, "42", "42/a1")).isEqualTo(ListenEnd.NONE)
+        assertThat(ListenOutcomes.endOf(changed, "42/a3", "42")).isEqualTo(ListenEnd.NONE)
+        assertThat(ListenOutcomes.endOf(changed, "42/a3", "42/a1")).isEqualTo(ListenEnd.NONE)
+        assertThat(ListenOutcomes.endOf(changed, "42/a1", "43/a2")).isEqualTo(ListenEnd.MOVED_ON)
+        assertThat(ListenOutcomes.endOf(changed, "42", "43/a42")).isEqualTo(ListenEnd.MOVED_ON)
+        // An opened file is the same song when the same file is opened again, and never a library song.
+        assertThat(ListenOutcomes.endOf(changed, "content://a/1", "content://a/1")).isEqualTo(ListenEnd.NONE)
+        assertThat(ListenOutcomes.endOf(changed, "content://a/1", "content://a/2")).isEqualTo(ListenEnd.MOVED_ON)
+        assertThat(ListenOutcomes.endOf(changed, "42", "content://a/42")).isEqualTo(ListenEnd.MOVED_ON)
+        assertThat(ListenOutcomes.endOf(changed, "content://a/42", "42")).isEqualTo(ListenEnd.MOVED_ON)
+        // Within the queue, another entry of the same file is a move (§12.2).
+        assertThat(ListenOutcomes.endOf(Player.MEDIA_ITEM_TRANSITION_REASON_SEEK, "42/a1", "42/a2")).isEqualTo(ListenEnd.MOVED_ON)
+        assertThat(ListenOutcomes.endOf(Player.MEDIA_ITEM_TRANSITION_REASON_SEEK, "42/a1", "42")).isEqualTo(ListenEnd.MOVED_ON)
+    }
+
+    @Test
     fun `a transition without a playback before it ends nothing`() {
         assertThat(ListenOutcomes.endOf(Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED, null, "1")).isEqualTo(ListenEnd.NONE)
         assertThat(ListenOutcomes.endOf(Player.MEDIA_ITEM_TRANSITION_REASON_SEEK, null, "1")).isEqualTo(ListenEnd.NONE)

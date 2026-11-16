@@ -13,6 +13,8 @@ import androidx.media3.common.Tracks
  */
 class BrokenSongSkipper(
     private val player: Player,
+    /** The current song failed and the skipper is about to move past it or stop at it (docs/playback.md §12.3). */
+    private val onFailing: () -> Unit = {},
     private val onStop: (failures: Int, kind: FailureKind) -> Unit,
 ) : Player.Listener {
 

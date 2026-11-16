@@ -14,7 +14,11 @@ import io.github.lorddetson.piplayer.library.playlists.PlaylistLinks
 import io.github.lorddetson.piplayer.library.sync.IndexRow
 import io.github.lorddetson.piplayer.library.sync.LibrarySync
 import io.github.lorddetson.piplayer.library.tagpass.DurationSource
+import androidx.room3.useReaderConnection
+import androidx.room3.useWriterConnection
 import io.github.lorddetson.piplayer.userdata.Favorites
+import io.github.lorddetson.piplayer.userdata.ListenOutcome
+import io.github.lorddetson.piplayer.userdata.Listens
 import io.github.lorddetson.piplayer.userdata.NewEntry
 import io.github.lorddetson.piplayer.userdata.PlayStats
 import io.github.lorddetson.piplayer.userdata.PlaylistEntity
@@ -204,6 +208,49 @@ class IdentityAttacherTest {
         assertThat(identities()).isEmpty()
     }
 
+    /** Writes [sql] into the user database. */
+    private suspend fun execute(sql: String) = user.useWriterConnection { c -> c.usePrepared(sql) { it.step() } }
+
+    /** Each `play_stats` row: identity, play count and the folded listening counts (docs/library.md §15.7). */
+    private suspend fun counts(): List<List<Long>> = user.useReaderConnection { c ->
+        c.usePrepared("SELECT identity_id, play_count, early_skips, late_skips, finished FROM play_stats ORDER BY identity_id") { s ->
+            buildList { while (s.step()) add(List(5) { s.getLong(it) }) }
+        }
+    }
+
+    @Test
+    fun anIdentityWithOnlyListeningOutcomesIsDeletedThirtyDaysAfterItWentMissingWithThem() = runBlocking<Unit> {
+        index.volume().rows = listOf(row(1), row(2))
+        sync.sync()
+        keyed(1, key(1))
+        keyed(2, key(2))
+        attacher.attach()
+        val (listened, played) = identities().sortedBy { it.id }.map { it.id }
+        Listens(user).record(listened, startedAt = 5, listenedMs = 4_000, durationMs = 200_000, ListenOutcome.EARLY_SKIP)
+        Listens(user).record(played, startedAt = 6, listenedMs = 4_000, durationMs = 200_000, ListenOutcome.EARLY_SKIP)
+        execute(
+            "INSERT INTO play_stats (identity_id, play_count, listened_ms, last_played_at, early_skips, late_skips, finished) " +
+                "VALUES ($listened, 0, 0, NULL, 1, 2, 3), ($played, 4, 1000, 7, 1, 0, 0)",
+        )
+        val real = IdentityAttacher(library, user, sync, holders = { user.user().identitiesHoldingData().toSet() }, clock = { now })
+
+        try {
+            index.volume().rows = emptyList()
+            sync.sync()
+            real.attach()
+            now += IdentityMatcher.KEEP_MISSING_MS
+            real.attach()
+
+            // Listening outcomes keep no identity (docs/library.md §8.1, §15.7): it goes, and its outcomes go with it; the
+            // identity with a play stays with its own.
+            assertThat(identities().map { it.id }).containsExactly(played)
+            assertThat(user.listens().events().map { it.identityId }).containsExactly(played)
+            assertThat(counts()).containsExactly(listOf(played, 4L, 1L, 0L, 0L))
+        } finally {
+            real.close()
+        }
+    }
+
     @Test
     fun anIdentityThatHoldsUserDataStays() = runBlocking<Unit> {
         index.volume().rows = listOf(row(1))
@@ -366,6 +413,47 @@ class IdentityAttacherTest {
             assertThat(idOfKey(key(3))).isEqualTo(a)
             assertThat(user.favorites().members().filter { m -> identities().any { it.id == m.identityId } }.map { it.albumKey to it.identityId })
                 .containsExactly("album" to a)
+        }
+    }
+
+    @Test
+    fun listeningWhileStep4FingerprintsNeitherKeepsTheNewIdentityNorIsLost() = runBlocking<Unit> {
+        // The user plays b.mp3 for a moment under N while step 4 fingerprints it (docs/library.md §8.1, §15.7): A still
+        // takes the file over, and the outcome becomes A's.
+        afterTakeoverRace(
+            onCompute = { file ->
+                Listens(user).record(idOfKey(file.contentKey)!!, startedAt = 5, listenedMs = 1_000, durationMs = 200_000, ListenOutcome.EARLY_SKIP)
+            },
+        ) { a ->
+            assertThat(idOfKey(key(3))).isEqualTo(a)
+            assertThat(identities().map { it.id }).containsExactly(a)
+            assertThat(user.listens().events().map { it.identityId to it.startedAt }).containsExactly(a to 5L)
+        }
+    }
+
+    @Test
+    fun aTakeoverAddsTheFoldedListeningCountsOfTheIdentityItReplaces() = runBlocking<Unit> {
+        var replaced = 0L
+        afterTakeoverRace(
+            onCompute = { file ->
+                if (replaced == 0L) {
+                    replaced = idOfKey(file.contentKey)!!
+                    val a = idOfKey(key(1))!!
+                    // A has counts of its own and an event at the same start as one of N's, which stays A's alone.
+                    Listens(user).record(a, startedAt = 5, listenedMs = 1_000, durationMs = 200_000, ListenOutcome.EARLY_SKIP)
+                    Listens(user).record(replaced, startedAt = 5, listenedMs = 9_000, durationMs = 200_000, ListenOutcome.EARLY_SKIP)
+                    Listens(user).record(replaced, startedAt = 6, listenedMs = 200_000, durationMs = 200_000, ListenOutcome.FINISHED)
+                    execute(
+                        "INSERT INTO play_stats (identity_id, play_count, listened_ms, last_played_at, early_skips, late_skips, finished) " +
+                            "VALUES ($a, 0, 0, NULL, 1, 1, 1), ($replaced, 0, 0, NULL, 2, 0, 5)",
+                    )
+                }
+            },
+        ) { a ->
+            assertThat(idOfKey(key(3))).isEqualTo(a)
+            assertThat(counts()).containsExactly(listOf(a, 0L, 3L, 1L, 6L))
+            assertThat(user.listens().events().map { Triple(it.identityId, it.startedAt, it.listenedMs) })
+                .containsExactly(Triple(a, 5L, 1_000L), Triple(a, 6L, 200_000L))
         }
     }
 

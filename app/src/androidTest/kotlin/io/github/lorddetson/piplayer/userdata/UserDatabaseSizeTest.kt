@@ -28,8 +28,8 @@ import org.junit.runner.RunWith
  * tags, whose references all fit the mask, and half on files whose tags differ from the decided values in 8 parts, which
  * take 5 bytes each (TI §10.2); a tenth of the tracks has a second location whose values differ in 4 parts, as
  * `file_state` rows. A year of listening adds 9 000 listening outcomes of 90 days and the folded counts of 15 000
- * identities (docs/library.md §15.7). Measured on the API 36 emulator in M3 before the references and `file_state` rows
- * were added: 13.0 MB; on the API 30 and 36 emulators with the listening outcomes, which take 0.64 MB: 15.1 MB.
+ * identities, 12 000 of which have folded plays too (docs/library.md §15.7). Measured on the API 36 emulator in M3 before
+ * the references and `file_state` rows were added: 13.0 MB.
  */
 @RunWith(AndroidJUnit4::class)
 class UserDatabaseSizeTest {
@@ -136,29 +136,27 @@ class UserDatabaseSizeTest {
                     s.step()
                 }
             }
-            for (i in 1..PLAYED) {
-                usePrepared("INSERT INTO play_stats (identity_id, play_count, listened_ms, last_played_at) VALUES (?, ?, ?, ?)") { s ->
-                    s.bindLong(1, i.toLong()); s.bindLong(2, (i % 50).toLong()); s.bindLong(3, i * 180_000L); s.bindLong(4, 1_800_000_000_000L + i)
+            // The folded plays of 12 000 identities and the folded listenings of 15 000, those 12 000 among them: an
+            // identity without a play has a play count of 0 (docs/library.md §15.7).
+            for (i in 1..LISTENED) {
+                usePrepared(
+                    "INSERT INTO play_stats (identity_id, play_count, listened_ms, last_played_at, early_skips, late_skips, finished) " +
+                        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                ) { s ->
+                    val played = i <= PLAYED
+                    s.bindLong(1, i.toLong()); s.bindLong(2, if (played) (i % 50 + 1).toLong() else 0); s.bindLong(3, if (played) i * 180_000L else 0)
+                    if (played) s.bindLong(4, 1_800_000_000_000L + i) else s.bindNull(4)
+                    s.bindLong(5, (i % 9).toLong()); s.bindLong(6, (i % 5).toLong()); s.bindLong(7, (i % 40).toLong())
                     s.step()
                 }
             }
-            // Listening outcomes of 90 days, 100 a day, and the folded counts of the listenings before (docs/library.md §15.7).
+            // Listening outcomes of 90 days, 100 a day (docs/library.md §15.7).
             for (i in 1..LISTEN_EVENTS) {
                 usePrepared(
                     "INSERT INTO listen_event (started_at, identity_id, listened_ms, duration_ms, outcome) VALUES (?, ?, ?, ?, ?)",
                 ) { s ->
                     s.bindLong(1, 1_800_000_000_000L + i * 864_000L); s.bindLong(2, (i * 7L % TRACKS) + 1)
                     s.bindLong(3, 1_000L + i * 7_919L % 299_000); s.bindLong(4, 180_000L + i % 120_000); s.bindLong(5, (i % 3 + 1).toLong())
-                    s.step()
-                }
-            }
-            for (i in 1..LISTENED) {
-                usePrepared(
-                    "INSERT INTO listen_stats (identity_id, early_skips, late_skips, finished, listened_ms, last_started_at) " +
-                        "VALUES (?, ?, ?, ?, ?, ?)",
-                ) { s ->
-                    s.bindLong(1, i.toLong()); s.bindLong(2, (i % 9).toLong()); s.bindLong(3, (i % 5).toLong()); s.bindLong(4, (i % 40).toLong())
-                    s.bindLong(5, i * 1_800_000L); s.bindLong(6, 1_790_000_000_000L + i * 1_000L)
                     s.step()
                 }
             }

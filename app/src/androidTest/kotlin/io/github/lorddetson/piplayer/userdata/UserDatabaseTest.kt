@@ -1,6 +1,8 @@
 package io.github.lorddetson.piplayer.userdata
 
+import androidx.room3.PooledConnection
 import androidx.room3.testing.MigrationTestHelper
+import androidx.room3.useReaderConnection
 import androidx.room3.useWriterConnection
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -42,6 +44,24 @@ class UserDatabaseTest {
         id = id, contentKey = ByteArray(32) { id.toByte() }, durationMs = 1_000, recordingMbid = null, hintVolumeName = null,
         hintRelativePath = null, hintDisplayName = null, hintSize = null, createdAt = 1, missingSince = null,
     )
+
+    /** The rows [sql] reads, as text. */
+    private suspend fun rows(db: UserDatabase, sql: String): List<List<String?>> = db.useReaderConnection { it.query(sql) }
+
+    private suspend fun PooledConnection.query(sql: String): List<List<String?>> = usePrepared(sql) { statement ->
+        buildList {
+            while (statement.step()) {
+                add(List(statement.getColumnCount()) { if (statement.isNull(it)) null else statement.getText(it) })
+            }
+        }
+    }
+
+    /** Each `play_stats` row: identity, play count and the folded listening counts (docs/library.md §15.7). */
+    private suspend fun counts(db: UserDatabase) =
+        rows(db, "SELECT identity_id, play_count, early_skips, late_skips, finished FROM play_stats ORDER BY identity_id")
+            .map { row -> row.map { it!!.toLong() } }
+
+    private suspend fun execute(db: UserDatabase, sql: String) = db.useWriterConnection { c -> c.usePrepared(sql) { it.step() } }
 
     @Test
     fun versionOneIsCreatedAsItsExportedSchemaSays() = runBlocking<Unit> {
@@ -220,9 +240,15 @@ class UserDatabaseTest {
             assertThat(decisions.releaseChoiceCount()).isZero()
             assertThat(decisions.fileStates(7)).isEmpty()
             assertThat(decisions.savedCover(1)).isNull()
-            // So do the listening outcomes (docs/library.md §15.7).
+            // So do the listening outcomes (docs/library.md §15.7); the rows of play_stats get listening counts of 0.
             assertThat(opened.listens().events()).isEmpty()
-            assertThat(opened.listens().stats()).isEmpty()
+            assertThat(counts(opened)).containsExactly(listOf(7L, 6L, 0L, 0L, 0L))
+            assertThat(rows(opened, "SELECT name FROM sqlite_master WHERE name = 'listen_stats'")).isEmpty()
+            // play_event keeps its rows under its new key, without row IDs and without its index on the start.
+            val playEvent = rows(opened, "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'play_event'").single().single()!!
+            assertThat(playEvent).contains("PRIMARY KEY(`started_at`, `identity_id`)").contains("WITHOUT ROWID")
+            assertThat(rows(opened, "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'play_event'")).isEmpty()
+            assertThat(opened.plays().totalOf(7)).isEqualTo(PlayTotalRow(playCount = 7, lastPlayedAt = 8))
             assertThat(Listens(opened).record(7, startedAt = 9, listenedMs = 10, durationMs = 1_000, ListenOutcome.EARLY_SKIP)).isEqualTo(7)
             assertThat(opened.listens().events()).containsExactly(ListenEventEntity(9, 7, 10, 1_000, ListenOutcome.EARLY_SKIP.code))
             assertThat(opened.user().changeCounter()).isEqualTo(11)
@@ -385,18 +411,17 @@ class UserDatabaseTest {
     }
 
     @Test
-    fun listeningsOlderThanNinetyDaysAreFoldedWithThePlays() = runBlocking<Unit> {
+    fun listeningsOlderThanNinetyDaysAreFoldedIntoTheCountsOfPlayStats() = runBlocking<Unit> {
         val day = 24L * 60 * 60 * 1_000
         val now = 1_800_000_000_000L
         val listens = Listens(database)
         for (id in 1L..3L) database.identities().add(identity(id))
-        // Identity 1 has an earlier fold: its counts add up.
-        database.useWriterConnection { connection ->
-            connection.usePrepared(
-                "INSERT INTO listen_stats (identity_id, early_skips, late_skips, finished, listened_ms, last_started_at) " +
-                    "VALUES (1, 4, 3, 2, 1000, 7)",
-            ) { it.step() }
-        }
+        // Identity 1 has an earlier fold of plays and listenings: its counts add up.
+        execute(
+            database,
+            "INSERT INTO play_stats (identity_id, play_count, listened_ms, last_played_at, early_skips, late_skips, finished) " +
+                "VALUES (1, 5, 1000, 7, 4, 3, 2)",
+        )
         val old = now - 91 * day
         listens.record(1, old, 10_000, 180_000, ListenOutcome.EARLY_SKIP)
         listens.record(1, old + 1, 60_000, 180_000, ListenOutcome.LATE_SKIP)
@@ -410,29 +435,32 @@ class UserDatabaseTest {
 
         PlayStats(database).fold(now)
 
-        assertThat(database.listens().stats()).containsExactly(
-            ListenStatsEntity(1, earlySkips = 5, lateSkips = 4, finished = 3, listenedMs = 1_000 + 250_000, lastStartedAt = old + 2),
-            ListenStatsEntity(2, earlySkips = 1, lateSkips = 0, finished = 0, listenedMs = 5_000, lastStartedAt = old + 3),
-        )
+        // Identity 2 has folded listenings but no play: a row with a play count of 0.
+        assertThat(counts(database)).containsExactly(listOf(1L, 6L, 5L, 4L, 3L), listOf(2L, 0L, 1L, 0L, 0L))
+        assertThat(rows(database, "SELECT listened_ms, last_played_at FROM play_stats WHERE identity_id = 2"))
+            .containsExactly(listOf("0", null))
         assertThat(database.listens().events().map { it.identityId to it.startedAt })
             .containsExactly(2L to now - 90 * day, 3L to now - day)
-        assertThat(database.plays().stats().single().playCount).isEqualTo(1)
+        // Such a row is no play: the mirror and the song details read only rows with one (docs/library.md §15.5).
+        assertThat(database.plays().playedKeys().map { it.identityId to it.playCount }).containsExactly(1L to 6L)
+        assertThat(database.plays().totalOf(2)).isEqualTo(PlayTotalRow(playCount = 0, lastPlayedAt = null))
         // The fold changes nothing mirrored.
         assertThat(database.user().changeCounter()).isEqualTo(counter)
     }
 
     @Test
-    fun listeningOutcomesHoldTheirIdentities() = runBlocking<Unit> {
-        for (id in 1L..3L) database.identities().add(identity(id))
+    fun listeningOutcomesKeepNoIdentity() = runBlocking<Unit> {
+        for (id in 1L..4L) database.identities().add(identity(id))
         Listens(database).record(1, startedAt = 5, listenedMs = 1_000, durationMs = 180_000, ListenOutcome.EARLY_SKIP)
-        database.useWriterConnection { connection ->
-            connection.usePrepared(
-                "INSERT INTO listen_stats (identity_id, early_skips, late_skips, finished, listened_ms, last_started_at) " +
-                    "VALUES (2, 1, 0, 0, 1000, 7)",
-            ) { it.step() }
-        }
+        execute(
+            database,
+            "INSERT INTO play_stats (identity_id, play_count, listened_ms, last_played_at, early_skips, late_skips, finished) " +
+                "VALUES (2, 0, 0, NULL, 1, 0, 0), (3, 2, 1000, 7, 1, 0, 0)",
+        )
+        PlayStats(database).record(4, startedAt = 6, listenedMs = 120_000)
 
-        // The attach pass never deletes them, and counts them among the identities that hold data (docs/library.md §8.1).
-        assertThat(database.user().identitiesHoldingData()).containsExactlyInAnyOrder(1L, 2L)
+        // Like album members, they are no user data the attach pass keeps an identity for (docs/library.md §8.1, §15.7):
+        // only a row with a play and a play event hold theirs.
+        assertThat(database.user().identitiesHoldingData()).containsExactlyInAnyOrder(3L, 4L)
     }
 }
