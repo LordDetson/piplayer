@@ -2,6 +2,7 @@ package io.github.lorddetson.piplayer.ui.identification
 
 import io.github.lorddetson.piplayer.fakes.FakeMusicBrainz
 import io.github.lorddetson.piplayer.fakes.Fixtures
+import io.github.lorddetson.piplayer.identification.caa.CaaImage
 import io.github.lorddetson.piplayer.identification.caa.CoverEntity
 import io.github.lorddetson.piplayer.identification.caa.CoverImage
 import io.github.lorddetson.piplayer.identification.caa.CoverSource
@@ -15,6 +16,8 @@ import io.github.lorddetson.piplayer.identification.pipeline.FileRef
 import io.github.lorddetson.piplayer.identification.pipeline.LocalFile
 import io.github.lorddetson.piplayer.identification.pipeline.PipelineResult
 import io.github.lorddetson.piplayer.identification.pipeline.StageDuration
+import io.github.lorddetson.piplayer.identification.release.Edition
+import io.github.lorddetson.piplayer.identification.release.EditionList
 import io.github.lorddetson.piplayer.identification.release.EditionSource
 import io.github.lorddetson.piplayer.identification.release.ReleaseChoice
 import io.github.lorddetson.piplayer.identification.release.ReleaseDetails
@@ -33,6 +36,7 @@ import io.github.lorddetson.piplayer.library.details.DetailField
 import io.github.lorddetson.piplayer.library.details.DetailRow
 import io.github.lorddetson.piplayer.library.details.DetailValue
 import io.github.lorddetson.piplayer.library.details.MusicBrainzKind
+import io.github.lorddetson.piplayer.library.details.PictureSize
 import io.github.lorddetson.piplayer.library.details.TrackDetails
 import io.github.lorddetson.piplayer.library.values.TrackTags
 import java.time.Instant
@@ -171,4 +175,44 @@ object ReviewFixtures {
 
     /** A recording ID row of track details. */
     fun recordingIdRow(id: String) = DetailRow(DetailField.RECORDING_ID, DetailValue.MusicBrainz(MusicBrainzKind.RECORDING, id))
+
+    /** The CD of the album, which holds the song as another recording at the same place (TI §4.2 step 6). */
+    val cdRelease: ReleaseDto = MusicBrainzJson.decodeFromString(FakeMusicBrainz.HARBOR_CD_LOOKUP.text())
+
+    /** The promotional CD, which has another song at that place: it does not contain this song. */
+    val promoRelease: ReleaseDto = MusicBrainzJson.decodeFromString(FakeMusicBrainz.HARBOR_PROMO_LOOKUP.text())
+
+    /** The CD's recording of the song. */
+    const val CD_RECORDING = "13131313-1313-4313-8313-131313131313"
+
+    /** The CD as the edition picker maps the file onto it. */
+    val cdEdition = SuggestedEdition(cdRelease, ReleaseDetailsExtractor.extract(cdRelease, CD_RECORDING, 3, 213_200)!!, EditionSource.PICKED)
+
+    /** The group's editions as the picker lists them: the studio album (suggested), the CD and the promotional CD. */
+    fun editionList(capped: Boolean = false, totalCount: Int = 3) = EditionList(
+        listOf(
+            Edition(harborRelease, suggested = true, knownToContain = true),
+            Edition(cdRelease, suggested = false, knownToContain = false),
+            Edition(promoRelease, suggested = false, knownToContain = false),
+        ),
+        capped,
+        totalCount,
+    )
+
+    /** An image of a release index for the cover picker: [id], its types and its addresses on the fake CAA. */
+    fun indexImage(id: String, types: List<String> = listOf("Front"), front: Boolean = types.contains("Front"), comment: String = "") = CaaImage(
+        id = id,
+        front = front,
+        types = types,
+        comment = comment,
+        approved = true,
+        original = "https://coverartarchive.org/release/${harborDetails.releaseId}/$id.jpg".toHttpUrl(),
+        thumbnails = mapOf(250 to "https://coverartarchive.org/release/${harborDetails.releaseId}/$id-250.jpg".toHttpUrl()),
+    )
+
+    /** An image of the index as Cover Art Archive sends it: the fixture JPEG, said to be [size] (null: unknown, as WebP). */
+    fun indexCover(size: PictureSize?, bytes: ByteArray = Fixtures.bytes("caa/front-250.jpg")): CoverImage {
+        val url = "https://coverartarchive.org/release/${harborDetails.releaseId}/1.jpg".toHttpUrl()
+        return CoverImage(bytes, ImageFormat.JPEG, size, url, url, original = false, source = null)
+    }
 }

@@ -20,6 +20,9 @@ import io.github.lorddetson.piplayer.library.tagpass.PassFile
 import io.github.lorddetson.piplayer.library.tagpass.PassRead
 import io.github.lorddetson.piplayer.library.tagpass.PassReader
 import io.github.lorddetson.piplayer.library.tagpass.TagPass
+import io.github.lorddetson.piplayer.fakes.Fixtures
+import io.github.lorddetson.piplayer.library.details.PictureSize
+import io.github.lorddetson.piplayer.library.values.Decided
 import io.github.lorddetson.piplayer.library.values.DecidedField
 import io.github.lorddetson.piplayer.library.values.DecisionKind
 import io.github.lorddetson.piplayer.settings.ProtectedField
@@ -201,6 +204,63 @@ class ReviewDecisionsTest {
         // A tagger changed the number of tracks, which the lists do not show: the track is flagged.
         readAgain(tags + ("TRACKTOTAL" to listOf("11")))
         assertThat(flaggedAtFileOne(identity)).containsExactly(DecidedField.TRACK_TOTAL)
+    }
+
+    /** The edit of review screen B: [values] and an embedded picture chosen as the cover. */
+    private fun edit(target: IdentificationTarget, values: Map<DecidedField, String?>, cover: Boolean = true) = ReviewEdit(
+        target,
+        values,
+        if (cover) ProposedCover.Chosen(Fixtures.bytes("caa/front-250.jpg"), PictureSize(250, 250), ProposedCover.Origin.EMBEDDED) else null,
+        releaseId = details().releaseId,
+    )
+
+    @Test
+    fun applyWithTheUsersValuesStoresTheIdentificationThenAnEditWithTheSavedCoverWhichWinsAndUndoUndoesBoth() = runBlocking<Unit> {
+        val identity = checkNotNull(identityOf(1))
+        val read = target(1, key = 1)
+        val request = request(key(1), details(title = "Decided", album = "Released"), fileId = read.fileId)
+            .copy(fields = setOf(ProtectedField.ALBUM))
+        val edit = edit(read, mapOf(DecidedField.TITLE to "Mine"))
+
+        val applied = checkNotNull(review.applyWithEdit(request, null, edit))
+
+        assertThat(applied.editFailed).isFalse()
+        val identification = checkNotNull(user.decisions().decision(applied.decisionId))
+        val edited = checkNotNull(user.decisions().decision(checkNotNull(applied.editId)))
+        assertThat(identification.kind).isEqualTo(DecisionKind.APPLY.code)
+        assertThat(edited.kind).isEqualTo(DecisionKind.EDIT.code)
+        assertThat(edited.identityId).isEqualTo(identity)
+        assertThat(edited.id).isGreaterThan(identification.id)
+        val winners = Decisions(user).decidedOf(listOf(identity)).getValue(identity)
+        assertThat(winners.getValue(DecidedField.TITLE)).isEqualTo(Decided("Mine", DecisionKind.LEVEL_USER_EDIT, edited.id))
+        assertThat(winners.getValue(DecidedField.ALBUM).value).isEqualTo("Released")
+        val cover = winners.getValue(DecidedField.COVER)
+        assertThat(cover.level).isEqualTo(DecisionKind.LEVEL_USER_EDIT)
+        val saved = checkNotNull(user.decisions().savedCover(checkNotNull(cover.value).toLong()))
+        assertThat(saved.source).isEqualTo(SavedCovers.Source.EMBEDDED.stored)
+        assertThat(File(covers.dir, saved.path).readBytes()).isEqualTo(edit.cover!!.bytes)
+
+        assertThat(review.undo(checkNotNull(applied.editId))).isTrue()
+        assertThat(review.undo(applied.decisionId)).isTrue()
+        assertThat(Decisions(user).decidedOf(listOf(identity))[identity].orEmpty()).isEmpty()
+    }
+
+    @Test
+    fun withOnlyTheUsersValuesTheEditIsStoredAloneByTheIdentityOfTheKey() = runBlocking<Unit> {
+        val identity = checkNotNull(identityOf(1))
+        val read = target(1, key = 1)
+        val unread = target(2, key = 2)
+        assertThat(review.canEdit(read)).isTrue()
+        assertThat(review.canEdit(unread)).isFalse()
+
+        assertThat(review.applyWithEdit(null, null, edit(unread, mapOf(DecidedField.TITLE to "Mine")))).isNull()
+        val applied = checkNotNull(review.applyWithEdit(null, null, edit(read, mapOf(DecidedField.TITLE to "Mine"), cover = false)))
+
+        assertThat(applied.editId).isNull()
+        val edited = checkNotNull(user.decisions().decision(applied.decisionId))
+        assertThat(edited.kind).isEqualTo(DecisionKind.EDIT.code)
+        assertThat(edited.identityId).isEqualTo(identity)
+        assertThat(identityOf(2)).isNull()
     }
 
     @Test

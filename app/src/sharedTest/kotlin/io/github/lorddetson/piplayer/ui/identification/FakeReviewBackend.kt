@@ -1,15 +1,23 @@
 package io.github.lorddetson.piplayer.ui.identification
 
+import io.github.lorddetson.piplayer.identification.caa.CaaImage
+import io.github.lorddetson.piplayer.identification.caa.CaaReleaseIndex
 import io.github.lorddetson.piplayer.identification.caa.CaaResult
 import io.github.lorddetson.piplayer.identification.caa.CoverImage
 import io.github.lorddetson.piplayer.identification.contract.ApplyRequest
 import io.github.lorddetson.piplayer.identification.contract.IdentificationTarget
+import io.github.lorddetson.piplayer.identification.musicbrainz.RefLookup
 import io.github.lorddetson.piplayer.identification.pipeline.FileRef
 import io.github.lorddetson.piplayer.identification.pipeline.PipelineProgress
 import io.github.lorddetson.piplayer.identification.pipeline.PipelineResult
+import io.github.lorddetson.piplayer.identification.release.Edition
+import io.github.lorddetson.piplayer.identification.release.EditionList
 import io.github.lorddetson.piplayer.identification.release.ReleaseDetails
 import io.github.lorddetson.piplayer.identification.release.SuggestedEdition
 import io.github.lorddetson.piplayer.identification.score.RecordingMatch
+import io.github.lorddetson.piplayer.identification.score.TextCandidate
+import io.github.lorddetson.piplayer.identification.text.MusicBrainzRef
+import io.github.lorddetson.piplayer.identification.text.RecordingQuery
 import io.github.lorddetson.piplayer.library.details.TrackDetails
 import io.github.lorddetson.piplayer.settings.ProtectedField
 import java.io.IOException
@@ -145,7 +153,94 @@ class FakeReviewBackend(
 
     override fun now(): Instant = clock
 
+    /** The group list of each suggested release ID; a release in [editionListFailures] fails with an IOException. */
+    val editionLists: MutableMap<String, EditionList> = mutableMapOf()
+    val editionListFailures: MutableSet<String> = mutableSetOf()
+
+    /** What choosing each edition gives, by release ID (null: does not contain the song); others fail. */
+    val openedEditions: MutableMap<String, SuggestedEdition?> = mutableMapOf()
+
+    /** When set, opening an edition waits for it. */
+    @Volatile
+    var openGate: CompletableDeferred<Unit>? = null
+
+    /** What manual search answers: the candidates of a query, the lookup of a reference; [searchFails] fails both. */
+    var searchAnswer: List<TextCandidate> = emptyList()
+    var lookupAnswer: RefLookup = RefLookup.NotFound
+
+    @Volatile
+    var searchFails: Boolean = false
+
+    /** The release index the cover picker gets, each image's thumbnail and full image by image ID, and the embedded ones. */
+    var indexAnswer: CaaResult<CaaReleaseIndex> = CaaResult.NotFound
+    val thumbnails: MutableMap<String, CoverImage> = mutableMapOf()
+    val images: MutableMap<String, CoverImage> = mutableMapOf()
+    var embedded: List<EmbeddedImage> = emptyList()
+
+    /** The requests Apply with the user's values stored, with the identification's cover and the edit. */
+    val appliedWithEdit: MutableList<Triple<ApplyRequest?, CoverImage?, ReviewEdit>> = CopyOnWriteArrayList()
+
+    /** The edit decision's ID Apply with the user's values answers; null: the edit was not stored. */
+    var editAnswer: Long? = 104
+
+    override suspend fun editions(suggested: SuggestedEdition, result: PipelineResult): EditionList {
+        calls += "editions ${suggested.release.id}"
+        if (suggested.release.id in editionListFailures) throw IOException("MusicBrainz unavailable")
+        return editionLists[suggested.release.id] ?: EditionList.NONE
+    }
+
+    override suspend fun openEdition(edition: Edition, suggested: SuggestedEdition, result: PipelineResult): SuggestedEdition? {
+        calls += "open ${edition.release.id}"
+        openGate?.await()
+        if (!openedEditions.containsKey(edition.release.id)) throw IOException("MusicBrainz unavailable")
+        return openedEditions[edition.release.id]
+    }
+
+    override suspend fun search(query: RecordingQuery): List<TextCandidate> {
+        calls += "search ${query.query}"
+        if (searchFails) throw IOException("MusicBrainz unavailable")
+        return searchAnswer
+    }
+
+    override suspend fun lookup(ref: MusicBrainzRef): RefLookup {
+        calls += "lookup $ref"
+        if (searchFails) throw IOException("MusicBrainz unavailable")
+        return lookupAnswer
+    }
+
+    override suspend fun releaseImages(releaseId: String): CaaResult<CaaReleaseIndex> {
+        calls += "index $releaseId"
+        return indexAnswer
+    }
+
+    override suspend fun image(image: CaaImage, px: Int?): CaaResult<CoverImage> {
+        calls += "image ${image.id} $px"
+        val found = if (px == THUMBNAIL_PX) thumbnails[image.id] else images[image.id]
+        return found?.let { CaaResult.Found(it) } ?: CaaResult.NotFound
+    }
+
+    override suspend fun embeddedImages(uri: String): List<EmbeddedImage> {
+        calls += "embedded $uri"
+        return embedded
+    }
+
+    override suspend fun canEdit(target: IdentificationTarget): Boolean = identityHeld
+
+    override suspend fun applyWithEdit(request: ApplyRequest?, cover: CoverImage?, edit: ReviewEdit): Applied? {
+        calls += "apply with edit"
+        writeGate?.await()
+        appliedWithEdit += Triple(request, cover, edit)
+        return if (request == null) {
+            editAnswer?.let { Applied(it) }
+        } else {
+            applyAnswer?.let { Applied(it, editAnswer, editFailed = editAnswer == null) }
+        }
+    }
+
     companion object {
+        /** The thumbnail size the cover picker shows. */
+        const val THUMBNAIL_PX = 250
+
         val NOW: Instant = Instant.parse("2026-11-16T10:00:00Z")
     }
 }
