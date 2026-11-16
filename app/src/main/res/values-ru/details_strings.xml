@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="details_source_edited">Изменено в PiPlayer</string>
+    <string name="details_source_identified">Распознано: %1$s</string>
+    <string name="details_source_identified_plain">Распознано</string>
+    <string name="details_source_tags">Из тегов</string>
+    <string name="details_source_index">Из медиаиндекса</string>
+    <string name="details_source_file_name">Из имени файла</string>
+    <string name="details_empty">Пусто</string>
+    <string name="details_field_acoustid_id">AcoustID</string>
+    <string name="details_open_acoustid">Открыть в AcoustID</string>
+
+    <string name="details_revert">Вернуть значение из файла</string>
+    <string name="details_changed_in_file">Изменено в файле</string>
+    <string name="details_keep_value">Оставить значение PiPlayer</string>
+    <string name="details_use_file_value">Взять значение из файла</string>
+
+    <string name="details_section_identification">Распознавание</string>
+    <string name="details_section_trace">Журнал распознавания</string>
+    <string name="details_metadata">Метаданные</string>
+    <string name="details_identification">Распознано</string>
+    <string name="details_identification_applied">Применено %1$s</string>
+    <string name="details_identification_fetched">Данные получены %1$s</string>
+    <string name="details_undo_identification">Отменить распознавание</string>
+    <string name="details_reset">Сбросить</string>
+
+    <string name="details_reverted">Значение из файла возвращено</string>
+    <string name="details_value_kept">Значение PiPlayer оставлено</string>
+    <string name="details_identification_undone">Распознавание отменено</string>
+    <string name="details_reset_done">Решение сброшено</string>
+    <string name="details_undone">Отменено</string>
+    <string name="details_action_failed">Не удалось сохранить изменение</string>
+
+    <string name="badge_from_tags">Из тегов</string>
+    <string name="badge_identified">Распознано: %1$s · %2$s · Сохранено в PiPlayer</string>
+    <string name="badge_identified_plain">Распознано · Сохранено в PiPlayer</string>
+    <string name="badge_edited">Изменено · Сохранено в PiPlayer</string>
+    <string name="badge_description">Метаданные: %1$s</string>
+    <string name="badge_show_identification">Показать распознавание</string>
+
+    <string name="trace_outcome_high">Высокая уверенность</string>
+    <string name="trace_outcome_medium">Средняя уверенность</string>
+    <string name="trace_outcome_no_match">Совпадений не найдено</string>
+    <string name="trace_outcome_no_key">Нет ключа AcoustID</string>
+    <string name="trace_outcome_unavailable">Сервис не ответил</string>
+    <string name="trace_outcome_provider_stopped">Сервис остановлен</string>
+    <string name="trace_outcome_unreadable">Файл не удалось прочитать</string>
+    <string name="trace_outcome_disabled">Онлайн-поиск выключен</string>
+    <string name="trace_outcome_no_network">Нет сети</string>
+    <string name="trace_outcome_captive_portal">Нужен вход в сеть</string>
+    <string name="trace_retry">Повторить после %1$s</string>
+    <string name="trace_stage_local_read">Чтение файла</string>
+    <string name="trace_stage_known_ids">ID записи из тегов</string>
+    <string name="trace_stage_isrc">ISRC</string>
+    <string name="trace_stage_fingerprint">Отпечаток</string>
+    <string name="trace_stage_text_search">Поиск по тексту</string>
+    <string name="trace_stage_release_choice">Выбор издания</string>
+    <string name="trace_http">HTTP %1$d</string>
+    <plurals name="trace_results">
+        <item quantity="one">%1$d результат</item>
+        <item quantity="few">%1$d результата</item>
+        <item quantity="many">%1$d результатов</item>
+        <item quantity="other">%1$d результата</item>
+    </plurals>
+    <string name="trace_best">лучший %1$s</string>
+    <string name="trace_seconds">%1$s с</string>
+    <string name="trace_skipped">пропущен: %1$s</string>
+    <string name="trace_failed">сбой: %1$s</string>
+</resources>

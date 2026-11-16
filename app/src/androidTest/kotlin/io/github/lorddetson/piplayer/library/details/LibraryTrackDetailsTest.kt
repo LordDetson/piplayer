@@ -47,6 +47,14 @@ import io.github.lorddetson.piplayer.library.details.DetailField.TAGS
 import io.github.lorddetson.piplayer.library.details.DetailField.TAG_ENCODING
 import io.github.lorddetson.piplayer.library.details.DetailField.TITLE
 import io.github.lorddetson.piplayer.library.identity.Hex
+import io.github.lorddetson.piplayer.identification.provider.ProviderId
+import io.github.lorddetson.piplayer.library.db.IdentificationTraceEntity
+import io.github.lorddetson.piplayer.library.values.DecidedField
+import io.github.lorddetson.piplayer.library.values.DecisionContent
+import io.github.lorddetson.piplayer.library.values.DecisionKind
+import io.github.lorddetson.piplayer.settings.ProtectedField
+import io.github.lorddetson.piplayer.userdata.DecisionFixtures
+import io.github.lorddetson.piplayer.userdata.Decisions
 import io.github.lorddetson.piplayer.library.identity.LibraryTrackRefs
 import io.github.lorddetson.piplayer.library.lists.LibraryLists
 import io.github.lorddetson.piplayer.library.sync.LibrarySync
@@ -545,6 +553,171 @@ class LibraryTrackDetailsTest {
                 .describedAs("case $case: song own $songOwn, album own $albumOwn, decided $decided, pictures $pictures")
                 .isEqualTo(DetailValue.Cover(expected))
         }
+    }
+
+    // M3 step 22: details with decisions (docs/library.md §18.7).
+
+    private val decisions by lazy { Decisions(user) }
+
+    /** The file of media store row 1 at its place, with [tags]' values, as the tag pass compares it. */
+    private fun location(tags: TrackTags) =
+        Decisions.LocationValues(FakeMediaIndex.PRIMARY, "Music/Ann/Red/", "03 Song.flac", DecisionContent.ofTags(tags))
+
+    private val readTagsValues = TrackTags(title = "Tag title", artist = "Ann", album = "Red", date = "2003-05-12", recordingMbid = recording)
+
+    private fun apply(
+        title: String = "Decided",
+        fields: Set<ProtectedField> = setOf(ProtectedField.TITLE, ProtectedField.ALBUM, ProtectedField.MUSICBRAINZ_IDS),
+        atDecision: List<Decisions.LocationValues> = emptyList(),
+    ) = checkNotNull(runBlocking {
+        decisions.apply(DecisionFixtures.request(key, DecisionFixtures.details(title = title, album = "Decided album"), fields = fields), atDecision = atDecision)
+    })
+
+    private fun TrackDetails.row(field: DetailField) = rows.first { it.field == field }
+
+    @Test
+    fun anIdentificationAndANewerEditGiveTheirValuesAndSourcesWithTheProvider() {
+        val fileId = readTags()
+        val identity = addIdentity()
+        val applied = apply()
+        runBlocking { decisions.edit(identity, mapOf(DecidedField.ARTIST to "Edited artist")) }
+
+        val details = read(fileId)
+
+        assertThat(details.text(TITLE)).isEqualTo("Decided")
+        assertThat(details.row(TITLE).source).isEqualTo(ValueSource(DecisionKind.LEVEL_IDENTIFICATION, ProviderId.MUSICBRAINZ))
+        assertThat(details.row(TITLE).decided).isTrue()
+        assertThat(details.text(ARTIST)).isEqualTo("Edited artist")
+        assertThat(details.row(ARTIST).source).isEqualTo(ValueSource(DecisionKind.LEVEL_USER_EDIT))
+        assertThat(details.text(ALBUM)).isEqualTo("Decided album")
+        // Not ticked: the tags' date.
+        assertThat(details.text(DATE)).isEqualTo("2003-05-12")
+        assertThat(details.row(DATE).source).isEqualTo(ValueSource(DecisionKind.LEVEL_TAGS))
+        assertThat(details.row(DATE).decided).isFalse()
+        assertThat(details.values(RECORDING_ID))
+            .containsExactly(DetailValue.MusicBrainz(MusicBrainzKind.RECORDING, DecisionFixtures.details().recordingId))
+        assertThat(details.value(DetailField.ACOUSTID_ID)).isEqualTo(DetailValue.AcoustId(DecisionFixtures.mbid(7, 0xac0)))
+        assertThat(details.row(DetailField.ACOUSTID_ID).source).isEqualTo(ValueSource(DecisionKind.LEVEL_IDENTIFICATION, ProviderId.ACOUSTID))
+        assertThat(details.identification).isEqualTo(
+            IdentificationFacts(applied.decisionId, ProviderId.MUSICBRAINZ, 0.965, DecisionFixtures.reason,
+                details.identification!!.createdAt, 1_800_000_000_000),
+        )
+        val target = checkNotNull(details.target)
+        assertThat(target.identityId).isEqualTo(identity)
+        assertThat(target.contentKey).isEqualTo(key)
+        assertThat(listOf(target.location.volume, target.location.relativePath, target.location.displayName))
+            .containsExactly(FakeMediaIndex.PRIMARY, "Music/Ann/Red/", "03 Song.flac")
+        assertThat(target.location.values[DecidedField.TITLE]).isEqualTo("Tag title")
+        assertThat(details.listDecision).isNull()
+    }
+
+    @Test
+    fun aRevertLetsTheTagsWinTheFieldAgain() {
+        val fileId = readTags()
+        val identity = addIdentity()
+        apply()
+        runBlocking { decisions.revert(identity, setOf(ProtectedField.TITLE)) }
+
+        val details = read(fileId)
+
+        assertThat(details.text(TITLE)).isEqualTo("Tag title")
+        assertThat(details.row(TITLE).source).isEqualTo(ValueSource(DecisionKind.LEVEL_TAGS))
+        assertThat(details.row(TITLE).decided).isFalse()
+        assertThat(details.text(ALBUM)).isEqualTo("Decided album")
+    }
+
+    @Test
+    fun aFieldChangedInTheFileIsMarkedUntilPiPlayersValueIsKept() {
+        val fileId = readTags()
+        val identity = addIdentity()
+        apply(atDecision = listOf(location(readTagsValues)))
+        // A tagger changed the title in the file, and the tag pass compared it.
+        val changed = readTagsValues.copy(title = "Retagged")
+        runBlocking { decisions.fileChanged(identity, location(changed)) }
+
+        val flagged = read(fileId)
+        assertThat(flagged.row(TITLE).changedInFile).isTrue()
+        assertThat(flagged.row(ALBUM).changedInFile).isFalse()
+
+        runBlocking { decisions.keepPiPlayersValue(identity, location(changed), DecidedField.partsOf(ProtectedField.TITLE).toSet()) }
+
+        assertThat(read(fileId).row(TITLE).changedInFile).isFalse()
+    }
+
+    @Test
+    fun undoIdentificationLeavesTheOlderIdentification() {
+        val fileId = readTags()
+        addIdentity()
+        val first = apply(title = "First")
+        val second = apply(title = "Second")
+        assertThat(read(fileId).identification!!.decisionId).isEqualTo(second.decisionId)
+
+        runBlocking { decisions.undo(checkNotNull(decisions.newestIdentification(second.identityId))) }
+
+        val details = read(fileId)
+        assertThat(details.text(TITLE)).isEqualTo("First")
+        assertThat(details.identification!!.decisionId).isEqualTo(first.decisionId)
+    }
+
+    @Test
+    fun aKeepAsIsAndASkipShowWithTheDecisionThatCounts() {
+        val fileId = readTags()
+        val identity = addIdentity()
+        val skip = checkNotNull(runBlocking { decisions.skip(identity, 1_001, 1_700_000_001_000) })
+        assertThat(read(fileId).listDecision).isEqualTo(ListDecision(skip.decisionId, skipped = true))
+
+        val keep = checkNotNull(runBlocking { decisions.keepAsIs(identity) })
+        assertThat(read(fileId).listDecision).isEqualTo(ListDecision(keep.decisionId, skipped = false))
+
+        // The reset undoes the Keep as-is: the Skip counts again.
+        runBlocking { decisions.undo(keep.decisionId) }
+        assertThat(read(fileId).listDecision).isEqualTo(ListDecision(skip.decisionId, skipped = true))
+    }
+
+    @Test
+    fun theTraceIsTheSongsContentKeysNewestFirst() {
+        val fileId = readTags()
+        fun row(contentKey: String, run: String, position: Int, stage: String, note: String? = null) =
+            IdentificationTraceEntity(contentKey, run, position, 1_000, stage, null, null, null, null, 5, note)
+        runBlocking {
+            database.identificationRuns().addTrace(
+                listOf(row(key, "r1", 0, "local_read"), row(key, "r1", 1, "outcome", "no_network"),
+                    row("%064x".format(5), "other", 0, "outcome", "unreadable")),
+            )
+            database.identificationRuns().addTrace(listOf(row(key, "r2", 0, "local_read"), row(key, "r2", 1, "outcome", "found=high")))
+        }
+
+        val trace = read(fileId).trace
+
+        assertThat(trace.map { it.outcome }).containsExactly("found=high", "no_network")
+        assertThat(trace[0].steps).containsExactly(TraceStep("local_read", elapsedMs = 5))
+    }
+
+    @Test
+    fun theBadgeComesFromTheDisplayRowWithTheIdentificationThatWins() {
+        val fileId = readTags()
+        addIdentity()
+        assertThat(read(fileId).badge).isEqualTo(Badge(BadgeState.FROM_TAGS))
+        val applied = apply()
+        // The mirror's rows of the identification, from which the display row takes its badge state.
+        runBlocking {
+            database.replaceDecided(listOf(fileId), listOf(DecidedMirrorEntity(fileId, "title", "Decided", DecidedMirrorEntity.LEVEL_IDENTIFICATION, applied.decisionId)))
+            TrackDisplayWriter(database).refresh(listOf(fileId))
+        }
+
+        assertThat(read(fileId).badge).isEqualTo(Badge(BadgeState.IDENTIFIED, ProviderId.MUSICBRAINZ, 0.965))
+        assertThat(runBlocking { TrackBadges(access, user).of(fileId) }).isEqualTo(Badge(BadgeState.IDENTIFIED, ProviderId.MUSICBRAINZ, 0.965))
+        assertThat(runBlocking { TrackBadges(access, user).of(fileOf(2)) }).isEqualTo(Badge(BadgeState.FROM_TAGS))
+    }
+
+    @Test
+    fun aSongWithoutAnIdentityHasNoTargetForDecisions() {
+        val details = read(readTags())
+
+        assertThat(details.target).isNull()
+        assertThat(details.identification).isNull()
+        assertThat(details.rows.none { it.decided }).isTrue()
+        assertThat(details.row(TITLE).source).isEqualTo(ValueSource(DecisionKind.LEVEL_TAGS))
     }
 
     private companion object {

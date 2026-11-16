@@ -45,7 +45,11 @@ import io.github.lorddetson.piplayer.library.details.DetailField.TITLE
 import io.github.lorddetson.piplayer.library.details.DetailField.TRACK
 import io.github.lorddetson.piplayer.library.details.DetailField.TRACK_GAIN
 import io.github.lorddetson.piplayer.library.details.DetailField.TRACK_ID
+import io.github.lorddetson.piplayer.identification.provider.ProviderId
+import io.github.lorddetson.piplayer.identification.score.Reason
 import io.github.lorddetson.piplayer.library.tagpass.DurationSource
+import io.github.lorddetson.piplayer.library.values.DecidedField
+import io.github.lorddetson.piplayer.library.values.DecisionValues
 import io.github.lorddetson.piplayer.library.values.FieldOverrides
 import io.github.lorddetson.piplayer.library.values.IndexValues
 import io.github.lorddetson.piplayer.library.values.MergedValues
@@ -84,7 +88,25 @@ data class UserFacts(val favorite: Boolean, val playCount: Long, val lastPlayedA
 /** The cover shown and its size when known (docs/library.md §18.3). */
 data class CoverDetail(val source: CoverSource, val width: Int? = null, val height: Int? = null, val bytes: Long? = null)
 
-/** Everything details are made of; [fileId] is null for a file opened from another app. */
+/**
+ * A decision of the track as details read it (TI §10.2, docs/library.md §18.7): its [values] as the resolver reads them,
+ * with the provenance stored once per decision and the AcoustID track ID of a confirmed result.
+ */
+data class DecisionRecord(
+    val values: DecisionValues,
+    val provider: ProviderId? = null,
+    val confidence: Double? = null,
+    val reason: Reason? = null,
+    val acoustId: String? = null,
+    val fetchedAt: Long? = null,
+)
+
+/**
+ * Everything details are made of; [fileId] is null for a file opened from another app. [decisions] are every decision of
+ * the song's identity, undone ones too, from which levels 1 and 2 are resolved; without them [overrides] gives those
+ * levels. [changedInFile] are the decided parts the tag pass flagged at the file's place, [badgeState] the display row's
+ * `badge_state` (TI §10.1), and [trace] and [target] pass through (§18.7).
+ */
 data class DetailInputs(
     val fileId: Long?,
     val file: FileFacts,
@@ -93,6 +115,11 @@ data class DetailInputs(
     val user: UserFacts? = null,
     val cover: CoverDetail? = null,
     val overrides: FieldOverrides = FieldOverrides.NONE,
+    val decisions: List<DecisionRecord>? = null,
+    val changedInFile: Set<DecidedField> = emptySet(),
+    val badgeState: Int? = null,
+    val trace: List<TraceRun> = emptyList(),
+    val target: DecisionTarget? = null,
 )
 
 /** Makes the rows of track details from the merged values (docs/library.md §18.2, TI §7.1). */
@@ -214,4 +241,14 @@ object TrackDetailsBuilder {
     private fun String?.present(): String? = this?.trim()?.takeUnless { it.isEmpty() || it == UNKNOWN }
 
     private const val UNKNOWN = "<unknown>"
+}
+
+/** The metadata badge of track details and Now Playing (TI §6, docs/library.md §18.7). */
+object DetailBadges {
+
+    /**
+     * The badge of a display row's [badgeState] (null without a display row: none), with the provider and confidence of
+     * the newest identification among [decisions] whose values win while identified.
+     */
+    fun of(badgeState: Int?, decisions: List<DecisionRecord>): Badge? = TODO("step 22")
 }

@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Track details from M3: sources, reverts, the identification, the trace and the metadata badge (docs/library.md §18.7). -->
+<resources>
+    <!-- Where a value comes from, under the value. -->
+    <string name="details_source_edited">Edited in PiPlayer</string>
+    <string name="details_source_identified">Identified by %1$s</string>
+    <string name="details_source_identified_plain">Identified</string>
+    <string name="details_source_tags">From the tags</string>
+    <string name="details_source_index">From the media index</string>
+    <string name="details_source_file_name">From the file name</string>
+    <!-- A decided value that is empty. -->
+    <string name="details_empty">Empty</string>
+    <string name="details_field_acoustid_id">AcoustID</string>
+    <string name="details_open_acoustid">Open in AcoustID</string>
+
+    <string name="details_revert">Revert to the file\'s value</string>
+    <string name="details_changed_in_file">Changed in the file</string>
+    <string name="details_keep_value">Keep PiPlayer\'s value</string>
+    <string name="details_use_file_value">Use the file\'s value</string>
+
+    <string name="details_section_identification">Identification</string>
+    <string name="details_section_trace">Identification trace</string>
+    <string name="details_metadata">Metadata</string>
+    <string name="details_identification">Identified</string>
+    <string name="details_identification_applied">Applied %1$s</string>
+    <string name="details_identification_fetched">Values fetched %1$s</string>
+    <string name="details_undo_identification">Undo identification</string>
+    <string name="details_reset">Reset</string>
+
+    <!-- What an action did. -->
+    <string name="details_reverted">Reverted to the file\'s value</string>
+    <string name="details_value_kept">PiPlayer\'s value kept</string>
+    <string name="details_identification_undone">Identification undone</string>
+    <string name="details_reset_done">Decision reset</string>
+    <string name="details_undone">Undone</string>
+    <string name="details_action_failed">The change could not be saved</string>
+
+    <!-- The metadata badge (TI §6). -->
+    <string name="badge_from_tags">From tags</string>
+    <string name="badge_identified">Identified by %1$s · %2$s · Saved in PiPlayer</string>
+    <string name="badge_identified_plain">Identified · Saved in PiPlayer</string>
+    <string name="badge_edited">Edited · Saved in PiPlayer</string>
+    <string name="badge_description">Metadata: %1$s</string>
+    <string name="badge_show_identification">Show the identification</string>
+
+    <!-- The identification trace: outcomes, stages and the parts of a step. -->
+    <string name="trace_outcome_high">High confidence</string>
+    <string name="trace_outcome_medium">Medium confidence</string>
+    <string name="trace_outcome_no_match">No match found</string>
+    <string name="trace_outcome_no_key">No AcoustID key</string>
+    <string name="trace_outcome_unavailable">A service did not answer</string>
+    <string name="trace_outcome_provider_stopped">A service stopped</string>
+    <string name="trace_outcome_unreadable">The file could not be read</string>
+    <string name="trace_outcome_disabled">Online lookups off</string>
+    <string name="trace_outcome_no_network">No network</string>
+    <string name="trace_outcome_captive_portal">Sign-in needed</string>
+    <string name="trace_retry">Try again after %1$s</string>
+    <string name="trace_stage_local_read">Reading the file</string>
+    <string name="trace_stage_known_ids">Tagged recording ID</string>
+    <string name="trace_stage_isrc">ISRC</string>
+    <string name="trace_stage_fingerprint">Fingerprint</string>
+    <string name="trace_stage_text_search">Text search</string>
+    <string name="trace_stage_release_choice">Release choice</string>
+    <string name="trace_http">HTTP %1$d</string>
+    <plurals name="trace_results">
+        <item quantity="one">%1$d result</item>
+        <item quantity="other">%1$d results</item>
+    </plurals>
+    <string name="trace_best">best %1$s</string>
+    <string name="trace_seconds">%1$s s</string>
+    <string name="trace_skipped">skipped: %1$s</string>
+    <string name="trace_failed">failed: %1$s</string>
+</resources>

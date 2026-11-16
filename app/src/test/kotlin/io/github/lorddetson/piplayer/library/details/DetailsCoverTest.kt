@@ -75,4 +75,26 @@ class DetailsCoverTest {
         runCurrent()
         assertThat(loaded).isTrue()
     }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun aLoadThatOutranTheWaitAsksForAReadOnceItFindsAPicture() = runTest {
+        var late = 0
+        val slow = DetailsCaaProbe({ 3f }, backgroundScope, onLate = { late++ }) { _, _ -> delay(5_000); true }
+
+        assertThat(slow.online(step)).isFalse()
+        assertThat(late).isEqualTo(0)
+        advanceTimeBy(2_000)
+        runCurrent()
+        assertThat(late).isEqualTo(1)
+
+        // A slow load without a picture, and one within the wait, ask for nothing.
+        val empty = DetailsCaaProbe({ 3f }, backgroundScope, onLate = { late++ }) { _, _ -> delay(5_000); false }
+        assertThat(empty.online(step)).isFalse()
+        val quick = DetailsCaaProbe({ 3f }, backgroundScope, onLate = { late++ }) { _, _ -> delay(1_000); true }
+        assertThat(quick.online(step)).isTrue()
+        advanceTimeBy(10_000)
+        runCurrent()
+        assertThat(late).isEqualTo(1)
+    }
 }

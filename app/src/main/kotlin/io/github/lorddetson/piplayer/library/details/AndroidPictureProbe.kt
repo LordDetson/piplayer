@@ -36,13 +36,14 @@ object DetailsCover {
 /**
  * The details' probe of a lazy Cover Art Archive step (docs/library.md §18.3): [load] asks the loader for the step at the
  * header's size on a screen of [density], so that the probe shares the header's request and image. The details wait for
- * it at most [waitMs]; a load that takes longer goes on in [scope] and fills the caches, so the next read of the details
- * finds it.
+ * it at most [waitMs]; a load that takes longer goes on in [scope] and fills the caches, and once it finds a picture
+ * [onLate] asks the details to read again, so that they find it.
  */
 class DetailsCaaProbe(
     private val density: () -> Float,
     private val scope: CoroutineScope,
     private val waitMs: Long = DetailsCover.CAA_WAIT_MS,
+    private val onLate: () -> Unit = {},
     private val load: suspend (step: CoverStep.Caa, px: Int) -> Boolean,
 ) {
 

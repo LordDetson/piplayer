@@ -69,6 +69,7 @@ import io.github.lorddetson.piplayer.library.details.DetailField
 import io.github.lorddetson.piplayer.library.details.DetailRow
 import io.github.lorddetson.piplayer.library.details.DetailSection
 import io.github.lorddetson.piplayer.library.details.DetailValue
+import io.github.lorddetson.piplayer.library.details.DetailsCover
 import io.github.lorddetson.piplayer.library.details.LengthSource
 import io.github.lorddetson.piplayer.library.details.TagState
 import io.github.lorddetson.piplayer.library.details.TrackDetails
@@ -91,9 +92,6 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-
-/** The size of the header's cover (docs/library.md §18.1). */
-private const val HEADER_COVER_DP = 96
 
 /**
  * The details of the song [fileId] of the library, or of the file opened from another app at [uri] (docs/library.md §18),
@@ -130,7 +128,7 @@ class TrackDetailsViewModel(application: Application, private val fileId: Long?,
             val details = opened.read(uri)
             // The header shows the opened file's embedded picture; a song of the library has the loader's cover.
             val embedded = details.value(DetailField.COVER_SOURCE) == DetailValue.Cover(CoverSource.EMBEDDED)
-            val px = (HEADER_COVER_DP * app.resources.displayMetrics.density).roundToInt()
+            val px = (DetailsCover.HEADER_DP * app.resources.displayMetrics.density).roundToInt()
             DetailsState.Found(details, if (embedded) opened.picture(uri, px)?.asImageBitmap() else null)
         }
         else -> null
@@ -176,13 +174,18 @@ fun TrackDetailsScreen(fileId: Long?, uri: String?, snackbar: SnackbarHostState,
                 style = MaterialTheme.typography.bodyLarge,
                 modifier = modifier.padding(16.dp),
             )
-            is DetailsState.Found -> DetailsList(shown.details, shown.picture, snackbar, modifier)
+            is DetailsState.Found -> DetailsContent(shown.details, shown.picture, snackbar, null, modifier)
         }
     }
 }
 
+/**
+ * The details shown (docs/library.md §18.1, §18.7): the header, the sections with their rows and, from M3, the sources,
+ * the decisions [commands] makes for the song (none for a file opened from another app), the Identification section and
+ * the trace.
+ */
 @Composable
-private fun DetailsList(details: TrackDetails, picture: ImageBitmap?, snackbar: SnackbarHostState, modifier: Modifier) {
+fun DetailsContent(details: TrackDetails, picture: ImageBitmap?, snackbar: SnackbarHostState, commands: DetailsCommands?, modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val resources = LocalResources.current
     val scope = rememberCoroutineScope()
@@ -220,9 +223,9 @@ private fun Header(details: TrackDetails, picture: ImageBitmap?) {
         val shape = RoundedCornerShape(8.dp)
         val id = details.fileId
         if (id != null) {
-            LibraryCover(CoverRequest.Track(id), details.album, size = HEADER_COVER_DP.dp, shape = shape)
+            LibraryCover(CoverRequest.Track(id), details.album, size = DetailsCover.HEADER_DP.dp, shape = shape)
         } else {
-            CoverImage(picture, Modifier.size(HEADER_COVER_DP.dp).clip(shape), placeholderName = details.album)
+            CoverImage(picture, Modifier.size(DetailsCover.HEADER_DP.dp).clip(shape), placeholderName = details.album)
         }
         Column {
             Text(details.title, style = MaterialTheme.typography.titleLarge, maxLines = 3, overflow = TextOverflow.Ellipsis)
@@ -318,6 +321,8 @@ private fun valueText(row: DetailRow): String {
         is DetailValue.Pixels -> value.bytes?.let { stringResource(R.string.details_pixels_bytes, value.width, value.height, Formatter.formatFileSize(context, it)) }
             ?: stringResource(R.string.details_pixels, value.width, value.height)
         is DetailValue.MusicBrainz -> value.id
+        is DetailValue.AcoustId -> value.id
+        DetailValue.Empty -> stringResource(R.string.details_empty)
     }
 }
 
@@ -409,4 +414,5 @@ private fun fieldLabel(field: DetailField) = when (field) {
     DetailField.TRACK_ID -> R.string.details_field_track_id
     DetailField.ARTIST_ID -> R.string.details_field_artist_id
     DetailField.ALBUM_ARTIST_ID -> R.string.details_field_album_artist_id
+    DetailField.ACOUSTID_ID -> R.string.details_field_acoustid_id
 }
