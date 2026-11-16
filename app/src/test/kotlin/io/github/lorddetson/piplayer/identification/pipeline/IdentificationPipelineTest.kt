@@ -448,6 +448,35 @@ class IdentificationPipelineTest {
     }
 
     @Test
+    fun `an AcoustID that refuses the key during the run reports it as stopped when nothing is found`() = runTest {
+        val pipeline = pipeline()
+        acoustId.on(SESSION, FakeAcoustId.ERROR_4)
+        musicBrainz.onSearch("recording:", FakeMusicBrainz.SEARCH_EMPTY)
+
+        val result = pipeline.runOpened()
+
+        assertThat(result.stage(PipelineStage.FINGERPRINT)).isInstanceOf(StageResult.Failed::class.java)
+        assertThat(result.outcome)
+            .isEqualTo(IdentificationOutcome.ProviderStopped(ProviderId.ACOUSTID, StopReason.INVALID_API_KEY))
+    }
+
+    @Test
+    fun `a stage that failed besides a refused key reports its provider as unavailable first`() = runTest {
+        val pipeline = pipeline()
+        local.file = file(tags.copy(recordingMbid = FakeMusicBrainz.HARBOR_RECORDING))
+        // The recording lookup stays busy through its retries; the searches after it find nothing.
+        musicBrainz.enqueue(*Array(4) { FakeMusicBrainz.busy(503) })
+        acoustId.on(SESSION, FakeAcoustId.ERROR_4)
+        musicBrainz.onSearch("recording:", FakeMusicBrainz.SEARCH_EMPTY)
+
+        val result = pipeline.runOpened()
+
+        assertThat(result.stage(PipelineStage.KNOWN_IDS)).isInstanceOf(StageResult.Failed::class.java)
+        assertThat(result.stage(PipelineStage.FINGERPRINT)).isInstanceOf(StageResult.Failed::class.java)
+        assertThat(result.outcome).isEqualTo(IdentificationOutcome.Unavailable(ProviderId.MUSICBRAINZ))
+    }
+
+    @Test
     fun `an AcoustID that stops after its stage was checked only skips the stage`() = runTest {
         val pipeline = pipeline()
         // Another run's error 4 stops AcoustID while this file decodes.

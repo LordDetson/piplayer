@@ -5,6 +5,7 @@ import android.net.Uri
 import android.util.Log
 import io.github.lorddetson.piplayer.identification.IdentificationServices
 import io.github.lorddetson.piplayer.identification.fingerprint.DecodingException
+import io.github.lorddetson.piplayer.identification.fingerprint.FingerprintResult
 import io.github.lorddetson.piplayer.library.db.LibraryAccess
 import io.github.lorddetson.piplayer.library.identity.LibraryFingerprints
 import io.github.lorddetson.piplayer.nativelib.chromaprint.Chromaprint
@@ -19,6 +20,26 @@ import kotlinx.coroutines.withContext
 /** The native library's encoder (TI §3.2): stored raw items into the string AcoustID takes. */
 object ChromaprintEncoder : FingerprintEncoder {
     override fun encode(raw: IntArray): String = Chromaprint.encode(raw)
+}
+
+/** Stage 3's decode in the app (TI §3.2 "Threads"), shared by the library's fingerprint cache and the debug spike's. */
+object UserLaneDecoder {
+
+    /**
+     * The fingerprint of [file], decoded on the user's lane of [LibraryFingerprints] without caching it. Throws an
+     * [IOException] when the file cannot be opened or decoded, a [DecodingException] for a decoder or extractor that
+     * fails in its own way.
+     */
+    suspend fun decode(context: Context, file: LocalFile): FingerprintResult = try {
+        LibraryFingerprints.decode(context, Uri.parse(file.uri), LibraryFingerprints.Lane.USER)
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: IOException) {
+        throw e
+    } catch (e: RuntimeException) {
+        // A decoder or extractor that fails in its own way: the file is not fingerprinted.
+        throw DecodingException.Failed("The file could not be fingerprinted: ${e.message}", e)
+    }
 }
 
 /**
@@ -39,16 +60,7 @@ class LibraryFingerprintCache(
 
     override suspend fun compute(file: LocalFile): ComputedFingerprint {
         // Decoded without the library's lock, which a decode of seconds must not hold.
-        val result = try {
-            LibraryFingerprints.decode(context, Uri.parse(file.uri), LibraryFingerprints.Lane.USER)
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: IOException) {
-            throw e
-        } catch (e: RuntimeException) {
-            // A decoder or extractor that fails in its own way: the file is not fingerprinted.
-            throw DecodingException.Failed("The file could not be fingerprinted: ${e.message}", e)
-        }
+        val result = UserLaneDecoder.decode(context, file)
         // Cached under the lock, so that a rebuild never closes the database under the write; a write that fails costs
         // the next run a decode, not this run its lookup.
         try {
@@ -81,13 +93,20 @@ object AppPipeline {
      */
     fun of(context: Context): IdentificationPipeline = over(context, IdentificationServices.of(context))
 
-    /** The same parts over [services], such as the debug spike's own. */
-    fun over(context: Context, services: IdentificationServices): IdentificationPipeline {
+    /**
+     * The same parts over [services], such as the debug spike's own, with [fingerprints] instead of the library's
+     * fingerprint cache when given (the spike keeps its own in memory, TI §3 "One run").
+     */
+    fun over(
+        context: Context,
+        services: IdentificationServices,
+        fingerprints: FingerprintCache? = null,
+    ): IdentificationPipeline {
         val library = LibraryAccess.app(context)
         return IdentificationPipeline(
             services = services,
             local = AndroidLocalStage(context, Tagger.client(context), library),
-            fingerprints = LibraryFingerprintCache(context.applicationContext, library),
+            fingerprints = fingerprints ?: LibraryFingerprintCache(context.applicationContext, library),
             encoder = ChromaprintEncoder,
         )
     }
