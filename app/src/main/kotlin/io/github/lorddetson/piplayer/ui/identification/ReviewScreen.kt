@@ -46,8 +46,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.pluralStringResource
@@ -399,7 +399,7 @@ private fun Confidence(score: Double, band: Band) {
 private fun percentFormat(): NumberFormat = NumberFormat.getPercentInstance(currentLocale())
 
 @Composable
-private fun currentLocale(): Locale = LocalResources.current.configuration.locales[0] ?: Locale.getDefault()
+private fun currentLocale(): Locale = LocalConfiguration.current.locales[0]
 
 /** The reason's parts joined by " · " (TI §6), numbers formatted for the locale. */
 @Composable

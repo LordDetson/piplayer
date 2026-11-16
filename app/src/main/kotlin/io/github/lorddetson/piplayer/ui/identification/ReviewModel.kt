@@ -21,6 +21,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 /** What the review shows (TI §6, review screen A). */
@@ -270,9 +271,8 @@ class ReviewModel(private val file: FileRef, private val backend: ReviewBackend,
         mutable.value = ReviewState.Running()
         run = scope.launch {
             val result = try {
-                backend.identify(file) { progress ->
-                    if (mutable.value is ReviewState.Running) mutable.value = ReviewState.Running(progress)
-                }
+                // Progress may come from another thread; it never replaces the state once the run is cancelled.
+                backend.identify(file) { progress -> mutable.update { if (it is ReviewState.Running) ReviewState.Running(progress) else it } }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {

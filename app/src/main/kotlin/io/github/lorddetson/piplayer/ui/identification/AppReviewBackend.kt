@@ -53,8 +53,8 @@ class AppReviewBackend(context: Context) : ReviewBackend {
     private val gate get() = (app as PiPlayerApplication).onlineGate
 
     override suspend fun identify(file: FileRef, onProgress: (PipelineProgress) -> Unit): PipelineResult =
-        // The services build their HTTP client on first use: never on the main thread.
-        withContext(Dispatchers.Default) { pipeline }.run(file, onProgress)
+        // Off the main thread: the services build their HTTP client on first use, and the run scores what it finds.
+        withContext(Dispatchers.Default) { pipeline.run(file, onProgress) }
 
     override suspend fun current(file: FileRef): TrackDetails? = withContext(Dispatchers.IO) {
         when (file) {
