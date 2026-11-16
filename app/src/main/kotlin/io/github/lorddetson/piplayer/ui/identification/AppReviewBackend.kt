@@ -9,12 +9,15 @@ import io.github.lorddetson.piplayer.identification.caa.CoverImage
 import io.github.lorddetson.piplayer.identification.caa.CoverSize
 import io.github.lorddetson.piplayer.identification.caa.CoverUrls
 import io.github.lorddetson.piplayer.identification.contract.ApplyRequest
+import io.github.lorddetson.piplayer.identification.contract.IdentificationOutcome
 import io.github.lorddetson.piplayer.identification.contract.IdentificationTarget
 import io.github.lorddetson.piplayer.identification.pipeline.AppPipeline
 import io.github.lorddetson.piplayer.identification.pipeline.FileRef
 import io.github.lorddetson.piplayer.identification.pipeline.PipelineProgress
 import io.github.lorddetson.piplayer.identification.pipeline.PipelineResult
+import io.github.lorddetson.piplayer.identification.release.EditionSource
 import io.github.lorddetson.piplayer.identification.release.ReleaseDetails
+import io.github.lorddetson.piplayer.identification.release.ReleaseDetailsExtractor
 import io.github.lorddetson.piplayer.identification.release.ReleaseRequest
 import io.github.lorddetson.piplayer.identification.release.SuggestedEdition
 import io.github.lorddetson.piplayer.identification.score.Bands
@@ -53,8 +56,8 @@ class AppReviewBackend(context: Context) : ReviewBackend {
     private val gate get() = (app as PiPlayerApplication).onlineGate
 
     override suspend fun identify(file: FileRef, onProgress: (PipelineProgress) -> Unit): PipelineResult =
-        // Off the main thread: the services build their HTTP client on first use, and the run scores what it finds.
-        withContext(Dispatchers.Default) { pipeline.run(file, onProgress) }
+        // Off the main thread: the services build their HTTP client on first use, and the run reads and waits.
+        withContext(Dispatchers.IO) { pipeline.run(file, onProgress) }
 
     override suspend fun current(file: FileRef): TrackDetails? = withContext(Dispatchers.IO) {
         when (file) {
@@ -71,8 +74,6 @@ class AppReviewBackend(context: Context) : ReviewBackend {
     }
 
     override suspend fun edition(match: RecordingMatch, result: PipelineResult): SuggestedEdition? = withContext(Dispatchers.IO) {
-        // The candidate alone, as release choice ranks a winner (TI §4.2), with the run's own file values.
-        val ranking = Ranking(listOf(match), match.score, Bands.of(match.score, null))
         val tags = result.file?.tags
         val request = ReleaseRequest(
             albumTag = tags?.album,
@@ -83,6 +84,16 @@ class AppReviewBackend(context: Context) : ReviewBackend {
             folder = result.file?.folder,
             country = Locale.getDefault().country.ifEmpty { null },
         )
+        // A recording the run browsed already has its releases ranked: only the top one is looked up (TI §4.2, §5.1).
+        val ranked = (result.outcome as? IdentificationOutcome.Found)?.choice?.ranked?.get(match.recordingId)
+        if (ranked != null) {
+            val top = ranked.firstOrNull() ?: return@withContext null
+            val release = services.releases.release(top.release.id) ?: return@withContext null
+            val details = ReleaseDetailsExtractor.extract(release, match.recordingId, request.trackNumberTag, request.durationMs)
+            return@withContext details?.let { SuggestedEdition(release, it, EditionSource.RANKING) }
+        }
+        // Otherwise the candidate alone, as release choice ranks a winner, with the run's own file values.
+        val ranking = Ranking(listOf(match), match.score, Bands.of(match.score, null))
         services.releases.choose(ranking, request).suggested
     }
 

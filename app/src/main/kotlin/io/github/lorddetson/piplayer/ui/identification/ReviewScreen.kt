@@ -40,14 +40,16 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.pluralStringResource
@@ -79,8 +81,11 @@ import io.github.lorddetson.piplayer.settings.ProtectedField
 import io.github.lorddetson.piplayer.ui.covers.LibraryCover
 import io.github.lorddetson.piplayer.ui.settings.protectedFieldLabel
 import java.text.NumberFormat
+import java.time.Instant
 import java.util.Date
 import java.util.Locale
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /** Test tags of the review (TI §6, review screen A). */
 object ReviewTags {
@@ -147,7 +152,10 @@ fun ReviewContent(
         is ReviewState.Running -> Progress(shown.progress, model::cancel, scrolling)
         is ReviewState.Blocked -> when (val outcome = shown.outcome) {
             IdentificationOutcome.Disabled -> DisclosureScreen(onEnable = model::enable, onNotNow = model::notNow, modifier = modifier.fillMaxSize())
-            else -> Column(scrolling) { OutcomeMessage(outcome, model::retry) }
+            else -> Column(scrolling, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutcomeMessage(outcome, model::retry)
+                shown.retryAt?.let { RetryAt(it) }
+            }
         }
         ReviewState.Failed -> Column(scrolling) { Message(stringResource(R.string.review_failed), model::retry) }
         is ReviewState.Ended -> Ended(shown, model, scrolling, oldCover, snippet)
@@ -237,16 +245,10 @@ private fun Ended(
     oldCover: (@Composable () -> Unit)?,
     snippet: (@Composable () -> Unit)?,
 ) {
-    val context = LocalContext.current
     Column(modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
         val card = state.card
         if (card == null) OutcomeMessage(state.outcome, model::retry)
-        state.retryAt?.let { at ->
-            Text(
-                stringResource(R.string.review_retry_at, DateFormat.getTimeFormat(context).format(Date.from(at))),
-                style = MaterialTheme.typography.bodyMedium,
-            )
-        }
+        state.retryAt?.let { RetryAt(it) }
         if (card != null) {
             CandidateCard(card)
             snippet?.invoke()
@@ -263,6 +265,16 @@ private fun Ended(
         }
         if (card != null && card.edition != null) Diff(card, model::toggle, oldCover)
     }
+}
+
+/** When AcoustID may be asked again (TI §3.2), in the device's time format. */
+@Composable
+private fun RetryAt(at: Instant) {
+    val context = LocalContext.current
+    Text(
+        stringResource(R.string.review_retry_at, DateFormat.getTimeFormat(context).format(Date.from(at))),
+        style = MaterialTheme.typography.bodyMedium,
+    )
 }
 
 /** What the last action did, with Undo until the next one, or what it said when it failed. */
@@ -345,13 +357,26 @@ private fun CandidateCard(card: Card) {
 @Composable
 private fun CoverPicture(cover: CoverState) {
     val image = (cover as? CoverState.Ready)?.line?.new ?: return
-    val bitmap = remember(image) { BitmapFactory.decodeByteArray(image.bytes, 0, image.bytes.size)?.asImageBitmap() } ?: return
+    val px = with(LocalDensity.current) { CARD_COVER_DP.dp.roundToPx() }
+    // Decoded off the main thread at about the size it is drawn: an original can be thousands of pixels wide.
+    val bitmap by produceState<ImageBitmap?>(null, image, px) { value = withContext(Dispatchers.Default) { decoded(image.bytes, px) } }
+    val shown = bitmap ?: return
     Image(
-        bitmap,
+        shown,
         contentDescription = null,
         contentScale = ContentScale.Crop,
         modifier = Modifier.size(CARD_COVER_DP.dp).clip(RoundedCornerShape(8.dp)),
     )
+}
+
+/** [bytes] decoded at the largest power-of-two reduction whose short side still covers [px]. */
+private fun decoded(bytes: ByteArray, px: Int): ImageBitmap? {
+    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+    var sample = 1
+    while (minOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= px) sample *= 2
+    val options = BitmapFactory.Options().apply { inSampleSize = sample }
+    return BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)?.asImageBitmap()
 }
 
 /** The proposed cover's size in pixels and bytes, from another edition when so, or that it loads or failed. */

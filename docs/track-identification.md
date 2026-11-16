@@ -1054,15 +1054,16 @@ step 20 on the same screen.
     the title and artist similarity as percentages, "title differs" and "artist differs" for a disagreement, and the
     other stages that found it ("also found by text search"). Numbers are formatted for the locale.
   - Candidates of at least 0.50 other than the chosen one follow the card, best first and at most four, with their
-    title, artist and percentage; the first card is the run's winner. Choosing another runs release choice and the
-    release lookup for it (§4.2, §5.1) through the same services, with the same file values, and makes it the card; a
+    title, artist and percentage; the first card is the run's winner. Choosing another looks up the top of its ranked
+    releases when the run browsed it (§3 request budget), otherwise runs release choice for it (§4.2), then the release
+    lookup (§5.1), through the same services and with the same file values, and makes it the card; a
     failure says so and keeps the card shown before. A candidate whose release could not be chosen (none contains it)
     shows its card without Apply, since a recording is applied with its release (§3 "One run").
 - Proposed cover: the chosen release's front image at the embedding size (`front-1200`, with the fallbacks of §5.2,
   the release group's image after a release without one), fetched once when its card shows; the size in pixels comes
   from the image header (none for WebP) and the size in bytes from the image. The same bytes are saved at Apply, so
   what Apply stores is what the card showed. A release group image is marked "from another edition". Without an image
-  (no source, or 404s) the cover has no line; a fetch that fails (busy, unavailable, blocked) says so and has no line
+  (no source, or 404s), and for an image that names no release or release group, the cover has no line; a fetch that fails (busy, unavailable, blocked) says so and has no line
   either.
 - Diff: one line per field of the protected-fields list (§10) that is not protected now and has an old or a new value,
   in the list's order, each with a checkbox, its label, the old value and the new value; TalkBack reads a line as one
@@ -1092,7 +1093,8 @@ step 20 on the same screen.
   - After Apply, Keep as-is or Skip the card says what was done ("Saved in PiPlayer", "Kept as it is", "Skipped") and
     offers Undo until the next of these actions; Undo undoes that decision (§7.1) and says so. After Apply, Apply is not
     offered again until its Undo. An action that cannot be done (the track gone, a database error) says so and changes
-    nothing; a second tap while one runs does nothing.
+    nothing; a second tap while one runs does nothing, and so does Try again, so that the action's Undo is not lost.
+    Cancel while Enable stores its answer sends nothing afterwards.
 - The snippet button (above) joins the card in step 20; the card keeps its place.
 - Phone layouts only: one column; each diff line is a row with its checkbox first and the old and the new value under
   the label, so lines wrap rather than cut on narrow screens and at large font scales.

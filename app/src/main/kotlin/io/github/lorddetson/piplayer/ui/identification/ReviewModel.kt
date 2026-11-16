@@ -159,9 +159,10 @@ class ReviewModel(private val file: FileRef, private val backend: ReviewBackend,
         mutable.value = ReviewState.Closed
     }
 
-    /** Try again: a new run. */
+    /** Try again: a new run, once no decision is being written, so that its Undo is not lost. */
     fun retry() {
-        if (mutable.value is ReviewState.Running || mutable.value == ReviewState.Closed) return
+        val now = mutable.value
+        if (now is ReviewState.Running || now == ReviewState.Closed || (now as? ReviewState.Ended)?.busy == true) return
         launchRun()
     }
 
@@ -169,7 +170,8 @@ class ReviewModel(private val file: FileRef, private val backend: ReviewBackend,
     fun enable() {
         if ((mutable.value as? ReviewState.Blocked)?.outcome != IdentificationOutcome.Disabled) return
         mutable.value = ReviewState.Running()
-        scope.launch {
+        // The run's job from the start, so that Cancel while the answer is stored sends nothing afterwards.
+        run = scope.launch {
             quietly { backend.enable() }
             launchRun()
         }
@@ -228,8 +230,7 @@ class ReviewModel(private val file: FileRef, private val backend: ReviewBackend,
         val card = ended.card!!
         val details = card.edition!!.details
         val target = result?.file?.target ?: return
-        // A cover without its source cannot be stored as one; it stays out.
-        val cover = (card.cover as? CoverState.Ready)?.line?.takeIf { it.ticked && it.new.source != null }
+        val cover = (card.cover as? CoverState.Ready)?.line?.takeIf { it.ticked }
         val fields = ReviewDiff.fields(card.lines, cover)
         if (fields.isEmpty()) return
         val provenance = Provenance.of(card.match, details, found?.acoustIdTrackId, backend.now())
@@ -268,7 +269,7 @@ class ReviewModel(private val file: FileRef, private val backend: ReviewBackend,
     }
 
     private fun launchRun() {
-        run?.cancel()
+        val before = run
         mutable.value = ReviewState.Running()
         run = scope.launch {
             val result = try {
@@ -282,6 +283,8 @@ class ReviewModel(private val file: FileRef, private val backend: ReviewBackend,
             }
             ended(result)
         }
+        // After the new run's launch: the job before may be Enable's own, which calls this as its last step.
+        before?.cancel()
     }
 
     private suspend fun ended(result: PipelineResult) {
@@ -293,7 +296,7 @@ class ReviewModel(private val file: FileRef, private val backend: ReviewBackend,
             IdentificationOutcome.CaptivePortal,
             is IdentificationOutcome.ProviderStopped,
             -> {
-                mutable.value = ReviewState.Blocked(outcome)
+                mutable.value = ReviewState.Blocked(outcome, result.retryAt)
                 return
             }
             else -> Unit

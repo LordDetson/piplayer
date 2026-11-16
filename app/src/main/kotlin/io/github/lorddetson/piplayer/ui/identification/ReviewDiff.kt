@@ -164,9 +164,12 @@ object ReviewDiff {
         DiffLine(field, old, newValue, ticked = newValue != null || sameValue(old, newValue))
     }
 
-    /** The cover line for [image] over [shown]; null without a proposed image or with the cover protected. */
+    /**
+     * The cover line for [image] over [shown]; null without a proposed image, for an image without its release or release
+     * group (Apply stores a cover with its source) or with the cover protected.
+     */
     suspend fun coverLine(shown: ShownCover, image: CoverImage?, protected: Set<ProtectedField> = emptySet()): CoverLine? {
-        if (image == null || ProtectedField.COVER in protected) return null
+        if (image?.source == null || ProtectedField.COVER in protected) return null
         val ticked = when (shown) {
             // A saved cover ranks below own covers: it would change nothing shown while the own cover stays.
             is ShownCover.Own -> false
