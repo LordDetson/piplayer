@@ -756,7 +756,9 @@ saved queue that refers to identities is in playback.md §4.
   makes it in the transaction that stores the decision (TI §10.2 "An identity at Apply"): an opened file gets a missing
   identity with the providing app's name and size as hints, which its decision keeps from the 30-day deletion and which
   step 1 of §8.2 attaches once the file is in the library and the tag pass has stored its key; a library file gets the
-  identity that the steps of §8.2 that need neither its tags nor the attach pass give that one file.
+  identity that the steps of §8.2 that need neither its tags nor the attach pass give that one file, by the content key
+  and the exact length that stage 0 found (M3 step 16b: the target carries the length, since the index's can be off by
+  more than the 1 s of step 2).
 - Attaching changes no user data, so it does not raise the user database's change counter (§3.1). Nothing is written
   into the library database: lists do not need the identity, and the two files keep no row IDs of each other (TI §10).
   Each pass asks the mirror of §15.4 for a run afterwards, because favorites and play counts follow the keys.
@@ -794,6 +796,13 @@ saved queue that refers to identities is in playback.md §4.
   of steps 1 to 3 is checked again in its write transaction: an identity that changed since the plan read it keeps
   what it has now, no identity takes a key that another one holds now, and a new identity whose key an identity holds
   now is left out. The rest of the plan is written.
+- Decision (M3 step 16b): until the tag pass reads a library file that Apply gave an identity, the library holds no key
+  for it, and the pass sees that identity as missing. So a missing identity whose hinted place holds a file the tag pass
+  has not read yet (`tag_pass_at` empty and no `tag_failure`) waits: steps 3 to 5 do not move it, while it still counts
+  for the uniqueness of steps 3 and 5, so that no other identity takes the file meanwhile. Step 2 still runs for it,
+  since it only gives it the file at its hint. Once the tag pass has read the file, or the file has left the library,
+  the identity takes part as before. The pass reads the places of the unread files with the keyed files, while no sync
+  writes (TI §10.2 "An identity at Apply").
 - Taking a key moves the identity: `content_key`, `duration_ms` and the hints become the file's, and `missing_since` is
   cleared. When two missing identities could take one file, the newest one takes it.
 - The identity's recording MBID follows the file's tags while it is attached. A decided MBID of M3 will win over tags.
