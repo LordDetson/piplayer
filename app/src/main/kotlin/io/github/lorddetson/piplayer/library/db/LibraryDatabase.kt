@@ -21,8 +21,9 @@ import kotlinx.coroutines.Dispatchers
 // has taken its new one.
 @Entity(
     tableName = "audio_file",
-    // date_added for Recently added (docs/library.md §17.4).
-    indices = [Index("media_store_id"), Index("volume_name", "relative_path"), Index("content_key"), Index("date_added")],
+    // date_added for Recently added (docs/library.md §17.4). The size beside the key, so that the files without a key yet
+    // that have a Skip's size are an exact lookup too (TI §1, §10.1).
+    indices = [Index("media_store_id"), Index("volume_name", "relative_path"), Index("content_key", "size"), Index("date_added")],
 )
 data class AudioFileEntity(
     @PrimaryKey val id: Long,

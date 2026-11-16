@@ -252,7 +252,7 @@ interface DecidedMirrorDao {
         const val UNKEYED_STAMPS =
             "SELECT size, mtime, content_key AS contentKey FROM audio_file WHERE content_key IS NULL AND size IN (:sizes)"
 
-        /** The queries that look up the files holding a Skip's stamp (TI §1), both by the index of the keys. */
+        /** The queries that look up the files holding a Skip's stamp (TI §1), both exact lookups of the index on key and size. */
         val STAMP_QUERIES = listOf(STAMPS_WITH_KEYS, UNKEYED_STAMPS)
     }
 }

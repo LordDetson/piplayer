@@ -118,6 +118,8 @@ class DecisionMirror(
         val files: List<Long>,
         val read: List<Long>,
         val failed: List<Long>,
+        /** Whether files wait for their checks made again, not asked for yet ([checkAgain]). */
+        val awaiting: Boolean,
     )
 
     init {
@@ -127,6 +129,7 @@ class DecisionMirror(
                     working = true
                     Asked(
                         pendingAll, pendingUnlessRan, pendingIfChanged, pendingFiles.toList(), pendingRead.toList(), pendingFailed.toList(),
+                        awaiting = retrying > 0,
                     ).also {
                         pendingAll = false
                         pendingUnlessRan = false
@@ -150,13 +153,24 @@ class DecisionMirror(
                         waiting = checkAgain(asked.read, asked.failed)
                     }
                 }
+                // A whole run replaces those rows too, so while files wait for their checks it waits as well (TI §1): it is
+                // asked for again, and the pass that takes the files' checks made again runs it after them.
+                val whole = asked.all || asked.unlessRan || asked.ifChanged
+                val deferred = whole && (asked.awaiting || waiting.isNotEmpty())
+                if (deferred) {
+                    synchronized(lock) {
+                        pendingAll = pendingAll || asked.all
+                        pendingUnlessRan = pendingUnlessRan || asked.unlessRan
+                        pendingIfChanged = pendingIfChanged || asked.ifChanged
+                    }
+                }
                 try {
                     // A whole run covers the files too.
                     when {
-                        asked.all -> mirrorAll()
+                        asked.all && !deferred -> mirrorAll()
                         else -> {
-                            if (asked.unlessRan) mirrorUnlessRan()
-                            if (asked.ifChanged) mirrorIfChanged()
+                            if (asked.unlessRan && !deferred) mirrorUnlessRan()
+                            if (asked.ifChanged && !deferred) mirrorIfChanged()
                             val files = (asked.files + asked.read + asked.failed).distinct().filter { it !in waiting }
                             if (files.isNotEmpty()) mirrorFiles(files)
                         }
@@ -465,8 +479,8 @@ class DecisionMirror(
 
     /**
      * Asks for the failed checks of the files [read] and [failed] again after [retryDelay], those made fewer than
-     * [CHECK_RETRIES] more times (TI §1); the files it asks for, whose run waits for their checks. The others are
-     * mirrored without them.
+     * [CHECK_RETRIES] more times (TI §1); the files it asks for, whose run waits for their checks, as whole runs do
+     * meanwhile. The others are mirrored without them.
      */
     private fun checkAgain(read: List<Long>, failed: List<Long>): Set<Long> {
         val again = synchronized(lock) {
@@ -480,13 +494,25 @@ class DecisionMirror(
         }
         if (again.isEmpty()) return again
         scope.launch {
+            var asked = false
             try {
                 delay(retryDelay)
-                requestRead(read.filter { it in again }, failed.filter { it in again })
-            } finally {
+                // The files and the end of the wait under one lock: a pass that sees no checks waiting takes their files
+                // with it or took them before, and one that sees them waiting is followed by the pass that takes them.
                 synchronized(lock) {
+                    pendingRead.addAll(read.filter { it in again })
+                    pendingFailed.addAll(failed.filter { it in again })
                     retrying--
-                    settle()
+                    asked = true
+                    idle.value = false
+                }
+                requests.trySend(Unit)
+            } finally {
+                if (!asked) {
+                    synchronized(lock) {
+                        retrying--
+                        settle()
+                    }
                 }
             }
         }
