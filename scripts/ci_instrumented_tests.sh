@@ -41,8 +41,15 @@ for module in app nativelib; do
   [ -n "$classes" ] || continue
   retried=1
   if [ "$(tr ',' '\n' <<< "$classes" | wc -l)" -le "$max_retried_classes" ]; then
-    gradle "$module retry" ":$module:connectedDebugAndroidTest" "$no_timing" "$runner_arg.class=$classes"
-    keep_results "$module" "$module-retry"
+    # One class per run: a comma list in the class argument ran only its first class on CI (PIM-90). The report reads
+    # the retry folder with its subfolders.
+    mkdir -p "$results/$module-retry"
+    n=0
+    for class in ${classes//,/ }; do
+      n=$((n + 1))
+      gradle "$module retry $class" ":$module:connectedDebugAndroidTest" "$no_timing" "$runner_arg.class=$class"
+      keep_results "$module" "$module-retry/$n"
+    done
   fi
 done
 # A failed Gradle run with no failed test (an install error, a crashed instrumentation) is a failure of its own.
