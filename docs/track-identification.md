@@ -940,7 +940,8 @@ re-checked before release (M5); in M4a they also drive automatic preparation.
   thumbnails (verify on devices that they include folder images; in v1.x also through a folder grant). PiPlayer does
   not request `READ_MEDIA_IMAGES`.
 - The cover picker (M3) offers the release's images and the embedded images; covers of other editions, the folder
-  image and an image from the device are below the cut line. The choice is a user decision (§7.1).
+  image and an image from the device are below the cut line (features.md). The choice is a user decision (§7.1), which
+  Apply stores as the user's edit (§6, review screen B).
 - An accepted cover is stored as a file in no-backup app storage (§10), not in the cache, so clearing the cache does
   not lose it; it is not backed up and is re-fetched by release MBID after a restore (§10.3). Details (decided in M3):
   - The file lies in the folder `saved_covers` of the no-backup files, named by the SHA-256 of its bytes in hex with
@@ -1113,6 +1114,86 @@ step 20 on the same screen.
 - The snippet button (above) joins the card in step 20; the card keeps its place.
 - Phone layouts only: one column; each diff line is a row with its checkbox first and the old and the new value under
   the label, so lines wrap rather than cut on narrow screens and at large font scales.
+
+**Review screen B (decided in M3, step 20).** The edition picker, manual search, the cover picker, Edit fields and the
+snippet join review screen A on the same screen.
+
+- Panels: Choose edition, Search manually, Choose cover and Edit fields each open a panel in place of the card, with a
+  title and Close; Close and back return to the card as it was, apart from what the panel chose. Every request of a
+  panel goes through the app's services and their checks (the online gate, a provider's stop, the network), so nothing
+  is sent while online lookups are off; a request that cannot be sent or that fails says so in the panel and changes
+  nothing.
+- Offered: Choose edition and Edit fields while the card has an edition, Choose cover too unless the cover is
+  protected, and Search manually whenever the run read the file, also after "No match found" and for a card without an
+  edition. None of them opens while an action runs or an edition loads.
+- Choose edition (§4.2 step 6) lists the release group of the card's candidate's suggested edition, browsed when the
+  picker first opens for that candidate and kept until the next run (Try again). Each row shows the release title, then the
+  release type, the format of its first medium, its countries, its date, its first label and its number of tracks; the
+  suggested edition comes first, labeled "Suggested edition", and the card's edition is marked as chosen. A list that
+  the page cap stopped says that it is partial and shows how many editions it lists of the group's release count.
+  - Choosing the card's own edition closes the picker. Choosing another loads its tracklist (one release lookup, cached
+    as §5.1 says) and maps the file onto it as §4.2 step 6 says. An edition with no such track is marked "Does not
+    contain this song", stays in the list and cannot be chosen.
+  - A mapped edition becomes the card's: its diff is built again from its values (the user's values of Edit fields
+    stay), its cover is fetched once as any release's is, and its `fetched_at` is the end of its tracklist's load. When
+    it holds the song as another recording, that recording's ID replaces the identified one on the card, in Apply and
+    in the provenance; the confidence and the reason stay those of the identified recording, and the provenance's
+    AcoustID track ID is the new recording's own AcoustID result's, none when the fingerprint did not find it.
+  - Choosing another candidate and coming back shows the edition chosen last.
+- Search manually (§3.3): a text field and Search. Free text is sent as one manual query (`dismax=true`, 50 results); a
+  pasted recording or release link or a bare MBID is looked up instead, a bare MBID as a recording first and then as a
+  release; another MusicBrainz link is refused with the hint to paste a recording or release link and sends nothing;
+  blank text sends nothing.
+  - Results: every recording found, with its title, its artist and a confidence that scores it against the run's file
+    values as the text search does (§4.1, similarity tier, so never in the high band; MusicBrainz's own score is never
+    shown), best first. A looked-up recording is one result. A looked-up release lists its tracks in disc and track
+    order with the release's title, each scored the same way, and choosing one takes that release as its edition
+    without release choice. "Nothing found" and "MusicBrainz knows no recording or release with this ID" say so.
+  - Choosing a result makes it the card as choosing another candidate does (review screen A: the tagged release when it
+    contains the recording, otherwise release choice for the recording alone, with one release lookup) and closes the
+    panel; the run's candidates stay listed below the card. A result's band is medium from 0.50 and low below it
+    ("Low confidence").
+- Choose cover (§5.2) lists the release's images from its Cover Art Archive index, in the index's order, each with its
+  250 px thumbnail, its types and its comment, and then the file's embedded pictures ("In the file"), each with its size
+  in pixels when its header says it. The index and the thumbnails load when the picker opens; a release without images
+  says so, and an image whose thumbnail cannot be loaded shows its types without a picture. The embedded pictures are
+  every picture the player's extractors read from the file (ID3 `APIC`, FLAC and Vorbis picture blocks, MP4 `covr`).
+  Covers of other editions, the folder image and an image from the device are below the cut line (features.md) and not
+  offered.
+  - Choosing a release image fetches it at the embedding size (its 1200 px thumbnail, else its original, §5.2);
+    choosing an embedded picture takes its bytes. The chosen image becomes the new cover of the cover line, marked
+    "Your choice", and its checkbox starts by the size rule of §5.2 against the cover shown now, as the proposed cover's
+    does: a smaller one and one of unknown size over a cover of known size start unticked, one of unknown size over a
+    system thumbnail or over no cover starts ticked, and under an own cover the line starts unticked with its note.
+  - The chosen image stays until the card shows another edition or candidate, which brings back that release's
+    proposed cover. Apply stores a ticked chosen image as the user's own cover (§7.1 level 1), not as part of the
+    identification.
+- Edit fields: one text field per field of the protected-fields list that the review can propose (title, artist,
+  album, album artist, date, original date, track number and total, disc number and total, disc subtitle, label,
+  catalog number, barcode, ISRC), protected fields left out, and so are the compilation flag, the MusicBrainz IDs and
+  the cover (which has the cover picker).
+  - Each field starts with the value Apply would leave in it: the line's new value when the line is ticked, otherwise
+    its old value. Labels, catalog numbers and ISRCs are lists separated by ";". A track or disc number and its total
+    take digits only; another text blocks Save and says so.
+  - Save puts every field whose text the user changed on the card as the user's value, and Close leaves the card as it
+    was. A user's value is a line of its own: the old value, the user's value as the new one, marked "Your edit", and
+    ticked; an emptied field is the user's empty value, which clears the field. A value equal to the release's is no
+    edit and gives the release's line back. The user's values stay on the card through another edition or candidate.
+- Apply with the user's values and a chosen cover: Apply stores the identification with the ticked lines that take the
+  release's values (and the proposed cover when its line is ticked), then an edit decision (§7.1 level 1) with the
+  ticked user values and the ticked chosen cover; the edit is the newer decision, so it wins those fields. An edit
+  stores every part of each field it sets (§7.1), so an edited artist has no credit of its own and no sort name. The
+  chosen cover is saved first, as part of Apply (§5.2), with its source (an image of the release index, or an embedded
+  picture) and the card's release MBID. When every ticked line is the user's, Apply stores the edit alone. An edit is
+  stored by the identity of the key and, unlike Apply, makes none, so then Apply is offered only once an identity holds
+  the key; a ticked line with a release value lets Apply make it (§10.2). Undo after such an Apply undoes the edit, then
+  the identification. When the identification is stored and the edit is not, the card says that the user's values
+  could not be saved, and Undo undoes the identification.
+- Snippet: "Play snippet" on the card, under the reason, plays the snippet of §6 (step 17's player, through the playback
+  service's MediaController) of the run's file at the address stage 0 read it by, with the exact duration of stage 0
+  (an unknown length plays from the start). While it plays the button reads "Stop snippet" and a bar shows its progress
+  over its span; a snippet the player could not play, and one refused the audio focus, says so. The button is there
+  whenever the run read the file, also without a card. Leaving the review stops the snippet as the card closing does.
 
 ## 7. Saving
 
@@ -2037,6 +2118,7 @@ tests, and a high-band error rate within the threshold of §11.4.
 | M3 | Cover size rule: a proposed cover whose short side is shorter than the existing cover's starts unticked, an equal one ticked; with the current size unknown a system thumbnail counts as ticked, an embedded picture has its header read on demand (and not read when the rule does not need it), an unreadable header counts as no cover; no cover now starts ticked; a proposed cover of unknown size starts ticked over a system thumbnail and over an embedded picture whose header cannot be read, and unticked over a cover of known size or a readable embedded picture |
 | M3 | Review diff (§6, review screen A): the old values from track details and the new ones from the release details of the shared fixtures give one line per field in the protected-fields list's order, with protected fields left out and named; an equal pair says "No change" and starts ticked, a changed one with a new value starts ticked, an emptied one starts unticked, a field empty on both sides has no line; track and disc compare with their totals, the compilation flag with no flag as off (a release that is no compilation turns a file tagged as one off, ticked), the MusicBrainz IDs as one set; the cover line starts by the size rule, unticked under an own cover of the song or the album with the own-cover note, and is left out without a proposed image; Apply takes the ticked fields, the cover only when ticked; the reason's parts (stage and tier, AcoustID score, duration difference rounded to whole seconds with ±0 within half a second, title and artist percentages, disagreements, the other stages) |
 | M3 | Review card state machine (§6), with a fake backend and virtual time: the run's progress, then each outcome's state (the four blocked ones, no key, unreadable, unavailable, no match and found in its band) with the retry time only when the run reports one; Enable after "online lookups off" runs again and Not now closes; Cancel ends the run and closes; the proposed cover is fetched once per card and its end lets Apply go; Apply saves the cover only when ticked and offers Undo; Undo after Apply, Keep as-is and Skip undoes that decision and offers Apply again after an undone Apply; a second action replaces the Undo offered; a failed action says so and changes nothing; Keep as-is and Skip only for a library file whose content key an identity holds, also after no match, and neither for one without; of Enable and Not now only the first answer counts, and Not now closes once its answer is stored; choosing another candidate loads its edition and keeps the card on a failure; the provenance takes the AcoustID track ID of the chosen recording's own result (none for a recording found by text only) and the time its release reached the review, not the time of Apply |
+| M3 | Review screen B models (§6, step 20), with a fake backend and virtual time: the edition picker browses the group when it first opens and not again, marks an edition without the song and keeps it unchoosable, and a chosen edition becomes the card with its diff, its cover fetched once and its fetch time, another recording's ID replacing the identified one in Apply and in the provenance; manual search sends nothing for blank text or a refused link, searches free text, looks up a pasted recording or release link (a release listing its tracks, a chosen track taking that release without release choice) and scores the results by the similarity tier; the cover picker lists the index and the embedded pictures, a chosen image starts by the size rule (a smaller one unticked, one of unknown size unticked over a cover of known size and ticked over a system thumbnail or no cover, unticked under an own cover) and another edition brings the proposed cover back; Edit fields reads lists and numbers, refuses a number that is not one, a changed field becomes a ticked user line and a value equal to the release's is none; Apply with user values stores the identification and then the edit with the chosen cover, the edit alone when only user values are ticked and only once an identity holds the key, and Undo undoes both; with the services' gate closed the group browse, the search, the lookup, the index and its images send nothing |
 | M3 | Covers in the chain (library.md §13.1, §13.3): a song's order with a decided cover between the own covers and the embedded picture and the lazy Cover Art Archive step last, an empty decided cover skipped; an album's own cover, the decided cover of its songs, a song's picture, then its release's lazy step; an artist's album chosen by own cover, decided cover, embedded picture, then release; no lazy step while online lookups are off or without a release MBID (an ID that is not an MBID included), the decided release before the tags'; on the fake CAA through the real client and limiter: 50 album rows keep at least 1 s between requests and load `front-250`, a lazy load holds no place of the loader, rows cancelled while they wait send nothing, a live failure entry sends nothing, turning online lookups off during the loads cancels them, sends nothing more and stores nothing; decisions and online lookups empty the loader's memory; track details take their cover source from the same plan; loads of one image at the same time share one request, and Now Playing's size is loaded once; a row's missing thumbnail loads no original; an artist's local pictures come before another album's lazy step, and the next album, decided cover or release is tried when one gives nothing |
 | M3 | Database-only undo: Apply followed by Undo restores the earlier merged values; stacked decisions (two identifications in a row, an edit on top of an identification) resolve as in §7.1; Undo right after Apply, Keep as-is and Skip; a later file change flags the field per location, also a change of a part outside the lists' columns (the number of tracks, the label), while a file read again unchanged flags nothing |
 | M3 | Session refresh after a decision (§7.1, playback.md §2.6): the playing item first, then the queued items of the changed files in play order after it (shuffled or not, the items before it last), at most 20 besides the playing item, and no item of another file; the files a mirror run changed are kept by the version it raised, so that the runs since a version give their files together, and a run with more than 1 000 files, one no longer kept or a version that went back (a new library) gives none known |
@@ -2081,6 +2163,8 @@ tests, and a high-band error rate within the threshold of §11.4.
 | M3 | Session metadata (`SessionDecisionsTest`, `SessionMetadataTest`): for a fixture whose embedded cover and tags differ from the saved values, and for an MP3 without a frame-count header, the MediaController's metadata, its duration (the stored exact one) and artwork equal PiPlayer's values after Apply and after Undo, without preparing the file again; the platform session, which Bluetooth controllers and watches read, shows the same title and cover, and the same length as the controller's timeline, the player's own (§7.1); the item stays the playing one throughout, on a fixture long enough that a slow emulator does not reach its end; another file of the decided track later in the queue follows, while the next item of another track, whose values changed in the library meanwhile, keeps its item; a library song shows no picture of the stream, a file opened from another app keeps it; the library tree's lists show a decision at once, its song in the bucket of its decided title (`LibraryTreeTest`); controllers hear the current item with new metadata as a change of the playlist (reason `PLAYLIST_CHANGED`), never as a move to another item; a decision whose files are not queued looks through the queue once, not again after the read; once stopped with the service, the session's refresh drops a read under way and changes no item; the playing item, moved by a removal before it while the read was under way, still comes up to date at its new place |
 | M3 | Review screen A (§6), Compose tests with fake pipeline results built from the shared fixtures: the progress with Cancel; the card with title, artist, album, year, type, format, country, the cover's size in pixels and bytes, the confidence as a percentage and band in words and the templated reason; the diff with old and new values and checkboxes that change what Apply stores; Apply then Undo; Keep as-is and Skip with Undo; the own-cover line unticked with its note, which TalkBack reads with the line, as it reads "from another edition"; the disclosure for "online lookups off" with Enable running again, and the texts of no network, sign-in needed and a stopped provider; the retry time; TalkBack labels of the confidence, the diff lines as checkboxes and the actions; "Identify" in the track menu before "Details", also for an opened file, on Now Playing and in track details opening the review; in the whole app, with online lookups off, "Identify" in the song menu of the list opens the review's route, which shows the disclosure |
 | M3 | Review backend in the app (§6, review screen A) on the real databases with a fake media index: Keep as-is and Skip are offered for a library file whose key an identity holds, store their decisions by it (Skip with the library's size and time of the file) and undo, and are not offered for a file the library has not read; Apply saves the ticked cover and stores the decision with the saved cover, the provenance and the references of each read file of the key, the identified one first, taken from every part the tag pass stored, so a later change of the number of tracks in the file flags the field, and for a file without an identity makes one |
+| M3 | Review screen B (§6, step 20), Compose tests with fake results built from the shared fixtures: the edition picker lists the group's editions with the suggested one first, marks one "Does not contain this song" and keeps it unchoosable, and a chosen edition changes the card; manual search with a pasted MusicBrainz ID shows the looked-up recording, and choosing it makes the card; the cover picker's chosen image starts unticked when it is smaller than the cover shown now, unticked when its size is unknown over a cover of known size, and ticked over a system thumbnail and over no cover; Edit fields puts a ticked user line on the card and Apply stores it as an edit decision; the snippet button plays the file's snippet and stops it, and the review stops it when it goes away |
+| M3 | Review backend in the app (§6, review screen B) on the real databases: Apply with a user value and a chosen cover stores the identification and then an edit decision with the saved cover, whose values win, and Undo undoes both; with only user values ticked it stores the edit alone by the identity of the key |
 | M3 | Session metadata: for a fixture whose embedded cover and tags differ from the saved values, and for an MP3 without a frame-count header, the MediaController's metadata, artwork and duration equal PiPlayer's values after Apply and after Undo, without preparing the file again |
 | M3 | Identification and privacy (§9): the disclosure names every service with what it receives, the background Cover Art Archive loads included, and its Enable and Not now buttons and links have labels and click actions for TalkBack; the settings section shows the setting as a switch, opens the disclosure when the current version is unanswered and turns off at once, lists the services and their terms links, changes the protected-fields list with checkboxes, takes a second tap before the first is stored as reversing it, puts the switch back to the gate when an answer was not stored, and shows each provider's status (stopped after a User-Agent rejection or an invalid key, unavailable without a key); the app's services use the settings file's gate, closed with no stored consent |
 | M3 | Library database version 13 (§10.1): an older library database is dropped and the new tables and columns are there (the content-key tables, `decided_mirror`, `release_cache`, `api_cache`, the identification columns of `fingerprint` and `track_display`, both counters of `library_meta`, no cover cache table); the release cache keeps a lookup under the asked and the answered MBID, survives reopening, and treats a row older than 30 days as missing and drops it on the next write; `api_cache` keeps a failure entry's kind, times and 503 count, keeps an expired entry for 6 hours so that the next 503 still doubles, then drops it, and the Cover Art Archive TTL rules hold through it; `decided_mirror` keeps one value per file and field, replaces a file's rows whole, clears, and the mirrored change counter moves apart from the rules counter; the app's services use these caches |

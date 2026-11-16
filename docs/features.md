@@ -195,7 +195,8 @@ soon after 1.0, `later` is planned without a date. The items listed under Cut li
 - Save to PiPlayer's database with provenance and undo; every view updates at once (TI §7.1 and the planned
   changes below). `M3`
 - Online covers from Cover Art Archive for identified albums and albums tagged with release IDs (TI §5). `M3`
-- Cover picker: release images, other editions, embedded and folder images, an image from the device. `M3`
+- Cover picker: the release's images and the file's embedded images (TI §5.2, §6). `M3` Its other sources (covers of
+  other editions, the folder image, an image from the device) are below the cut line.
 - Batch identification for a selection, a folder or "Songs missing information", saved in PiPlayer until the user
   chooses to write tags (TI §8). `M4a`
 - Fix tab: review queue, needs-attention list, counters and ETA. `M4a`
