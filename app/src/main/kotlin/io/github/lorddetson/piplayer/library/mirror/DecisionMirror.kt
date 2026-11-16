@@ -49,9 +49,17 @@ class DecisionMirror(
     /** Raised after every run that changed decided values, so that lists, Now Playing and the session read again. */
     val version: StateFlow<Long> = mutableVersion.asStateFlow()
 
-    /** The whole runs this mirror has made, also those that wrote nothing; a start makes one (TI §10.3). */
+    /**
+     * The whole runs this mirror has completed, also those that wrote nothing; a start makes one (TI §10.3). A run that
+     * fails does not count, so the first attach pass still asks for one after a failed start-up run.
+     */
     @Volatile
     var wholeRuns = 0
+        private set
+
+    /** The whole runs made because the change counters differed (TI §10.3, the start's own run). */
+    @Volatile
+    var changedRuns = 0
         private set
 
     private val running = Mutex()
@@ -128,6 +136,7 @@ class DecisionMirror(
         if (!ready()) return@withLock false
         if (user.user().changeCounter() == library.library().mirroredChangeCounter()) return@withLock false
         allRun()
+        changedRuns++
         true
     }
 
@@ -208,7 +217,6 @@ class DecisionMirror(
 
     private suspend fun allRun(): Boolean {
         if (!ready()) return false
-        wholeRuns++
         // Every decision is read before the sync is held off, which waits only for the comparison and the write (TI §10.3).
         val snapshot = decisions.snapshot()
         val changed = sync.exclusive {
@@ -221,6 +229,8 @@ class DecisionMirror(
             val existing = library.decided().all().groupBy { it.fileId }
             write(differing(desired.keys + existing.keys, desired, existing), desired, snapshot.counter)
         }
+        // Counted once it has completed: a run that throws leaves the next request to make one (TI §10.3).
+        wholeRuns++
         return changed.also { if (it) mutableVersion.value++ }
     }
 

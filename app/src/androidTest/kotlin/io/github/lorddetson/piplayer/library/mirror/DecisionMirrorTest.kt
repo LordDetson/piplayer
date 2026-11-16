@@ -1,5 +1,6 @@
 package io.github.lorddetson.piplayer.library.mirror
 
+import androidx.room3.withWriteTransaction
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.github.lorddetson.piplayer.TestFiles
 import io.github.lorddetson.piplayer.library.FakeMediaIndex
@@ -387,6 +388,67 @@ class DecisionMirrorTest {
             assertThat(level.wholeRuns).isEqualTo(2)
         } finally {
             level.close()
+        }
+    }
+
+    @Test
+    fun aStartUpRunThatFailsLeavesTheWholeRunToTheFirstAttachPass() = runBlocking<Unit> {
+        library(listOf(row(1)))
+        mirror.mirrorAll()
+        // The counters differ: a decision committed without its run, as when the process died in between.
+        repository.apply(request(key(1)))
+        // The start-up run's write fails, as a full disk or a locked database would make it.
+        library.withWriteTransaction {
+            usePrepared(
+                "CREATE TRIGGER poisoned BEFORE INSERT ON decided_mirror BEGIN SELECT RAISE(ABORT, 'Writing failed'); END",
+            ) { it.step() }
+        }
+        val next = DecisionMirror(library, user, sync)
+        try {
+            next.requestIfChanged()
+            next.awaitIdle()
+            assertThat(display(1).title).isEqualTo("Song 1")
+            assertThat(next.wholeRuns).isEqualTo(0)
+            assertThat(next.changedRuns).isEqualTo(0)
+            library.withWriteTransaction { usePrepared("DROP TRIGGER poisoned") { it.step() } }
+
+            // The first attach pass of the process, which wrote no identities, still gets the start its whole run.
+            next.requestUnlessRan()
+            next.awaitIdle()
+
+            assertThat(display(1).title).isEqualTo("Song")
+            assertThat(library.library().mirroredChangeCounter()).isEqualTo(user.user().changeCounter())
+            assertThat(next.wholeRuns).isEqualTo(1)
+        } finally {
+            next.close()
+        }
+    }
+
+    @Test
+    fun theRunsOfACounterCheckAreCountedApart() = runBlocking<Unit> {
+        library(listOf(row(1)))
+        mirror.mirrorAll()
+        repository.apply(request(key(1)))
+        val next = DecisionMirror(library, user, sync)
+        try {
+            // A whole run asked for without the check does not count as one of its runs.
+            next.request()
+            next.awaitIdle()
+            assertThat(next.wholeRuns).isEqualTo(1)
+            assertThat(next.changedRuns).isEqualTo(0)
+            repository.apply(request(key(1), details(title = "Again")))
+
+            next.requestIfChanged()
+            next.awaitIdle()
+            assertThat(next.wholeRuns).isEqualTo(2)
+            assertThat(next.changedRuns).isEqualTo(1)
+            // Counters that agree make no run.
+            next.requestIfChanged()
+            next.awaitIdle()
+            assertThat(next.changedRuns).isEqualTo(1)
+            assertThat(display(1).title).isEqualTo("Again")
+        } finally {
+            next.close()
         }
     }
 
