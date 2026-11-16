@@ -82,13 +82,14 @@ interface UserDao {
 
     /**
      * The identities that user data refers to, which the attach pass never deletes (docs/library.md §8.1, §15, §16.2):
-     * decisions, undone ones too, and `file_state` rows count (TI §10.2), and so do the listening outcomes (§15.7).
+     * decisions, undone ones too, and `file_state` rows count (TI §10.2). The listening outcomes do not (§15.7): neither
+     * `listen_event` nor a `play_stats` row without a play keeps an identity.
      */
     @Query(
         "SELECT identity_id FROM track_cover UNION SELECT identity_id FROM favorite UNION SELECT identity_id FROM play_event " +
-            "UNION SELECT identity_id FROM play_stats UNION SELECT identity_id FROM playlist_entry WHERE identity_id IS NOT NULL " +
-            "UNION SELECT identity_id FROM decision UNION SELECT identity_id FROM file_state " +
-            "UNION SELECT identity_id FROM listen_event UNION SELECT identity_id FROM listen_stats",
+            "UNION SELECT identity_id FROM play_stats WHERE play_count > 0 " +
+            "UNION SELECT identity_id FROM playlist_entry WHERE identity_id IS NOT NULL " +
+            "UNION SELECT identity_id FROM decision UNION SELECT identity_id FROM file_state",
     )
     suspend fun identitiesHoldingData(): List<Long>
 }
@@ -110,13 +111,14 @@ class RulesCounterMigration : AutoMigrationSpec {
         AlbumCoverEntity::class, FavoriteEntity::class, FavoriteAlbumEntity::class, AlbumMemberEntity::class,
         PlayEventEntity::class, PlayStatsEntity::class, PlaylistEntity::class, PlaylistEntryEntity::class,
         DecisionEntity::class, ReleaseChoiceEntity::class, TrackMetadataEntity::class, FileStateEntity::class,
-        SavedCoverEntity::class, ListenEventEntity::class, ListenStatsEntity::class,
+        SavedCoverEntity::class, ListenEventEntity::class,
     ],
     version = 6,
     exportSchema = true,
     // Version 2 adds the track identities (docs/library.md §8.1), version 3 the own covers (§13.2), version 4 favorites,
     // album members, plays and the rules counter (§15.1), version 5 playlists (§16.1), version 6 the decisions of
-    // identification and their values (TI §10.2) and the listening outcomes (§15.7).
+    // identification and their values (TI §10.2) and the listening outcomes, with play events keyed by their start
+    // without row IDs (§15.7).
     autoMigrations = [
         AutoMigration(from = 1, to = 2),
         AutoMigration(from = 2, to = 3),

@@ -2,7 +2,7 @@
   "formatVersion": 1,
   "database": {
     "version": 6,
-    "identityHash": "992948aed52f24813e96a0619a64425d",
+    "identityHash": "c8c4cde00ece365c349c8b1c9a0b8a7c",
     "entities": [
       {
         "tableName": "library_folder_rule",
@@ -325,7 +325,7 @@
       },
       {
         "tableName": "play_event",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`identity_id` INTEGER NOT NULL, `started_at` INTEGER NOT NULL, `listened_ms` INTEGER NOT NULL, PRIMARY KEY(`identity_id`, `started_at`))",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`identity_id` INTEGER NOT NULL, `started_at` INTEGER NOT NULL, `listened_ms` INTEGER NOT NULL, PRIMARY KEY(`started_at`, `identity_id`)) WITHOUT ROWID",
         "fields": [
           {
             "fieldPath": "identityId",
@@ -349,25 +349,15 @@
         "primaryKey": {
           "autoGenerate": false,
           "columnNames": [
-            "identity_id",
-            "started_at"
+            "started_at",
+            "identity_id"
           ]
         },
-        "indices": [
-          {
-            "name": "index_play_event_started_at",
-            "unique": false,
-            "columnNames": [
-              "started_at"
-            ],
-            "orders": [],
-            "createSql": "CREATE INDEX IF NOT EXISTS `index_play_event_started_at` ON `${TABLE_NAME}` (`started_at`)"
-          }
-        ]
+        "withoutRowId": true
       },
       {
         "tableName": "play_stats",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`identity_id` INTEGER NOT NULL, `play_count` INTEGER NOT NULL, `listened_ms` INTEGER NOT NULL, `last_played_at` INTEGER, PRIMARY KEY(`identity_id`))",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`identity_id` INTEGER NOT NULL, `play_count` INTEGER NOT NULL, `listened_ms` INTEGER NOT NULL, `last_played_at` INTEGER, `early_skips` INTEGER NOT NULL DEFAULT 0, `late_skips` INTEGER NOT NULL DEFAULT 0, `finished` INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(`identity_id`))",
         "fields": [
           {
             "fieldPath": "identityId",
@@ -391,6 +381,27 @@
             "fieldPath": "lastPlayedAt",
             "columnName": "last_played_at",
             "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "earlySkips",
+            "columnName": "early_skips",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          },
+          {
+            "fieldPath": "lateSkips",
+            "columnName": "late_skips",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          },
+          {
+            "fieldPath": "finished",
+            "columnName": "finished",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
           }
         ],
         "primaryKey": {
@@ -909,58 +920,11 @@
           ]
         },
         "withoutRowId": true
-      },
-      {
-        "tableName": "listen_stats",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`identity_id` INTEGER NOT NULL, `early_skips` INTEGER NOT NULL, `late_skips` INTEGER NOT NULL, `finished` INTEGER NOT NULL, `listened_ms` INTEGER NOT NULL, `last_started_at` INTEGER, PRIMARY KEY(`identity_id`))",
-        "fields": [
-          {
-            "fieldPath": "identityId",
-            "columnName": "identity_id",
-            "affinity": "INTEGER",
-            "notNull": true
-          },
-          {
-            "fieldPath": "earlySkips",
-            "columnName": "early_skips",
-            "affinity": "INTEGER",
-            "notNull": true
-          },
-          {
-            "fieldPath": "lateSkips",
-            "columnName": "late_skips",
-            "affinity": "INTEGER",
-            "notNull": true
-          },
-          {
-            "fieldPath": "finished",
-            "columnName": "finished",
-            "affinity": "INTEGER",
-            "notNull": true
-          },
-          {
-            "fieldPath": "listenedMs",
-            "columnName": "listened_ms",
-            "affinity": "INTEGER",
-            "notNull": true
-          },
-          {
-            "fieldPath": "lastStartedAt",
-            "columnName": "last_started_at",
-            "affinity": "INTEGER"
-          }
-        ],
-        "primaryKey": {
-          "autoGenerate": false,
-          "columnNames": [
-            "identity_id"
-          ]
-        }
       }
     ],
     "setupQueries": [
       "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
-      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '992948aed52f24813e96a0619a64425d')"
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'c8c4cde00ece365c349c8b1c9a0b8a7c')"
     ]
   }
 }

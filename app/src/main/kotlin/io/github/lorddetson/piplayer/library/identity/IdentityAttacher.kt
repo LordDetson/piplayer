@@ -139,7 +139,12 @@ class IdentityAttacher(
             // again here, since user data may have come for one since the plan read them (docs/library.md §8.1).
             if (plan.deleted.isNotEmpty()) {
                 val holding = holders()
-                plan.deleted.filter { it !in holding }.chunked(CHUNK).forEach { dao.delete(it) }
+                plan.deleted.filter { it !in holding }.chunked(CHUNK).forEach { ids ->
+                    // Listening outcomes keep no identity and go with it (docs/library.md §8.1, §15.7).
+                    user.listens().deleteEventsOf(ids)
+                    user.listens().deleteCountsOf(ids)
+                    dao.delete(ids)
+                }
             }
             if (plan.updated.isNotEmpty()) {
                 // In two steps, so that two identities that swap keys never hold one key at once.
@@ -156,7 +161,8 @@ class IdentityAttacher(
      * Steps 4 and 5: a missing identity takes over the file of a new identity without user data, which goes. What
      * [find] found is checked again in the write transaction against the identities and holders of that moment, since
      * user data may have been written for the new identity meanwhile (the attach pass never deletes an identity that
-     * holds data). The replaced identity's album members become the missing one's (docs/library.md §15.3).
+     * holds data). The replaced identity's album members become the missing one's (docs/library.md §15.3), and so do its
+     * listening outcomes, which never keep it from a takeover (§15.7).
      */
     private suspend fun takeOver(find: suspend (List<Identity>) -> List<Takeover>) {
         val dao = user.identities()
@@ -170,6 +176,10 @@ class IdentityAttacher(
             takeovers.forEach { takeover ->
                 user.favorites().copyMembers(from = takeover.replacedId, to = takeover.missingId)
                 user.favorites().removeMembersOf(takeover.replacedId)
+                user.listens().moveEvents(from = takeover.replacedId, to = takeover.missingId)
+                user.listens().addCounts(from = takeover.replacedId, to = takeover.missingId)
+                user.listens().deleteEventsOf(listOf(takeover.replacedId))
+                user.listens().deleteCountsOf(listOf(takeover.replacedId))
             }
             dao.delete(takeovers.map { it.replacedId })
             dao.updateAll(takeovers.map { identity(byId.getValue(it.missingId)).following(it.file).entity(byId.getValue(it.missingId)) })

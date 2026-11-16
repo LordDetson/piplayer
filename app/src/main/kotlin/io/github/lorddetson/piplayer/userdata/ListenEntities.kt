@@ -3,7 +3,6 @@ package io.github.lorddetson.piplayer.userdata
 import androidx.room3.ColumnInfo
 import androidx.room3.Dao
 import androidx.room3.Entity
-import androidx.room3.PrimaryKey
 import androidx.room3.Query
 
 /** How a listening ended (docs/playback.md §12.2), by the code `listen_event.outcome` stores (docs/library.md §15.7). */
@@ -40,17 +39,6 @@ data class ListenEventEntity(
     val outcome: Int,
 )
 
-/** The listenings older than 90 days, folded per identity (docs/library.md §15.7). */
-@Entity(tableName = "listen_stats")
-data class ListenStatsEntity(
-    @PrimaryKey @ColumnInfo(name = "identity_id") val identityId: Long,
-    @ColumnInfo(name = "early_skips") val earlySkips: Long,
-    @ColumnInfo(name = "late_skips") val lateSkips: Long,
-    val finished: Long,
-    @ColumnInfo(name = "listened_ms") val listenedMs: Long,
-    @ColumnInfo(name = "last_started_at") val lastStartedAt: Long?,
-)
-
 @Dao
 interface ListenDao {
 
@@ -64,21 +52,42 @@ interface ListenDao {
     @Query("SELECT * FROM listen_event ORDER BY started_at, identity_id")
     suspend fun events(): List<ListenEventEntity>
 
-    @Query("SELECT * FROM listen_stats ORDER BY identity_id")
-    suspend fun stats(): List<ListenStatsEntity>
-
-    /** Folds the events that started before [before] into `listen_stats`; the caller deletes them afterwards. */
+    /**
+     * Folds the events that started before [before] into the listening counts of `play_stats` (docs/library.md §15.7):
+     * an identity without a row gets one with a play count of 0. The caller deletes the events afterwards.
+     */
     @Query(
-        "INSERT INTO listen_stats (identity_id, early_skips, late_skips, finished, listened_ms, last_started_at) " +
-            "SELECT identity_id, SUM(outcome = 1), SUM(outcome = 2), SUM(outcome = 3), SUM(listened_ms), MAX(started_at) " +
+        "INSERT INTO play_stats (identity_id, play_count, listened_ms, last_played_at, early_skips, late_skips, finished) " +
+            "SELECT identity_id, 0, 0, NULL, SUM(outcome = 1), SUM(outcome = 2), SUM(outcome = 3) " +
             "FROM listen_event WHERE started_at < :before GROUP BY identity_id " +
             "ON CONFLICT(identity_id) DO UPDATE SET early_skips = early_skips + excluded.early_skips, " +
-            "late_skips = late_skips + excluded.late_skips, finished = finished + excluded.finished, " +
-            "listened_ms = listened_ms + excluded.listened_ms, " +
-            "last_started_at = MAX(COALESCE(last_started_at, 0), excluded.last_started_at)",
+            "late_skips = late_skips + excluded.late_skips, finished = finished + excluded.finished",
     )
     suspend fun foldInto(before: Long)
 
     @Query("DELETE FROM listen_event WHERE started_at < :before")
     suspend fun deleteEventsBefore(before: Long)
+
+    /**
+     * The events of [from] become [to]'s, as when a takeover deletes [from] (docs/library.md §8.2, §15.7); one whose start
+     * [to] has already stays behind, for [deleteEventsOf].
+     */
+    @Query("UPDATE OR IGNORE listen_event SET identity_id = :to WHERE identity_id = :from")
+    suspend fun moveEvents(from: Long, to: Long)
+
+    /** The folded listening counts of [from] are added to [to]'s; [from]'s row is one without a play (§15.7). */
+    @Query(
+        "INSERT INTO play_stats (identity_id, play_count, listened_ms, last_played_at, early_skips, late_skips, finished) " +
+            "SELECT :to, 0, 0, NULL, early_skips, late_skips, finished FROM play_stats WHERE identity_id = :from " +
+            "ON CONFLICT(identity_id) DO UPDATE SET early_skips = early_skips + excluded.early_skips, " +
+            "late_skips = late_skips + excluded.late_skips, finished = finished + excluded.finished",
+    )
+    suspend fun addCounts(from: Long, to: Long)
+
+    @Query("DELETE FROM listen_event WHERE identity_id IN (:identityIds)")
+    suspend fun deleteEventsOf(identityIds: List<Long>)
+
+    /** The listening counts of [identityIds]; a row with a play keeps its identity and is never one of theirs (§15.7). */
+    @Query("DELETE FROM play_stats WHERE identity_id IN (:identityIds) AND play_count = 0")
+    suspend fun deleteCountsOf(identityIds: List<Long>)
 }

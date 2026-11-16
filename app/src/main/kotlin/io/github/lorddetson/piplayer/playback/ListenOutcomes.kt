@@ -11,7 +11,7 @@ enum class ListenEnd {
     /** The user moved on: next, previous to another song, another entry, a new queue of another song, a removal. */
     MOVED_ON,
 
-    /** Neither: the service went, the queue emptied, the same song chosen anew. */
+    /** Neither: the service went, the queue emptied, the same song (its file, whatever entry) chosen anew. */
     NONE,
 }
 
@@ -45,8 +45,18 @@ object ListenOutcomes {
         reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO || reason == Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT -> ListenEnd.REACHED_END
         reason == Player.MEDIA_ITEM_TRANSITION_REASON_SEEK -> ListenEnd.MOVED_ON
         // A new queue that starts with the same song asks for it again; one with no item is no listening's end.
-        reason == Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED && toMediaId != null && toMediaId != fromMediaId -> ListenEnd.MOVED_ON
+        reason == Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED && toMediaId != null && !sameSong(fromMediaId, toMediaId) ->
+            ListenEnd.MOVED_ON
         else -> ListenEnd.NONE
+    }
+
+    /**
+     * Whether the entries [a] and [b] play the same song (docs/playback.md §12.3): the same file for library songs and
+     * added entries, whichever entry plays it; the same URI for opened files.
+     */
+    private fun sameSong(a: String, b: String): Boolean {
+        val file = QueueIds.fileId(a) ?: return a == b
+        return file == QueueIds.fileId(b)
     }
 
     /** The share of a song of [durationMs] that [listenedMs] covers, at most 1; null when the length is not known. */

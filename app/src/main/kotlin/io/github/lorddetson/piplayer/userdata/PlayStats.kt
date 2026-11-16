@@ -25,7 +25,7 @@ class PlayStats(private val database: UserDatabase) {
 
     /**
      * Folds the events that started before [now] minus 90 days into `play_stats`, and the listening outcomes as old into
-     * `listen_stats` (docs/library.md §15.7), in one transaction; the mirrored values stay the same.
+     * its listening counts (docs/library.md §15.7), in one transaction; the mirrored values stay the same.
      */
     suspend fun fold(now: Long) = database.withWriteTransaction {
         val before = now - KEEP_EVENTS_MS

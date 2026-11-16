@@ -56,6 +56,9 @@ class PlayTracker(
     private val handler = Handler(Looper.getMainLooper())
     private val counter = PlayCounter(clock, thresholdOf)
     private val check = Runnable { checkNow() }
+
+    /** Clears [failed] once the player still plays after the moment it started to: a retry plays the song (§12.3). */
+    private val recovered = Runnable { if (player.isPlaying) failed = false }
     private var started = false
 
     /** The progress a restored item goes on from once it becomes the current playback. */
@@ -83,6 +86,7 @@ class PlayTracker(
         if (!started) return
         started = false
         player.removeListener(this)
+        handler.removeCallbacks(recovered)
         // The service goes: the playback is neither skipped nor finished, and a restore decides (§12.3, §12.5).
         finish(ListenEnd.NONE)
     }
@@ -152,8 +156,13 @@ class PlayTracker(
 
     override fun onIsPlayingChanged(isPlaying: Boolean) {
         counter.setPlaying(isPlaying)
-        // Playing again after an error, as a retry does, makes its end the user's again (§12.3).
-        if (isPlaying) failed = false
+        // Playing again after an error, as a retry does, makes its end the user's again (§12.3). Not at once: the player
+        // reports playing in the same events in which the skipper gives a song without playable audio up, and the move
+        // past it comes before the next message on the main thread.
+        if (isPlaying && failed) {
+            handler.removeCallbacks(recovered)
+            handler.post(recovered)
+        }
         checkNow()
     }
 
@@ -161,8 +170,14 @@ class PlayTracker(
         failed = true
     }
 
-    /** The service's skipper gave the current song up (docs/playback.md §12.3). */
-    fun songFailed() = Unit
+    /**
+     * The service's skipper gave the current song up, also one that raised no error (no audio that can be played): its
+     * end is not the user's (docs/playback.md §12.3). Called just before the skipper moves on or stops.
+     */
+    fun songFailed() {
+        failed = true
+        handler.removeCallbacks(recovered)
+    }
 
     override fun onPlaybackStateChanged(playbackState: Int) {
         // The queue ended (§11.2): nothing may end this playback before the process goes, so a counted one gets its
@@ -187,6 +202,7 @@ class PlayTracker(
         counter.start(item.mediaId, knownDuration() ?: item.mediaMetadata.durationMs, wallClock(), player.isPlaying, resume)
         endPositionMs = null
         failed = false
+        handler.removeCallbacks(recovered)
         outcomeWritten = false
         checkNow()
     }

@@ -52,6 +52,7 @@ class BrokenSongSkipper(
      * again on play, so that the check runs again), and a retry starts a new count.
      */
     private fun failed(kind: FailureKind) {
+        onFailing()
         if (kind == FailureKind.SONG && streak.failed(player.mediaItemCount) && player.hasNextMediaItem()) {
             player.seekToNextMediaItem()
             player.prepare()
