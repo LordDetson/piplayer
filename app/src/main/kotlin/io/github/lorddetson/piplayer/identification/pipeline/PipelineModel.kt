@@ -4,8 +4,10 @@ import io.github.lorddetson.piplayer.identification.contract.IdentificationOutco
 import io.github.lorddetson.piplayer.identification.contract.IdentificationTarget
 import io.github.lorddetson.piplayer.identification.score.TrackHint
 import io.github.lorddetson.piplayer.library.values.TrackTags
+import io.github.lorddetson.piplayer.net.HttpSummary
 import io.github.lorddetson.piplayer.tagging.contentkey.DurationPlan
 import java.io.IOException
+import java.time.Instant
 import kotlin.time.Duration
 
 /** The file a run is for, before stage 0 has read it (TI §3, §3.1). */
@@ -125,6 +127,12 @@ enum class SkipReason {
 
     /** The fingerprint holds no items. */
     EMPTY_FINGERPRINT,
+
+    /** An earlier empty AcoustID result waits for its retry time (TI §3.2). */
+    RETRY_PENDING,
+
+    /** The retry of an empty AcoustID result came back empty too, so the empty result is final (TI §3.2). */
+    EMPTY_RESULT_FINAL,
 }
 
 /** How one stage of a run ended. */
@@ -139,14 +147,23 @@ sealed interface StageResult {
     data class Failed(val error: IOException) : StageResult
 }
 
-/** One stage of a run, for the trace (TI §10.1). */
-data class StageReport(val stage: PipelineStage, val result: StageResult, val elapsed: Duration)
+/**
+ * One stage of a run, for the trace (TI §10.1): how it ended, its [elapsed] time, when it started by the services'
+ * clock ([startedAtMs], null when not known) and what the HTTP layer saw of its requests ([http], null when it sent none).
+ */
+data class StageReport(
+    val stage: PipelineStage,
+    val result: StageResult,
+    val elapsed: Duration,
+    val startedAtMs: Long? = null,
+    val http: HttpSummary? = null,
+)
 
 /** Where stage 3 took its fingerprint from. */
 enum class FingerprintSource { CACHED, COMPUTED }
 
 /**
- * One run (TI §3 "One run"), kept in memory until it is stored (a later step of M3).
+ * One run (TI §3 "One run"), as it ended; a run that went through its stages has stored it by its content key (TI §10.1).
  *
  * @property outcome how the run ended.
  * @property file what stage 0 read; null when the run ended before it or the file could not be read.
@@ -155,7 +172,8 @@ enum class FingerprintSource { CACHED, COMPUTED }
  * @property lengthWalked the length was walked in this run.
  * @property stages every stage that was reached, in order.
  * @property fingerprint where stage 3 took its fingerprint from; null when it took none.
- * @property retryLater an empty AcoustID result that no text candidate of at least 0.50 outweighed (TI §3.2).
+ * @property retryLater the file waits for the retry of an empty AcoustID result after this run (TI §3.2).
+ * @property retryAt when that retry is due, by the services' clock; null when none waits.
  */
 data class PipelineResult(
     val outcome: IdentificationOutcome,
@@ -166,4 +184,5 @@ data class PipelineResult(
     val stages: List<StageReport> = emptyList(),
     val fingerprint: FingerprintSource? = null,
     val retryLater: Boolean = false,
+    val retryAt: Instant? = null,
 )

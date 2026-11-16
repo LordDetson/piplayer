@@ -120,6 +120,7 @@ class IdentificationPipelineDeviceTest {
         local = AndroidLocalStage(context, client, LibraryAccess.of(library)),
         fingerprints = LibraryFingerprintCache(context, LibraryAccess.of(library)),
         encoder = ChromaprintEncoder,
+        store = RoomIdentificationStore(LibraryAccess.of(library)),
         country = { "GB" },
     )
 
@@ -206,6 +207,11 @@ class IdentificationPipelineDeviceTest {
         assertThat(sentFingerprints.single()).startsWith("AQ")
         assertThat(log.entries.single { it.path.startsWith("/v2/") }.body).contains("duration=$seconds&")
         assertThat(log.entries.toString()).doesNotContain(KEY)
+        // The run's candidates and trace are in the library database under the content key (TI §10.1).
+        assertThat(library.identificationRuns().candidates(key).first().recordingMbid)
+            .isEqualTo(FakeMusicBrainz.HARBOR_RECORDING)
+        assertThat(library.identificationRuns().trace(key).map { it.stage })
+            .contains("local_read", "fingerprint", "release_choice", "outcome")
 
         progress.clear()
         val second = pipeline(services()).run(FileRef.Opened(uri)) { progress += it }

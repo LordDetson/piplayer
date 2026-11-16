@@ -13,6 +13,7 @@ import io.github.lorddetson.piplayer.identification.pipeline.ComputedFingerprint
 import io.github.lorddetson.piplayer.identification.pipeline.FileRef
 import io.github.lorddetson.piplayer.identification.pipeline.FingerprintCache
 import io.github.lorddetson.piplayer.identification.pipeline.IdentificationPipeline
+import io.github.lorddetson.piplayer.identification.pipeline.IdentificationStore
 import io.github.lorddetson.piplayer.identification.pipeline.LocalFile
 import io.github.lorddetson.piplayer.identification.pipeline.LocalStage
 import io.github.lorddetson.piplayer.identification.pipeline.PipelineStage
@@ -78,7 +79,9 @@ class SpikeServicesWiringTest {
     }
 
     private fun TestScope.pipeline(services: IdentificationServices) =
-        IdentificationPipeline(services, local, fingerprints, { error("nothing is cached") }, timeSource = testTimeSource)
+        IdentificationPipeline(
+            services, local, fingerprints, { error("nothing is cached") }, IdentificationStore.NONE, timeSource = testTimeSource,
+        )
 
     private fun RecordingRequestLog.toServer(server: MockWebServer) = to("${server.hostName}:${server.port}")
 

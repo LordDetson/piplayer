@@ -44,6 +44,8 @@ class IdentificationPipeline(
     /** The fingerprint cache of stage 3; readable so that a test can check which cache a pipeline was built over. */
     internal val fingerprints: FingerprintCache,
     private val encoder: FingerprintEncoder,
+    /** Where a run keeps its candidates, trace and lookup job (TI §10.1); readable so that a test can check it. */
+    internal val store: IdentificationStore,
     private val country: () -> String? = { Locale.getDefault().country.ifEmpty { null } },
     private val timeSource: TimeSource = TimeSource.Monotonic,
 ) {

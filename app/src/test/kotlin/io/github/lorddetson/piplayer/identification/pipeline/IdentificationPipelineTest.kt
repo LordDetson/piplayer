@@ -20,7 +20,6 @@ import io.github.lorddetson.piplayer.net.NetworkState
 import io.github.lorddetson.piplayer.net.OnlineConsent
 import io.github.lorddetson.piplayer.tagging.contentkey.DurationCheck
 import io.github.lorddetson.piplayer.tagging.contentkey.DurationPlan
-import java.io.IOException
 import java.util.Collections
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.launch
@@ -57,6 +56,7 @@ class IdentificationPipelineTest {
     private val local = FakeLocal(file())
     private val fingerprints = FakeFingerprints()
     private val encoder = FakeEncoder()
+    private val store = MemoryIdentificationStore()
 
     private fun file(
         tags: TrackTags? = this.tags,
@@ -83,7 +83,9 @@ class IdentificationPipelineTest {
             statuses = statuses,
             acoustIdApiKey = key,
         )
-        return IdentificationPipeline(services, local, fingerprints, encoder, country = { "GB" }, timeSource = testTimeSource)
+        return IdentificationPipeline(
+            services, local, fingerprints, encoder, store, country = { "GB" }, timeSource = testTimeSource,
+        )
     }
 
     private suspend fun IdentificationPipeline.runOpened() = run(FileRef.Opened("file:///music/track.mp3")) { progress += it }
@@ -685,86 +687,6 @@ class IdentificationPipelineTest {
         assertThat(progress.last()).isEqualTo(PipelineProgress.Decoding)
     }
 
-    /** Stage 0 as a fake: [file] is what it read, [walked] what a walk finds. */
-    private class FakeLocal(@Volatile var file: LocalFile?) : LocalStage {
-        val reads: MutableList<FileRef> = Collections.synchronizedList(mutableListOf())
-        val walks: MutableList<DurationPlan> = Collections.synchronizedList(mutableListOf())
-
-        @Volatile
-        var walked: Long? = null
-
-        @Volatile
-        var failure: RuntimeException? = null
-
-        override suspend fun read(file: FileRef): LocalFile? {
-            reads += file
-            failure?.let { throw it }
-            return this.file
-        }
-
-        override suspend fun walk(file: LocalFile, plan: DurationPlan): Long? {
-            walks += plan
-            return walked
-        }
-    }
-
-    /** The fingerprint cache as a fake: decoding gives [RAW] with the session's string [SESSION]. */
-    private class FakeFingerprints : FingerprintCache {
-        val stored: MutableMap<String, CachedFingerprint> = Collections.synchronizedMap(mutableMapOf())
-        val kept: MutableMap<String, String> = Collections.synchronizedMap(mutableMapOf())
-
-        @Volatile
-        var computes = 0
-
-        @Volatile
-        var failure: IOException? = null
-
-        @Volatile
-        var whileComputing: () -> Unit = {}
-
-        @Volatile
-        var suspendUntil: CompletableDeferred<Unit>? = null
-
-        @Volatile
-        var cacheFailure: RuntimeException? = null
-
-        @Volatile
-        var runtimeFailure: RuntimeException? = null
-
-        override suspend fun cached(contentKey: String): CachedFingerprint? {
-            cacheFailure?.let { throw it }
-            return stored[contentKey]
-        }
-
-        override suspend fun compute(file: LocalFile): ComputedFingerprint {
-            computes++
-            whileComputing()
-            suspendUntil?.await()
-            failure?.let { throw it }
-            runtimeFailure?.let { throw it }
-            stored[file.target.contentKey] = CachedFingerprint(RAW)
-            return ComputedFingerprint(RAW, SESSION)
-        }
-
-        override suspend fun keepAcoustIdTrack(contentKey: String, trackId: String) {
-            kept[contentKey] = trackId
-        }
-    }
-
-    /** An encoder whose string names the number of items it was given. */
-    private class FakeEncoder : FingerprintEncoder {
-        val calls: MutableList<IntArray> = Collections.synchronizedList(mutableListOf())
-
-        override fun encode(raw: IntArray): String {
-            calls += raw
-            return encoded(raw)
-        }
-
-        companion object {
-            fun encoded(raw: IntArray) = "AQAAcached${raw.size}"
-        }
-    }
-
     /** MusicBrainz whose release browses stay busy; everything else as [fake] answers it. */
     private class BusyBrowses(private val fake: FakeMusicBrainz) : mockwebserver3.Dispatcher() {
         override fun dispatch(request: mockwebserver3.RecordedRequest): mockwebserver3.MockResponse =
@@ -779,10 +701,10 @@ class IdentificationPipelineTest {
         const val API_KEY = "testKey123"
         const val KEY = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
         const val DURATION_MS = 214_000L
-        const val SESSION = "AQAAsession"
+        const val SESSION = FakeFingerprints.SESSION
         const val UNKNOWN_RECORDING = "99999999-9999-4999-8999-999999999999"
         const val CLOSE_SCORES_BEST = "a1d2e3f4-0516-4273-8495-a6b7c8d9e0f1"
-        val RAW = IntArray(948) { it * 7 }
+        val RAW = FakeFingerprints.RAW
         val ID_ONLY = Fixture("acoustid/id-only.json")
     }
 }

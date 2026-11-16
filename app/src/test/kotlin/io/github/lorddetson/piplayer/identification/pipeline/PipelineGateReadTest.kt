@@ -95,7 +95,7 @@ class PipelineGateReadTest {
             baseUrls = TestServices.baseUrls(server.url("/v2/"), server.url("/ws/2/")),
             gate = gate,
         )
-        return IdentificationPipeline(services, stage, fingerprints, { error("not used") })
+        return IdentificationPipeline(services, stage, fingerprints, { error("not used") }, IdentificationStore.NONE)
     }
 
     @Test

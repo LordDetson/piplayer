@@ -9,6 +9,7 @@ import io.github.lorddetson.piplayer.identification.pipeline.AppPipeline
 import io.github.lorddetson.piplayer.identification.pipeline.ComputedFingerprint
 import io.github.lorddetson.piplayer.identification.pipeline.FileRef
 import io.github.lorddetson.piplayer.identification.pipeline.IdentificationPipeline
+import io.github.lorddetson.piplayer.identification.pipeline.IdentificationStore
 import io.github.lorddetson.piplayer.identification.pipeline.PipelineProgress
 import io.github.lorddetson.piplayer.identification.pipeline.PipelineResult
 import io.github.lorddetson.piplayer.identification.pipeline.UserLaneDecoder
@@ -22,7 +23,7 @@ import kotlin.time.TimeSource
  * own, with one rate limiter per provider (TI §8, §9), behind [SpikeGate], which is open only while a spike run goes on.
  * The app's services stay behind the user's own choice, so in a debug process the spike can send while lookups are off.
  * For that reason its fingerprints stay in a cache of its own in memory ([SpikeFingerprintCache]): a spike run writes
- * nothing to the library database's fingerprint cache. Its reads through `:tagger` still keep the read counts every
+ * nothing to the library database's fingerprint cache, and it stores no candidates, trace or lookup job. Its reads through `:tagger` still keep the read counts every
  * read keeps (TI §7.2 step 11).
  */
 object SpikeServices {
@@ -68,9 +69,12 @@ object SpikeServices {
         }.also { fingerprints = it }
     }
 
-    /** The app's pipeline over the spike's services and fingerprint cache; open [SpikeGate] to run it. */
+    /**
+     * The app's pipeline over the spike's services and fingerprint cache, storing no working rows, so every spike run
+     * asks AcoustID (TI §3 "One run"); open [SpikeGate] to run it.
+     */
     fun pipeline(context: Context): IdentificationPipeline =
-        AppPipeline.over(context, services(context), fingerprints(context))
+        AppPipeline.over(context, services(context), fingerprints(context), IdentificationStore.NONE)
 
     /** Runs [pipeline] on the file at [uri], with [SpikeGate] open for the run only. */
     suspend fun run(

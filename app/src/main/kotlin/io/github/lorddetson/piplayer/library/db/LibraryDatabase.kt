@@ -272,6 +272,9 @@ abstract class LibraryDatabase : RoomDatabase() {
     /** The decided values beside `track_display` (TI §10.1). */
     abstract fun decided(): DecidedMirrorDao
 
+    /** The lookup jobs, candidates and trace of identification, by content key (TI §10.1). */
+    abstract fun identificationRuns(): IdentificationRunDao
+
     companion object {
         const val FILE_NAME = "library.db"
 

@@ -2,6 +2,7 @@ package io.github.lorddetson.piplayer.spike
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.github.lorddetson.piplayer.TestFiles
+import io.github.lorddetson.piplayer.identification.pipeline.IdentificationStore
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -22,5 +23,7 @@ class SpikeServicesDeviceTest {
 
         assertThat(pipeline.fingerprints).isInstanceOf(SpikeFingerprintCache::class.java)
         assertThat(pipeline.fingerprints).isSameAs(SpikeServices.fingerprints(context))
+        // Nor does it store candidates, a trace or a lookup job (TI §3 "One run").
+        assertThat(pipeline.store).isSameAs(IdentificationStore.NONE)
     }
 }

@@ -4,14 +4,15 @@ import androidx.room3.ColumnInfo
 import androidx.room3.Dao
 import androidx.room3.Entity
 import androidx.room3.Index
+import androidx.room3.Insert
 import androidx.room3.PrimaryKey
 import androidx.room3.Query
 import androidx.room3.Upsert
 import androidx.room3.withWriteTransaction
 
 // The working rows of identification (TI §10.1). They are kept by content key, not by file ID: a file opened from
-// another app has none, and a library file the tag pass has not read gets its key at stage 0 (TI §3.1). Their DAOs
-// arrive with the pipeline that writes them (M3 step 15).
+// another app has none, and a library file the tag pass has not read gets its key at stage 0 (TI §3.1). The pipeline
+// writes them through IdentificationRunDao.
 
 /** One lookup job per audio content (TI §10.1), with the "retry later" time of TI §3.2. */
 @Entity(tableName = "lookup_job", indices = [Index("batch_uuid")])
@@ -145,6 +146,51 @@ interface IdentificationCacheDao {
      */
     @Query("UPDATE fingerprint SET acoustid_id = :trackId WHERE content_key = :contentKey")
     suspend fun keepAcoustIdTrack(contentKey: String, trackId: String)
+}
+
+/**
+ * The lookup jobs, candidates and trace of identification (TI §10.1), by content key. The pipeline writes a run's rows in
+ * one transaction (`RoomIdentificationStore`).
+ */
+@Dao
+interface IdentificationRunDao {
+
+    @Query("SELECT * FROM lookup_job WHERE content_key = :contentKey")
+    suspend fun job(contentKey: String): LookupJobEntity?
+
+    @Upsert
+    suspend fun saveJob(job: LookupJobEntity)
+
+    @Query("DELETE FROM lookup_job WHERE content_key = :contentKey")
+    suspend fun dropJob(contentKey: String)
+
+    @Query("SELECT * FROM candidate WHERE content_key = :contentKey ORDER BY position")
+    suspend fun candidates(contentKey: String): List<CandidateEntity>
+
+    @Query("DELETE FROM candidate WHERE content_key = :contentKey")
+    suspend fun dropCandidates(contentKey: String)
+
+    @Insert
+    suspend fun addCandidates(rows: List<CandidateEntity>)
+
+    /** The trace of [contentKey], run after run in the order the rows were added, each run in position order. */
+    @Query("SELECT * FROM identification_trace WHERE content_key = :contentKey ORDER BY rowid")
+    suspend fun trace(contentKey: String): List<IdentificationTraceEntity>
+
+    @Insert
+    suspend fun addTrace(rows: List<IdentificationTraceEntity>)
+
+    /**
+     * The runs traced for [contentKey], oldest first by the order their rows were added (row ID), not by `started_at`,
+     * which a clock set back would mix up.
+     */
+    @Query(
+        "SELECT run_id FROM identification_trace WHERE content_key = :contentKey GROUP BY run_id ORDER BY MIN(rowid)",
+    )
+    suspend fun tracedRuns(contentKey: String): List<String>
+
+    @Query("DELETE FROM identification_trace WHERE content_key = :contentKey AND run_id IN (:runIds)")
+    suspend fun dropTracedRuns(contentKey: String, runIds: List<String>)
 }
 
 /** Reads and plain writes of `decided_mirror` (TI §10.1); whole replacements go through [replaceDecided]. */

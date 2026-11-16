@@ -95,20 +95,24 @@ object AppPipeline {
         context = context,
         services = IdentificationServices.of(context),
         fingerprints = LibraryFingerprintCache(context.applicationContext, LibraryAccess.app(context)),
+        store = RoomIdentificationStore(LibraryAccess.app(context)),
     )
 
     /**
-     * The same stage 0 and encoder over [services] and [fingerprints], such as the debug spike's own, which keeps its
-     * fingerprints in memory (TI §3 "One run"). The cache has no default, so a caller always names the one it fills.
+     * The same stage 0 and encoder over [services], [fingerprints] and [store], such as the debug spike's own, which
+     * keeps its fingerprints in memory and stores no working rows (TI §3 "One run"). The cache and the store have no
+     * default, so a caller always names the ones it fills.
      */
     fun over(
         context: Context,
         services: IdentificationServices,
         fingerprints: FingerprintCache,
+        store: IdentificationStore,
     ): IdentificationPipeline = IdentificationPipeline(
         services = services,
         local = AndroidLocalStage(context, Tagger.client(context), LibraryAccess.app(context)),
         fingerprints = fingerprints,
         encoder = ChromaprintEncoder,
+        store = store,
     )
 }

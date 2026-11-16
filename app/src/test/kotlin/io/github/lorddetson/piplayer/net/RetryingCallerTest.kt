@@ -9,6 +9,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.testTimeSource
+import kotlinx.coroutines.withContext
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
 import mockwebserver3.junit5.StartStop
@@ -139,5 +140,47 @@ class RetryingCallerTest {
         server.enqueue(ok())
         assertThat(caller.get()).isEqualTo("ok")
         assertThat((testScheduler.currentTime - gaveUpAt).milliseconds).isLessThanOrEqualTo(interval)
+    }
+
+    // What the HTTP layer reports to the trace of the coroutine (TI §10.1).
+
+    @Test
+    fun `every attempt sent is reported to the coroutine's trace with the status of its answer`() = runTest {
+        val trace = HttpTrace()
+        val caller = caller()
+        server.enqueue(MockResponse.Builder().code(503).build())
+        server.enqueue(ok())
+
+        assertThat(withContext(trace) { caller.get() }).isEqualTo("ok")
+
+        val summary = trace.summary()!!
+        assertThat(summary.requests).isEqualTo(2)
+        assertThat(summary.lastStatus).isEqualTo(200)
+        assertThat(summary.elapsedMs).isGreaterThanOrEqualTo(0)
+    }
+
+    @Test
+    fun `an attempt without an answer is reported without a status`() = runTest {
+        val gate = TestServices.openGate()
+        val http = HttpClients.create(TestServices.USER_AGENT, gate).newBuilder()
+            .dns { host -> throw UnknownHostException("test: no address for $host") }
+            .build()
+        val trace = HttpTrace()
+
+        runCatching { withContext(trace) { caller(http = http, gate = gate).get() } }
+
+        assertThat(trace.summary()).isEqualTo(HttpSummary(requests = 4, lastStatus = null, elapsedMs = 0))
+    }
+
+    @Test
+    fun `a blocked call reports nothing, and a call outside a trace sends as before`() = runTest {
+        val trace = HttpTrace()
+        val blocked = caller(guard = CallGuard { throw GateClosedException() })
+
+        runCatching { withContext(trace) { blocked.get() } }
+        assertThat(trace.summary()).isNull()
+
+        server.enqueue(ok())
+        assertThat(caller().get()).isEqualTo("ok")
     }
 }
