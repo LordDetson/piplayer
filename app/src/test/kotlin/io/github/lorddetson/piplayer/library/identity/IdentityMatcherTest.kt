@@ -200,7 +200,48 @@ class IdentityMatcherTest {
         val result = IdentityMatcher.plan(listOf(elsewhere), listOf(waiting), emptySet(), now, unread = setOf(music))
 
         assertThat(result.updated).isEmpty()
-        assertThat(result.created).containsExactly(elsewhere)
+        // The file step 3 would give the waiting identity is not matched yet, so that step 3 can still give it later.
+        assertThat(result.created).isEmpty()
+    }
+
+    @Test
+    fun aWaitingIdentityTakesTheFileStep3HeldBackOnceTheFileAtItsHintIsReadWithAnotherKey() {
+        val elsewhere = file(1, "bb", place = moved, durationMs = 199_500, mbid = "m1")
+        val waiting = identity(7, "aa", mbid = "m1", missingSince = now - 1_000)
+        val held = IdentityMatcher.plan(listOf(elsewhere), listOf(waiting), emptySet(), now, unread = setOf(music))
+        assertThat(held.created).isEmpty()
+
+        // The tag pass reads the file at the hint: another recording, another key and a length step 2 does not take.
+        val read = file(2, "cc", durationMs = 150_000)
+        val result = IdentityMatcher.plan(listOf(elsewhere, read), listOf(waiting), emptySet(), now, unread = emptySet())
+
+        assertThat(result.updated).containsExactly(waiting.following(elsewhere))
+        assertThat(result.created).containsExactly(read)
+    }
+
+    @Test
+    fun aWaitingIdentityTakesTheFileStep3HeldBackOnceTheFileAtItsHintLeavesTheLibrary() {
+        val elsewhere = file(1, "bb", place = moved, durationMs = 199_500, mbid = "m1")
+        val waiting = identity(7, "aa", mbid = "m1", missingSince = now - 1_000)
+        assertThat(IdentityMatcher.plan(listOf(elsewhere), listOf(waiting), emptySet(), now, unread = setOf(music)).created).isEmpty()
+
+        val result = IdentityMatcher.plan(listOf(elsewhere), listOf(waiting), emptySet(), now, unread = emptySet())
+
+        assertThat(result.updated).containsExactly(waiting.following(elsewhere))
+        assertThat(result.created).isEmpty()
+    }
+
+    @Test
+    fun aWaitingIdentityHoldsBackNoFileThatStep3WouldNotGiveIt() {
+        // 2 s off: step 3 would not give it the file, so the file gets a new identity at once.
+        val farOff = file(1, "bb", place = moved, durationMs = 198_000, mbid = "m1")
+        val otherMbid = file(2, "cc", place = moved.copy(displayName = "02.mp3"), mbid = "m2")
+        val waiting = identity(7, "aa", mbid = "m1", missingSince = now - 1_000)
+
+        val result = IdentityMatcher.plan(listOf(farOff, otherMbid), listOf(waiting), emptySet(), now, unread = setOf(music))
+
+        assertThat(result.updated).isEmpty()
+        assertThat(result.created).containsExactly(farOff, otherMbid)
     }
 
     @Test
