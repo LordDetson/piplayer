@@ -120,6 +120,11 @@ class DetailsCommands(private val actions: DetailsActions, val runner: DetailsAc
     /** The Undo of a message: undoes [decisionId]. */
     fun undo(decisionId: Long): Boolean = runner.run(DetailsAction.UNDO) { done(DetailsAction.UNDO, actions.undo(decisionId)) }
 
+    /** STUB: the Undo of a message, refused while an action runs, as before. */
+    fun undoWhenFree(decisionId: Long) {
+        undo(decisionId)
+    }
+
     private fun reverting(action: DetailsAction, target: DecisionTarget, field: ProtectedField) = runner.run(action) {
         actions.revert(target, field)?.let { DetailsOutcome.Done(action, undo = it) } ?: DetailsOutcome.Failed(action)
     }

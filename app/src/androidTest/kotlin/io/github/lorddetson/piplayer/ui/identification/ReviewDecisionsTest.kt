@@ -20,11 +20,13 @@ import io.github.lorddetson.piplayer.library.tagpass.PassFile
 import io.github.lorddetson.piplayer.library.tagpass.PassRead
 import io.github.lorddetson.piplayer.library.tagpass.PassReader
 import io.github.lorddetson.piplayer.library.tagpass.TagPass
+import io.github.lorddetson.piplayer.library.values.DecidedField
 import io.github.lorddetson.piplayer.library.values.DecisionKind
 import io.github.lorddetson.piplayer.settings.ProtectedField
 import io.github.lorddetson.piplayer.tagging.TagReport
 import io.github.lorddetson.piplayer.tagging.contentkey.DurationCheck
 import io.github.lorddetson.piplayer.tagging.contentkey.DurationPlan
+import io.github.lorddetson.piplayer.userdata.DecisionFixtures
 import io.github.lorddetson.piplayer.userdata.DecisionFixtures.details
 import io.github.lorddetson.piplayer.userdata.DecisionFixtures.request
 import io.github.lorddetson.piplayer.userdata.Decisions
@@ -155,6 +157,50 @@ class ReviewDecisionsTest {
         val states = user.decisions().fileStates(identity)
         assertThat(states).isNotEmpty()
         assertThat(states.map { it.displayName }.toSet()).containsExactly("3.mp3")
+    }
+
+    /**
+     * The tag pass reads every file again, file 1 with [tags] and file 3 with its title as before, and compares them as
+     * after each of its batches (TI §7.1).
+     */
+    private suspend fun readAgain(tags: Map<String, List<String>>) {
+        sync.exclusive { library.library().forgetReaderVersions() }
+        TagPass(
+            library, sync,
+            object : PassReader {
+                override suspend fun read(file: PassFile): PassRead = PassRead.Replied(
+                    TagReport(
+                        properties = if (file.mediaStoreId == 1L) tags else mapOf("TITLE" to listOf("Tag ${file.mediaStoreId}")),
+                        audio = TagReport.Audio(60_000, 128, 44_100, 2),
+                        content = TagReport.Content(key(if (file.mediaStoreId == 2L) 2 else 1), "mp3", DurationPlan(60_000, DurationCheck.NONE)),
+                    ),
+                )
+            },
+            cyrillicLanguage = { false }, legacyEncoding = { null }, decodedEncoding = DecodedEncoding.InMemory(),
+            crashBackoff = 1.milliseconds,
+            onStored = { read, failed -> mirror.requestRead(read, failed) },
+        ).run()
+        mirror.awaitIdle()
+    }
+
+    /** The parts flagged as changed in the file at file 1's place. */
+    private suspend fun flaggedAtFileOne(identity: Long) = user.decisions().fileStates(identity)
+        .filter { it.changedInFile && it.displayName == "1.mp3" }.mapNotNull { DecidedField.ofCode(it.field) }
+
+    @Test
+    fun applyTakesTheReferencesFromEveryPartTheTagPassStored() = runBlocking<Unit> {
+        val tags = DecisionFixtures.wideTags()
+        readAgain(tags)
+        val identity = checkNotNull(identityOf(1))
+        checkNotNull(review.apply(request(key(1), details(title = "Decided"), fileId = fileId(1)), cover = null))
+
+        // Read again unchanged: nothing is flagged.
+        readAgain(tags)
+        assertThat(flaggedAtFileOne(identity)).isEmpty()
+
+        // A tagger changed the number of tracks, which the lists do not show: the track is flagged.
+        readAgain(tags + ("TRACKTOTAL" to listOf("11")))
+        assertThat(flaggedAtFileOne(identity)).containsExactly(DecidedField.TRACK_TOTAL)
     }
 
     @Test

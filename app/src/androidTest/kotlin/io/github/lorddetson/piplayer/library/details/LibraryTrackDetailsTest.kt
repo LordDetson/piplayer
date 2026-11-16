@@ -57,6 +57,7 @@ import io.github.lorddetson.piplayer.userdata.DecisionFixtures
 import io.github.lorddetson.piplayer.userdata.Decisions
 import io.github.lorddetson.piplayer.library.identity.LibraryTrackRefs
 import io.github.lorddetson.piplayer.library.lists.LibraryLists
+import io.github.lorddetson.piplayer.library.mirror.DecisionMirror
 import io.github.lorddetson.piplayer.library.sync.LibrarySync
 import io.github.lorddetson.piplayer.library.sync.TrackDisplayWriter
 import io.github.lorddetson.piplayer.library.tagpass.DurationSource
@@ -158,16 +159,19 @@ class LibraryTrackDetailsTest {
         coverBytes: Long? = null,
         tagEncoding: String? = null,
         release: String? = null,
+        properties: Map<String, List<String>>? = null,
     ): Long {
         val fileId = fileOf(mediaStoreId)
         val tags = TrackTags.from(
-            mapOf(
-                "TITLE" to listOf("Tag title"),
-                "ARTIST" to listOf("Ann"),
-                "ALBUM" to listOf("Red"),
-                "DATE" to listOf("2003-05-12"),
-                "MUSICBRAINZ_TRACKID" to listOf(recording),
-            ) + listOfNotNull(release?.let { "MUSICBRAINZ_ALBUMID" to listOf(it) }),
+            properties ?: (
+                mapOf(
+                    "TITLE" to listOf("Tag title"),
+                    "ARTIST" to listOf("Ann"),
+                    "ALBUM" to listOf("Red"),
+                    "DATE" to listOf("2003-05-12"),
+                    "MUSICBRAINZ_TRACKID" to listOf(recording),
+                ) + listOfNotNull(release?.let { "MUSICBRAINZ_ALBUMID" to listOf(it) })
+                ),
         )
         runBlocking {
             val dao = database.library()
@@ -642,6 +646,55 @@ class LibraryTrackDetailsTest {
         runBlocking { decisions.keepPiPlayersValue(identity, location(changed), DecidedField.partsOf(ProtectedField.TITLE).toSet()) }
 
         assertThat(read(fileId).row(TITLE).changedInFile).isFalse()
+    }
+
+    /** A tagger wrote [properties] into the file of [fileId], and the tag pass stored them. */
+    private fun retag(fileId: Long, properties: Map<String, List<String>>) = runBlocking {
+        database.library().deleteTracks(listOf(fileId))
+        database.library().addTrack(TrackEntity.of(fileId, TrackTags.from(properties)))
+    }
+
+    /** The parts of the song's decided fields flagged as changed in the file. */
+    private fun flagged(identity: Long) = runBlocking { user.decisions().fileStates(identity) }
+        .filter { it.changedInFile }.mapNotNull { DecidedField.ofCode(it.field) }
+
+    @Test
+    fun keepingPiPlayersValueThroughTheDetailsStaysWhenTheTagPassComparesTheFileAgain() {
+        val tags = DecisionFixtures.wideTags()
+        val fileId = readTags(properties = tags)
+        val identity = addIdentity()
+        val mirror = DecisionMirror(database, user, sync)
+        try {
+            // The tag pass compares the files it stored, as after each of its batches (TI §7.1).
+            fun tagPassCompares() = runBlocking {
+                mirror.requestRead(listOf(fileId), failed = emptyList())
+                mirror.awaitIdle()
+            }
+            val fields = setOf(ProtectedField.TRACK_NUMBER, ProtectedField.DISC_NUMBER, ProtectedField.ALBUM_ARTIST, ProtectedField.MUSICBRAINZ_IDS)
+            apply(fields = fields, atDecision = listOf(checkNotNull(read(fileId).target).location))
+            tagPassCompares()
+            assertThat(flagged(identity)).isEmpty()
+
+            // A tagger changed the track number: only the track is flagged.
+            val retagged = tags + ("TRACKNUMBER" to listOf("5"))
+            retag(fileId, retagged)
+            tagPassCompares()
+            assertThat(flagged(identity)).containsExactly(DecidedField.TRACK_NUMBER)
+            assertThat(read(fileId).row(DetailField.TRACK).changedInFile).isTrue()
+
+            // "Keep PiPlayer's value" as the screen does it, through the details' own place.
+            val target = checkNotNull(read(fileId).target)
+            runBlocking { decisions.keepPiPlayersValue(target.identityId, target.location, DecidedField.partsOf(ProtectedField.TRACK_NUMBER).toSet()) }
+            assertThat(read(fileId).row(DetailField.TRACK).changedInFile).isFalse()
+
+            // A change that has nothing to do with the decided fields, then the tag pass compares again.
+            retag(fileId, retagged + ("REPLAYGAIN_TRACK_GAIN" to listOf("-6.5 dB")))
+            tagPassCompares()
+            assertThat(flagged(identity)).isEmpty()
+            assertThat(read(fileId).row(DetailField.TRACK).changedInFile).isFalse()
+        } finally {
+            mirror.close()
+        }
     }
 
     @Test

@@ -34,6 +34,7 @@ import io.github.lorddetson.piplayer.settings.ProtectedField
 import io.github.lorddetson.piplayer.tagging.TagReport
 import io.github.lorddetson.piplayer.tagging.contentkey.DurationCheck
 import io.github.lorddetson.piplayer.tagging.contentkey.DurationPlan
+import io.github.lorddetson.piplayer.userdata.DecisionFixtures
 import io.github.lorddetson.piplayer.userdata.DecisionFixtures.details
 import io.github.lorddetson.piplayer.userdata.DecisionFixtures.request
 import io.github.lorddetson.piplayer.userdata.Decisions
@@ -1045,6 +1046,46 @@ class DecisionMirrorTest {
         // Flags are not mirrored: no counter moved, and the decision keeps winning.
         assertThat(user.user().changeCounter()).isEqualTo(counter)
         assertThat(display(1).title).isEqualTo("Song")
+    }
+
+    /** A reader of the tag pass that gives each file the key of its media ID and the properties of [tags]. */
+    private inner class PropertiesReader(val tags: Map<String, List<String>>) : PassReader {
+        override suspend fun read(file: PassFile): PassRead = PassRead.Replied(
+            TagReport(
+                properties = tags,
+                audio = TagReport.Audio(200_000, 128, 44_100, 2),
+                content = TagReport.Content(key(file.mediaStoreId), "mp3", DurationPlan(200_000, DurationCheck.NONE)),
+            ),
+        )
+    }
+
+    @Test
+    fun aReadComparesEveryPartOfADecidedFieldAsThePassStoredIt() = runBlocking<Unit> {
+        val tags = DecisionFixtures.wideTags()
+        library(listOf(row(1)))
+        readAndReport(PropertiesReader(tags))
+        val file = library.library().files().single()
+        val location = Decisions.LocationValues(file.volumeName, file.relativePath, file.displayName, DecisionContent.ofTags(TrackTags.from(tags)))
+        decisions.apply(request(key(1)), atDecision = listOf(location))
+
+        // Read again unchanged: no part is flagged, not even those the lists do not show.
+        sync.exclusive { library.library().forgetReaderVersions() }
+        readAndReport(PropertiesReader(tags))
+        assertThat(user.decisions().fileStates(identityOf(1)).filter { it.changedInFile }.map { DecidedField.ofCode(it.field) }).isEmpty()
+
+        // A tagger changed the number of tracks, the label and the album artists' IDs.
+        changeFileOne()
+        readAndReport(
+            PropertiesReader(
+                tags + mapOf(
+                    "TRACKTOTAL" to listOf("11"), "LABEL" to listOf("Other label"),
+                    "MUSICBRAINZ_ALBUMARTISTID" to listOf(DecisionFixtures.mbid(9, 0xa47)),
+                ),
+            ),
+        )
+
+        assertThat(user.decisions().fileStates(identityOf(1)).filter { it.changedInFile }.map { DecidedField.ofCode(it.field) })
+            .containsExactlyInAnyOrder(DecidedField.TRACK_TOTAL, DecidedField.LABEL, DecidedField.ALBUM_ARTIST_IDS)
     }
 
     @Test

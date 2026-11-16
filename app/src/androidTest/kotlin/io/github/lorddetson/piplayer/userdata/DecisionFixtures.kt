@@ -25,6 +25,21 @@ object DecisionFixtures {
     /** The [n]th MBID of a test: a valid UUID made of [n]. */
     fun mbid(n: Int, prefix: Int = 0xabc): String = "%08x-1111-4222-8333-%012x".format(prefix, n)
 
+    /**
+     * The tags of a file with the parts the lists' columns leave out (TI §7.1): the numbers of tracks and discs, the
+     * disc subtitle, album artists with their IDs, the label and the other release IDs. The catalog number is the one
+     * [details] decides, the others differ from it.
+     */
+    fun wideTags(title: String = "Tag 1"): Map<String, List<String>> = mapOf(
+        "TITLE" to listOf(title), "ARTIST" to listOf("Tag artist"), "ALBUM" to listOf("Tag album"),
+        "TRACKNUMBER" to listOf("3"), "TRACKTOTAL" to listOf("10"), "DISCNUMBER" to listOf("1"), "DISCTOTAL" to listOf("3"),
+        "DISCSUBTITLE" to listOf("Tag disc"), "ALBUMARTIST" to listOf("Ann & Bob"), "ALBUMARTISTS" to listOf("Ann", "Bob"),
+        "LABEL" to listOf("Tag label"), "CATALOGNUMBER" to listOf("CAT-1"), "BARCODE" to listOf("0000000000000"),
+        "ISRC" to listOf("YYBBB0000001"), "MUSICBRAINZ_RELEASEGROUPID" to listOf(mbid(9, 0x6e6)),
+        "MUSICBRAINZ_RELEASETRACKID" to listOf(mbid(9, 0x7c7)), "MUSICBRAINZ_ARTISTID" to listOf(mbid(9, 0xa47)),
+        "MUSICBRAINZ_ALBUMARTISTID" to listOf(mbid(9, 0xa47), mbid(10, 0xa47)),
+    )
+
     fun details(
         title: String = "Song",
         artist: String = "Ann",

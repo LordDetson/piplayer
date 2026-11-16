@@ -178,6 +178,7 @@ class DetailsStatesTest {
         var revertId: Long? = 41
         var failWith: Exception? = null
         var hold: CompletableDeferred<Unit>? = null
+        var keepHold: CompletableDeferred<Unit>? = null
         val calls = mutableListOf<String>()
 
         override suspend fun revert(target: DecisionTarget, field: ProtectedField): Long? {
@@ -195,6 +196,7 @@ class DetailsStatesTest {
 
         override suspend fun keepPiPlayersValue(target: DecisionTarget, field: ProtectedField) {
             calls += "keep $field"
+            keepHold?.await()
             flagged = false
         }
 
@@ -302,6 +304,63 @@ class DetailsStatesTest {
         assertThat(runner.busy.value).isFalse()
         // Once it ended, the next tap runs.
         assertThat(commands.keepPiPlayersValue(target, ProtectedField.TITLE)).isTrue()
+    }
+
+    @Test
+    fun aMessagesUndoTappedWhileAnotherActionRunsWaitsForItAndIsNotLost() = runTest {
+        val actions = FakeActions()
+        val runner = DetailsActionRunner(backgroundScope)
+        val commands = DetailsCommands(actions, runner)
+        val state = statesOf(actions, runner)
+        val outcomes = outcomesOf(runner)
+        watch(state)
+        runCurrent()
+        commands.revert(target, ProtectedField.TITLE)
+        runCurrent()
+        assertThat(state.value).isEqualTo(DetailsState.Found(details("Tag (changed)")))
+
+        // While "Keep PiPlayer's value" runs, the user taps Undo on the revert's message; Keep's own message then
+        // replaces it, and the job that showed it ends.
+        actions.keepHold = CompletableDeferred()
+        assertThat(commands.keepPiPlayersValue(target, ProtectedField.TITLE)).isTrue()
+        runCurrent()
+        assertThat(runner.busy.value).isTrue()
+        val message = launch { commands.undoWhenFree(41) }
+        runCurrent()
+        message.cancel()
+        actions.keepHold!!.complete(Unit)
+        runCurrent()
+
+        assertThat(actions.calls).containsExactly("revert TITLE", "keep TITLE", "undo 41")
+        assertThat(outcomes).containsExactly(
+            DetailsOutcome.Done(DetailsAction.REVERT, undo = 41),
+            DetailsOutcome.Done(DetailsAction.KEEP_VALUE),
+            DetailsOutcome.Done(DetailsAction.UNDO),
+        )
+        assertThat(state.value).isEqualTo(DetailsState.Found(details("Decided")))
+        assertThat(runner.busy.value).isFalse()
+    }
+
+    @Test
+    fun undosWaitingForTheirTurnEachRunOnceOneAfterAnother() = runTest {
+        val actions = FakeActions().apply { hold = CompletableDeferred() }
+        val runner = DetailsActionRunner(backgroundScope)
+        val commands = DetailsCommands(actions, runner)
+        runCurrent()
+
+        assertThat(commands.revert(target, ProtectedField.TITLE)).isTrue()
+        runCurrent()
+        commands.undoWhenFree(5)
+        commands.undoWhenFree(6)
+        runCurrent()
+        // Taps while the revert runs still do nothing.
+        assertThat(commands.keepPiPlayersValue(target, ProtectedField.TITLE)).isFalse()
+        actions.hold!!.complete(Unit)
+        runCurrent()
+
+        // Each waiting Undo ran once, one after another.
+        assertThat(actions.calls).containsExactly("revert TITLE", "undo 5", "undo 6")
+        assertThat(runner.busy.value).isFalse()
     }
 
     @Test
