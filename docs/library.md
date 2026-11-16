@@ -565,7 +565,13 @@ keeps playing meanwhile, and the crash leaves a native crash report of `:tagger`
     - The display writer settles the groups in the transaction of every write of display rows. A write of every file
       settles them all from what it resolved. A smaller write, while some file of the library has a decided release
       MBID, settles the groups of the files it wrote with their other files and changes the key of each file whose key
-      differs: for a key of an album and folder, the files whose rows hold it as their own, or when none does (the
+      differs. Only a group that can move is read (decided in step 16c, since reading every group of a start-up mirror
+      run read the whole library): for a key of an album and folder, the write first looks for one file it did not
+      write whose row holds the key and that has neither a decided album nor a decided release MBID other than an
+      empty one. Such a file is of the group by its own values (a file whose key comes from its decided values has a
+      decided album) and ends up with no release, so the group keeps its own key; the files of a group all hold one
+      key, and that file's row holds the own one, so nothing of the group is read or changed. The other groups are
+      read: for a key of an album and folder, the files whose rows hold it as their own, or when none does (the
       group holds a release's key, or the write holds all of it) the files of the album folder and the folders one
       below it (more than 16 such groups read, in one statement, only the files with a decided release in those folders,
       since only they can hold a release's key that is not their own, so the cost follows the write and not the
