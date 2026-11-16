@@ -34,16 +34,28 @@ import org.junit.runner.RunWith
  *
  * The budgets are relative to runs of the same test, so that the host's load cancels out: each write path that joins
  * the decided values (a sync that stores every file again under a new index version, a full refresh of every display
- * row, a refresh through the writer) runs twice without and twice with the decided values mirrored, alternately, and
- * the faster of each pair counts. With a decision on a fifth of the 20 000 files, the decided values may add at most
- * [JOIN_MS_PER_FILE] for each decided file. The start-up mirror of all 4 000 decisions may take as long as the faster
- * full refresh without them, and half of that when it finds every value mirrored. With a decision on every file, a whole
- * run that finds every value mirrored may take as long as a full refresh of the same run, and it holds off the sync for
- * at most half of that.
+ * row, a refresh through the writer) runs twice without and twice with the decided values, alternately, and the faster
+ * of each pair counts. Without them, every decision is undone (see [live]), as in a library without decisions: the
+ * mirror runs that the write paths ask for themselves would otherwise fill `decided_mirror` again halfway through. With
+ * a decision on a fifth of the 20 000 files, the decided values may add at most [JOIN_MS_PER_FILE] for each decided file.
+ * The start-up mirror of all 4 000 decisions may take as long as the faster full refresh without them, and half of that
+ * when it finds every value mirrored. With a decision on every file, a whole run that finds every value mirrored may take
+ * as long as a full refresh of the same run, and it holds off the sync for at most half of that.
  *
  * A first sync on an empty library database joins no decided value (no file has a content key yet), so it is not
  * measured here. Measured before M3 step 12 on the API 36 emulator (Pixel_8, host AMD Ryzen 7 5800HS): first sync at most
  * 2.31 s, full refresh at most 2.52 s.
+ *
+ * Measured on 16.11 in M3 step 12, in three quiet passes (`--timing`) on the API 36 emulator (Pixel_8, 4 cores; the
+ * helper printed a host CPU of 21 %, 20 % and 20 %):
+ * - a decision on every file: full refresh 3.19 s in each pass; the whole run that finds every value mirrored 1.74 s,
+ *   1.74 s and 1.68 s, holding off the sync at most 86 ms, 98 ms and 93 ms. Before step 12's changes (compared under the
+ *   hold, both sides built as maps of rows, decoding and resolving on one core) it took 4.56 s and held off the sync
+ *   1.76 s, against a full refresh of 3.20 s;
+ * - a decision on a fifth: the decided values added 0.30 s, 0.37 s and 0.42 s to the sync that stores every file again,
+ *   0.37 s, 0.21 s and 0.32 s to the full refresh and 0.36 s, 0.37 s and 0.35 s to the writer's refresh (budget 0.60 s);
+ *   the start-up mirror took 1.20 s, 1.19 s and 1.16 s (budgets 1.74 s, 1.91 s and 1.71 s), and 0.37 s, 0.36 s and 0.37 s
+ *   when it found every value mirrored.
  */
 @RunWith(AndroidJUnit4::class)
 class GeneratedLibraryDecisionsTest {
@@ -92,11 +104,24 @@ class GeneratedLibraryDecisionsTest {
         mirror.awaitIdle()
     }
 
-    /** Without the decided values mirrored, as before M3, or with them. */
+    /**
+     * Whether the decisions decide anything: without, as in a library before M3 or one without decisions, every decision
+     * stays but is undone, so that the mirror runs the write paths ask for themselves (each tag pass batch, an attach pass
+     * that writes) keep `decided_mirror` empty, as they do in such a library. Written behind the app's back, as a fixture:
+     * the change counter does not move, and [decided] brings the library database level.
+     */
+    private suspend fun live(live: Boolean) {
+        UserData.database(context).withWriteTransaction {
+            usePrepared("UPDATE decision SET undone_at = ${if (live) "NULL" else "1"}") { it.step() }
+        }
+    }
+
+    /** Without decided values, as before M3 (see [live]), or with them, mirrored by a whole run. */
     private suspend fun decided(mirrored: Boolean) {
-        if (!mirrored) database.withWriteTransaction { database.decided().clear() }
-        if (mirrored) mirror.mirrorAll()
+        live(mirrored)
+        mirror.mirrorAll()
         settle()
+        assertThat(database.decided().all().isEmpty()).describedAs("decided values mirrored").isEqualTo(!mirrored)
     }
 
     /** A sync that stores every file again: the index version it has stored is gone. */
@@ -128,6 +153,7 @@ class GeneratedLibraryDecisionsTest {
         val without1 = paths()
         assertThat(database.decided().all()).describedAs("decided values while measuring without them").isEmpty()
         // As the start of the next process finds them: the decided values not mirrored yet.
+        live(true)
         val startUpMirror = measureTime { mirror.mirrorAll() }
         assertThat(dao.displays().single { it.fileId == keyed[7].id }.title).isEqualTo("Decided 7")
         // The common start: a favorite or a play raised the counter, and every decided value is mirrored already.

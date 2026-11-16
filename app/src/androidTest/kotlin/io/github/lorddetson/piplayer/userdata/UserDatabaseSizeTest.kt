@@ -27,8 +27,9 @@ import org.junit.runner.RunWith
  * cover ticked, titles of about 18 characters and artists of about 12. Half of the decisions are made on files without
  * tags, whose references all fit the mask, and half on files whose tags differ from the decided values in 8 parts, which
  * take 5 bytes each (TI §10.2); a tenth of the tracks has a second location whose values differ in 4 parts, as
- * `file_state` rows. Measured on the API 36 emulator in M3 before the references and `file_state` rows were added:
- * 13.0 MB.
+ * `file_state` rows. Measured on 16.11 in M3 step 12 on the API 36 emulator (Pixel_8), with the references and the
+ * `file_state` rows: "user.db with 20000 identified tracks: 14450688 bytes", 49 312 bytes under the budget of
+ * 14 500 000.
  */
 @RunWith(AndroidJUnit4::class)
 class UserDatabaseSizeTest {
