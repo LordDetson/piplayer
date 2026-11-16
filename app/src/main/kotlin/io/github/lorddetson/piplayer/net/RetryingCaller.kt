@@ -1,11 +1,19 @@
 package io.github.lorddetson.piplayer.net
 
 import java.io.IOException
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.hours
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import okhttp3.Call
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -79,15 +87,18 @@ class RetryingCaller(
                 // Again after the wait, as the gate, a stop or the network may have changed during a backoff; a
                 // call blocked here has taken its slot, which only spaces the next caller as a sent one would.
                 guard.check()
-                http.newCall(request).await().use { response ->
+                val call = http.newCall(request)
+                call.await().use { response ->
                     answered = true
                     trace?.answered(response.code, response.receivedResponseAtMillis - response.sentRequestAtMillis)
-                    withContext(ioDispatcher) { handle(response) }
+                    cancellingOnCancel(call) { withContext(ioDispatcher) { handle(response) } }
                 }
             } catch (e: SendBlockedException) {
                 // Nothing was sent (the client's gate also refuses redirect hops): no retry and no pause.
                 CallOutcome.Fail(e)
             } catch (e: IOException) {
+                // A call cancelled with its coroutine ends here, neither retried nor pausing the limiter.
+                currentCoroutineContext().ensureActive()
                 // A body that breaks off after its status was answered; anything before it got no answer.
                 if (!answered) trace?.unanswered()
                 CallOutcome.Retry(e)
@@ -104,6 +115,28 @@ class RetryingCaller(
                     limiter.pause(wait)
                 }
             }
+        }
+    }
+
+    /**
+     * [block], which reads [call]'s answer in a blocking read that a cancellation does not reach: cancelling the coroutine
+     * cancels the call, which closes its connection, so that the read ends at once with an error.
+     */
+    private suspend fun <T> cancellingOnCancel(call: Call, block: suspend () -> T): T = coroutineScope {
+        // Started at once and resumed in the thread that cancels: a busy pool must not keep the call open.
+        val done = AtomicBoolean(false)
+        val watcher = launch(Dispatchers.Unconfined, start = CoroutineStart.UNDISPATCHED) {
+            try {
+                awaitCancellation()
+            } finally {
+                if (!done.get()) call.cancel()
+            }
+        }
+        try {
+            block()
+        } finally {
+            done.set(true)
+            watcher.cancel()
         }
     }
 }

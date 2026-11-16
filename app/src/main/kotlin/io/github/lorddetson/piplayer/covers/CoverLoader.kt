@@ -138,10 +138,17 @@ class CoverLoader<I : Any>(
             image
         }
 
+    /**
+     * Whether the disk cache keeps what [source] gives at a step that is [cached] or not: every cached step, and a remote
+     * step's picture at every step, which would otherwise be asked for again at each show (docs/library.md §13.3).
+     */
+    private fun onDisk(source: CoverStep, cached: Boolean) = disk != null && (cached || source.remote)
+
     /** The picture of [source] at [step], from the disk cache when it holds it. */
     private suspend fun picture(source: CoverStep, step: Int, cached: Boolean): I? {
         val diskKey = "${source.key}@$step"
-        if (cached && disk != null) {
+        val onDisk = onDisk(source, cached)
+        if (onDisk && disk != null) {
             when (val hit = disk.read(diskKey)) {
                 Cached.Nothing -> return null
                 is Cached.Picture -> codec.decode(hit.bytes, step)?.let { return it }
@@ -151,7 +158,7 @@ class CoverLoader<I : Any>(
         val image = sources.load(source, step)
         // A load cancelled meanwhile stores nothing.
         coroutineContext.ensureActive()
-        if (cached && disk != null) {
+        if (onDisk) {
             // Only an embedded picture's absence is remembered on disk: it holds while the file stays the same. A missing own
             // copy costs a look at the file, and a missing thumbnail may come with an image put into the folder later, which
             // changes nothing of the file (memory still remembers it until the library changes).
@@ -225,7 +232,8 @@ class CoverLoader<I : Any>(
     /** The bytes of [source] at [step]: from the disk cache as stored, or loaded, encoded and stored. */
     private suspend fun bytesOf(source: CoverStep, step: Int, cached: Boolean): Encoded {
         val diskKey = "${source.key}@$step"
-        if (cached && disk != null) {
+        val onDisk = onDisk(source, cached)
+        if (onDisk && disk != null) {
             when (val hit = disk.read(diskKey)) {
                 Cached.Nothing -> return Encoded.None
                 // A file that is no picture of the codec's is loaded again and replaced, as a failed decode is in the app.
@@ -236,7 +244,7 @@ class CoverLoader<I : Any>(
         val image = sources.load(source, step)
         coroutineContext.ensureActive()
         val bytes = image?.let(codec::encode)
-        if (cached && disk != null) remember(source, diskKey, image, bytes)
+        if (onDisk) remember(source, diskKey, image, bytes)
         return when {
             bytes != null -> Encoded.Bytes(bytes)
             image != null -> Encoded.Unencodable

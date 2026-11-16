@@ -90,11 +90,14 @@ interface CoverFacts {
     /** The artist's first song, for an artist without albums. */
     suspend fun artistFile(artistKey: String): CoverFile?
 
-    /** The decided cover of the album [albumKey]: that of its first song with one by disc, track and file name. */
-    suspend fun albumDecidedCover(albumKey: String): Long? = null
+    /**
+     * The decided covers of the album [albumKey]: those of its songs that are not empty, by disc, track and file name,
+     * each once.
+     */
+    suspend fun albumDecidedCovers(albumKey: String): List<Long> = emptyList()
 
-    /** The release of the album [albumKey]: that of its first song with one by disc, track and file name. */
-    suspend fun albumRelease(albumKey: String): CoverRelease? = null
+    /** The releases of the album [albumKey]: those of its songs that have one, by disc, track and file name, each once. */
+    suspend fun albumReleases(albumKey: String): List<CoverRelease> = emptyList()
 }
 
 /** The own covers the user chose (docs/library.md §13.2): the name of each copy. */
@@ -135,30 +138,47 @@ object CoverPlan {
             ) + song(file, saved, online)
         }.orEmpty()
         is CoverRequest.Album -> album(request.key, facts, own, saved, online)
-        is CoverRequest.Artist -> {
-            val albums = facts.artistAlbums(request.key)
-            val chosen = albums.firstOrNull { own.album(it.key) != null }
-                ?: albums.firstOrNull { it.decided }
-                ?: albums.firstOrNull { it.embedded }
-                ?: albums.firstOrNull { online && it.release }
-                ?: albums.firstOrNull()
-            if (chosen != null) {
-                album(chosen.key, facts, own, saved, online)
-            } else {
-                facts.artistFile(request.key)?.let { song(it, saved, online) }.orEmpty()
-            }
-        }
+        is CoverRequest.Artist -> artist(request.key, facts, own, saved, online)
     }
 
     /**
-     * An album's own cover, its decided cover, the pictures of the song that stands for it, then its release on Cover Art
-     * Archive; a song's own cover never stands for it.
+     * An artist's album by own cover, decided cover, embedded picture, else the first, with the next of these choices
+     * after it in case its sources give no picture (the facts cannot see a decided cover's missing file or a folder
+     * image), each album once; then, while online, the Cover Art Archive step of the first album with a release MBID,
+     * so that it never replaces a local picture of another album.
+     */
+    private suspend fun artist(key: String, facts: CoverFacts, own: OwnCoverIndex, saved: SavedCoverIndex, online: Boolean): List<CoverStep> {
+        val albums = facts.artistAlbums(key)
+        if (albums.isEmpty()) return facts.artistFile(key)?.let { song(it, saved, online) }.orEmpty()
+        val chosen = listOfNotNull(
+            albums.firstOrNull { own.album(it.key) != null },
+            albums.firstOrNull { it.decided },
+            albums.firstOrNull { it.embedded },
+            albums.first(),
+        ).distinct()
+        val local = chosen.flatMap { albumLocal(it.key, facts, own, saved) }.distinct()
+        // The releases are read only while they can be used, and only until one is an MBID.
+        val release = if (online) albums.filter { it.release }.firstNotNullOfOrNull { firstCaa(facts.albumReleases(it.key)) } else null
+        return local + listOfNotNull(release)
+    }
+
+    /**
+     * An album's own cover, its decided covers, the pictures of the song that stands for it, then its release on Cover
+     * Art Archive; a song's own cover never stands for it.
      */
     private suspend fun album(key: String, facts: CoverFacts, own: OwnCoverIndex, saved: SavedCoverIndex, online: Boolean): List<CoverStep> =
-        listOfNotNull(own.album(key)?.let(CoverStep::Own), saved(facts.albumDecidedCover(key), saved)) +
-            facts.albumFile(key)?.let(::fromFile).orEmpty() +
-            // The release is read only while it can be used.
-            listOfNotNull(if (online) caa(facts.albumRelease(key)) else null)
+        albumLocal(key, facts, own, saved) +
+            // The releases are read only while they can be used.
+            listOfNotNull(if (online) firstCaa(facts.albumReleases(key)) else null)
+
+    /** An album's own cover, each of its decided covers in turn, then the pictures of the song that stands for it. */
+    private suspend fun albumLocal(key: String, facts: CoverFacts, own: OwnCoverIndex, saved: SavedCoverIndex): List<CoverStep> =
+        listOfNotNull(own.album(key)?.let(CoverStep::Own)) +
+            facts.albumDecidedCovers(key).mapNotNull { saved(it, saved) } +
+            facts.albumFile(key)?.let(::fromFile).orEmpty()
+
+    /** The Cover Art Archive step of the first of [releases] that is an MBID. */
+    private fun firstCaa(releases: List<CoverRelease>): CoverStep? = releases.firstNotNullOfOrNull(::caa)
 
     /** A song's steps after its own covers: its decided cover, its file's pictures, then its release on Cover Art Archive. */
     private suspend fun song(file: CoverFile, saved: SavedCoverIndex, online: Boolean): List<CoverStep> =

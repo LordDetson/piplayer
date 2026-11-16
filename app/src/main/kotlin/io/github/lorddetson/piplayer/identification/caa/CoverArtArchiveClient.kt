@@ -125,10 +125,13 @@ class CoverArtArchiveClient(
      * address has a live 404 entry, is replaced by the original in a request of its own. A 404 from CAA itself means
      * there is no front image: the original's address is recorded too and not asked for.
      */
-    suspend fun cover(source: CoverSource, size: CoverSize): CaaResult<CoverImage> {
+    suspend fun cover(source: CoverSource, size: CoverSize): CaaResult<CoverImage> = cover(source, size, orOriginal = true)
+
+    /** [cover], replacing a missing thumbnail by the original only when [orOriginal]. */
+    private suspend fun cover(source: CoverSource, size: CoverSize, orOriginal: Boolean): CaaResult<CoverImage> {
         val original = CoverUrls.image(baseUrl, source, CoverSize.ORIGINAL)
         val thumbnail = if (size == CoverSize.ORIGINAL) null else CoverUrls.image(baseUrl, source, size)
-        return fetch(thumbnail, original, front = source)
+        return fetch(thumbnail, original, front = source, orOriginal = orOriginal)
     }
 
     /**
@@ -136,9 +139,16 @@ class CoverArtArchiveClient(
      * for only after [CaaResult.NotFound] for the one before, so a release without a front image gives way to its
      * release group (TI §5.2). A busy answer ends the attempt. [CoverImage.source] tells which source answered.
      */
-    suspend fun cover(sources: List<CoverSource>, size: CoverSize): CaaResult<CoverImage> {
+    suspend fun cover(sources: List<CoverSource>, size: CoverSize): CaaResult<CoverImage> = cover(sources, size, orOriginal = true)
+
+    /**
+     * [cover] of [sources], where a thumbnail that the image host does not have counts as none unless [orOriginal]: the
+     * lazy covers of rows and headers never load an original, which can be tens of MB (library.md §13.3). The
+     * thumbnail's 404 entry then answers for it as for any 404.
+     */
+    suspend fun cover(sources: List<CoverSource>, size: CoverSize, orOriginal: Boolean): CaaResult<CoverImage> {
         for (source in sources) {
-            val result = cover(source, size)
+            val result = cover(source, size, orOriginal)
             if (result != CaaResult.NotFound) return result
         }
         return CaaResult.NotFound
@@ -167,21 +177,23 @@ class CoverArtArchiveClient(
      * a 404 from CAA itself means the entity has no front image, so the original is recorded instead of asked for, and a
      * live 404 entry of the original answers for every thumbnail, none of which exists without it.
      */
-    private suspend fun fetch(thumbnail: HttpUrl?, original: HttpUrl, front: CoverSource?): CaaResult<CoverImage> {
+    private suspend fun fetch(thumbnail: HttpUrl?, original: HttpUrl, front: CoverSource?, orOriginal: Boolean = true): CaaResult<CoverImage> {
         val frontAddresses = front != null
         if (frontAddresses && recorded(original)?.kind == FailureKind.NOT_FOUND) return CaaResult.NotFound
         if (thumbnail != null) {
             val entry = recorded(thumbnail)
             when (entry?.kind) {
                 FailureKind.BUSY -> return CaaResult.Busy(entry.expiresAt)
-                // A thumbnail known to be missing: straight to the original.
-                FailureKind.NOT_FOUND -> Unit
+                // A thumbnail known to be missing: straight to the original, when it is wanted.
+                FailureKind.NOT_FOUND -> if (!orOriginal) return CaaResult.NotFound
                 null -> when (val answer = send(thumbnail, ::readImage)) {
                     is Answer.Got -> return CaaResult.Found(answer.toCover(thumbnail, original = false, front))
                     is Answer.Busy -> return CaaResult.Busy(answer.until)
                     is Answer.Missing -> if (frontAddresses && !answer.fromImageHost) {
                         // CAA itself has no front image, so its original is missing too.
                         record(original, ttl.notFound())
+                        return CaaResult.NotFound
+                    } else if (!orOriginal) {
                         return CaaResult.NotFound
                     }
                 }

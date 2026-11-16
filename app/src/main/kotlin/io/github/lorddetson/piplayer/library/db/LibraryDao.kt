@@ -544,26 +544,26 @@ interface LibraryDao {
     suspend fun artistCoverFile(artistKey: String): CoverFileRow?
 
     /**
-     * The decided cover of an album (TI §7.1): that of its first song by disc, track and file name with a decided cover
-     * that is not empty (docs/library.md §13.1), as the `saved_cover` ID in decimal digits.
+     * The decided covers of an album (TI §7.1): those of its songs by disc, track and file name that are not empty
+     * (docs/library.md §13.1), as `saved_cover` IDs in decimal digits, one per song.
      */
     @Query(
         "SELECT m.value FROM track_display d JOIN audio_file f ON f.id = d.file_id " +
             "JOIN decided_mirror m ON m.file_id = d.file_id AND m.field = 'cover' " +
             "WHERE d.album_key = :albumKey AND m.value IS NOT NULL AND m.value <> '' " +
-            "ORDER BY $BY_POSITION LIMIT 1",
+            "ORDER BY $BY_POSITION",
     )
-    suspend fun albumDecidedCover(albumKey: String): String?
+    suspend fun albumDecidedCovers(albumKey: String): List<String>
 
-    /** The release of an album: that of its first song by disc, track and file name with one (docs/library.md §13.1). */
+    /** The releases of an album: those of its songs by disc, track and file name that have one (docs/library.md §13.1). */
     @Query(
         "SELECT releaseMbid, releaseGroupMbid FROM (SELECT $RELEASE AS releaseMbid, $RELEASE_GROUP AS releaseGroupMbid, " +
             "d.disc_number AS disc_number, d.track_number AS track_number, d.file_sort AS file_sort, f.id AS id " +
             "FROM track_display d JOIN audio_file f ON f.id = d.file_id WHERE d.album_key = :albumKey) " +
             "WHERE releaseMbid IS NOT NULL AND releaseMbid <> '' " +
-            "ORDER BY disc_number IS NULL, disc_number, track_number IS NULL, track_number, file_sort, id LIMIT 1",
+            "ORDER BY disc_number IS NULL, disc_number, track_number IS NULL, track_number, file_sort, id",
     )
-    suspend fun albumRelease(albumKey: String): CoverReleaseRow?
+    suspend fun albumReleases(albumKey: String): List<CoverReleaseRow>
 
     /** Which of the albums [albumKeys] have a song with a decided cover that is not empty. */
     @Query(

@@ -71,11 +71,11 @@ class LibraryCoverFacts(
 
     override suspend fun artistFile(artistKey: String): CoverFile? = read { it.library().artistCoverFile(artistKey) }?.let { cover(it) }
 
-    override suspend fun albumDecidedCover(albumKey: String): Long? =
-        read { it.library().albumDecidedCover(albumKey) }?.toLongOrNull()
+    override suspend fun albumDecidedCovers(albumKey: String): List<Long> =
+        read { it.library().albumDecidedCovers(albumKey) }.mapNotNull(String::toLongOrNull).distinct()
 
-    override suspend fun albumRelease(albumKey: String): CoverRelease? =
-        read { it.library().albumRelease(albumKey) }?.let { release(it.releaseMbid, it.releaseGroupMbid) }
+    override suspend fun albumReleases(albumKey: String): List<CoverRelease> =
+        read { it.library().albumReleases(albumKey) }.mapNotNull { release(it.releaseMbid, it.releaseGroupMbid) }.distinct()
 
     /** A release as the library holds it; an empty value is none. */
     private fun release(release: String?, group: String?): CoverRelease? =
@@ -171,7 +171,11 @@ object Covers {
                     own.dir,
                     saved,
                     // The client comes into being with the first lazy cover, not with the loader.
-                    AndroidCoverSources.caa({ sources, size -> IdentificationServices.of(app).coverArtArchive.cover(sources, size) }, gate, gate.open),
+                    AndroidCoverSources.caa(
+                        { sources, size, orOriginal -> IdentificationServices.of(app).coverArtArchive.cover(sources, size, orOriginal) },
+                        gate,
+                        gate.open,
+                    ),
                 ),
                 codec = BitmapCodec,
                 disk = CoverDiskCache(File(app.cacheDir, CACHE_DIR)),

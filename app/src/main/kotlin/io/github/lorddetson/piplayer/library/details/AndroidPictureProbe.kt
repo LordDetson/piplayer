@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.BitmapFactory
 import android.util.Log
 import android.util.Size
+import kotlin.math.roundToInt
 import androidx.core.net.toUri
 import io.github.lorddetson.piplayer.covers.CoverStep
 import io.github.lorddetson.piplayer.covers.Covers
@@ -15,6 +16,19 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.withContext
+
+/** The cover of the details' header (docs/library.md §18.1, §18.3). */
+object DetailsCover {
+
+    /** The header's cover, in dp. */
+    const val HEADER_DP = 96
+
+    /**
+     * The size the details probe the lazy Cover Art Archive step at, on a screen of [density]: the header's own size in
+     * pixels, rounded as Compose rounds dp, so that the probe loads the header's step and image (§18.3).
+     */
+    fun caaProbePx(density: Float): Int = (HEADER_DP * density).roundToInt()
+}
 
 /**
  * The pictures of files on the device, for their details (docs/library.md §18.3): the embedded one as the player reads it,
@@ -41,11 +55,13 @@ class AndroidPictureProbe(context: Context) : PictureProbe {
     } ?: false
 
     /**
-     * Whether the lazy Cover Art Archive [step] has a picture, loaded by the loader as a list would load it: from its caches,
-     * otherwise through the client with its gate, limiter and failure entries (docs/library.md §18.3).
+     * Whether the lazy Cover Art Archive [step] has a picture, loaded by the loader as the header's cover loads it: from its
+     * caches, otherwise through the client with its gate, limiter and failure entries, sharing the header's request
+     * (docs/library.md §18.3).
      */
     override suspend fun online(step: CoverStep.Caa): Boolean {
-        val load = probes.async { safely { Covers.loader(app).step(step, CAA_PX) != null } ?: false }
+        val px = DetailsCover.caaProbePx(app.resources.displayMetrics.density)
+        val load = probes.async { safely { Covers.loader(app).step(step, px) != null } ?: false }
         // A load that waits longer, at the limiter or for the network, keeps the details from showing; it goes on in the
         // background and fills the caches, so the next read of the details finds it.
         return withTimeoutOrNull(CAA_WAIT_MS) { load.await() } ?: false
@@ -66,9 +82,6 @@ class AndroidPictureProbe(context: Context) : PictureProbe {
 
         /** The smallest step of the loader (docs/library.md §13.3): enough to know that there is one. */
         const val THUMBNAIL_PX = 96
-
-        /** Cover Art Archive's list size, `front-250` (docs/library.md §13.3). */
-        const val CAA_PX = 250
 
         /** How long the details wait for a Cover Art Archive load (docs/library.md §18.3). */
         const val CAA_WAIT_MS = 3_000L
