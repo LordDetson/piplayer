@@ -170,22 +170,33 @@ class ListsShowDecisionsTest {
         checkNotNull(Library.decisions(context).apply(DecisionFixtures.request(KEY, DecisionFixtures.details(title = "Zulu"), fileId = alpha)))
         val songs = songs()
         val changes = AtomicInteger()
+        val smartChanges = AtomicInteger()
         collecting.launch { SongList.changes(context).collect { changes.incrementAndGet() } }
+        // Songs missing information, which a decision can take a song off (docs/library.md §17.4).
+        collecting.launch { SongList.changes(context, SongQuery.missingInfo()).collect { smartChanges.incrementAndGet() } }
         eventually("the list shows the decision", 20.seconds) { songs.titles() == listOf("Bravo", "Charlie", "Zulu") }
-        eventually("the changes are watched") { changes.get() > 0 }
+        eventually("the changes are watched") { changes.get() > 0 && smartChanges.get() > 0 }
+        // The start's attach pass and the mirror of favorites and plays after it, whose run also reads smart lists again.
+        Library.identities(context).awaitIdle()
+        Library.mirror(context).awaitIdle()
+        Library.decisionMirror(context).awaitIdle()
         val shown = songs.state.value
         val seen = changes.get()
+        val smartSeen = smartChanges.get()
 
         // A whole run compares every decision with what is mirrored, as at a start-up after the user database changed.
         assertThat(Library.decisionMirror(context).mirrorAll()).describedAs("the run changed decided values").isFalse()
 
-        throughout("the list is not read again", 1.seconds) { songs.state.value === shown && changes.get() == seen }
+        throughout("the list is not read again", 1.seconds) {
+            songs.state.value === shown && changes.get() == seen && smartChanges.get() == smartSeen
+        }
         assertThat(SongList.current()).describedAs("the kept list is still handed out").isNotNull()
 
         // A run that changes values does read again, so the run above had its chance.
         Library.decisions(context).apply(DecisionFixtures.request(KEY, DecisionFixtures.details(title = "Yankee", recording = 101), fileId = alpha))
         eventually("the list shows the newer decision") { songs.titles() == listOf("Bravo", "Charlie", "Yankee") }
         assertThat(changes.get()).isGreaterThan(seen)
+        eventually("a smart list may read again") { smartChanges.get() > smartSeen }
     }
 
     private companion object {
