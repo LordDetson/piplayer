@@ -48,7 +48,7 @@ class DetailsCaaProbe(
     private val density: () -> Float,
     private val scope: CoroutineScope,
     private val waitMs: Long = DetailsCover.CAA_WAIT_MS,
-    private val onLate: () -> Unit = {},
+    private val onLate: (step: CoverStep.Caa) -> Unit = {},
     private val load: suspend (step: CoverStep.Caa, px: Int) -> Boolean,
 ) {
 
@@ -59,7 +59,7 @@ class DetailsCaaProbe(
         val loading = scope.async { load(step, px) }
         return withTimeoutOrNull(waitMs) { loading.await() } ?: run {
             // Given up: once the load that goes on finds a picture, the details read again and find it in the caches.
-            loading.invokeOnCompletion { failure -> if (failure == null && loading.getCompleted()) onLate() }
+            loading.invokeOnCompletion { failure -> if (failure == null && loading.getCompleted()) onLate(step) }
             false
         }
     }
@@ -96,7 +96,12 @@ class AndroidPictureProbe(context: Context) : PictureProbe {
      */
     override suspend fun online(step: CoverStep.Caa): Boolean = caa.online(step)
 
-    private val caa = DetailsCaaProbe({ app.resources.displayMetrics.density }, probes, onLate = { late.update { it + 1 } }) { step, px ->
+    // A read once per release and process: should the caches not keep its picture, the reads it asks for stop there.
+    private val caa = DetailsCaaProbe(
+        { app.resources.displayMetrics.density },
+        probes,
+        onLate = { step -> if (lateReleases.add(step.release.release)) late.update { it + 1 } },
+    ) { step, px ->
         safely { Covers.loader(app).step(step, px) != null } ?: false
     }
 
@@ -120,6 +125,9 @@ class AndroidPictureProbe(context: Context) : PictureProbe {
          * read again (docs/library.md §18.3).
          */
         val lateLoads: StateFlow<Long> = late.asStateFlow()
+
+        /** The releases whose late loads asked for a read already. */
+        private val lateReleases: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
 
         /** The smallest step of the loader (docs/library.md §13.3): enough to know that there is one. */
         private const val THUMBNAIL_PX = 96

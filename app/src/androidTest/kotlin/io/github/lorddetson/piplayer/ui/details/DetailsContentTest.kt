@@ -187,6 +187,19 @@ class DetailsContentTest {
     }
 
     @Test
+    fun aChangedFieldOfSeveralRowsSaysSoOnceOnItsFirstRow() {
+        val artistIds = listOf("a74b1b7f-71a5-4011-9441-d0b5e4122711", "b10bbbfc-cf9e-42e0-be17-e2c3e1d2600d").map {
+            DetailRow(DetailField.ARTIST_ID, DetailValue.MusicBrainz(MusicBrainzKind.ARTIST, it),
+                ValueSource(DecisionKind.LEVEL_IDENTIFICATION, ProviderId.MUSICBRAINZ), decided = true, changedInFile = true)
+        }
+        show(details(artistIds))
+
+        compose.onNodeWithTag(DetailsTags.LIST).performScrollToNode(hasTestTag(DetailsTags.keep(DetailField.ARTIST_ID)))
+        assertThat(compose.onAllNodes(hasText(text(R.string.details_changed_in_file))).fetchSemanticsNodes()).hasSize(1)
+        assertThat(compose.onAllNodes(hasTestTag(DetailsTags.keep(DetailField.ARTIST_ID))).fetchSemanticsNodes()).hasSize(1)
+    }
+
+    @Test
     fun theIdentificationSectionUndoesTheIdentificationAndResetsASkip() {
         val reason = Reason(Source.FINGERPRINT, Tier.IDENTIFIER, setOf(Source.FINGERPRINT), 0.97, -800, 0.95, 0.9, emptySet())
         show(

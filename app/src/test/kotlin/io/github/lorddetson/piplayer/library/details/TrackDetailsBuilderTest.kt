@@ -693,4 +693,17 @@ class TrackDetailsBuilderTest {
         assertThat(runs[0].retryAt).isNull()
         assertThat(TraceRuns.of(emptyList())).isEmpty()
     }
+
+    @Test
+    fun `a traced run names the service that left it unavailable or stopped it`() {
+        val rows = listOf(
+            IdentificationTraceEntity("k", "a", 0, 1, "fingerprint", "acoustid", 503, null, null, 900, "failed=unavailable"),
+            IdentificationTraceEntity("k", "a", 1, 1, "outcome", "acoustid", null, 0, null, 1_000, "unavailable"),
+            IdentificationTraceEntity("k", "b", 0, 2, "outcome", null, null, 0, null, 10, "no_network"),
+        )
+
+        val runs = TraceRuns.of(rows)
+
+        assertThat(runs.map { it.outcome to it.provider }).containsExactly("no_network" to null, "unavailable" to "acoustid")
+    }
 }

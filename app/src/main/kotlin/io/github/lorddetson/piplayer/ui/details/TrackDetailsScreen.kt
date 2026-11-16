@@ -116,6 +116,8 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -267,7 +269,8 @@ fun DetailsContent(details: TrackDetails, picture: ImageBitmap?, snackbar: Snack
                 .mapTo(HashSet()) { it.index }
             itemsIndexed(rows) { i, row ->
                 val target = details.target
-                RowItem(row, copy, open, if (decide != null && target != null && i in firsts) RowDecisions(decide, target) else null)
+                val first = i in firsts
+                RowItem(row, copy, open, first, if (decide != null && target != null && first) RowDecisions(decide, target) else null)
             }
         }
         if (identificationShown) {
@@ -286,21 +289,28 @@ fun DetailsContent(details: TrackDetails, picture: ImageBitmap?, snackbar: Snack
 /** What a row can decide: its field's revert, or the choices of a field changed in the file (§18.7). */
 private class RowDecisions(val commands: DetailsCommands, val target: DecisionTarget)
 
-/** The message of each action that ends, with Undo for a revert (§18.7); a new message takes the place of the one shown. */
+/**
+ * The message of each action that ends, with Undo for a revert (§18.7). A new message takes the place of the screen's own
+ * message, never of another screen's on the shared host; an Undo tapped while an action runs waits for it to end.
+ */
 @Composable
 private fun Messages(commands: DetailsCommands, snackbar: SnackbarHostState) {
     val resources = LocalResources.current
     LaunchedEffect(commands) {
+        var shown: Job? = null
         commands.runner.outcomes.collect { outcome ->
-            snackbar.currentSnackbarData?.dismiss()
+            shown?.cancel()
             val undo = (outcome as? DetailsOutcome.Done)?.undo
-            launch {
+            shown = launch {
                 val result = snackbar.showSnackbar(
                     resources.getString(messageOf(outcome)),
                     actionLabel = undo?.let { resources.getString(R.string.review_undo) },
                     duration = SnackbarDuration.Short,
                 )
-                if (result == SnackbarResult.ActionPerformed && undo != null) commands.undo(undo)
+                if (result == SnackbarResult.ActionPerformed && undo != null) {
+                    commands.runner.busy.first { !it }
+                    commands.undo(undo)
+                }
             }
         }
     }
@@ -357,11 +367,12 @@ private fun SectionHeading(text: String, modifier: Modifier = Modifier) {
 
 /**
  * A row: its label over its value and the value's source, read by TalkBack as one; a long press copies, a link opens on a
- * tap. With [decisions], the first row of a decided field offers its revert, or the two choices when the file changed it.
+ * tap. The [first] row of a decided field says that the file changed it, and with [decisions] offers its revert, or the two
+ * choices when the file changed it.
  */
 @OptIn(ExperimentalFoundationApi::class, ExperimentalLayoutApi::class)
 @Composable
-private fun RowItem(row: DetailRow, copy: (String, String) -> Unit, open: (String) -> Unit, decisions: RowDecisions?) {
+private fun RowItem(row: DetailRow, copy: (String, String) -> Unit, open: (String) -> Unit, first: Boolean, decisions: RowDecisions?) {
     val label = stringResource(fieldLabel(row.field))
     val text = valueText(row)
     val id = (row.value as? DetailValue.MusicBrainz)?.id ?: (row.value as? DetailValue.AcoustId)?.id
@@ -388,7 +399,8 @@ private fun RowItem(row: DetailRow, copy: (String, String) -> Unit, open: (Strin
             }
     }
     val source = row.source?.let { sourceText(it) }
-    val changed = if (row.changedInFile) stringResource(R.string.details_changed_in_file) else null
+    // A field says it once, on its first row: the IDs are one field.
+    val changed = if (row.changedInFile && first) stringResource(R.string.details_changed_in_file) else null
     val notes = listOfNotNull(source, changed)
     Column {
         ListItem(
@@ -492,8 +504,12 @@ private fun ListDecisionRow(state: ListDecision, commands: DetailsCommands?) {
 private fun TraceRunRow(run: TraceRun) {
     val locale = currentLocale()
     val start = DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.MEDIUM, locale).format(Date(run.startedAt))
-    val outcome = run.outcome?.let { outcomeText(it) }
-    val retry = run.retryAt?.let { stringResource(R.string.trace_retry, DateFormat.getTimeInstance(DateFormat.SHORT, locale).format(Date(it))) }
+    // The service that left the run unavailable or stopped it.
+    val outcome = run.outcome?.let { outcomeText(it) }?.let { text -> run.provider?.let { "$text · ${providerCode(it)}" } ?: text }
+    // A retry may fall on another day than the run.
+    val retry = run.retryAt?.let {
+        stringResource(R.string.trace_retry, DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT, locale).format(Date(it)))
+    }
     val steps = run.steps.map { stepText(it) }
     ListItem(
         overlineContent = { Text(start) },

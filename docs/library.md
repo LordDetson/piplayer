@@ -1987,7 +1987,8 @@ are in playback.md §9.1. The owner left the open choices to the recommendations
   details while an earlier read's load still waits joins that load instead of sending another. Decision: the read
   waits for that load at most 3 seconds, and the other values wait with it, as they wait for the embedded picture's
   header; a load still waiting then (its turn at the limiter, a slow network) goes on and fills the caches, the source
-  shows "None" meanwhile, and once that load finds a picture the details read again (§18.1) and find it. Showing the values first and the source
+  shows "None" meanwhile, and once that load finds a picture the details read again (§18.1) and find it; at most once
+  per release in a process, so that a picture the caches do not keep cannot make the details read again and again. Showing the values first and the source
   later would need a second state of the screen for one row, for a wait that a cached cover never has.
 - The size: for an own cover the width and height stored with it (§13.2); for a saved cover those of its `saved_cover`
   row, read from the image header when it was saved (none for WebP, TI §10.2); for an embedded picture the size of the
@@ -2112,7 +2113,8 @@ Decided in M3 step 22 by the recommendations (the owner's rule of 16.11 for M3).
 - **Identification trace.** For a song of the library whose content key has rows in `identification_trace` (TI §10.1,
   the last three runs), a section "Identification trace" lists the runs newest first, each with its start (date and
   time), its outcome ("High confidence", "Medium confidence", "No match found", "No network" and the other outcomes of
-  TI §6), the retry time when the run reported one, and its steps in order, each with its stage, its provider, the last
+  TI §6, with the service that left the run unavailable or stopped it), the retry time (date and time, since it may fall
+  on another day) when the run reported one, and its steps in order, each with its stage, its provider, the last
   HTTP status, the number of results, the best score, its time and why it was skipped or failed. The trace holds only
   codes, numbers and times, never a file name or a message (TI §9), and the screen shows nothing else; a code this build
   does not know is shown as it is.
@@ -2120,8 +2122,9 @@ Decided in M3 step 22 by the recommendations (the owner's rule of 16.11 for M3).
   tags" (0), "Identified by MusicBrainz · 97% · Saved in PiPlayer" (1: the provider and confidence of the newest
   identification whose values win), "Edited · Saved in PiPlayer" (2). A tap opens the review (TI §6) while the values
   come from the file, and otherwise scrolls to the Identification section, where the result is. Now Playing shows the
-  same badge for a song of the library under its album line, read for the current item's file again after every run of
-  the decision mirror that changed decided values; a tap opens the review while the values come from the file, and the
+  same badge for a song of the library under its album line, read for the current item's file again after a sync that
+  changed the library, a batch of the tag pass (both write display rows) and every run of the decision mirror that
+  changed decided values; a tap opens the review while the values come from the file, and the
   song's details otherwise. TalkBack reads "Metadata" with the state and the tap's label ("Identify" or "Show the
   identification"). A file opened from another app has no display row, so it shows no badge in M3.
 - **Actions** run one at a time off the main thread: a tap while one runs does nothing. Each commits through

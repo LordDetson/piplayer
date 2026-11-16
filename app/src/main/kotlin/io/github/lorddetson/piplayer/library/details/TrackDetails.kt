@@ -220,9 +220,10 @@ data class ListDecision(val decisionId: Long, val skipped: Boolean)
 
 /**
  * One run of the identification trace (TI §10.1, docs/library.md §18.7): its start, its [outcome] code (`found=high`,
- * `no_network`, ...), the retry time it reported, and its steps in order.
+ * `no_network`, ...), the retry time it reported, its steps in order, and the [provider] code of a service that left it
+ * unavailable or stopped it.
  */
-data class TraceRun(val startedAt: Long, val outcome: String?, val retryAt: Long?, val steps: List<TraceStep>)
+data class TraceRun(val startedAt: Long, val outcome: String?, val retryAt: Long?, val steps: List<TraceStep>, val provider: String? = null)
 
 /** One step of a traced run: a stage code with what the trace holds of it, [skipped] and [failed] as codes. */
 data class TraceStep(

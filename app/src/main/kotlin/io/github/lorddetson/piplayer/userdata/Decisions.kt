@@ -273,19 +273,23 @@ class Decisions(private val database: UserDatabase, private val clock: () -> Lon
 
     /**
      * The decided parts flagged as changed in the file at the place [volume], [relativePath] and [displayName] for the
-     * decisions that win them now (TI §7.1), read without writing: track details mark their fields (docs/library.md
-     * §18.7), while the comparison belongs to the tag pass.
+     * decisions that win them now among [decisions], the identity's as [storedOf] read them (TI §7.1). It only reads:
+     * track details mark their fields (docs/library.md §18.7), while the comparison belongs to the tag pass.
      */
-    suspend fun flaggedAt(identityId: Long, volume: String, relativePath: String, displayName: String): Set<DecidedField> =
-        database.withReadTransaction {
-            val flagged = dao.fileStates(identityId).filter {
-                it.changedInFile && it.volumeName == volume && it.relativePath == relativePath && it.displayName == displayName
-            }
-            if (flagged.isEmpty()) return@withReadTransaction emptySet()
-            val decisions = dao.decisionsOf(identityId).filter { it.undoneAt == null }
-            val winners = DecisionResolver.resolve(values(decisions, metadataOf(decisions), choicesOf(decisions)))
-            flagged.mapNotNullTo(LinkedHashSet()) { row -> DecidedField.ofCode(row.field)?.takeIf { winners[it]?.decisionId == row.decisionId } }
+    suspend fun flaggedAt(
+        identityId: Long,
+        volume: String,
+        relativePath: String,
+        displayName: String,
+        decisions: List<DecisionValues>,
+    ): Set<DecidedField> {
+        val flagged = dao.fileStates(identityId).filter {
+            it.changedInFile && it.volumeName == volume && it.relativePath == relativePath && it.displayName == displayName
         }
+        if (flagged.isEmpty()) return emptySet()
+        val winners = DecisionResolver.resolve(decisions)
+        return flagged.mapNotNullTo(LinkedHashSet()) { row -> DecidedField.ofCode(row.field)?.takeIf { winners[it]?.decisionId == row.decisionId } }
+    }
 
     /** The decided values that win for each of [identityIds] that has any. */
     suspend fun decidedOf(identityIds: Collection<Long>): Map<Long, Map<DecidedField, Decided>> {

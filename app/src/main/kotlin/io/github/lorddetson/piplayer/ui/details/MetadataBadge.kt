@@ -32,6 +32,7 @@ import io.github.lorddetson.piplayer.library.Library
 import io.github.lorddetson.piplayer.library.details.Badge
 import io.github.lorddetson.piplayer.library.details.BadgeState
 import io.github.lorddetson.piplayer.library.details.TrackDetailsSources
+import io.github.lorddetson.piplayer.library.songs.SongList
 import io.github.lorddetson.piplayer.playback.QueueIds
 import io.github.lorddetson.piplayer.ui.identification.IdentifyTarget
 import io.github.lorddetson.piplayer.ui.identification.LocalIdentify
@@ -43,8 +44,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
-import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.onStart
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.transformLatest
 
 /** Test tags of the metadata badge (TI §6, docs/library.md §18.7). */
@@ -146,14 +146,16 @@ fun PlayingBadge(player: Player?) {
 object MetadataBadges {
 
     /**
-     * The badge of the file [fileId], read off the main thread at first and again after every run of the decision mirror
-     * that changed decided values; a read that fails keeps what was shown.
+     * The badge of the file [fileId], read off the main thread at first and again after a sync that changed the library,
+     * a batch of the tag pass (both write display rows) and every run of the decision mirror that changed decided
+     * values; a read that fails keeps what was shown.
      */
     @OptIn(ExperimentalCoroutinesApi::class)
     fun of(context: Context, fileId: Long): Flow<Badge?> {
         val app = context.applicationContext
         if (!Library.mayRead(app)) return flowOf(null)
-        return Library.decisionVersion(app).map { }.onStart { emit(Unit) }
+        // Each emits its present value at first, so the first read needs no start of its own.
+        return combine(SongList.changes(app), SongList.batches, Library.decisionVersion(app)) { _, _, _ -> }
             .transformLatest {
                 try {
                     emit(TrackDetailsSources.badges(app).of(fileId))

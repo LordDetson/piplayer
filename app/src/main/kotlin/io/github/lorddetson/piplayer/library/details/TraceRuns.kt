@@ -22,6 +22,7 @@ object TraceRuns {
                 outcome = notes.firstOrNull { !it.startsWith(RETRY_AT) },
                 retryAt = notes.firstOrNull { it.startsWith(RETRY_AT) }?.removePrefix(RETRY_AT)?.toLongOrNull(),
                 steps = ordered.filter { it.stage != RunTrace.OUTCOME }.map(::step),
+                provider = outcome?.provider,
             )
         }
     }

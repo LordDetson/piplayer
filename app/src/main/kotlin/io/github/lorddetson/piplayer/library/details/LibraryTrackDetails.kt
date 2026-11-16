@@ -90,7 +90,9 @@ class LibraryTrackDetails(
         // The decisions of the song's identity, read from the user database as plays are (§18.2, §18.7).
         val location = Decisions.LocationValues(file.volumeName, file.relativePath, file.displayName, DecisionContent.ofTags(tags.takeIf { read }))
         val records = identity?.let { decisions.storedOf(it).map(DecisionRecord::of) }
-        val changed = identity?.let { decisions.flaggedAt(it, location.volume, location.relativePath, location.displayName) }.orEmpty()
+        val changed = identity?.let { id ->
+            decisions.flaggedAt(id, location.volume, location.relativePath, location.displayName, records.orEmpty().map { it.values })
+        }.orEmpty()
         TrackDetailsBuilder.of(
             DetailInputs(
                 fileId = fileId,
