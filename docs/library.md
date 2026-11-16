@@ -1932,16 +1932,20 @@ are in playback.md §9.1. The owner left the open choices to the recommendations
   says "Copied" only on older versions. Rows are text, not fields: selecting part of a value is not needed.
 - Reading never blocks the main thread: the screen reads both databases and probes the cover on a background thread, and
   reads again after a sync that changed the library, a batch of the tag pass, an attach pass, a change that the mirror
-  brings over (a favorite, a play, §15.4) and a change of the own covers, so that it follows the song while it is open. A
-  song that left the library while its screen is open says so, with the way back.
+  brings over (a favorite, a play, §15.4), a run of the decision mirror that changed decided values (TI §7.1), a change
+  that loads the covers on screen again (the own covers, a decision, online lookups turned on or off, §13.3), a lazy
+  Cover Art Archive load that outran the details' wait and found a picture (§18.3) and an action of the screen itself
+  (§18.7), so that it follows the song while it is open. A song that left the library while its screen is open says so,
+  with the way back.
 - Decision: a read that fails (a database busy or failing for a moment) never says that the song left the library. The
   screen keeps the values it shows, or says "The details could not be read" when it shows none yet, and the next change
   reads again. The reads of a song of the library stop five seconds after the screen is no longer shown and start again
   when it comes back, so that it does not follow the library in the background; an opened file is read once (§18.5).
   The values kept on a failed read are the last ones the screen showed, also when the read is the first one after the
   screen comes back.
-- M3 adds the source of each value and a per-field revert (TI §7.1): each row is a field with a value, kept apart from
-  its label and its format, so that a source can be added to it later. Nothing of that is built in M2b.
+- Each row is a field with a value, kept apart from its label and its format. From M3 a row also carries the source of
+  its value, whether a decision decides its field and whether the file changed it since; the header carries the
+  metadata badge, and an Identification section and an Identification trace section follow the IDs (§18.7).
 
 ### 18.2 Values
 
@@ -1983,7 +1987,7 @@ are in playback.md §9.1. The owner left the open choices to the recommendations
   details while an earlier read's load still waits joins that load instead of sending another. Decision: the read
   waits for that load at most 3 seconds, and the other values wait with it, as they wait for the embedded picture's
   header; a load still waiting then (its turn at the limiter, a slow network) goes on and fills the caches, the source
-  shows "None" meanwhile, and the next read of the details (§18.1) finds it. Showing the values first and the source
+  shows "None" meanwhile, and once that load finds a picture the details read again (§18.1) and find it. Showing the values first and the source
   later would need a second state of the screen for one row, for a wait that a cached cover never has.
 - The size: for an own cover the width and height stored with it (§13.2); for a saved cover those of its `saved_cover`
   row, read from the image header when it was saved (none for WebP, TI §10.2); for an embedded picture the size of the
@@ -2000,8 +2004,8 @@ are in playback.md §9.1. The owner left the open choices to the recommendations
   an `ACTION_VIEW` intent; the row says "Open in MusicBrainz" to TalkBack. Without an app for the link a message says so.
   Decision: only a well-formed ID (36 characters of hex digits and hyphens) is a link; anything else that a tag holds is
   shown as text and can be copied, but opens nothing.
-- The AcoustID is not stored in M2b (`fingerprint.acoustid_id` comes with identification, TI §10.1); its row appears in M3.
-  ISRC is a value of the song section, not a link.
+- The AcoustID is not stored in M2b; M3 adds its row at the end of the section, read from the decision (§18.7). ISRC is
+  a value of the song section, not a link.
 
 ### 18.5 A file opened from another app
 
@@ -2037,6 +2041,90 @@ tags, the embedded picture's size), and one that can no longer be opened (the pr
 segment, "The file could not be read"); the counts of failed reads used only inside the library's access; on the screen, "Details" from the song menu of the Songs tab, an album page, a
 playlist page, a queue row and Now Playing's menu, a MusicBrainz row opening its page with `ACTION_VIEW`, a long press
 copying a value, and for an opened file the embedded picture in the header and a file that can no longer be opened.
+
+M3 (step 22, §18.7): JVM tests of the rows' sources from levels 1 to 5 with the provider of an identification, the
+fields outside `track_display` from the decided values, an empty decided value, the revert and "changed in the file"
+marks of a decided field only, the AcoustID row from the decision that wins the recording ID and never from the
+fingerprint cache, the badge from `badge_state` with the winning identification's provider and confidence, the trace's
+runs newest first with their outcomes and steps, and the screen's actions: one at a time, a read after each (also after
+"Keep PiPlayer's value", which raises no version), a failed one changing nothing; a lazy Cover Art Archive load that
+outran the wait and found a picture asking for a read. Compose tests on fake details: the sources under the values, the
+revert with its Undo, "Keep PiPlayer's value" and "Use the file's value", "Undo identification", the reset of Keep as-is
+and Skip, the trace, and the badge in the header (from tags opening the review, otherwise showing the Identification
+section) and on Now Playing (from tags opening the review, otherwise the details), with their TalkBack labels.
+Instrumented tests on the real databases: a song's details with an identification and an edit (values, sources and the
+provider), a revert that lets the tags win again, a field flagged as changed in the file and cleared by "Keep
+PiPlayer's value", "Undo identification", a Keep as-is and a Skip with their reset, the AcoustID row, the trace of a
+song's content key and the badge state of its display row.
+
+### 18.7 Sources, reverts and the identification (M3)
+
+Decided in M3 step 22 by the recommendations (the owner's rule of 16.11 for M3).
+
+- **Sources.** Each row of the Song and IDs sections says under its value where the value comes from, by the
+  precedence of TI §7.1: "Edited in PiPlayer" (level 1), "Identified by MusicBrainz" (level 2, named by the provider
+  stored with the decision, TI §10.2), "From the tags" (3), "From the media index" (4) or "From the file name" (5). The
+  source is that of the part the row shows (the title, the artist's credit as printed, the track number, the recording
+  ID, TI §10.2), from the same resolution of the parts that the lists use (`MergedValues.parts`, TI §7.1), so a row
+  never shows one level's value with another's source. Genre, composer and the gains are not fields of the
+  protected-fields list: their source is the tags once read, else the media index. The rows of plays, of the file and
+  the cover's size have no source; the cover's source row has one only while the decided cover shows.
+- **The fields `track_display` does not hold** (disc subtitle, date, original date, compilation, label, catalog number,
+  barcode, ISRC, the totals and the IDs) come from the same parts: a decided field's values, else the tags once read,
+  else the index (the year as the date). Labels, catalog numbers and ISRCs, which a decision stores as lists, are joined
+  by "; ", as tags write a list. A decided compilation flag that is off shows "No", since it can be reverted; an off flag
+  of the tags stays left out.
+- **An empty decided value** (an edit that cleared a field, an identification whose release has no such value): when no
+  lower level fills it, its row shows "Empty" with its source, the one exception to leaving unknown values out, so that
+  its revert can be reached. The title and the artist are filled by the file name's guess as in the lists (TI §7.1):
+  their row shows that guess with "From the file name" and still offers the revert, since the field is decided. A
+  MusicBrainz IDs field decided empty shows one "Empty" row in place of the recording ID.
+- **Per-field revert.** The first row of a field of the protected-fields list that a decision of level 1 or 2 decides
+  offers "Revert to the file's value" (the IDs are one field, so only their first row offers it). It stores a
+  `revert_field` decision for that field (TI §7.1, §10.2): the file's value wins again over every older decision, and the
+  row's source follows. The screen then says "Reverted to the file's value" with Undo, which undoes that revert and
+  brings the hidden values back.
+- **Changed in the file.** The first row of a decided field that the tag pass flagged at this file's place for the
+  decision that wins it (TI §7.1, `file_state.changed_in_file`) says "Changed in the file" and offers "Keep PiPlayer's
+  value" and "Use the file's value". The first clears the flag and takes the file's present value as that place's new
+  reference; it changes no value, raises no counter and mirrors nothing, so the screen reads again by itself. The second
+  is the per-field revert above. The details only read the flags; the comparison belongs to the tag pass.
+- **Identification section**, after the IDs:
+  - "Metadata": the badge's state (below);
+  - while the track has an identification that is not undone, the newest by row ID, which "Undo identification" undoes
+    (TI §7.1): its provider, its confidence as a percentage with the band's name, its reason (TI §4.1, formatted for the
+    locale as on the review's card), when it was applied and when its values were fetched, and "Undo identification".
+    Undoing it lets an older identification win again where no newer decision hides it; the screen says
+    "Identification undone", and there is no redo (TI §7.1);
+  - while the track has a Keep as-is or Skip that counts (TI §1): "Songs missing information" with "Kept as it is" or
+    "Skipped", and "Reset", which undoes that decision, so an older one counts again or none does.
+  Decisions belong to the song's identity: a song without one (its tags not read) offers no revert, choice, undo or
+  reset, and its section shows only the badge.
+- **AcoustID row.** The IDs section ends with the AcoustID track ID of the decision that wins the recording ID, when that
+  decision stored one (`decision.acoustid_id`, TI §10.2), with "Identified by AcoustID" as its source. A tap opens
+  `https://acoustid.org/track/<ID>` (only for a well-formed ID), which TalkBack reads as "Open in AcoustID", and a long
+  press copies it. Decision: `fingerprint.acoustid_id` in the library database (TI §10.1) holds the best result of the
+  last lookup as a cache for the next run, not a confirmed ID, so the details never show it: a song identified without
+  the fingerprint, or only edited, has no AcoustID row.
+- **Identification trace.** For a song of the library whose content key has rows in `identification_trace` (TI §10.1,
+  the last three runs), a section "Identification trace" lists the runs newest first, each with its start (date and
+  time), its outcome ("High confidence", "Medium confidence", "No match found", "No network" and the other outcomes of
+  TI §6), the retry time when the run reported one, and its steps in order, each with its stage, its provider, the last
+  HTTP status, the number of results, the best score, its time and why it was skipped or failed. The trace holds only
+  codes, numbers and times, never a file name or a message (TI §9), and the screen shows nothing else; a code this build
+  does not know is shown as it is.
+- **Metadata badge** (TI §6). The header shows it under the artist, from `track_display.badge_state` (TI §10.1): "From
+  tags" (0), "Identified by MusicBrainz · 97% · Saved in PiPlayer" (1: the provider and confidence of the newest
+  identification whose values win), "Edited · Saved in PiPlayer" (2). A tap opens the review (TI §6) while the values
+  come from the file, and otherwise scrolls to the Identification section, where the result is. Now Playing shows the
+  same badge for a song of the library under its album line, read for the current item's file again after every run of
+  the decision mirror that changed decided values; a tap opens the review while the values come from the file, and the
+  song's details otherwise. TalkBack reads "Metadata" with the state and the tap's label ("Identify" or "Show the
+  identification"). A file opened from another app has no display row, so it shows no badge in M3.
+- **Actions** run one at a time off the main thread: a tap while one runs does nothing. Each commits through
+  `LibraryDecisions` (the user database first, then the mirror, TI §10.3), so lists, Now Playing and the session follow at
+  once, and the screen reads again when it ends. One that cannot be done (the identity gone, a database error) says "The
+  change could not be saved" and changes nothing: the values shown stay. A file opened from another app has none of them.
 
 ## 19. Genres and the Playlists category (M2b: PIM-64)
 
