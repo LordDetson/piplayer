@@ -226,7 +226,7 @@ class DecisionMirrorTest {
         )
     }
 
-    /** A run of the real tag pass, whose batches ask the mirror for their files as the app's do. */
+    /** A run of the real tag pass, whose batches report what they stored to the mirror as the app's do. */
     private suspend fun readByThePass(vararg mediaStoreIds: Long) {
         TagPass(
             library, sync, Reader(),
@@ -234,7 +234,7 @@ class DecisionMirrorTest {
             legacyEncoding = { null },
             decodedEncoding = DecodedEncoding.InMemory(),
             crashBackoff = 1.milliseconds,
-            onBatch = { rows -> mirror.requestFiles(rows.map { it.fileId }) },
+            onStored = { read, failed -> mirror.requestRead(read, failed) },
         ).run()
         mirror.awaitIdle()
     }
@@ -280,7 +280,7 @@ class DecisionMirrorTest {
             },
             cyrillicLanguage = { false }, legacyEncoding = { null }, decodedEncoding = DecodedEncoding.InMemory(),
             crashBackoff = 1.milliseconds,
-            onBatch = { rows -> mirror.requestFiles(rows.map { it.fileId }) },
+            onStored = { read, failed -> mirror.requestRead(read, failed) },
         ).run()
         mirror.awaitIdle()
 

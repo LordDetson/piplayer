@@ -59,7 +59,7 @@ class UserDataSurvivesRebuildTest {
         val files = dao.files()
         for (file in files) dao.setContent(file.id, key(file.mediaStoreId % 100), 200_000, DurationSource.HEADER)
         Library.mirror(context).requestFiles(files.map { it.id })
-        Library.decisionMirror(context).requestFiles(files.map { it.id })
+        Library.decisionMirror(context).requestRead(files.map { it.id }, failed = emptyList())
         Library.identities(context).attach()
         // The attach pass asks the mirrors for a run.
         Library.mirror(context).awaitIdle()

@@ -389,10 +389,14 @@ class DecisionsTest {
         decisions.lapse(listOf(lapsed.decisionId))
         decisions.undo(checkNotNull(decisions.skip(third, 40, 40_000)).decisionId)
 
-        assertThat(decisions.liveSkips()).containsExactlyInAnyOrder(
-            Decisions.LiveSkip(a.decisionId, first, key(1), "external_primary", "Music/", "1.mp3", 10, 10_000),
-            Decisions.LiveSkip(b.decisionId, second, key(2), "external_primary", "Music/", "2.mp3", 20, 20_000),
-        )
+        val skipA = Decisions.LiveSkip(a.decisionId, first, key(1), "external_primary", "Music/", "1.mp3", 10, 10_000)
+        val skipB = Decisions.LiveSkip(b.decisionId, second, key(2), "external_primary", "Music/", "2.mp3", 20, 20_000)
+
+        // By decision, by the identity's key and by the file name of its location hint; never a lapsed or undone one.
+        assertThat(decisions.liveSkipsOf(listOf(a.decisionId, lapsed.decisionId), emptyList(), emptyList())).containsExactly(skipA)
+        assertThat(decisions.liveSkipsOf(emptyList(), listOf(key(2), key(3)), emptyList())).containsExactly(skipB)
+        assertThat(decisions.liveSkipsOf(emptyList(), emptyList(), listOf("1.mp3", "3.mp3"))).containsExactly(skipA)
+        assertThat(decisions.liveSkipsOf(listOf(a.decisionId), listOf(key(1), key(2)), listOf("2.mp3"))).containsExactlyInAnyOrder(skipA, skipB)
     }
 
     @Test

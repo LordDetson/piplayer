@@ -480,9 +480,13 @@ class DecisionMirror(
             skip.decisionId in beforeIds || skip.contentKey in keySet ||
                 Triple(skip.hintVolume, skip.hintRelativePath, skip.hintDisplayName) in spots
         }
+        if (candidates.isEmpty()) return null
+        // The files with the candidates' sizes, in one read, and of them those with a candidate's time too.
+        val bySize = candidates.mapNotNull { it.size }.distinct().chunked(DecidedMirrorDao.CHUNK)
+            .flatMap { library.decided().filesWithSizes(it) }.groupBy { it.size }
         val lapsing = candidates.filter { skip ->
             val seconds = skip.mtimeMs?.let(SkipLapse::mtimeSeconds)
-            val holders = if (skip.size == null || seconds == null) emptyList() else library.decided().keysWithStamp(skip.size, seconds)
+            val holders = bySize[skip.size].orEmpty().filter { it.mtime == seconds }.map { it.contentKey }
             SkipLapse.lapses(skip.contentKey, skip.size, skip.mtimeMs, holders)
         }
         return if (lapsing.isEmpty()) null else decisions.lapse(lapsing.map { it.decisionId })
@@ -494,22 +498,23 @@ class DecisionMirror(
      */
     private suspend fun compareRead(fileIds: List<Long>) {
         if (!user.decisions().hasLiveValueDecisions()) return
-        val reads = fileIds.chunked(DecidedMirrorDao.CHUNK).flatMap { library.library().readFilesOf(it) }
         val keys = fileIds.chunked(MirrorDao.CHUNK).flatMap { library.mirror().keysOf(it) }.associate { it.fileId to it.contentKey }
         val identityOfKey = keys.values.filterNotNull().distinct().chunked(MirrorDao.CHUNK)
             .flatMap { chunk -> user.identities().withKeys(chunk.map(Hex::bytes)) }
             .associate { Hex.text(it.contentKey) to it.id }
         val decided = decisions.withLiveValues(identityOfKey.values)
         if (decided.isEmpty()) return
-        val items = reads.mapNotNull { read ->
-            val identity = keys[read.fileId]?.let(identityOfKey::get)?.takeIf { it in decided } ?: return@mapNotNull null
-            identity to Decisions.LocationValues(read.volume, read.relativePath, read.displayName, DecisionContent.ofTags(TrackEntity.tagsOf(read)))
+        // The tags only of the files whose tracks have decided values.
+        val identityOf = keys.mapNotNull { (file, key) -> key?.let(identityOfKey::get)?.takeIf { it in decided }?.let { file to it } }.toMap()
+        val items = identityOf.keys.toList().chunked(DecidedMirrorDao.CHUNK).flatMap { library.library().readFilesOf(it) }.map { read ->
+            identityOf.getValue(read.fileId) to
+                Decisions.LocationValues(read.volume, read.relativePath, read.displayName, DecisionContent.ofTags(TrackEntity.tagsOf(read)))
         }
         decisions.filesChanged(items)
     }
 
 
-    /** Asks for a run of [fileIds] in the background, which the tag pass has just read. */
+    /** Asks for a run of [fileIds] in the background, without the checks of a tag pass batch ([requestRead]). */
     fun requestFiles(fileIds: List<Long>) {
         if (fileIds.isNotEmpty()) ask { pendingFiles.addAll(fileIds) }
     }

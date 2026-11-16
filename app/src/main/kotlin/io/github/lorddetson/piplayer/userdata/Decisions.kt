@@ -72,7 +72,8 @@ class Decisions(private val database: UserDatabase, private val clock: () -> Lon
 
     /**
      * Skip for the track of [identityId] (TI §1), with the [fileSize] and [fileMtimeMs] of the file it is made on, which let
-     * it lapse. Null when the track has no identity now.
+     * it lapse: the library's stamp, the time a whole second in milliseconds (`SkipLapse.mtimeMs`), since the lapse looks
+     * for a file of the library that holds it. Null when the track has no identity now.
      */
     suspend fun skip(identityId: Long, fileSize: Long, fileMtimeMs: Long, contentKey: ByteArray? = null): Committed? =
         listState(identityId, contentKey, DecisionKind.SKIP, fileSize, fileMtimeMs)
@@ -92,9 +93,6 @@ class Decisions(private val database: UserDatabase, private val clock: () -> Lon
 
     /** Whether any Skip counts, so that the check after a batch of the tag pass costs nothing without one. */
     suspend fun hasLiveSkips(): Boolean = dao.hasLiveSkips()
-
-    /** Every Skip that counts (TI §1). */
-    suspend fun liveSkips(): List<LiveSkip> = dao.liveSkips().map(::liveSkip)
 
     /**
      * The Skips that count among the decisions [decisionIds], of the identities that hold the content keys [keys] (in hex)

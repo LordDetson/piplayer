@@ -148,6 +148,9 @@ interface IdentificationCacheDao {
     suspend fun keepAcoustIdTrack(contentKey: String, trackId: String)
 }
 
+/** A file's size, modification time (seconds) and content key, null without one yet (TI §1). */
+data class FileStampRow(val size: Long, val mtime: Long, val contentKey: String?)
+
 /**
  * The lookup jobs, candidates and trace of identification (TI §10.1), by content key. The pipeline writes a run's rows in
  * one transaction (`RoomIdentificationStore`).
@@ -215,11 +218,11 @@ interface DecidedMirrorDao {
     suspend fun missingInfoOf(fileIds: List<Long>): List<DecidedMirrorEntity>
 
     /**
-     * The content keys of the files with [size] and [mtime] (seconds), null for a file without a key yet: the files that
-     * hold a Skip's stamp (TI §1).
+     * The files with one of [sizes] (at most [CHUNK] at once), with their modification time (seconds) and content key, null
+     * for a file without a key yet: those that may hold a Skip's stamp (TI §1).
      */
-    @Query("SELECT content_key FROM audio_file WHERE size = :size AND mtime = :mtime")
-    suspend fun keysWithStamp(size: Long, mtime: Long): List<String?>
+    @Query("SELECT size, mtime, content_key AS contentKey FROM audio_file WHERE size IN (:sizes)")
+    suspend fun filesWithSizes(sizes: List<Long>): List<FileStampRow>
 
     /** The places and keys of [fileIds] (at most [CHUNK] at once). */
     @Query(

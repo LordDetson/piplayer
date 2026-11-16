@@ -227,19 +227,15 @@ interface DecisionDao {
     @Query("SELECT EXISTS(SELECT 1 FROM decision WHERE kind = 5 AND undone_at IS NULL AND lapsed_at IS NULL)")
     suspend fun hasLiveSkips(): Boolean
 
-    /** Every Skip that counts, with its identity's key and location hint (TI §1). */
-    @Query(LIVE_SKIPS)
-    suspend fun liveSkips(): List<LiveSkipRow>
-
-    /** [liveSkips] of the decisions [ids] (at most 500 at once). */
+    /** The Skips that count among the decisions [ids] (at most 500 at once), with their identities' keys and hints (TI §1). */
     @Query("$LIVE_SKIPS AND d.id IN (:ids)")
     suspend fun liveSkipsWithIds(ids: List<Long>): List<LiveSkipRow>
 
-    /** [liveSkips] of the identities that hold [keys] (at most 500 at once). */
+    /** The Skips that count of the identities that hold [keys] (at most 500 at once). */
     @Query("$LIVE_SKIPS AND i.content_key IN (:keys)")
     suspend fun liveSkipsWithKeys(keys: List<ByteArray>): List<LiveSkipRow>
 
-    /** [liveSkips] of the identities whose location hint has one of the file [names] (at most 500 at once). */
+    /** The Skips that count of the identities whose location hint has one of the file [names] (at most 500 at once). */
     @Query("$LIVE_SKIPS AND i.hint_display_name IN (:names)")
     suspend fun liveSkipsNamed(names: List<String>): List<LiveSkipRow>
 
