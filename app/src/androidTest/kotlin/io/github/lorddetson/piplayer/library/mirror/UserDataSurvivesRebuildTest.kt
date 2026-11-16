@@ -49,10 +49,17 @@ class UserDataSurvivesRebuildTest {
         Library.sync(context).awaitIdle()
     }
 
-    /** What the tag pass would store: each file's key by its media ID, then the attach pass and the mirror run. */
+    /**
+     * What the tag pass would store: each file's key by its media ID, the run its batch asks the mirrors for, then the
+     * attach pass and the mirror run. Without the batch's run a start whose attach pass writes no identities would
+     * leave the decided values to the order of the start-up run and the test's own pass (TI §10.3).
+     */
     private suspend fun keysComeBack() {
         val dao = Library.database(context).library()
-        for (file in dao.files()) dao.setContent(file.id, key(file.mediaStoreId % 100), 200_000, DurationSource.HEADER)
+        val files = dao.files()
+        for (file in files) dao.setContent(file.id, key(file.mediaStoreId % 100), 200_000, DurationSource.HEADER)
+        Library.mirror(context).requestFiles(files.map { it.id })
+        Library.decisionMirror(context).requestFiles(files.map { it.id })
         Library.identities(context).attach()
         // The attach pass asks the mirrors for a run.
         Library.mirror(context).awaitIdle()
