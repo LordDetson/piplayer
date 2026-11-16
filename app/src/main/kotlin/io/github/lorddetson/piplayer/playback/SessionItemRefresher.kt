@@ -68,7 +68,8 @@ class SessionItemRefresher(
     /**
      * Reads the songs of the items [choose] gives, then compares those items once they are read. They are chosen once,
      * since choosing can look through a large queue: the queue may have changed meanwhile, so an item is compared only
-     * where its place still holds the same entry, and the others catch up at their transition (docs/playback.md §2.6).
+     * where its place still holds the same entry, or at the playing place when it is the playing entry, and the others
+     * catch up at their transition (docs/playback.md §2.6).
      */
     private fun compare(choose: () -> List<Int>) {
         // An undispatched start runs up to its first suspension even in a cancelled scope, the read included.
@@ -127,13 +128,17 @@ class SessionItemRefresher(
     }
 
     private fun refreshAt(entry: Entry, found: Map<Long, Song>) {
-        val index = entry.index
-        if (index !in 0 until player.mediaItemCount) return
-        val item = player.getMediaItemAt(index)
-        // Another entry in its place, after an edit of the queue during the read.
-        if (item.mediaId != entry.mediaId) return
         // An added entry plays a library song too (docs/playback.md §9.4).
         val song = found[entry.file] ?: return
+        var index = entry.index
+        var item = if (index in 0 until player.mediaItemCount) player.getMediaItemAt(index) else null
+        if (item == null || item.mediaId != entry.mediaId) {
+            // Another entry in its place, after an edit of the queue during the read. A queued item catches up at its
+            // transition, but an edit before the playing item moves it without one, so the playing place is looked at.
+            index = player.currentMediaItemIndex
+            item = player.currentMediaItem
+            if (index == C.INDEX_UNSET || item == null || item.mediaId != entry.mediaId) return
+        }
         if (item.mediaMetadata.shows(song)) return
         player.replaceMediaItem(index, item.buildUpon().setMediaMetadata(songMetadata(song)).build())
     }
