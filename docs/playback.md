@@ -1520,10 +1520,17 @@ history starts early. It is local only: nothing of it is ever sent. What is stor
 - The service is destroyed (the notification swiped away while paused, a task swipe, a stop): the playback stops
   without being skipped or finished. The snapshot carries its progress (§11.3), and the restore decides (§12.5).
 - A new queue that starts with the same song, as choosing the playing song again or Play on its album does: the user
-  asked for that song again, so its playback before is not a skip. The new playback starts as §11.1 says.
+  asked for that song again, so its playback before is not a skip. The new playback starts as §11.1 says. The same song
+  is the same file, whatever entry of the queue plays it: a library song, an entry an edit added (§9.4) and the entries
+  of a list ranked by plays (§2.3) all play their file, so Recently played chosen at the playing song, or "play
+  selected songs" starting with it, writes nothing; an opened file is the same song when it is the same file opened
+  again. Another entry of the same file chosen within the queue is a move, as any other entry is (§12.2).
 - The queue emptied, with no item after it.
 - A playback that ends after a playback error: a broken song that the service moves past (§2.4) was not skipped by the
-  user. Playing again after the error (a retry that plays) clears it.
+  user. This holds as well for a song that raises no error but has no audio that can be played, which the service
+  moves past or stops at by itself (§2.4), also when it was reached by a gapless transition while playing. Playing
+  again after the error (a retry that plays the song) clears it; the play state the player reports at the very moment
+  of the failure, before the service moves on, does not.
 - A playback with no listened time: one that never played, as when the user moves on while it is still loading or
   paused at its start.
 - A playback writes at most one outcome, the first. A playback that ended the queue was written as listened to the end
@@ -1562,13 +1569,20 @@ history starts early. It is local only: nothing of it is ever sent. What is stor
 JVM tests: the outcome rule: 29.9 s and 30 s of listened time at a skip, a late skip with its share (and none without a
 length), listened to the end at an automatic transition, at a repeat-one replay and at the end of the queue whatever the
 listened time, a move within the end of the song as listened to the end and one just before it as a skip, a new queue
-of another song as a skip and of the same song or of nothing as no outcome, no outcome after an error or without
+of another song as a skip and of the same song or of nothing as no outcome, the same song also when the new queue's
+entry is an added entry of the same file or the playing entry was one (and another file's entry, or another opened
+file, a skip), a move to another entry of the same file within the queue a skip, no outcome after an error or without
 listened time; which saved playback a restore finishes (one moved off the end of a song whose file is known, not a
 resumed, a gone or an opened one).
 
 Instrumented tests: the tracker on a real player with a test clock: "Next" before and after 30 s as an early and a late
 skip, a transition to the next song, a repeat-one replay and the end of the queue as listened to the end, a new queue of
 another song as a skip and of the same song as none, a pause and a seek adding nothing to the skip's listened time, a
-release writing nothing, one outcome for a playback that ended the queue and went on, and a saved playback finished at a
-restore. Through the playback service: a library song skipped with "Next" and the next one played to the end of the
+release writing nothing, one outcome for a playback that ended the queue and went on, a saved playback finished at a
+restore, a new queue whose first entry is an added entry of the playing file writing nothing, a playback error followed
+by "Next" writing nothing and an error followed by a retry that plays writing the outcome as usual, a song without
+playable audio that the service's skipper moves past (also one reached by a gapless transition) writing nothing, a
+restored item that the check against the player's length moves to the next song ending as listened to the end with its
+saved progress, and "stop after current track" pausing at the end of the last song followed by a new queue of another
+song ending as listened to the end. Through the playback service: a library song skipped with "Next" and the next one played to the end of the
 queue are written into `user.db` by their identities as an early skip and as listened to the end.
