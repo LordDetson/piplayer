@@ -70,9 +70,10 @@ import org.junit.runner.RunWith
  * Step 16 settled the album groups in every write of display rows (docs/library.md §6.2), and its first form read every
  * group a write touched: the start-up mirror, which writes the 4 000 decided files of nearly all 2 000 albums, read all
  * 20 000 rows and derived each file's own album key again, about 0.8 s in SQLite and 2 s in Kotlin, and took 2.81 to
- * 4.57 s against 1.70 and 1.80 s before step 16. Measured on 16.11 in M3 step 16c, which reads only the groups that can
- * move, in an interleaved A/B on the same emulator (`--timing`, the app cleared between the builds; the helper printed
- * a host CPU of 27 to 51 %, the emulator's own load included): after step 16c the start-up mirror took 1.23 s, 1.35 s
+ * 4.57 s in passes of the step's merge, where the build before step 16 took 1.70 and 1.80 s (an earlier A/B of the same
+ * day). Measured on 16.11 in M3 step 16c, which reads only the groups that can move, in an interleaved A/B on the same
+ * emulator (`--timing`, the app cleared between the builds; the helper printed a host CPU of 27 to 51 %, the
+ * emulator's own load included): after step 16c the start-up mirror took 1.23 s, 1.35 s
  * and 1.34 s (budgets 1.69 s, 2.18 s and 1.76 s), and 0.36 s, 0.39 s and 0.40 s when it found every value mirrored;
  * the build before step 16 took 1.43 s, 2.42 s and 1.21 s (budgets 3.01 s, 2.18 s and 1.66 s; the second pass failed
  * its budget under the host's load). The settling now costs the start-up mirror about 0.1 s: the keys the written rows

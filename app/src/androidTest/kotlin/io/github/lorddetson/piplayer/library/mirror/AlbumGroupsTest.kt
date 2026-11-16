@@ -17,6 +17,7 @@ import io.github.lorddetson.piplayer.library.sync.LibrarySync
 import io.github.lorddetson.piplayer.library.sync.TrackDisplayWriter
 import io.github.lorddetson.piplayer.library.tagpass.DurationSource
 import io.github.lorddetson.piplayer.library.values.DecidedField
+import io.github.lorddetson.piplayer.settings.ProtectedField
 import io.github.lorddetson.piplayer.userdata.DecisionFixtures.details
 import io.github.lorddetson.piplayer.userdata.DecisionFixtures.mbid
 import io.github.lorddetson.piplayer.userdata.DecisionFixtures.request
@@ -159,6 +160,27 @@ class AlbumGroupsTest {
         identify(3)
         assertThat(read).describedAs("groups read by the last write").contains(own)
         for (track in 1L..3L) assertThat(albumKeyOf(track)).describedAs("track $track").isEqualTo("mbid:$release")
+    }
+
+    @Test
+    fun aFileWhoseKeyComesFromItsDecidedValuesDoesNotKeepTheGroupWhoseKeyItHoldsFromMoving() = runBlocking<Unit> {
+        // Track 9 has no album of its own; an identification without the release decides the album of the others.
+        library(listOf(track(1), track(2), row(9, path = "Music/Record/", album = null, artist = "Ann", generation = 9)))
+        val own = checkNotNull(albumKeyOf(1))
+        checkNotNull(
+            decisions.apply(
+                request(key(9), details(recording = 9), fields = setOf(ProtectedField.ALBUM, ProtectedField.ALBUM_ARTIST), fileId = fileId(9)),
+            ),
+        )
+        assertThat(albumKeyOf(9)).describedAs("the key of track 9's decided values").isEqualTo(own)
+
+        identify(1)
+        identify(2)
+
+        // Track 9 is of no group and has no release: the group of tracks 1 and 2 takes theirs.
+        assertThat(albumKeyOf(1)).isEqualTo("mbid:$release")
+        assertThat(albumKeyOf(2)).isEqualTo("mbid:$release")
+        assertThat(albumKeyOf(9)).isEqualTo(own)
     }
 
     @Test

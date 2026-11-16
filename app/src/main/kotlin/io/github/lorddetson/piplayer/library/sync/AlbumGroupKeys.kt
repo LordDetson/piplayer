@@ -144,13 +144,14 @@ internal object AlbumGroupKeys {
      * key the row of a file not written holds, a file with no decided album and no decided release MBID other than an
      * empty one. Its key is then its own (a file whose key comes from its decided values has a decided album, and a key
      * of an album and folder that a file holds is otherwise its own), and it ends up with no release, so its group keeps
-     * its own key, which every file of the group holds as that file does. One statement, each key's search stopping at
-     * the first such file.
+     * its own key, which every file of the group holds as that file does. That a row holds what the file's values give
+     * holds because every writer of a file's own values (the sync, the tag pass, the decision mirror) writes its display
+     * row in the same transaction. One statement, each key's search stopping at the first such file.
      */
     private suspend fun PooledConnection.kept(keys: List<String>, fileIds: List<Long>): Set<String> {
         if (keys.isEmpty()) return emptySet()
         return usePrepared(KEPT) { statement ->
-            statement.bindText(1, buildJsonArray { keys.forEach { add(it) } }.toString())
+            statement.bindText(1, texts(keys))
             statement.bindText(2, ids(fileIds))
             buildSet { while (statement.step()) add(statement.getText(0)) }
         }
@@ -165,7 +166,7 @@ internal object AlbumGroupKeys {
     private suspend fun PooledConnection.select(sql: String, keys: List<String>): List<Stored> {
         if (keys.isEmpty()) return emptyList()
         return usePrepared(sql) { statement ->
-            statement.bindText(1, buildJsonArray { keys.forEach { add(it) } }.toString())
+            statement.bindText(1, texts(keys))
             stored(statement)
         }
     }
@@ -229,6 +230,9 @@ internal object AlbumGroupKeys {
     /** File IDs as a JSON array, without a JSON element for each. */
     private fun ids(fileIds: Collection<Long>): String = fileIds.joinToString(",", "[", "]")
 
+    /** Album keys as a JSON array of strings. */
+    private fun texts(keys: Collection<String>): String = buildJsonArray { keys.forEach { add(it) } }.toString()
+
     private fun edit(value: String?) = Decided(value, DecisionKind.LEVEL_USER_EDIT, 0)
 
     /** A write of fewer files than this does not count the library's: it settles as a write of some of them. */
@@ -246,7 +250,8 @@ internal object AlbumGroupKeys {
     private const val KEYS_OF = "SELECT file_id, album_key FROM track_display WHERE file_id IN (SELECT value FROM json_each(?))"
 
     // DecidedField.ALBUM and RELEASE_MBID by their stored names, in one look at a file's decided values, which most files
-    // that keep a group lack; the written files by the second JSON array, read once.
+    // that keep a group lack; the written files by the second JSON array, read once. The file must be in audio_file, as
+    // HOLDING's files are, so that a display row the sync left behind keeps no group.
     private const val KEPT = "SELECT k.value FROM json_each(?1) k WHERE EXISTS (SELECT 1 FROM track_display d " +
         "JOIN audio_file f ON f.id = d.file_id WHERE d.album_key = k.value " +
         "AND NOT EXISTS (SELECT 1 FROM decided_mirror m WHERE m.file_id = d.file_id " +
