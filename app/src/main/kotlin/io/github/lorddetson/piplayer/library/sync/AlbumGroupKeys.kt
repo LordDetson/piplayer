@@ -50,7 +50,7 @@ internal object AlbumGroupKeys {
         if (fileIds.size >= EVERY_FILE_FROM && fileIds.size >= count(FILE_COUNT)) return Before.EveryFile
         if (count(DECIDED_RELEASES) == 0L) return Before.NoRelease
         return usePrepared(KEYS_OF) { statement ->
-            statement.bindText(1, buildJsonArray { fileIds.forEach { add(it) } }.toString())
+            statement.bindText(1, ids(fileIds))
             Before.Keys(buildMap { while (statement.step()) if (!statement.isNull(1)) put(statement.getLong(0), statement.getText(1)) })
         }
     }
@@ -58,11 +58,12 @@ internal object AlbumGroupKeys {
     /**
      * Gives each file of the groups of [fileIds] (written with [values], in the same order) the key its group holds, and
      * so too the files of the groups they left. A write of every file settles every group from [values] alone. A
-     * smaller one reads the other files of each group: for a key of an album and folder, the files whose rows hold it
-     * as their own, or when none does (the group holds a release's key, or the write holds all of it) the files of its
-     * album folder and the folders one below it, or past [FOLDERS_ONE_BY_ONE] such groups the files with a decided
-     * release in all their folders at once, since only they can hold a release's key that is not their own; for a key of
-     * a tag release MBID, the files whose tags carry it.
+     * smaller one leaves the groups of an album and folder that [kept] finds keeping their own key, and reads the other
+     * files of each other group: for a key of an album and folder, the files whose rows hold it as their own, or when
+     * none does (the group holds a release's key, or the write holds all of it) the files of its album folder and the
+     * folders one below it, or past [FOLDERS_ONE_BY_ONE] such groups the files with a decided release in all their
+     * folders at once, since only they can hold a release's key that is not their own; for a key of a tag release MBID,
+     * the files whose tags carry it.
      */
     suspend fun PooledConnection.settleAlbumGroups(fileIds: List<Long>, values: List<DisplayValues>, before: Before) {
         if (before == Before.NoRelease) return
@@ -87,7 +88,7 @@ internal object AlbumGroupKeys {
         for ((key, files) in updates.entries.groupBy({ it.value }, { it.key })) {
             usePrepared(SET_KEY) { statement ->
                 statement.bindText(1, key)
-                statement.bindText(2, buildJsonArray { files.forEach { add(it) } }.toString())
+                statement.bindText(2, ids(files))
                 statement.step()
             }
         }
@@ -108,8 +109,12 @@ internal object AlbumGroupKeys {
             if (old != values[i].albumKey && old !in groups) left += old
         }
         if (groups.isEmpty() && left.isEmpty()) return
-        val keys = groups.keys + left
-        val (released, own) = keys.partition { it.startsWith(AlbumKey.RELEASE_PREFIX) }
+        val (released, folders) = (groups.keys + left).partition { it.startsWith(AlbumKey.RELEASE_PREFIX) }
+        // Only the groups that can move are read: in a library identified here and there, few of them.
+        val kept = kept(folders, fileIds)
+        val own = folders.filter { it !in kept }
+        val keys = released + own
+        if (keys.isEmpty()) return
         onGroupsRead(keys)
         // A statement for all groups at once, so that a whole run of the decision mirror reads no folder by folder.
         val holding = select(HOLDING, own).filter { it.fileId !in written && it.ownKey == it.storedKey }.groupBy { it.ownKey }
@@ -131,6 +136,23 @@ internal object AlbumGroupKeys {
             val target = AlbumKey.ofGroup(key, members.map { it.second.release } + others.map { it.release })
             if (target != key) members.forEach { (fileId, _) -> updates[fileId] = target }
             for (other in others) if (other.storedKey != target) updates[other.fileId] = target
+        }
+    }
+
+    /**
+     * The album and folder [keys] that keep their own key whatever the written files [fileIds] end up with: those whose
+     * key the row of a file not written holds, a file with no decided album and no decided release MBID other than an
+     * empty one. Its key is then its own (a file whose key comes from its decided values has a decided album, and a key
+     * of an album and folder that a file holds is otherwise its own), and it ends up with no release, so its group keeps
+     * its own key, which every file of the group holds as that file does. One statement, each key's search stopping at
+     * the first such file.
+     */
+    private suspend fun PooledConnection.kept(keys: List<String>, fileIds: List<Long>): Set<String> {
+        if (keys.isEmpty()) return emptySet()
+        return usePrepared(KEPT) { statement ->
+            statement.bindText(1, buildJsonArray { keys.forEach { add(it) } }.toString())
+            statement.bindText(2, ids(fileIds))
+            buildSet { while (statement.step()) add(statement.getText(0)) }
         }
     }
 
@@ -204,6 +226,9 @@ internal object AlbumGroupKeys {
 
     private fun SQLiteStatement.text(i: Int): String? = if (isNull(i)) null else getText(i)
 
+    /** File IDs as a JSON array, without a JSON element for each. */
+    private fun ids(fileIds: Collection<Long>): String = fileIds.joinToString(",", "[", "]")
+
     private fun edit(value: String?) = Decided(value, DecisionKind.LEVEL_USER_EDIT, 0)
 
     /** A write of fewer files than this does not count the library's: it settles as a write of some of them. */
@@ -219,6 +244,14 @@ internal object AlbumGroupKeys {
         "SELECT EXISTS(SELECT 1 FROM decided_mirror WHERE field = 'release_mbid' AND value IS NOT NULL)"
 
     private const val KEYS_OF = "SELECT file_id, album_key FROM track_display WHERE file_id IN (SELECT value FROM json_each(?))"
+
+    // DecidedField.ALBUM and RELEASE_MBID by their stored names, in one look at a file's decided values, which most files
+    // that keep a group lack; the written files by the second JSON array, read once.
+    private const val KEPT = "SELECT k.value FROM json_each(?1) k WHERE EXISTS (SELECT 1 FROM track_display d " +
+        "JOIN audio_file f ON f.id = d.file_id WHERE d.album_key = k.value " +
+        "AND NOT EXISTS (SELECT 1 FROM decided_mirror m WHERE m.file_id = d.file_id " +
+        "AND (m.field = 'album' OR (m.field = 'release_mbid' AND m.value IS NOT NULL))) " +
+        "AND d.file_id NOT IN (SELECT value FROM json_each(?2)))"
 
     private const val SET_KEY = "UPDATE track_display SET album_key = ? WHERE file_id IN (SELECT value FROM json_each(?))"
 
