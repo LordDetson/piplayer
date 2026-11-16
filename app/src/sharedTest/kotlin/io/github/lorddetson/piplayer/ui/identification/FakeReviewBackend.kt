@@ -52,6 +52,10 @@ class FakeReviewBackend(
     @Volatile
     var enableGate: CompletableDeferred<Unit>? = null
 
+    /** When set, another candidate's edition waits for it. */
+    @Volatile
+    var editionGate: CompletableDeferred<Unit>? = null
+
     /** The edition of each other candidate by recording ID; a recording in [editionFailures] fails with an IOException. */
     val editions: MutableMap<String, SuggestedEdition?> = mutableMapOf()
     val editionFailures: MutableSet<String> = mutableSetOf()
@@ -84,6 +88,7 @@ class FakeReviewBackend(
 
     override suspend fun edition(match: RecordingMatch, result: PipelineResult): SuggestedEdition? {
         calls += "edition ${match.recordingId}"
+        editionGate?.await()
         if (match.recordingId in editionFailures) throw IOException("MusicBrainz unavailable")
         return editions[match.recordingId]
     }

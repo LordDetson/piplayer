@@ -1,6 +1,7 @@
 package io.github.lorddetson.piplayer.ui.identification
 
 import io.github.lorddetson.piplayer.identification.caa.CoverEntity
+import io.github.lorddetson.piplayer.identification.caa.CoverImage
 import io.github.lorddetson.piplayer.identification.release.Credit
 import io.github.lorddetson.piplayer.library.details.CoverSource
 import io.github.lorddetson.piplayer.library.details.DetailField
@@ -223,7 +224,7 @@ class ReviewDiffTest {
     @Test
     fun `an image without its source has no cover line, since Apply could not store it`() = runTest {
         val image = ReviewFixtures.cover()
-        val sourceless = io.github.lorddetson.piplayer.identification.caa.CoverImage(
+        val sourceless = CoverImage(
             image.bytes, image.format, image.size, image.requested, image.url, image.original, source = null,
         )
 

@@ -423,6 +423,42 @@ class ReviewModelTest {
     }
 
     @Test
+    fun `Try again waits while a candidate's edition loads`() = runTest {
+        val backend = FakeReviewBackend(result(found(match(), live)))
+        backend.editions[ReviewFixtures.LIVE_RECORDING] = liveEdition
+        backend.editionGate = CompletableDeferred()
+        val model = started(backend)
+
+        model.choose(1)
+        advanceUntilIdle()
+        model.retry()
+        advanceUntilIdle()
+
+        assertThat(backend.calls.count { it.startsWith("identify") }).isEqualTo(1)
+        backend.editionGate!!.complete(Unit)
+        advanceUntilIdle()
+        assertThat(model.card.index).isEqualTo(1)
+    }
+
+    @Test
+    fun `Try again keeps the Undo of the last action`() = runTest {
+        val backend = FakeReviewBackend(result(found()))
+        val model = started(backend)
+        model.apply()
+        advanceUntilIdle()
+
+        model.retry()
+        advanceUntilIdle()
+
+        assertThat(backend.calls.count { it.startsWith("identify") }).isEqualTo(2)
+        assertThat(model.ended.last).isEqualTo(LastAction(ActionKind.APPLY, 101))
+        assertThat(model.ended.applied).isTrue()
+        model.undo()
+        advanceUntilIdle()
+        assertThat(backend.calls).endsWith("undo 101")
+    }
+
+    @Test
     fun `a blocked run keeps the retry time it reports`() = runTest {
         val at = Instant.parse("2026-11-16T11:35:00Z")
         val stopped = IdentificationOutcome.ProviderStopped(ProviderId.ACOUSTID, StopReason.INVALID_API_KEY)

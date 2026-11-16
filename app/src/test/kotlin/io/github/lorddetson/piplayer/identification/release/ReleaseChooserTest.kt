@@ -92,6 +92,33 @@ class ReleaseChooserTest {
     }
 
     @Test
+    fun `a browsed recording's suggestion is the top of its ranking, without a second browse`() = runTest {
+        val chooser = chooser()
+        val request = ReleaseRequest(durationMs = 214_000, country = "GB")
+        val choice = chooser.choose(harborRanking(), request)
+        val before = browses().size
+
+        val suggestion = chooser.suggestionFor(choice, recording, request)!!
+
+        assertThat(suggestion.source).isEqualTo(EditionSource.RANKING)
+        assertThat(suggestion.release.id).isEqualTo(FakeMusicBrainz.HARBOR_RELEASE)
+        assertThat(suggestion.details.at).isEqualTo(TrackPosition(1, 3))
+        assertThat(browses()).hasSize(before)
+        assertThat(chooser.suggestionFor(choice, "not-browsed", request)).isNull()
+    }
+
+    @Test
+    fun `a browsed recording on the tagged release takes the tagged release`() = runTest {
+        val chooser = chooser()
+        val choice = chooser.choose(harborRanking(), ReleaseRequest(durationMs = 214_000))
+
+        val suggestion = chooser.suggestionFor(choice, recording, ReleaseRequest(tagReleaseId = FakeMusicBrainz.HARBOR_RELEASE, trackNumberTag = 11))!!
+
+        assertThat(suggestion.source).isEqualTo(EditionSource.TAG)
+        assertThat(suggestion.details.at).isEqualTo(TrackPosition(1, 11))
+    }
+
+    @Test
     fun `a tagged release without the recording falls back to the ranking`() = runTest {
         val services = services()
         val choice = ReleaseChooser(services.musicBrainz, cache)

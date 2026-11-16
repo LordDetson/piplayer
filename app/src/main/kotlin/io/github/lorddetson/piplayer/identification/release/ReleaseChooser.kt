@@ -143,6 +143,13 @@ class ReleaseChooser(
         return ReleaseChoice(winner, recording, ranked, suggested, trace)
     }
 
+    /**
+     * The suggested edition of [recordingId], a recording other than the winner that [choice] browsed (the review's
+     * other candidates, TI §6): the tagged release when it contains the recording (TI §4.2 step 0), otherwise the top of
+     * its ranking, with one release lookup and no second browse. Null when [choice] did not browse it.
+     */
+    suspend fun suggestionFor(choice: ReleaseChoice, recordingId: String, request: ReleaseRequest): SuggestedEdition? = null
+
     /** The edition picker's list (TI §4.2 step 6), browsed from the suggested release's group when it opens. */
     suspend fun editions(choice: ReleaseChoice, request: ReleaseRequest): EditionList {
         val suggested = choice.suggested ?: return EditionList.NONE
