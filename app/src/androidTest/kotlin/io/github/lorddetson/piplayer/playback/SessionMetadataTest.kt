@@ -529,6 +529,42 @@ class SessionMetadataTest {
     }
 
     /**
+     * An edit of the queue before the playing item during the read moves it without a transition (docs/playback.md
+     * §2.6): the playing item is found again at its new place and still comes up to date, since nothing later would
+     * catch it up before it plays again.
+     */
+    @Test
+    fun thePlayingItemMovedByAnEditDuringTheReadStillComesUpToDate() {
+        playFirst(item(1, LONG_FIXTURE, "One"), item(2, LONG_FIXTURE, "Two"), item(3, LONG_FIXTURE, "Three"))
+        onMain { session.seekTo(1, 0) }
+        val read = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val reads = CopyOnWriteArrayList<String>()
+        val refresher = SessionItemRefresher(session, { ids ->
+            reads += "start"
+            read.await()
+            reads += "end"
+            ids.associateWith { song(it, "New $it") }
+        }, mainScope)
+        onMain {
+            refresher.start()
+            refresher.refreshDecided(setOf(2L))
+        }
+        assertThat(reads).containsExactly("start")
+
+        onMain {
+            session.removeMediaItem(0)
+            assertThat(session.currentMediaItemIndex).describedAs("the playing item moved up").isZero()
+        }
+        onMain { read.complete(Unit) }
+
+        eventually("the read is applied") { reads.size == 2 }
+        onMain { }
+        onMain { assertThat(session.mediaMetadata.title.toString()).describedAs("the playing item").isEqualTo("New 2") }
+        assertThat(titles()).containsExactly("New 2", "Three")
+        onMain { refresher.stop() }
+    }
+
+    /**
      * A decision whose files are not in a large queue looks through it once: the items are chosen before the read and
      * not chosen again after it (docs/playback.md §2.6). Each look at an item is counted.
      */
