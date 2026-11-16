@@ -123,7 +123,10 @@ class Decisions(private val database: UserDatabase, private val clock: () -> Lon
      */
     suspend fun filesChanged(items: List<Pair<Long, LocationValues>>): List<Set<DecidedField>> {
         if (items.isEmpty()) return emptyList()
-        return database.withWriteTransaction { items.map { (identity, location) -> changedAt(identity, location) } }
+        return database.withWriteTransaction {
+            val tracks = tracksOf(items.map { it.first })
+            items.map { (identity, location) -> changedAt(identity, location, tracks[identity]) }
+        }
     }
 
     /** The Keep as-is or Skip that counts for each identity among [rows], the decisions of those kinds. */
@@ -302,15 +305,34 @@ class Decisions(private val database: UserDatabase, private val clock: () -> Lon
      * parts, those flagged before included.
      */
     suspend fun fileChanged(identityId: Long, location: LocationValues): Set<DecidedField> =
-        database.withWriteTransaction { changedAt(identityId, location) }
+        database.withWriteTransaction { changedAt(identityId, location, tracksOf(listOf(identityId))[identityId]) }
 
-    /** [fileChanged] inside the caller's transaction. */
-    private suspend fun changedAt(identityId: Long, location: LocationValues): Set<DecidedField> {
-        val decisions = dao.decisionsOf(identityId).filter { it.undoneAt == null }
-        val winners = DecisionResolver.resolve(values(decisions, metadataOf(decisions), choicesOf(decisions)))
-        val ofDecision = decisions.associate { it.id to FileReferences.decode(it.fileValues) }
+    /**
+     * What [changedAt] compares for each of [identityIds] that has decisions that are not undone: read for all of them at
+     * once, as a batch of the tag pass compares a few hundred files.
+     */
+    private suspend fun tracksOf(identityIds: Collection<Long>): Map<Long, Track> {
+        val ids = identityIds.distinct()
+        val decisions = ids.chunked(CHUNK).flatMap { dao.liveDecisionsOf(it) }
+        if (decisions.isEmpty()) return emptyMap()
+        val metadata = metadataOf(decisions)
+        val choices = choicesOf(decisions)
+        val states = ids.chunked(CHUNK).flatMap { dao.fileStatesOf(it) }.groupBy { it.identityId }
+        return decisions.groupBy { it.identityId }.mapValues { (identity, own) ->
+            Track(own, DecisionResolver.resolve(values(own, metadata, choices)), states[identity].orEmpty())
+        }
+    }
+
+    /** The decisions of a track that are not undone, the values that win and its file states. */
+    private class Track(val decisions: List<DecisionEntity>, val winners: Map<DecidedField, Decided>, val states: List<FileStateEntity>)
+
+    /** [fileChanged] inside the caller's transaction, with what [tracksOf] read of the track; null when it has no decision. */
+    private suspend fun changedAt(identityId: Long, location: LocationValues, track: Track?): Set<DecidedField> {
+        if (track == null) return emptySet()
+        val winners = track.winners
+        val ofDecision = track.decisions.associate { it.id to FileReferences.decode(it.fileValues) }
         // The location's rows of the decision that wins each part; the rows of other decisions wait for theirs to win.
-        val here = dao.fileStates(identityId).filter { it.at(location) }
+        val here = track.states.filter { it.at(location) }
             .mapNotNull { row -> DecidedField.ofCode(row.field)?.takeIf { winners[it]?.decisionId == row.decisionId }?.let { it to row } }
             .toMap()
         val references = here.mapValues { (_, row) -> int(row.valueAtDecision) }

@@ -247,6 +247,14 @@ interface DecisionDao {
     @Query("SELECT * FROM file_state WHERE identity_id = :identityId")
     suspend fun fileStates(identityId: Long): List<FileStateEntity>
 
+    /** The file states of [identityIds] (at most 500 at once). */
+    @Query("SELECT * FROM file_state WHERE identity_id IN (:identityIds)")
+    suspend fun fileStatesOf(identityIds: List<Long>): List<FileStateEntity>
+
+    /** The decisions of [identityIds] (at most 500 at once) that are not undone, oldest first. */
+    @Query("SELECT * FROM decision WHERE undone_at IS NULL AND identity_id IN (:identityIds) ORDER BY id")
+    suspend fun liveDecisionsOf(identityIds: List<Long>): List<DecisionEntity>
+
     @Upsert
     suspend fun saveFileStates(rows: List<FileStateEntity>)
 
