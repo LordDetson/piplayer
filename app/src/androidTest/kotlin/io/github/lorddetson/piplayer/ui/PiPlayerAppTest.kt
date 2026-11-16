@@ -125,7 +125,7 @@ class PiPlayerAppTest {
                 check(runBlocking { Covers.facts(context).file(id)?.embedded } == true) { "Bravo's picture is not marked as found" }
                 bravo = checkNotNull(SongList.songsById(context, listOf(id))[id]) { "No song $id" }
             } catch (e: Throwable) {
-                // A rule whose start fails is not finished.
+                // JUnit does not call after() when before() fails.
                 after()
                 throw e
             }
