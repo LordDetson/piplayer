@@ -72,7 +72,4 @@ internal class DecidedComparison(private val fileIds: LongArray, private val des
         }
         return out
     }
-
-    /** The values [fileId] should hold; none for a file that is not one of [fileIds]. */
-    fun desiredOf(fileId: Long): Map<DecidedField, Decided> = fileIds.binarySearch(fileId).let { if (it < 0) emptyMap() else desired[it] }
 }

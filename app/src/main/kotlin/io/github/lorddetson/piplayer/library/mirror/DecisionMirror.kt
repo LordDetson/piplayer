@@ -1,6 +1,7 @@
 package io.github.lorddetson.piplayer.library.mirror
 
 import android.util.Log
+import androidx.annotation.VisibleForTesting
 import androidx.room3.useReaderConnection
 import androidx.room3.withWriteTransaction
 import io.github.lorddetson.piplayer.library.db.DecidedMirrorDao
@@ -64,6 +65,14 @@ class DecisionMirror(
     @Volatile
     var changedRuns = 0
         private set
+
+    /** Called by a whole run once it has compared, before it holds off the sync (tests: the moment the run waits). */
+    @VisibleForTesting
+    internal var beforeHold: suspend () -> Unit = {}
+
+    /** Called by each range of a whole run's comparison once it holds its reader connection (tests). */
+    @VisibleForTesting
+    internal var onScanPart: suspend () -> Unit = {}
 
     private val running = Mutex()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -220,20 +229,24 @@ class DecisionMirror(
 
     private suspend fun allRun(): Boolean {
         if (!ready()) return false
-        // Every decision is read, and compared with `decided_mirror`, before the sync is held off (TI §10.3): only this
-        // mirror writes `decided_mirror`, under its lock, so its rows stay as read. The files' keys, which the sync and the
-        // tag pass change, are read again under the hold, and the files whose keys moved meanwhile are compared again.
+        // Every decision is read, and compared with `decided_mirror`, before the sync is held off (TI §10.3). Only this
+        // mirror writes values into `decided_mirror`, under its lock; the sync only deletes the rows of the files it
+        // deletes, whose IDs never come back (library.md §8.4). So under the hold the run reads the files' keys again, which
+        // the sync and the tag pass change, and compares again the files whose keys moved meanwhile and the files that
+        // should hold no values, whose rows may be gone with their files.
         val snapshot = decisions.snapshot()
         val byKey = snapshot.byKey
         val before = keyedFiles(byKey)
         val comparison = DecidedComparison(before.ids, before.values(byKey))
         compareMirrored(comparison)
+        beforeHold()
         val changed = sync.exclusive {
             val now = keyedFiles(byKey)
-            val moved = before.moved(now)
-            val existing = moved.chunked(DecidedMirrorDao.CHUNK).flatMap { library.decided().valuesOf(it) }.groupBy { it.fileId }
-            val stale = differing(moved, moved.associateWith { rowsOf(it, now.valuesOf(it, byKey)) }, existing)
-            val differing = (comparison.differing().filter { it !in moved } + stale).sorted()
+            val found = comparison.differing()
+            val again = before.moved(now) + found.filter { now.valuesOf(it, byKey).isEmpty() }
+            val existing = again.chunked(DecidedMirrorDao.CHUNK).flatMap { library.decided().valuesOf(it) }.groupBy { it.fileId }
+            val stale = differing(again, again.associateWith { rowsOf(it, now.valuesOf(it, byKey)) }, existing)
+            val differing = (found.filter { it !in again } + stale).sorted()
             write(differing, differing.associateWith { rowsOf(it, now.valuesOf(it, byKey)) }, snapshot.counter)
         }
         // Counted once it has completed: a run that throws leaves the next request to make one (TI §10.3).
@@ -262,7 +275,8 @@ class DecisionMirror(
 
     /**
      * Streams every row of `decided_mirror` through [comparison], so that nothing is built for a file that matches, in
-     * [SCAN_PARTS] ranges of row IDs read on reader connections of their own at once (TI §10.3).
+     * [SCAN_PARTS] ranges of row IDs read on reader connections of their own at once (TI §10.3), one fewer than the pool
+     * has, so that the lists and Now Playing still read meanwhile.
      */
     private suspend fun compareMirrored(comparison: DecidedComparison) {
         val range = library.useReaderConnection { connection ->
@@ -279,6 +293,7 @@ class DecisionMirror(
                 val part = comparison.part()
                 launch(Dispatchers.IO) {
                     library.useReaderConnection { connection ->
+                        onScanPart()
                         connection.usePrepared(MIRRORED_ROWS) { statement ->
                             statement.bindLong(1, from)
                             statement.bindLong(2, minOf(range.last, from + span - 1))
@@ -396,23 +411,24 @@ class DecisionMirror(
         running.withLock { }
     }
 
-    private companion object {
-        const val TAG = "DecisionMirror"
-        const val DECIDED_TABLE = "decided_mirror"
+    internal companion object {
+        private const val TAG = "DecisionMirror"
+        private const val DECIDED_TABLE = "decided_mirror"
 
         // In file order, which the comparison's search needs.
-        const val KEYED_FILES = "SELECT id, content_key FROM audio_file WHERE content_key IS NOT NULL ORDER BY id"
+        private const val KEYED_FILES = "SELECT id, content_key FROM audio_file WHERE content_key IS NOT NULL ORDER BY id"
 
-        const val ROW_RANGE = "SELECT min(rowid), max(rowid) FROM decided_mirror"
+        private const val ROW_RANGE = "SELECT min(rowid), max(rowid) FROM decided_mirror"
 
         // A range of row IDs in the order the table holds them: the comparison takes any order, and sorting half a million
         // rows would cost.
-        const val MIRRORED_ROWS = "SELECT file_id, field, value, level, decision_id FROM decided_mirror WHERE rowid BETWEEN ? AND ?"
+        private const val MIRRORED_ROWS = "SELECT file_id, field, value, level, decision_id FROM decided_mirror WHERE rowid BETWEEN ? AND ?"
 
-        /** The ranges a whole run reads `decided_mirror` in at once, within the readers of the connection pool. */
-        const val SCAN_PARTS = 4
+        /** The ranges a whole run reads `decided_mirror` in at once: every reader of the pool but one. */
+        @VisibleForTesting
+        internal const val SCAN_PARTS = LibraryDatabase.READERS - 1
 
         // The columns of DecidedMirrorEntity, in the order the bulk write gives them.
-        val DECIDED_COLUMNS = listOf("file_id", "field", "value", "level", "decision_id")
+        private val DECIDED_COLUMNS = listOf("file_id", "field", "value", "level", "decision_id")
     }
 }

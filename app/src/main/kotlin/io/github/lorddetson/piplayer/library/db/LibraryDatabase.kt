@@ -275,12 +275,15 @@ abstract class LibraryDatabase : RoomDatabase() {
     companion object {
         const val FILE_NAME = "library.db"
 
+        /** The reader connections of a database file, Room's own number for write-ahead logging, set here by name. */
+        const val READERS = 4
+
         /** The database in [file], or in memory when it is null (tests). */
         fun open(context: Context, file: File?): LibraryDatabase {
             val builder = if (file == null) {
                 Room.inMemoryDatabaseBuilder<LibraryDatabase>(context)
             } else {
-                Room.databaseBuilder<LibraryDatabase>(context, file.absolutePath)
+                Room.databaseBuilder<LibraryDatabase>(context, file.absolutePath).setMultipleConnectionPool(READERS, 1)
             }
             return builder
                 .setDriver(BundledSQLiteDriver())

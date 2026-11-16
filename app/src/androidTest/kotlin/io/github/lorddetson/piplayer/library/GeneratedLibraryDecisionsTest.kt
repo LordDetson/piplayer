@@ -56,6 +56,16 @@ import org.junit.runner.RunWith
  *   0.37 s, 0.21 s and 0.32 s to the full refresh and 0.36 s, 0.37 s and 0.35 s to the writer's refresh (budget 0.60 s);
  *   the start-up mirror took 1.20 s, 1.19 s and 1.16 s (budgets 1.74 s, 1.91 s and 1.71 s), and 0.37 s, 0.36 s and 0.37 s
  *   when it found every value mirrored.
+ *
+ * Measured again on 16.11 after step 12's review, which reads `decided_mirror` in three ranges (a reader stays free) and
+ * decodes and resolves the decisions on every core but one, in three quiet passes (host CPU 21 %, 21 % and 22 %):
+ * - a decision on every file: full refresh 3.43 s, 3.41 s and 3.31 s; the whole run that finds every value mirrored
+ *   2.31 s, 2.22 s and 1.96 s, holding off the sync at most 113 ms, 114 ms and 67 ms. Single runs of this test with every
+ *   core resolving took 1.90 s, 1.80 s and 2.07 s, and with four ranges 2.17 s and 1.98 s;
+ * - a decision on a fifth: the decided values added 0.56 s, 0.43 s and 0.47 s to the sync that stores every file again,
+ *   0.40 s, 0.40 s and 0.39 s to the full refresh and 0.36 s, 0.40 s and 0.31 s to the writer's refresh (budget 0.60 s);
+ *   the start-up mirror took 1.35 s, 1.30 s and 1.30 s (budgets 1.71 s, 1.72 s and 1.75 s), and 0.40 s, 0.44 s and 0.38 s
+ *   when it found every value mirrored.
  */
 @RunWith(AndroidJUnit4::class)
 class GeneratedLibraryDecisionsTest {

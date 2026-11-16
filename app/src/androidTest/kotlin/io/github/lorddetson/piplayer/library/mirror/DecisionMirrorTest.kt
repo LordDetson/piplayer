@@ -1,5 +1,6 @@
 package io.github.lorddetson.piplayer.library.mirror
 
+import androidx.room3.useReaderConnection
 import androidx.room3.withWriteTransaction
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.github.lorddetson.piplayer.TestFiles
@@ -33,6 +34,7 @@ import io.github.lorddetson.piplayer.userdata.DecisionFixtures.details
 import io.github.lorddetson.piplayer.userdata.DecisionFixtures.request
 import io.github.lorddetson.piplayer.userdata.Decisions
 import io.github.lorddetson.piplayer.userdata.UserDatabase
+import java.io.File
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.coroutines.CompletableDeferred
@@ -43,6 +45,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.After
 import org.junit.Test
@@ -519,20 +522,86 @@ class DecisionMirrorTest {
         decisions.apply(request(key(1), fields = setOf(ProtectedField.TITLE)))
         assertThat(display(1).title).isEqualTo("Song")
 
-        val run = sync.exclusive {
-            // The run compares before it holds off the sync, then waits for it.
-            val run = async(Dispatchers.IO) { mirror.mirrorAll() }
-            delay(1_000)
-            // Meanwhile the tag pass finds file 1 changed and file 2 a copy of the decided song.
-            library.library().setContent(fileId(1), key(3), 200_000, DurationSource.HEADER)
-            library.library().setContent(fileId(2), key(1), 200_000, DurationSource.HEADER)
-            run
+        // The run compares before it holds off the sync; at that moment the tag pass finds file 1 changed and file 2 a
+        // copy of the decided song.
+        mirror.beforeHold = {
+            sync.exclusive {
+                library.library().setContent(fileId(1), key(3), 200_000, DurationSource.HEADER)
+                library.library().setContent(fileId(2), key(1), 200_000, DurationSource.HEADER)
+            }
         }
 
-        assertThat(run.await()).isTrue()
+        assertThat(mirror.mirrorAll()).isTrue()
         assertThat(display(2).title).isEqualTo("Song")
         assertThat(display(1).title).isEqualTo("Song 1")
         assertThat(library.decided().valuesOf(listOf(fileId(1)))).isEmpty()
+    }
+
+    @Test
+    fun aWholeRunWritesNothingForAFileTheSyncDeletedWhileItWaited() = runBlocking<Unit> {
+        library(listOf(row(1), row(2)))
+        decisions.apply(request(key(1), fields = setOf(ProtectedField.TITLE)))
+        val first = fileId(1)
+        // File 2 still holds the rows of a decision undone before the mirror ran.
+        library.decided().saveValues(listOf(DecidedMirrorEntity(fileId(2), "title", "Undone", DecisionKind.LEVEL_IDENTIFICATION, 999)))
+        val version = mirror.version.value
+
+        // The run compares before it holds off the sync; at that moment the sync finds file 2 gone and deletes it.
+        mirror.beforeHold = {
+            index.volume().rows = listOf(row(1))
+            sync.sync()
+        }
+
+        assertThat(mirror.mirrorAll()).isFalse()
+        assertThat(mirror.version.value).isEqualTo(version)
+        assertThat(library.decided().all().map { it.fileId }.distinct()).containsExactly(first)
+        assertThat(display(1).title).isEqualTo("Song")
+    }
+
+    @Test
+    fun aWholeRunLeavesAReaderOfTheLibraryDatabaseFreeWhileItReadsTheMirroredRows() = runBlocking<Unit> {
+        // On a database file, as in the app: an in-memory database has a single connection.
+        val file = File(context.cacheDir, "decision-mirror-readers.db")
+        deleteDatabase(file)
+        val onDisk = LibraryDatabase.open(context, file)
+        val diskSync = LibrarySync(onDisk, FakeMediaIndex(), mayRead = { true }, FakeRules())
+        val diskMirror = DecisionMirror(onDisk, user, diskSync)
+        val release = CompletableDeferred<Unit>()
+        try {
+            // Rows of undone decisions, spread over enough row IDs for every range.
+            onDisk.decided().saveValues((1L..200L).map { DecidedMirrorEntity(it, "title", "Undone $it", DecisionKind.LEVEL_IDENTIFICATION, it) })
+            val entered = AtomicInteger()
+            diskMirror.onScanPart = {
+                entered.incrementAndGet()
+                release.await()
+            }
+            val run = async(Dispatchers.IO) { diskMirror.mirrorAll() }
+            withTimeout(10_000) { while (entered.get() < DecisionMirror.SCAN_PARTS) delay(10) }
+
+            // Every range holds its reader connection, and the lists still read. Not cancelled when it waits: Room keeps
+            // a cancelled wait for a reader, so the ranges are let go first.
+            val read = async(Dispatchers.IO) {
+                onDisk.useReaderConnection { connection ->
+                    connection.usePrepared("SELECT count(*) FROM decided_mirror") { it.step(); it.getLong(0) }
+                }
+            }
+            val rows = withTimeoutOrNull(5_000) { read.await() }
+            release.complete(Unit)
+            assertThat(rows).describedAs("rows read while every range holds its reader").isEqualTo(200L)
+
+            assertThat(run.await()).isTrue()
+            assertThat(onDisk.decided().all()).isEmpty()
+        } finally {
+            release.complete(Unit)
+            diskMirror.closeAndJoin()
+            diskSync.close()
+            onDisk.close()
+            deleteDatabase(file)
+        }
+    }
+
+    private fun deleteDatabase(file: File) {
+        for (suffix in listOf("", "-wal", "-shm", "-journal")) File(file.path + suffix).delete()
     }
 
     @Test

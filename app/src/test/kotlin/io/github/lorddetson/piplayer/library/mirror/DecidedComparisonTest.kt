@@ -104,15 +104,6 @@ class DecidedComparisonTest {
     }
 
     @Test
-    fun `the desired values of a file that differs are at hand for its write`() {
-        val ids = desired.keys.sorted()
-        val comparison = DecidedComparison(ids.toLongArray(), ids.map(desired::getValue))
-
-        assertThat(comparison.desiredOf(5)).isEqualTo(values(5))
-        assertThat(comparison.desiredOf(7)).isEmpty()
-    }
-
-    @Test
     fun `the files must come in ascending order, each once, with their values`() {
         assertThatThrownBy { DecidedComparison(longArrayOf(5, 1), listOf(values(5), values(1))) }.isInstanceOf(IllegalArgumentException::class.java)
         assertThatThrownBy { DecidedComparison(longArrayOf(1, 1), listOf(values(1), values(1))) }.isInstanceOf(IllegalArgumentException::class.java)

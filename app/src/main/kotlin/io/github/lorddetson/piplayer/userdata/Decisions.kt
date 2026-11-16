@@ -10,9 +10,9 @@ import io.github.lorddetson.piplayer.library.values.DecisionContent
 import io.github.lorddetson.piplayer.library.values.DecisionKind
 import io.github.lorddetson.piplayer.library.values.DecisionResolver
 import io.github.lorddetson.piplayer.library.values.DecisionValues
+import io.github.lorddetson.piplayer.library.values.ResolvingCores
 import io.github.lorddetson.piplayer.settings.ProtectedField
 import java.nio.ByteBuffer
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -170,8 +170,8 @@ class Decisions(private val database: UserDatabase, private val clock: () -> Lon
             )
         }
         // Decoding and resolving made up most of a whole run with a decision on each of 20 000 files (TI §11.2), so they
-        // run after the transaction, on every core.
-        return withContext(Dispatchers.Default) {
+        // run after the transaction, on every core but one: a start-up run may meet playback resuming (TI §10.3).
+        return withContext(ResolvingCores.dispatcher) {
             val choices = read.choices.parallel { rows -> rows.map { it.id to choice(it) } }.toMap()
             val metadata = read.metadata.groupBy { it.decisionId }
             val decided = read.decisions.groupBy { it.identityId }.entries.toList()
@@ -376,7 +376,7 @@ class Decisions(private val database: UserDatabase, private val clock: () -> Lon
         /** Below this many items [parallel] does not split. */
         const val PARALLEL_FROM = 256
 
-        /** The parts [parallel] splits into: a few per core of a phone, so that a slow part leaves no core idle for long. */
-        val PARTS = Runtime.getRuntime().availableProcessors() * 4
+        /** The parts [parallel] splits into: a few per core, so that a slow part leaves no core idle for long. */
+        val PARTS = ResolvingCores.count * 4
     }
 }

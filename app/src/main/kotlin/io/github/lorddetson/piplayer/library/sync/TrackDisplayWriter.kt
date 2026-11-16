@@ -17,11 +17,11 @@ import io.github.lorddetson.piplayer.library.values.DecidedField
 import io.github.lorddetson.piplayer.library.values.FieldOverrides
 import io.github.lorddetson.piplayer.library.values.IndexValues
 import io.github.lorddetson.piplayer.library.values.MergedValues
+import io.github.lorddetson.piplayer.library.values.ResolvingCores
 import io.github.lorddetson.piplayer.library.values.TextForms
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -127,10 +127,10 @@ class TrackDisplayWriter(private val database: LibraryDatabase) {
             }
 
         /**
-         * All cores but one, which stays for the thread that writes the database and the one that builds what it writes
-         * next, so that neither waits behind a chunk being resolved.
+         * All cores but one ([ResolvingCores]), which stays for the thread that writes the database and the one that builds
+         * what it writes next, so that neither waits behind a chunk being resolved.
          */
-        private val resolvers = Dispatchers.Default.limitedParallelism(maxOf(1, Runtime.getRuntime().availableProcessors() - 1))
+        private val resolvers = ResolvingCores.dispatcher
 
         /** Files per chunk of [resolving] and [write]. */
         internal const val CHUNK_SIZE = 2_000
