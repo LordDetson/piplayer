@@ -103,12 +103,13 @@ object MergedValues {
         val artistsForSearch = if (artistDecided || !tagValues?.artists.isNullOrEmpty()) artists.joinToString(" ").ifEmpty { null } else artist
         val albumArtist = pick(DecidedField.ALBUM_ARTIST) { if (read) tagValues?.albumArtist else indexValues?.albumArtist.present() }
         val compilation = if (DecidedField.COMPILATION in decided) decided[DecidedField.COMPILATION]?.value == "1" else tagValues?.compilation == true
-        // The album key comes from the file's own values, never from decided ones (docs/library.md §6.2): the display
-        // writer settles a group whose files all end up with one release MBID. A decided empty release hides the tags'.
+        // The album key comes from the file's own values with the user's edits, never from an identification's
+        // (docs/library.md §6.2): the display writer settles a group whose files all end up with one release MBID. A
+        // decided empty release hides the tags'.
         val decidedRelease = DecidedField.RELEASE_MBID in decided
         val release = if (decidedRelease) decided[DecidedField.RELEASE_MBID]?.value else tagValues?.releaseMbid
         val normalize = { text: String -> forms.shared(text).normalized }
-        val ownAlbumKey = ownAlbum(index, tags, read)?.let { AlbumKey.of(it, volume, relativePath, normalize, forms::albumFolder) }
+        val ownAlbumKey = ownAlbum(index, tags, read, decided)?.let { AlbumKey.of(it, volume, relativePath, normalize, forms::albumFolder) }
         // A file without an album of its own takes its key from its decided values.
         val albumKey = ownAlbumKey ?: album?.let {
             AlbumKey.of(TrackTags(album = it, albumArtist = albumArtist, releaseMbid = release, compilation = compilation), volume, relativePath, normalize, forms::albumFolder)
@@ -206,13 +207,17 @@ object MergedValues {
 
     /**
      * The album part of the file's own values (docs/library.md §6.2): its tags once [read] (the album, album artist,
-     * release MBID and compilation flag), the index's album and album artist until then; null without an album. Its
-     * album key is the key of the file's album group.
+     * release MBID and compilation flag), the index's album and album artist until then, and over either the user's
+     * edits (level 1) of the album, album artist and compilation flag among [decided], also empty ones; an
+     * identification's values do not count. Null without an album. Its album key is the key of the file's album group.
      */
-    fun ownAlbum(index: IndexValues?, tags: TrackTags?, read: Boolean): TrackTags? = if (read) {
-        tags?.album?.let { TrackTags(album = it, albumArtist = tags.albumArtist, releaseMbid = tags.releaseMbid, compilation = tags.compilation) }
-    } else {
-        index?.album.present()?.let { TrackTags(album = it, albumArtist = index?.albumArtist.present()) }
+    fun ownAlbum(index: IndexValues?, tags: TrackTags?, read: Boolean, decided: Map<DecidedField, Decided> = emptyMap()): TrackTags? {
+        val file = if (read) tags else TrackTags(album = index?.album.present(), albumArtist = index?.albumArtist.present())
+        fun edited(part: DecidedField): Decided? = decided[part]?.takeIf { it.level == DecisionKind.LEVEL_USER_EDIT }
+        val album = edited(DecidedField.ALBUM).let { if (it != null) it.value else file?.album } ?: return null
+        val albumArtist = edited(DecidedField.ALBUM_ARTIST).let { if (it != null) it.value else file?.albumArtist }
+        val compilation = edited(DecidedField.COMPILATION).let { if (it != null) it.value == "1" else file?.compilation == true }
+        return TrackTags(album = album, albumArtist = albumArtist, releaseMbid = file?.releaseMbid.takeIf { read }, compilation = compilation)
     }
 
     /**

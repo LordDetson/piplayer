@@ -6,6 +6,9 @@ import io.github.lorddetson.piplayer.library.db.FOLDER_AND_ONE_BELOW
 import io.github.lorddetson.piplayer.library.db.FolderKey
 import io.github.lorddetson.piplayer.library.values.AlbumGroupFacts
 import io.github.lorddetson.piplayer.library.values.AlbumKey
+import io.github.lorddetson.piplayer.library.values.Decided
+import io.github.lorddetson.piplayer.library.values.DecidedField
+import io.github.lorddetson.piplayer.library.values.DecisionKind
 import io.github.lorddetson.piplayer.library.values.IndexValues
 import io.github.lorddetson.piplayer.library.values.MergedValues
 import io.github.lorddetson.piplayer.library.values.TrackTags
@@ -52,8 +55,8 @@ internal object AlbumGroupKeys {
      * smaller one reads the other files of each group: for a key of an album and folder, the files whose rows hold it
      * as their own, or when none does (the group holds a release's key, or the write holds all of it) the files of its
      * album folder and the folders one below it, or past [FOLDERS_ONE_BY_ONE] such groups the files with a decided
-     * release, since only they can hold a release's key that is not their own; for a key of a tag release MBID, the
-     * files whose tags carry it.
+     * release in all their folders at once, since only they can hold a release's key that is not their own; for a key of
+     * a tag release MBID, the files whose tags carry it.
      */
     suspend fun PooledConnection.settleAlbumGroups(fileIds: List<Long>, values: List<DisplayValues>, before: Before) {
         if (before == Before.NoRelease) return
@@ -109,7 +112,7 @@ internal object AlbumGroupKeys {
         val elsewhere = when {
             unheld.isEmpty() -> emptyMap()
             unheld.size <= FOLDERS_ONE_BY_ONE -> unheld.associateWith { key -> inFolder(groups.getValue(key).first().second) }
-            else -> select(DECIDED, null).groupBy { it.ownKey }
+            else -> decidedInFolders(unheld.map { groups.getValue(it).first().second }).groupBy { it.ownKey }
         }
         for (key in keys) {
             val members = groups[key].orEmpty()
@@ -129,13 +132,30 @@ internal object AlbumGroupKeys {
         statement.getLong(0)
     }
 
-    /** The files of [sql] for the album [keys] (none when there are none), or every file of [sql] for null. */
-    private suspend fun PooledConnection.select(sql: String, keys: List<String>?): List<Stored> {
-        if (keys != null && keys.isEmpty()) return emptyList()
+    /** The files of [sql] for the album [keys]; none when there are none. */
+    private suspend fun PooledConnection.select(sql: String, keys: List<String>): List<Stored> {
+        if (keys.isEmpty()) return emptyList()
         return usePrepared(sql) { statement ->
-            if (keys != null) statement.bindText(1, buildJsonArray { keys.forEach { add(it) } }.toString())
+            statement.bindText(1, buildJsonArray { keys.forEach { add(it) } }.toString())
             stored(statement)
         }
+    }
+
+    /**
+     * The files with a decided release in the album folders of [groups] or one folder below them, in one statement, so
+     * that what is read follows the write and not the library; a file in two of the ranges once.
+     */
+    private suspend fun PooledConnection.decidedInFolders(groups: List<AlbumGroupFacts>): List<Stored> {
+        val ranges = groups.map { it.volume to it.albumFolder }.distinct()
+        return usePrepared(DECIDED_IN_FOLDERS) { statement ->
+            statement.bindText(
+                1,
+                buildJsonArray {
+                    for ((volume, folder) in ranges) add(buildJsonArray { add(volume); add(folder); add(folder + FolderKey.AFTER_PATHS) })
+                }.toString(),
+            )
+            stored(statement)
+        }.distinctBy { it.fileId }
     }
 
     /** The files of [facts]' volume in its album folder or one folder below it; the caller keeps those of the group. */
@@ -156,7 +176,13 @@ internal object AlbumGroupKeys {
                 releaseMbid = statement.text(6),
                 compilation = !statement.isNull(7) && statement.getLong(7) != 0L,
             )
-            val own = MergedValues.ownAlbum(IndexValues(album = statement.text(8), albumArtist = statement.text(9)), tags, read)
+            // The user's edits of the album's fields count as the file's own values, as the resolver takes them.
+            val edits = buildMap {
+                if (statement.getLong(13) != 0L) put(DecidedField.ALBUM, edit(statement.text(14)))
+                if (statement.getLong(15) != 0L) put(DecidedField.ALBUM_ARTIST, edit(statement.text(16)))
+                if (statement.getLong(17) != 0L) put(DecidedField.COMPILATION, edit(statement.text(18)))
+            }
+            val own = MergedValues.ownAlbum(IndexValues(album = statement.text(8), albumArtist = statement.text(9)), tags, read, edits)
             val decided = statement.getLong(10) != 0L
             add(
                 Stored(
@@ -170,6 +196,8 @@ internal object AlbumGroupKeys {
     }
 
     private fun SQLiteStatement.text(i: Int): String? = if (isNull(i)) null else getText(i)
+
+    private fun edit(value: String?) = Decided(value, DecisionKind.LEVEL_USER_EDIT, 0)
 
     /** A write of fewer files than this does not count the library's: it settles as a write of some of them. */
     private const val EVERY_FILE_FROM = 500
@@ -187,14 +215,21 @@ internal object AlbumGroupKeys {
 
     private const val SET_KEY = "UPDATE track_display SET album_key = ? WHERE file_id IN (SELECT value FROM json_each(?))"
 
-    // What a file's own album key and its release are made of, as the display writer resolves them (MergedValues).
+    // What a file's own album key and its release are made of, as the display writer resolves them (MergedValues): with
+    // the user's edits (level 1) of the album, album artist and compilation flag from EDITS.
     private const val COLUMNS = "SELECT f.id, f.volume_name, f.relative_path, t.file_id IS NOT NULL, t.album, t.album_artist, " +
-        "t.release_mbid, t.compilation, e.album, e.album_artist, m.file_id IS NOT NULL, m.value, d.album_key FROM "
+        "t.release_mbid, t.compilation, e.album, e.album_artist, m.file_id IS NOT NULL, m.value, d.album_key, " +
+        "ua.file_id IS NOT NULL, ua.value, uaa.file_id IS NOT NULL, uaa.value, uc.file_id IS NOT NULL, uc.value FROM "
+
+    // DecidedField.ALBUM, ALBUM_ARTIST and COMPILATION by their stored names, at DecisionKind.LEVEL_USER_EDIT.
+    private const val EDITS = "LEFT JOIN decided_mirror ua ON ua.file_id = f.id AND ua.field = 'album' AND ua.level = 1 " +
+        "LEFT JOIN decided_mirror uaa ON uaa.file_id = f.id AND uaa.field = 'album_artist' AND uaa.level = 1 " +
+        "LEFT JOIN decided_mirror uc ON uc.file_id = f.id AND uc.field = 'compilation' AND uc.level = 1 "
 
     private const val READ_TRACK = "LEFT JOIN track t ON t.file_id = f.id AND t.start_ms = 0 AND f.tag_pass_at IS NOT NULL "
 
     private const val JOINS = "LEFT JOIN media_index_entry e ON e.file_id = f.id " +
-        "LEFT JOIN decided_mirror m ON m.file_id = f.id AND m.field = 'release_mbid' "
+        "LEFT JOIN decided_mirror m ON m.file_id = f.id AND m.field = 'release_mbid' " + EDITS
 
     private const val DISPLAY = "LEFT JOIN track_display d ON d.file_id = f.id "
 
@@ -207,9 +242,18 @@ internal object AlbumGroupKeys {
         "JOIN audio_file f ON f.id = t.file_id AND f.tag_pass_at IS NOT NULL " + JOINS + DISPLAY +
         "WHERE a.album_key IN (SELECT value FROM json_each(?))"
 
-    /** The files with a decided release MBID: only they can hold a release's key that is not their own. */
-    private const val DECIDED = COLUMNS + "decided_mirror m JOIN audio_file f ON f.id = m.file_id " + READ_TRACK +
-        "LEFT JOIN media_index_entry e ON e.file_id = f.id " + DISPLAY + "WHERE m.field = 'release_mbid' AND m.value IS NOT NULL"
+    /**
+     * The files with a decided release MBID (only they can hold a release's key that is not their own) in the folders of
+     * a JSON array of `[volume, folder, folder + AFTER_PATHS]` or one folder below them, as [FOLDER_AND_ONE_BELOW] gives
+     * them: the ranges first, each a range of the index on volume and path.
+     */
+    private const val DECIDED_IN_FOLDERS = COLUMNS + "json_each(?) g CROSS JOIN audio_file f " +
+        "JOIN decided_mirror m ON m.file_id = f.id AND m.field = 'release_mbid' AND m.value IS NOT NULL " + READ_TRACK +
+        "LEFT JOIN media_index_entry e ON e.file_id = f.id " + EDITS + DISPLAY +
+        "WHERE f.volume_name = json_extract(g.value, '$[0]') AND f.relative_path >= json_extract(g.value, '$[1]') " +
+        "AND f.relative_path < json_extract(g.value, '$[2]') " +
+        "AND instr(substr(f.relative_path, length(json_extract(g.value, '$[1]')) + 1), '/') = " +
+        "length(f.relative_path) - length(json_extract(g.value, '$[1]'))"
 
     /** The files of a folder and of the folders one below it. */
     private const val IN_FOLDER = COLUMNS + "audio_file f " + READ_TRACK + JOINS + DISPLAY + "WHERE " + FOLDER_AND_ONE_BELOW

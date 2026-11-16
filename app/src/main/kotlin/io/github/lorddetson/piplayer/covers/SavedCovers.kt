@@ -11,6 +11,7 @@ import io.github.lorddetson.piplayer.library.values.DecidedField
 import io.github.lorddetson.piplayer.userdata.SavedCoverEntity
 import io.github.lorddetson.piplayer.userdata.UserDatabase
 import java.io.File
+import java.io.FileOutputStream
 import java.security.MessageDigest
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
@@ -99,11 +100,14 @@ class SavedCovers(
         },
     )
 
-    /** The image file of the saved cover [id]; null when there is no such row or its file is gone. */
+    /**
+     * The image file of the saved cover [id]; null when there is no such row or its file is gone, or does not hold the
+     * row's number of bytes (cut short by a power loss), until the same bytes are saved again.
+     */
     suspend fun file(id: Long): File? {
         load()
         val row = database.decisions().savedCover(id) ?: return null
-        return withContext(ioDispatcher) { File(dir, row.path).takeIf { it.isFile } }
+        return withContext(ioDispatcher) { File(dir, row.path).takeIf { it.isFile && it.length() == row.bytes } }
     }
 
     /**
@@ -123,14 +127,20 @@ class SavedCovers(
         loaded = true
     }
 
-    /** Writes [bytes] as [name] in [dir] through a temporary file, unless a file of that name holds them already. */
+    /**
+     * Writes [bytes] as [name] in [dir] through a temporary file flushed to the storage before its rename, so the file is
+     * whole also after a power loss, unless a file of that name holds them already.
+     */
     private fun write(name: String, bytes: ByteArray) {
         val target = File(dir, name)
         // The name is the hash of the bytes: a file of their length holds them.
         if (target.isFile && target.length() == bytes.size.toLong()) return
         dir.mkdirs()
         val temporary = File(dir, ".$name.tmp")
-        temporary.writeBytes(bytes)
+        FileOutputStream(temporary).use { stream ->
+            stream.write(bytes)
+            stream.fd.sync()
+        }
         if (!temporary.renameTo(target)) {
             temporary.delete()
             error("Could not store the saved cover $name")
