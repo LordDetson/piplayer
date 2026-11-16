@@ -41,6 +41,7 @@ import io.github.lorddetson.piplayer.userdata.UserDatabase
 import java.io.File
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -819,6 +820,72 @@ class DecisionMirrorTest {
         for (n in listOf(1L, 2L)) assertThat(display(n).missingInfoDecision).isEqualTo(MissingInfoDecision.NONE)
     }
 
+    /** The copy of [fileAndCopy] encoded again, so that the sync forgets its key and the pass gives it key 9. */
+    private suspend fun copyEncodedAgain() {
+        index.volume().rows = listOf(row(1), row(2).copy(size = 9_000, modifiedSeconds = 1_800_000_000, generationModified = 70))
+        sync.sync()
+    }
+
+    @Test
+    fun aWholeRunAskedForWhileFailedChecksWaitRunsAfterThem() = runBlocking<Unit> {
+        fileAndCopy()
+        val skipped = skip(2, keyOf = 1)
+        val runs = mirror.wholeRuns
+        val checks = AtomicInteger()
+        // Long enough for the whole run to come first if it did not wait.
+        mirror.retryDelay = 1.seconds
+        mirror.beforeChecks = {
+            if (checks.getAndIncrement() == 0) {
+                // As the attach pass after the batch asks for one (TI §10.3), while the checks fail.
+                mirror.request()
+                throw IllegalStateException("The user database is busy")
+            }
+        }
+
+        copyEncodedAgain()
+        readAndReport(StampReader(keys = mapOf(2L to 9L)))
+
+        assertThat(checks.get()).describedAs("checks made").isEqualTo(2)
+        assertThat(lapsedAt(skipped.decisionId)).isNotNull()
+        assertThat(mirror.wholeRuns).isGreaterThan(runs)
+        for (n in listOf(1L, 2L)) assertThat(display(n).missingInfoDecision).isEqualTo(MissingInfoDecision.NONE)
+    }
+
+    @Test
+    fun aWholeRunTakenInOnePassWithABatchWhoseChecksFailWaitsForThemToo() = runBlocking<Unit> {
+        fileAndCopy()
+        val skipped = skip(2, keyOf = 1)
+        val runs = mirror.wholeRuns
+        val checks = AtomicInteger()
+        val holding = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        mirror.retryDelay = 10.milliseconds
+        mirror.beforeChecks = {
+            when (checks.getAndIncrement()) {
+                // The checks of an earlier batch hold the mirror while the copy's batch and a whole run are asked for,
+                // so that its next pass takes both.
+                0 -> {
+                    holding.complete(Unit)
+                    release.await()
+                }
+                1 -> throw IllegalStateException("The user database is busy")
+            }
+        }
+        mirror.requestRead(emptyList(), failed = listOf(Long.MAX_VALUE))
+        withTimeout(10_000) { holding.await() }
+
+        copyEncodedAgain()
+        pass(StampReader(keys = mapOf(2L to 9L))) { read, failed -> mirror.requestRead(read, failed) }
+        mirror.request()
+        release.complete(Unit)
+        mirror.awaitIdle()
+
+        assertThat(checks.get()).describedAs("checks made").isEqualTo(3)
+        assertThat(lapsedAt(skipped.decisionId)).isNotNull()
+        assertThat(mirror.wholeRuns).isGreaterThan(runs)
+        for (n in listOf(1L, 2L)) assertThat(display(n).missingInfoDecision).isEqualTo(MissingInfoDecision.NONE)
+    }
+
     @Test
     fun checksThatKeepFailingLeaveTheFilesMirroredAfterTheLastTry() = runBlocking<Unit> {
         library(listOf(row(1)))
@@ -843,13 +910,18 @@ class DecisionMirrorTest {
     @Test
     fun theLapseLooksUpTheFilesThatHoldAStampByTheIndexOfTheKeys() = runBlocking<Unit> {
         library(listOf(row(1)))
-        for (sql in DecidedMirrorDao.STAMP_QUERIES) {
+        // Exact lookups on every term, so that a library without keys yet, as after a rebuild, is not walked through
+        // all of its files that have no key.
+        val terms = mapOf(DecidedMirrorDao.STAMPS_WITH_KEYS to "content_key=?", DecidedMirrorDao.UNKEYED_STAMPS to "content_key=? AND size=?")
+        assertThat(DecidedMirrorDao.STAMP_QUERIES).containsExactlyInAnyOrderElementsOf(terms.keys)
+        for ((sql, term) in terms) {
             val plan = library.useReaderConnection { connection ->
                 connection.usePrepared("EXPLAIN QUERY PLAN " + sql.replace(Regex(":\\w+"), "?")) { statement ->
                     buildList { while (statement.step()) add(statement.getText(3)) }
                 }
             }
-            assertThat(plan).describedAs(sql).isNotEmpty().noneMatch { it.startsWith("SCAN") }
+            assertThat(plan).describedAs(sql).singleElement().asString()
+                .matches("SEARCH audio_file USING (COVERING )?INDEX \\S+ \\(" + Regex.escape(term) + "\\)")
         }
     }
 
