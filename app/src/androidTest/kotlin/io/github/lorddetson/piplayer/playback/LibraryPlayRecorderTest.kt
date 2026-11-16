@@ -40,6 +40,12 @@ class LibraryPlayRecorderTest {
 
     private fun key(n: Long) = "%064x".format(n)
 
+    /**
+     * The test's plays and listenings start now: the first whole mirror run of the process folds events older than 90 days
+     * (docs/library.md §15.5), and it may come while a test runs.
+     */
+    private val start = System.currentTimeMillis()
+
     private suspend fun fileOf(mediaStoreId: Long) =
         Library.database(context).library().files().single { it.mediaStoreId == mediaStoreId }.id
 
@@ -51,11 +57,11 @@ class LibraryPlayRecorderTest {
         Library.identities(context).attach()
         val identity = checkNotNull(UserData.database(context).identities().idOfKey(Hex.bytes(key(1))))
 
-        recorder.counted(file.toString(), startedAt = 1_000, listenedMs = 100_000)
-        recorder.ended(file.toString(), startedAt = 1_000, listenedMs = 180_000)
+        recorder.counted(file.toString(), startedAt = start + 1_000, listenedMs = 100_000)
+        recorder.ended(file.toString(), startedAt = start + 1_000, listenedMs = 180_000)
         recorder.flush()
 
-        assertThat(UserData.database(context).plays().events()).containsExactly(PlayEventEntity(identity, 1_000, 180_000))
+        assertThat(UserData.database(context).plays().events()).containsExactly(PlayEventEntity(identity, start + 1_000, 180_000))
         // The raised change counter asks the mirror for a run as well; this one is the test's own.
         Library.mirror(context).mirror()
         assertThat(Library.read(context) { LibraryLists(it).recentlyPlayed(limit = 5) }.map { it.id }).containsExactly(file)
@@ -69,13 +75,13 @@ class LibraryPlayRecorderTest {
         Library.identities(context).attach()
         val identity = checkNotNull(UserData.database(context).identities().idOfKey(Hex.bytes(key(1))))
 
-        recorder.counted(file.toString(), startedAt = 1_000, listenedMs = 100_000)
-        recorder.ended(file.toString(), startedAt = 1_000, listenedMs = 150_000)
+        recorder.counted(file.toString(), startedAt = start + 1_000, listenedMs = 100_000)
+        recorder.ended(file.toString(), startedAt = start + 1_000, listenedMs = 150_000)
         recorder.close()
 
         // The writer ends with the writes, so that no coroutine outlives the service.
         withTimeout(SAFETY_TIMEOUT_MS) { recorder.awaitClosed() }
-        assertThat(UserData.database(context).plays().events()).containsExactly(PlayEventEntity(identity, 1_000, 150_000))
+        assertThat(UserData.database(context).plays().events()).containsExactly(PlayEventEntity(identity, start + 1_000, 150_000))
     }
 
     @Test
@@ -98,17 +104,17 @@ class LibraryPlayRecorderTest {
         val identity = checkNotNull(UserData.database(context).identities().idOfKey(Hex.bytes(key(1))))
         val counter = UserData.database(context).user().changeCounter()
 
-        recorder.listened(file.toString(), startedAt = 1_000, listenedMs = 12_000, durationMs = 200_000, ListenOutcome.EARLY_SKIP)
+        recorder.listened(file.toString(), startedAt = start + 1_000, listenedMs = 12_000, durationMs = 200_000, ListenOutcome.EARLY_SKIP)
         // An entry an edit added plays the same file (docs/playback.md §9.4).
-        recorder.listened(QueueIds.added(3, file), startedAt = 2_000, listenedMs = 200_000, durationMs = 200_000, ListenOutcome.FINISHED)
+        recorder.listened(QueueIds.added(3, file), startedAt = start + 2_000, listenedMs = 200_000, durationMs = 200_000, ListenOutcome.FINISHED)
         // Opened files and songs whose tags are not read have no identity (docs/playback.md §12.1).
-        recorder.listened("content://open/song", startedAt = 3_000, listenedMs = 50_000, durationMs = null, ListenOutcome.LATE_SKIP)
-        recorder.listened(fileOf(2).toString(), startedAt = 4_000, listenedMs = 50_000, durationMs = null, ListenOutcome.LATE_SKIP)
+        recorder.listened("content://open/song", startedAt = start + 3_000, listenedMs = 50_000, durationMs = null, ListenOutcome.LATE_SKIP)
+        recorder.listened(fileOf(2).toString(), startedAt = start + 4_000, listenedMs = 50_000, durationMs = null, ListenOutcome.LATE_SKIP)
         recorder.flush()
 
         assertThat(UserData.database(context).listens().events()).containsExactly(
-            ListenEventEntity(1_000, identity, 12_000, 200_000, ListenOutcome.EARLY_SKIP.code),
-            ListenEventEntity(2_000, identity, 200_000, 200_000, ListenOutcome.FINISHED.code),
+            ListenEventEntity(start + 1_000, identity, 12_000, 200_000, ListenOutcome.EARLY_SKIP.code),
+            ListenEventEntity(start + 2_000, identity, 200_000, 200_000, ListenOutcome.FINISHED.code),
         )
         assertThat(UserData.database(context).user().changeCounter()).isEqualTo(counter)
     }
