@@ -1816,6 +1816,8 @@ Every smart list is a list of the library: it holds visible songs only (§3.5), 
     - Keep as-is and Skip (TI §1) belong to identification: they come with M3, together with the
       `missing_info_decision` column (M2b has neither), and batches that include skipped songs come with M4a. A song
       kept as it is leaves the list and its number; a skipped song stays, with "Skipped" after its reasons in its row.
+      In M3 the review of a single song makes them (TI §6, review screen A): "Identify" from the song's menu offers Keep
+      as-is and Skip, with Undo until the next action, also when nothing was found.
 
 ### 17.2 Where they show
 
@@ -1905,7 +1907,8 @@ are in playback.md §9.1. The owner left the open choices to the recommendations
 ### 18.1 The screen
 
 - Decision: "Details" opens a full screen route (`TrackDetailsRoute`, by file ID, or by URI for a file opened from another
-  app), which comes in from the side like a page, with a top bar with back and the title "Details". Not a sheet: the
+  app), which comes in from the side like a page, with a top bar with back and the title "Details". From M3 the top bar
+  also has an "Identify" action, which opens the review of the song or the opened file (TI §6). Not a sheet: the
   screen is long, M3 adds the source of each value and a per-field revert to it, and system back and predictive back work
   as on every page.
 - Under the top bar a header shows the song's cover (§13.1, 96 dp), its title and its artist, then the sections in this

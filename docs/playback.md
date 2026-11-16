@@ -1053,8 +1053,9 @@ By hand on the phone: one of the owner's albums (MP3 with a LAME tag) with the s
     4. "Go to album", 5. "Go to artist" (one entry per artist), 6. "Go to folder",
     7. "Add to favorites" or "Remove from favorites" (library.md §15.2),
     8. "Choose cover" and, when the song has one, "Remove own cover" (library.md §13.2),
-    9. "Details" (library.md §18), always last of the song's entries. "Identify" (M3) and "Edit tags" (M4b) will go
-       between the cover entries and "Details".
+    9. "Identify" (M3, TI §6), which opens the review of the song,
+    10. "Details" (library.md §18), always last of the song's entries. "Edit tags" (M4b) will go between "Identify" and
+       "Details".
 
   Entries that need what a place does not have are left out there, and a place's own entries come after the song's:
     - Song rows of every list and page (the Songs tab and its search, album, artist and folder pages, and the lists that
@@ -1062,10 +1063,11 @@ By hand on the phone: one of the owner's albums (MP3 with a LAME tag) with the s
     - Rows of a playlist page: the whole menu for an available entry, then "Move up", "Move down" and "Remove from
       playlist"; an entry that is not in the library has only the last three, because it has no file to go to or describe.
     - Rows of the queue screen (§9.2): the whole menu, then "Remove from queue". A file opened from another app has
-      "Details" (library.md §18.5) and "Remove from queue".
+      "Identify" (from M3), "Details" (library.md §18.5) and "Remove from queue".
     - Now Playing: a "More options" button at the right of the top row, after the queue button, opens the menu of the
       current song without "Play next" and "Add to queue" (the song is the one playing) and without the favorite entry
-      (the heart toggle sits beside it). A file opened from another app has "Details" only.
+      (the heart toggle sits beside it). A file opened from another app has "Identify" (from M3) and "Details". From M3
+      the top row also has an "Identify" button for the current song or opened file (TI §1, §6).
   An entry whose song has no tags read yet stays: "Add to favorites" and "Choose cover" then say that the tags are still
   being read (library.md §13.2, §15.2), and "Details" shows what the index knows.
 - "Play next" puts the songs right after the current one. "Add to queue" puts them after the current song and after
