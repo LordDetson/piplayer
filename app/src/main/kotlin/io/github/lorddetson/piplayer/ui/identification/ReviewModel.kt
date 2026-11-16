@@ -32,9 +32,10 @@ sealed interface ReviewState {
 
     /**
      * A pre-check or a blocked call ended the run before anything was found (TI §3): online lookups off, no network,
-     * sign-in needed or a provider stopped. "Online lookups off" shows the disclosure.
+     * sign-in needed or a provider stopped. "Online lookups off" shows the disclosure. [retryAt] is the retry time the
+     * run reported (TI §3.2), null for none.
      */
-    data class Blocked(val outcome: IdentificationOutcome) : ReviewState
+    data class Blocked(val outcome: IdentificationOutcome, val retryAt: Instant? = null) : ReviewState
 
     /**
      * The run ended with [outcome]: found in its band, or no key, unreadable, unavailable. [retryAt] is the retry time the

@@ -390,6 +390,49 @@ class ReviewModelTest {
     }
 
     @Test
+    fun `Cancel while Enable is stored runs nothing more`() = runTest {
+        val backend = FakeReviewBackend(result(IdentificationOutcome.Disabled, read = false), result(found()))
+        backend.enableGate = CompletableDeferred()
+        val model = started(backend)
+
+        model.enable()
+        advanceUntilIdle()
+        model.cancel()
+        backend.enableGate!!.complete(Unit)
+        advanceUntilIdle()
+
+        assertThat(model.state.value).isEqualTo(ReviewState.Closed)
+        assertThat(backend.calls.count { it.startsWith("identify") }).isEqualTo(1)
+    }
+
+    @Test
+    fun `Try again waits while a decision is written, so its Undo is not lost`() = runTest {
+        val backend = FakeReviewBackend(result(IdentificationOutcome.Unavailable(ProviderId.MUSICBRAINZ)), result(found()))
+        backend.writeGate = CompletableDeferred()
+        val model = started(backend)
+
+        model.keepAsIs()
+        advanceUntilIdle()
+        model.retry()
+        advanceUntilIdle()
+        assertThat(backend.calls.count { it.startsWith("identify") }).isEqualTo(1)
+        backend.writeGate!!.complete(Unit)
+        advanceUntilIdle()
+
+        assertThat(model.ended.last).isEqualTo(LastAction(ActionKind.KEEP_AS_IS, 102))
+    }
+
+    @Test
+    fun `a blocked run keeps the retry time it reports`() = runTest {
+        val at = Instant.parse("2026-11-16T11:35:00Z")
+        val stopped = IdentificationOutcome.ProviderStopped(ProviderId.ACOUSTID, StopReason.INVALID_API_KEY)
+
+        val model = started(FakeReviewBackend(result(stopped, retryAt = at)))
+
+        assertThat(model.state.value).isEqualTo(ReviewState.Blocked(stopped, at))
+    }
+
+    @Test
     fun `Not now stores the answer and closes`() = runTest {
         val backend = FakeReviewBackend(result(IdentificationOutcome.Disabled, read = false))
         val model = started(backend)

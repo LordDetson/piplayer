@@ -221,6 +221,16 @@ class ReviewDiffTest {
     }
 
     @Test
+    fun `an image without its source has no cover line, since Apply could not store it`() = runTest {
+        val image = ReviewFixtures.cover()
+        val sourceless = io.github.lorddetson.piplayer.identification.caa.CoverImage(
+            image.bytes, image.format, image.size, image.requested, image.url, image.original, source = null,
+        )
+
+        assertThat(ReviewDiff.coverLine(ShownCover.None, sourceless)).isNull()
+    }
+
+    @Test
     fun `a release group image is marked as from another edition`() = runTest {
         val line = ReviewDiff.coverLine(ShownCover.None, ReviewFixtures.cover(CoverEntity.RELEASE_GROUP))!!
 

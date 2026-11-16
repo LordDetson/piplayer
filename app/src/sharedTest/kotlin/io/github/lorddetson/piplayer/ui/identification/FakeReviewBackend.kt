@@ -45,6 +45,13 @@ class FakeReviewBackend(
     @Volatile
     var coverGate: CompletableDeferred<Unit>? = null
 
+    /** When set, Apply, Keep as-is, Skip and Undo wait for [writeGate], Enable for [enableGate], before they answer. */
+    @Volatile
+    var writeGate: CompletableDeferred<Unit>? = null
+
+    @Volatile
+    var enableGate: CompletableDeferred<Unit>? = null
+
     /** The edition of each other candidate by recording ID; a recording in [editionFailures] fails with an IOException. */
     val editions: MutableMap<String, SuggestedEdition?> = mutableMapOf()
     val editionFailures: MutableSet<String> = mutableSetOf()
@@ -83,27 +90,32 @@ class FakeReviewBackend(
 
     override suspend fun apply(request: ApplyRequest, cover: CoverImage?): Long? {
         calls += "apply"
+        writeGate?.await()
         applied += request to cover
         return applyAnswer
     }
 
     override suspend fun keepAsIs(target: IdentificationTarget.LibraryFile): Long? {
         calls += "keep ${target.fileId}"
+        writeGate?.await()
         return keepAnswer
     }
 
     override suspend fun skip(target: IdentificationTarget.LibraryFile): Long? {
         calls += "skip ${target.fileId}"
+        writeGate?.await()
         return skipAnswer
     }
 
     override suspend fun undo(decisionId: Long): Boolean {
         calls += "undo $decisionId"
+        writeGate?.await()
         return undoAnswer
     }
 
     override suspend fun enable() {
         calls += "enable"
+        enableGate?.await()
     }
 
     override suspend fun notNow() {
