@@ -2048,14 +2048,16 @@ fields outside `track_display` from the decided values, an empty decided value, 
 marks of a decided field only, the AcoustID row from the decision that wins the recording ID and never from the
 fingerprint cache, the badge from `badge_state` with the winning identification's provider and confidence, the trace's
 runs newest first with their outcomes and steps, and the screen's actions: one at a time, a read after each (also after
-"Keep PiPlayer's value", which raises no version), a failed one changing nothing; a lazy Cover Art Archive load that
+"Keep PiPlayer's value", which raises no version), a failed one changing nothing, a message's Undo tapped while another
+action runs waiting for it, also when its caller is cancelled; a lazy Cover Art Archive load that
 outran the wait and found a picture asking for a read. Compose tests on fake details: the sources under the values, the
 revert with its Undo, "Keep PiPlayer's value" and "Use the file's value", "Undo identification", the reset of Keep as-is
 and Skip, the trace, and the badge in the header (from tags opening the review, otherwise showing the Identification
 section) and on Now Playing (from tags opening the review, otherwise the details), with their TalkBack labels.
 Instrumented tests on the real databases: a song's details with an identification and an edit (values, sources and the
 provider), a revert that lets the tags win again, a field flagged as changed in the file and cleared by "Keep
-PiPlayer's value", "Undo identification", a Keep as-is and a Skip with their reset, the AcoustID row, the trace of a
+PiPlayer's value", which stays cleared when the tag pass compares the file again after an unrelated change, also for
+the parts the lists do not show, "Undo identification", a Keep as-is and a Skip with their reset, the AcoustID row, the trace of a
 song's content key and the badge state of its display row.
 
 ### 18.7 Sources, reverts and the identification (M3)
@@ -2090,7 +2092,8 @@ Decided in M3 step 22 by the recommendations (the owner's rule of 16.11 for M3).
 - **Changed in the file.** The first row of a decided field that the tag pass flagged at this file's place for the
   decision that wins it (TI §7.1, `file_state.changed_in_file`) says "Changed in the file" and offers "Keep PiPlayer's
   value" and "Use the file's value". The first clears the flag and takes the file's present value as that place's new
-  reference; it changes no value, raises no counter and mirrors nothing, so the screen reads again by itself. The second
+  reference, taken from the same parts of the file's rows that the tag pass compares (TI §7.1); it changes no value,
+  raises no counter and mirrors nothing, so the screen reads again by itself. The second
   is the per-field revert above. The details only read the flags; the comparison belongs to the tag pass.
 - **Identification section**, after the IDs:
   - "Metadata": the badge's state (below);
@@ -2127,7 +2130,9 @@ Decided in M3 step 22 by the recommendations (the owner's rule of 16.11 for M3).
   changed decided values; a tap opens the review while the values come from the file, and the
   song's details otherwise. TalkBack reads "Metadata" with the state and the tap's label ("Identify" or "Show the
   identification"). A file opened from another app has no display row, so it shows no badge in M3.
-- **Actions** run one at a time off the main thread: a tap while one runs does nothing. Each commits through
+- **Actions** run one at a time off the main thread: a tap while one runs does nothing. The Undo of a message, once
+  tapped, is not such a tap: it waits for the action that runs, then runs, also when a newer message has replaced its
+  own, so a tapped Undo is never lost. Each commits through
   `LibraryDecisions` (the user database first, then the mirror, TI §10.3), so lists, Now Playing and the session follow at
   once, and the screen reads again when it ends. One that cannot be done (the identity gone, a database error) says "The
   change could not be saved" and changes nothing: the values shown stay. A file opened from another app has none of them.
