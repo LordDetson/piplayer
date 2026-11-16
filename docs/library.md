@@ -549,6 +549,22 @@ keeps playing meanwhile, and the crash leaves a native crash report of `:tagger`
     - The album key is the one the tag pass gives (§5.2): the release ID, or else the normalized album and album artist
       within a folder, a last folder named like a disc not counting, plus the compilation flag. A file without an album
       belongs to none.
+    - Decided values and the album key (M3, decided in step 16). The key comes from the file's own values (its tags once
+      read, the index's until then), never from decided values (TI §7.1), so that identifying one track of a tagged
+      album does not split it: the album keeps its key, its favorite and its own cover (§15.3), and the track keeps its
+      own cover and favorite. The files that share a key from their own values are the album's group. A decided release
+      MBID changes the key only when every file of the group ends up with the same release MBID, decided or from its
+      tags (a decided empty value hides the tags' one); then each of them takes that release's key (`mbid:` and the
+      MBID in its usual form), as if their tags carried it, and joins any other album of that release. Otherwise the
+      track stays in its group, and the release MBID is only shown (track details, the badge). A file without an album
+      of its own takes its key from its decided values: the decided release MBID when there is one, otherwise the
+      decided album and album artist within its folder, as above.
+    - The display writer settles the groups in the transaction of every write of display rows: a write of every file
+      settles them all from what it resolved; a smaller write, while some file of the library has a decided release
+      MBID, settles the groups of the files it wrote with the files of the same album folder (or, for a key of a
+      release MBID from the tags, the files whose tags carry it) and changes the key of each file whose key differs.
+      A group that a file leaves (its tags name another album, or the sync deletes it) is settled with the next write
+      of one of its files; until then it keeps the key it had.
     - The index gives the track number with the disc in its thousands (`2005` is disc 2, track 5); the resolver splits it.
       The year is the first four digits of the date, or else of the original date; from the index, its year.
 - `display_artist` lists each artist of a file in order: all the artists of its tags once read, otherwise the displayed
@@ -727,6 +743,12 @@ saved queue that refers to identities is in playback.md §4.
   copy of the cover goes; a playlist entry, added or put back by an undo with its key hint, keeps its hints without an
   identity, and the linking of a later pass (§16.2) gives it one. A removal (favorite off, own cover removed) finds its
   identity the same way.
+- Decision (M3 step 16): Apply of an identification needs an identity, unlike the writers above, which write nothing
+  without one: a file opened from another app and a library file the tag pass has not read have no identity yet. Apply
+  makes it in the transaction that stores the decision (TI §10.2 "An identity at Apply"): an opened file gets a missing
+  identity with the providing app's name and size as hints, which its decision keeps from the 30-day deletion and which
+  step 1 of §8.2 attaches once the file is in the library and the tag pass has stored its key; a library file gets the
+  identity that the steps of §8.2 that need neither its tags nor the attach pass give that one file.
 - Attaching changes no user data, so it does not raise the user database's change counter (§3.1). Nothing is written
   into the library database: lists do not need the identity, and the two files keep no row IDs of each other (TI §10).
   Each pass asks the mirror of §15.4 for a run afterwards, because favorites and play counts follow the keys.
