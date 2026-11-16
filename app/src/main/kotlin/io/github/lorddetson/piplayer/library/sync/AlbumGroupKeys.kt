@@ -93,13 +93,13 @@ internal object AlbumGroupKeys {
     ) {
         val written = fileIds.toHashSet()
         // The groups the written files left: a key a row held that is no longer the file's.
-        val left = HashMap<String, Long>()
+        val left = HashSet<String>()
         for (i in fileIds.indices) {
             val old = keysBefore[fileIds[i]] ?: continue
-            if (old != values[i].albumKey && old !in groups) left.putIfAbsent(old, fileIds[i])
+            if (old != values[i].albumKey && old !in groups) left += old
         }
         if (groups.isEmpty() && left.isEmpty()) return
-        val keys = groups.keys + left.keys
+        val keys = groups.keys + left
         val (released, own) = keys.partition { it.startsWith(AlbumKey.RELEASE_PREFIX) }
         // A statement for all groups at once, so that a whole run of the decision mirror reads no folder by folder.
         val holding = select(HOLDING, own).filter { it.fileId !in written && it.ownKey == it.storedKey }.groupBy { it.ownKey }

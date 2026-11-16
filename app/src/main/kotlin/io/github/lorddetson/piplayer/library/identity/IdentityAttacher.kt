@@ -151,11 +151,11 @@ class IdentityAttacher(
                 // identity it changed keeps what Apply gave it, and no identity takes a key another one holds now.
                 val current = dao.identities()
                 val byId = current.associateBy { it.id }
-                val holderOf = current.associate { Hex.text(it.contentKey) to it.id }
+                val holderOf = current.associate { (Hex.text(it.contentKey) to it.startMs) to it.id }
                 val valid = plan.updated.filter { byId[it.id] == stored[it.id] }
                 val validIds = valid.mapTo(HashSet()) { it.id }
                 // In two steps, so that two identities that swap keys never hold one key at once.
-                val moved = valid.filter { holderOf[it.contentKey].let { holder -> holder == null || holder in validIds } }
+                val moved = valid.filter { holderOf[it.contentKey to it.startMs].let { holder -> holder == null || holder in validIds } }
                     .map { it.entity(stored.getValue(it.id)) }
                 val keysChanged = moved.filter { !it.contentKey.contentEquals(stored.getValue(it.id).contentKey) }
                 if (keysChanged.isNotEmpty()) dao.updateAll(keysChanged.map { it.copy(contentKey = placeholder(it.id)) })

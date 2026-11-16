@@ -942,8 +942,8 @@ re-checked before release (M5); in M4a they also drive automatic preparation.
     WebP), the number of bytes, the hash and the source. The same bytes for the same release are one row, so the
     tracks of an album that accept its cover share one row and one release choice; the same bytes for another release
     get a row of their own that names the same file.
-  - When the saved covers are first used in a process, the rows that no decision refers to (saved for an Apply that
-    never committed; an undone decision still refers to its cover) are deleted, and then every file that no row names,
+  - When the saved covers are first used in a process, the rows that no release choice and no edit refers to (saved
+    for an Apply that never committed; an undone decision still refers to its cover) are deleted, and then every file that no row names,
     such as one left by a process that died between the file and its row. So the review saves a cover as part of
     Apply, never ahead of it. A row whose file is gone (after a restore) stays for the re-fetch and gives no file.
 - Writing `cover.jpg` into the album folder: v1.x, with folder grants.

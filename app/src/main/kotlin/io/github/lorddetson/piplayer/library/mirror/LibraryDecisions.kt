@@ -39,7 +39,13 @@ class LibraryDecisions(
         } else {
             null
         }
+        // The identity seen may be gone by the transaction (a takeover of the attach pass): then the file is read after all.
         decisions.apply(request, savedCoverId, atDecision, file)
+            ?: if (file == null && target is IdentificationTarget.LibraryFile && target.startMs == 0L) {
+                decisions.apply(request, savedCoverId, atDecision, files.file(target.fileId, target.contentKey))
+            } else {
+                null
+            }
     }
 
     /** `Decisions.edit`, then the mirror of the track. */

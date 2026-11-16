@@ -467,12 +467,13 @@ class Decisions(private val database: UserDatabase, private val clock: () -> Lon
             )
             is IdentificationTarget.LibraryFile -> {
                 val file = libraryFile?.file?.takeIf { it.fileId == target.fileId }?.copy(contentKey = target.contentKey) ?: return null
-                // The identity of the key the library still stores for this file alone counts as missing: the file's audio
-                // changed in place, and the attach pass has not seen it yet.
-                val held = libraryFile.heldKey?.let { dao.idOfKey(Hex.bytes(it)) }?.let { dao.identity(it) }
-                val missing = dao.missingIdentities() + listOfNotNull(held?.takeIf { it.missingSince == null })
-                val candidates = missing.map { IdentityAttacher.identity(it).let { identity -> identity.copy(missingSince = identity.missingSince ?: now) } }
-                val taker = IdentityMatcher.atApply(file, candidates)
+                // The identity of the key the library still stores for this file alone is the file's own, whose audio
+                // changed in place before the attach pass saw it. It counts as missing, and it comes first: it holds the
+                // file's old key, where another missing identity only names the place.
+                val held = libraryFile.heldKey?.let { dao.idOfKey(Hex.bytes(it)) }?.let { dao.identity(it) }?.takeIf { it.missingSince == null }
+                val missing = listOfNotNull(held) + dao.missingIdentities()
+                val taker = held?.let { IdentityMatcher.atApply(file, listOf(IdentityAttacher.identity(it).copy(missingSince = now))) }
+                    ?: IdentityMatcher.atApply(file, missing.filter { it.id != held?.id }.map(IdentityAttacher::identity))
                 if (taker == null) {
                     dao.add(
                         TrackIdentityEntity(

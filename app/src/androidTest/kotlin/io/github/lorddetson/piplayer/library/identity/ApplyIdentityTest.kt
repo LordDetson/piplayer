@@ -188,6 +188,15 @@ class ApplyIdentityTest {
         library.library().setContent(fileId(1), key(9), 200_000, DurationSource.HEADER)
         attacher.attach()
         val own = checkNotNull(identityWithKey(9)).id
+        // A newer missing identity that only names the same place, as of a file once deleted there.
+        val namesThePlace = user.identities().add(
+            TrackIdentityEntity(
+                contentKey = Hex.bytes(key(8)), durationMs = 200_000, recordingMbid = null,
+                hintVolumeName = FakeMediaIndex.PRIMARY, hintRelativePath = "Music/Record/", hintDisplayName = "01.mp3",
+                hintSize = 1, createdAt = now - 10_000, missingSince = now - 5_000,
+            ),
+        )
+        assertThat(namesThePlace).isGreaterThan(own)
 
         // A gain tool rewrote the frames: stage 0 reads key 1, while the library and the identity still hold key 9.
         val applied = checkNotNull(decisions.apply(request(key(1), fileId = fileId(1))))
@@ -196,7 +205,7 @@ class ApplyIdentityTest {
         val moved = checkNotNull(user.identities().identity(own))
         assertThat(Hex.text(moved.contentKey)).isEqualTo(key(1))
         assertThat(moved.missingSince).isNull()
-        assertThat(user.identities().identities()).hasSize(1)
+        assertThat(Hex.text(checkNotNull(user.identities().identity(namesThePlace)).contentKey)).isEqualTo(key(8))
     }
 
     @Test
