@@ -542,10 +542,66 @@ interface LibraryDao {
             "WHERE a.artist_key = :artistKey ORDER BY $BY_PICTURE, d.title_sort, f.id LIMIT 1",
     )
     suspend fun artistCoverFile(artistKey: String): CoverFileRow?
+
+    /**
+     * The decided cover of an album (TI §7.1): that of its first song by disc, track and file name with a decided cover
+     * that is not empty (docs/library.md §13.1), as the `saved_cover` ID in decimal digits.
+     */
+    @Query(
+        "SELECT m.value FROM track_display d JOIN audio_file f ON f.id = d.file_id " +
+            "JOIN decided_mirror m ON m.file_id = d.file_id AND m.field = 'cover' " +
+            "WHERE d.album_key = :albumKey AND m.value IS NOT NULL AND m.value <> '' " +
+            "ORDER BY $BY_POSITION LIMIT 1",
+    )
+    suspend fun albumDecidedCover(albumKey: String): String?
+
+    /** The release of an album: that of its first song by disc, track and file name with one (docs/library.md §13.1). */
+    @Query(
+        "SELECT releaseMbid, releaseGroupMbid FROM (SELECT $RELEASE AS releaseMbid, $RELEASE_GROUP AS releaseGroupMbid, " +
+            "d.disc_number AS disc_number, d.track_number AS track_number, d.file_sort AS file_sort, f.id AS id " +
+            "FROM track_display d JOIN audio_file f ON f.id = d.file_id WHERE d.album_key = :albumKey) " +
+            "WHERE releaseMbid IS NOT NULL AND releaseMbid <> '' " +
+            "ORDER BY disc_number IS NULL, disc_number, track_number IS NULL, track_number, file_sort, id LIMIT 1",
+    )
+    suspend fun albumRelease(albumKey: String): CoverReleaseRow?
+
+    /** Which of the albums [albumKeys] have a song with a decided cover that is not empty. */
+    @Query(
+        "SELECT DISTINCT d.album_key FROM track_display d JOIN decided_mirror m ON m.file_id = d.file_id AND m.field = 'cover' " +
+            "WHERE d.album_key IN (:albumKeys) AND m.value IS NOT NULL AND m.value <> ''",
+    )
+    suspend fun albumsWithDecidedCovers(albumKeys: List<String>): List<String>
+
+    /** Which of the albums [albumKeys] have a song with a release MBID, decided or from the tags. */
+    @Query(
+        "SELECT DISTINCT album_key FROM (SELECT d.album_key AS album_key, $RELEASE AS rel FROM track_display d " +
+            "JOIN audio_file f ON f.id = d.file_id WHERE d.album_key IN (:albumKeys)) WHERE rel IS NOT NULL AND rel <> ''",
+    )
+    suspend fun albumsWithReleases(albumKeys: List<String>): List<String>
 }
 
+// A file's decided values by the stored names of DecidedField.COVER, RELEASE_MBID and RELEASE_GROUP_MBID.
+private const val DECIDED_COVER = "(SELECT value FROM decided_mirror WHERE file_id = f.id AND field = 'cover')"
+
+/** Whether the file's MusicBrainz IDs are decided: they are decided as a whole, so the tags' release no longer counts. */
+private const val DECIDED_IDS = "EXISTS(SELECT 1 FROM decided_mirror WHERE file_id = f.id AND field = 'release_mbid')"
+
+/** A file's release MBID (docs/library.md §13.1): the decided one when the IDs are decided, else the tags' of a read file. */
+private const val RELEASE = "(CASE WHEN $DECIDED_IDS THEN " +
+    "(SELECT value FROM decided_mirror WHERE file_id = f.id AND field = 'release_mbid') " +
+    "WHEN f.tag_pass_at IS NOT NULL THEN (SELECT release_mbid FROM track WHERE file_id = f.id AND start_ms = 0) END)"
+
+/** The release group MBID that goes with [RELEASE]. */
+private const val RELEASE_GROUP = "(CASE WHEN $DECIDED_IDS THEN " +
+    "(SELECT value FROM decided_mirror WHERE file_id = f.id AND field = 'release_group_mbid') " +
+    "WHEN f.tag_pass_at IS NOT NULL THEN (SELECT release_group_mbid FROM track WHERE file_id = f.id AND start_ms = 0) END)"
+
 private const val COVER_FILES = "SELECT f.id AS fileId, f.media_store_id AS mediaStoreId, f.size, f.mtime, " +
-    "f.embedded_cover_present AS embedded, f.content_key AS contentKey, d.album_key AS albumKey"
+    "f.embedded_cover_present AS embedded, f.content_key AS contentKey, d.album_key AS albumKey, " +
+    "$DECIDED_COVER AS decidedCover, $RELEASE AS releaseMbid, $RELEASE_GROUP AS releaseGroupMbid"
+
+/** An album's songs by disc, track and file name. */
+private const val BY_POSITION = "d.disc_number IS NULL, d.disc_number, d.track_number IS NULL, d.track_number, d.file_sort, f.id"
 
 /** Songs whose picture the tag pass found first, then the unread ones, then those without. */
 private const val BY_PICTURE =
@@ -560,7 +616,14 @@ data class CoverFileRow(
     val embedded: Boolean?,
     val contentKey: String?,
     val albumKey: String?,
+    /** The `saved_cover` ID of the decided cover in decimal digits; null without one or for an empty one. */
+    val decidedCover: String? = null,
+    val releaseMbid: String? = null,
+    val releaseGroupMbid: String? = null,
 )
+
+/** A release and its release group, as covers need them (docs/library.md §13.1). */
+data class CoverReleaseRow(val releaseMbid: String, val releaseGroupMbid: String?)
 
 
 /** A step of a query's plan, as `EXPLAIN QUERY PLAN` describes it. */

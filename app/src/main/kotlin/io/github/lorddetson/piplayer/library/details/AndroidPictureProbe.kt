@@ -5,6 +5,8 @@ import android.graphics.BitmapFactory
 import android.util.Log
 import android.util.Size
 import androidx.core.net.toUri
+import io.github.lorddetson.piplayer.covers.CoverStep
+import io.github.lorddetson.piplayer.covers.Covers
 import io.github.lorddetson.piplayer.covers.EmbeddedPictures
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -34,6 +36,12 @@ class AndroidPictureProbe(context: Context) : PictureProbe {
         }
     } ?: false
 
+    /**
+     * Whether the lazy Cover Art Archive [step] has a picture, loaded by the loader as a list would load it: from its caches,
+     * otherwise through the client with its gate, limiter and failure entries (docs/library.md §18.3).
+     */
+    override suspend fun online(step: CoverStep.Caa): Boolean = safely { Covers.loader(app).step(step, CAA_PX) != null } ?: false
+
     /** [block], or null when the file cannot be read now: details then show no such picture. */
     private suspend fun <T> safely(block: suspend () -> T?): T? = try {
         block()
@@ -49,5 +57,8 @@ class AndroidPictureProbe(context: Context) : PictureProbe {
 
         /** The smallest step of the loader (docs/library.md §13.3): enough to know that there is one. */
         const val THUMBNAIL_PX = 96
+
+        /** Cover Art Archive's list size, `front-250` (docs/library.md §13.3). */
+        const val CAA_PX = 250
     }
 }

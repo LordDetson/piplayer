@@ -14,7 +14,10 @@ import kotlinx.coroutines.flow.scan
  * library (a new revision after the first one seen), or a run of the tag pass ended, which may have found pictures and
  * chosen other songs to stand for albums; or an attach pass wrote identities, so that an own cover may follow its identity
  * to another file; or the hidden files changed, which decide the albums of an artist and raise no revision. Not at every
- * batch of a pass, so that scrolling back during a pass finds its covers in memory.
+ * batch of a pass, so that scrolling back during a pass finds its covers in memory. A run of the decision mirror that
+ * changed decided values ([decisions]) and online lookups turned on or off ([online]) also load the covers on screen
+ * again ([CoverChange.RELOAD]): a decision may bring a saved cover or a release, and the gate decides the lazy Cover Art
+ * Archive step (M3).
  */
 object CoverInvalidations {
 
@@ -33,6 +36,8 @@ object CoverInvalidations {
             .map { CoverChange.MEMORY },
         identityChanges.distinctUntilChanged().drop(1).map { CoverChange.MEMORY },
         hiddenFiles.distinctUntilChanged().drop(1).map { CoverChange.MEMORY },
+        decisions.distinctUntilChanged().drop(1).map { CoverChange.RELOAD },
+        online.distinctUntilChanged().drop(1).map { CoverChange.RELOAD },
     )
 }
 

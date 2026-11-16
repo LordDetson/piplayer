@@ -7,7 +7,7 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.sync.Semaphore
-import kotlinx.coroutines.sync.withPermit
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.coroutineContext
 
 /** Where the pictures of [CoverStep]s come from. */
@@ -75,10 +75,33 @@ class CoverLoader<I : Any>(
         val key = memoryKey(request, step)
         if (cached) memory.get(key)?.let { return it.image }
         val started = synchronized(memoryLock) { generation }
-        return permits.withPermit { loadNow(request, step, cached, key, started) }
+        return withPlace { place -> loadNow(request, step, cached, key, started, place) }
     }
 
-    private suspend fun loadNow(request: CoverRequest, step: Int, cached: Boolean, key: String, started: Long): I? =
+    /**
+     * One of the [PARALLEL_LOADS] places, held from when it is given until [release] or the end of the load, whichever
+     * comes first; a remote step gives it back before it waits for its turn (docs/library.md §13.3).
+     */
+    private inner class Place {
+        private val held = AtomicBoolean(true)
+
+        fun release() {
+            if (held.compareAndSet(true, false)) permits.release()
+        }
+    }
+
+    /** [block] with a place of its own, which is given back at the end if [block] has not given it back before. */
+    private suspend fun <T> withPlace(block: suspend (Place) -> T): T {
+        permits.acquire()
+        val place = Place()
+        try {
+            return block(place)
+        } finally {
+            place.release()
+        }
+    }
+
+    private suspend fun loadNow(request: CoverRequest, step: Int, cached: Boolean, key: String, started: Long, place: Place): I? =
         withContext(dispatcher) {
             val steps = try {
                 plan(request)
@@ -92,6 +115,8 @@ class CoverLoader<I : Any>(
             var image: I? = null
             var known = steps.isNotEmpty()
             for (source in steps) {
+                // The plan puts remote steps last, so every step after the place is given back is remote too.
+                if (source.remote) place.release()
                 val result = try {
                     picture(source, step, cached)
                 } catch (e: CancellationException) {
@@ -151,14 +176,15 @@ class CoverLoader<I : Any>(
         val step = CoverSizes.step(px)
         val cached = CoverSizes.cached(step)
         if (cached && memory.get(memoryKey(request, step))?.let { it.image == null } == true) return null
-        return permits.withPermit {
-            if (!wanted()) return@withPermit null
-            // The time counts from here: a wait in line behind the app's own loads is not the load's.
-            withTimeoutOrNull(timeoutMs) { withContext(dispatcher) { encodedNow(request, step, cached) } }
+        return withPlace { place ->
+            if (!wanted()) return@withPlace null
+            // The time counts from here: a wait in line behind the app's own loads is not the load's. A remote step's wait
+            // for its turn counts, though it holds no place.
+            withTimeoutOrNull(timeoutMs) { withContext(dispatcher) { encodedNow(request, step, cached, place) } }
         }
     }
 
-    private suspend fun encodedNow(request: CoverRequest, step: Int, cached: Boolean): ByteArray? {
+    private suspend fun encodedNow(request: CoverRequest, step: Int, cached: Boolean, place: Place): ByteArray? {
         val steps = try {
             plan(request)
         } catch (e: CancellationException) {
@@ -168,6 +194,7 @@ class CoverLoader<I : Any>(
             return null
         }
         for (source in steps) {
+            if (source.remote) place.release()
             val result = try {
                 bytesOf(source, step, cached)
             } catch (e: CancellationException) {
@@ -227,7 +254,13 @@ class CoverLoader<I : Any>(
      * The picture of the one [step] for a view [px] wide, through the disk cache as [load] reads it, or null when the step
      * has none (docs/library.md §18.3).
      */
-    suspend fun step(step: CoverStep, px: Int): I? = TODO("M3 step 19")
+    suspend fun step(step: CoverStep, px: Int): I? {
+        val size = CoverSizes.step(px)
+        return withPlace { place ->
+            if (step.remote) place.release()
+            withContext(dispatcher) { picture(step, size, CoverSizes.cached(size)) }
+        }
+    }
 
     /** Own covers or the library changed: what memory holds may be stale. */
     fun invalidate() {

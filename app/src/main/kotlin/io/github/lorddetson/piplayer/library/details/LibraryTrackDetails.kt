@@ -1,12 +1,13 @@
 package io.github.lorddetson.piplayer.library.details
 
-import android.content.ContentUris
-import android.provider.MediaStore
+import io.github.lorddetson.piplayer.covers.CoverPlan
+import io.github.lorddetson.piplayer.covers.CoverRequest
 import io.github.lorddetson.piplayer.covers.CoverStep
+import io.github.lorddetson.piplayer.covers.LibraryCoverFacts
 import io.github.lorddetson.piplayer.covers.OwnCovers
+import io.github.lorddetson.piplayer.covers.SavedCoverIndex
 import io.github.lorddetson.piplayer.covers.SavedCovers
 import io.github.lorddetson.piplayer.library.db.AudioFileEntity
-import io.github.lorddetson.piplayer.library.db.CoverFileRow
 import io.github.lorddetson.piplayer.library.db.MediaIndexEntryEntity
 import io.github.lorddetson.piplayer.library.db.TrackEntity
 import io.github.lorddetson.piplayer.library.identity.Hex
@@ -50,14 +51,17 @@ class LibraryTrackDetails(
 ) {
 
     /** What the library database holds of one file, read at once. */
-    private class Stored(val file: AudioFileEntity, val entry: MediaIndexEntryEntity?, val track: TrackEntity?, val cover: CoverFileRow?)
+    private class Stored(val file: AudioFileEntity, val entry: MediaIndexEntryEntity?, val track: TrackEntity?)
+
+    /** The covers' view of the library, the loader's own (docs/library.md §13.1). */
+    private val facts = LibraryCoverFacts(access, user)
 
     /** The details of the file [fileId], or null when the library has no such file. */
     suspend fun read(fileId: Long): TrackDetails? = withContext(Dispatchers.IO) {
         val stored = access.read { database ->
             runBlocking {
                 val dao = database.library()
-                dao.file(fileId)?.let { Stored(it, dao.entry(fileId), dao.trackOf(fileId), dao.coverFile(fileId)) }
+                dao.file(fileId)?.let { Stored(it, dao.entry(fileId), dao.trackOf(fileId)) }
             }
         } ?: return@withContext null
         val file = stored.file
@@ -91,7 +95,7 @@ class LibraryTrackDetails(
                 },
                 tags = stored.track?.toTags(),
                 user = identity?.let { userFacts(it) },
-                cover = coverOf(stored, identity),
+                cover = coverOf(fileId, stored, identity),
             ),
         )
     }
@@ -108,24 +112,39 @@ class LibraryTrackDetails(
         )
     }
 
-    /** The cover the loader would show, by the order of docs/library.md §13.1, with its size (§18.3). */
-    private suspend fun coverOf(stored: Stored, identity: Long?): CoverDetail {
+    /**
+     * The cover the loader would show, with its size (§18.3): the first step of the loader's own plan (§13.1) that has a
+     * picture, each tried as the loader tries it.
+     */
+    private suspend fun coverOf(fileId: Long, stored: Stored, identity: Long?): CoverDetail {
         own.load()
-        identity?.let(own::track)?.takeIf(::copyExists)?.let {
-            user.covers().trackCover(identity)?.let { cover -> return CoverDetail(CoverSource.SONG_OWN, cover.width, cover.height) }
-        }
-        val albumKey = stored.cover?.albumKey
-        albumKey?.let(own::album)?.takeIf(::copyExists)?.let {
-            user.covers().albumCover(albumKey)?.let { cover -> return CoverDetail(CoverSource.ALBUM_OWN, cover.width, cover.height) }
-        }
-        val uri = ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, stored.file.mediaStoreId).toString()
-        // Not looked for when the tag pass found no picture in the file.
-        if (stored.file.embeddedCoverPresent != false) {
-            probe.embedded(uri)?.let { return CoverDetail(CoverSource.EMBEDDED, it.width, it.height, stored.file.embeddedCoverBytes) }
-        }
-        if (probe.hasThumbnail(uri)) return CoverDetail(CoverSource.THUMBNAIL)
+        val names = saved?.names() ?: SavedCoverIndex.NONE
+        val steps = CoverPlan.of(CoverRequest.Track(fileId), facts, own, names, online())
+        for (step in steps) detailOf(step, stored, identity)?.let { return it }
         return CoverDetail(CoverSource.NONE)
     }
+
+    /** What [step] shows, or null when it has no picture. */
+    private suspend fun detailOf(step: CoverStep, stored: Stored, identity: Long?): CoverDetail? = when (step) {
+        is CoverStep.Own -> if (!copyExists(step.fileName)) {
+            null
+        } else if (identity != null && own.track(identity) == step.fileName) {
+            // Copies have names of their own, so the song's and the album's never share one.
+            user.covers().trackCover(identity)?.let { CoverDetail(CoverSource.SONG_OWN, it.width, it.height) }
+        } else {
+            stored.albumKey()?.let { user.covers().albumCover(it) }?.let { CoverDetail(CoverSource.ALBUM_OWN, it.width, it.height) }
+        }
+        is CoverStep.Saved -> saved?.file(step.id)?.takeIf { it.name == step.fileName }?.let {
+            user.decisions().savedCover(step.id)?.let { row -> CoverDetail(CoverSource.SAVED, row.width, row.height, row.bytes) }
+        }
+        is CoverStep.Embedded ->
+            probe.embedded(step.file.uri)?.let { CoverDetail(CoverSource.EMBEDDED, it.width, it.height, stored.file.embeddedCoverBytes) }
+        is CoverStep.Thumbnail -> if (probe.hasThumbnail(step.file.uri)) CoverDetail(CoverSource.THUMBNAIL) else null
+        is CoverStep.Caa -> if (probe.online(step)) CoverDetail(CoverSource.CAA) else null
+    }
+
+    /** The album key the file's display row holds. */
+    private suspend fun Stored.albumKey(): String? = facts.file(file.id)?.albumKey
 
     /** A reference whose copy is gone counts as no own cover (docs/library.md §13.2). */
     private fun copyExists(fileName: String) = File(own.dir, fileName).isFile

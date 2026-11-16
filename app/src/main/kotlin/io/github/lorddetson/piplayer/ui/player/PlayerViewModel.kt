@@ -357,8 +357,9 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     init {
-        // A change of own covers loads the current song's cover again, keeping the old one on screen meanwhile.
-        viewModelScope.launch { AppCovers.own(application).version.drop(1).collect { showCover(reload = true) } }
+        // A change of own covers, a decision or online lookups loads the current song's cover again (docs/library.md §13.3),
+        // keeping the old one on screen meanwhile.
+        viewModelScope.launch { AppCovers.changes(application).drop(1).collect { showCover(reload = true) } }
     }
 
     /**

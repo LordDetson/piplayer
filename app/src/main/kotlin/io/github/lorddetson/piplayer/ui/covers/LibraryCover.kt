@@ -62,9 +62,11 @@ private fun Cover(
 ) {
     val context = LocalContext.current
     val loader = remember(context) { Covers.loader(context) }
-    val version by remember(context) { Covers.own(context).version }.collectAsState()
+    // Own covers, decisions and online lookups (docs/library.md §13.3).
+    val version by remember(context) { Covers.changes(context) }.collectAsState()
     // Another request in the same place starts from what memory holds for it, never from the one before; a change of own
-    // covers keeps the picture on screen until the new one is loaded, so that covers do not blink.
+    // covers, a decision or online lookups keep the picture on screen until the new one is loaded, so that covers do not
+    // blink.
     var image by remember(request, px) { mutableStateOf(loader.peek(request, px)?.asImageBitmap()) }
     LaunchedEffect(request, px, version) {
         image = loader.load(request, px)?.asImageBitmap()

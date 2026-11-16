@@ -1,6 +1,7 @@
 package io.github.lorddetson.piplayer.library.details
 
 import android.content.Context
+import io.github.lorddetson.piplayer.PiPlayerApplication
 import io.github.lorddetson.piplayer.covers.Covers
 import io.github.lorddetson.piplayer.library.Library
 import io.github.lorddetson.piplayer.library.db.LibraryDatabase
@@ -21,6 +22,8 @@ object TrackDetailsSources {
             UserData.database(app),
             Covers.own(app),
             AndroidPictureProbe(app),
+            Covers.saved(app),
+            online = { (app as PiPlayerApplication).onlineGate.isOpen() },
         )
     }
 

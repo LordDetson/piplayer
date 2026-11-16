@@ -1,5 +1,7 @@
 package io.github.lorddetson.piplayer.covers
 
+import io.github.lorddetson.piplayer.identification.musicbrainz.MusicBrainzClient
+
 /** What a view shows a cover of (docs/library.md §13.3): a song by its file ID, an album or an artist by its key. */
 sealed interface CoverRequest {
     data class Track(val fileId: Long) : CoverRequest
@@ -130,19 +132,47 @@ object CoverPlan {
             listOfNotNull(
                 file.identityId?.let(own::track)?.let(CoverStep::Own),
                 file.albumKey?.let(own::album)?.let(CoverStep::Own),
-            ) + fromFile(file)
+            ) + song(file, saved, online)
         }.orEmpty()
-        is CoverRequest.Album -> album(request.key, facts, own)
+        is CoverRequest.Album -> album(request.key, facts, own, saved, online)
         is CoverRequest.Artist -> {
             val albums = facts.artistAlbums(request.key)
-            val chosen = albums.firstOrNull { own.album(it.key) != null } ?: albums.firstOrNull { it.embedded } ?: albums.firstOrNull()
-            if (chosen != null) album(chosen.key, facts, own) else facts.artistFile(request.key)?.let(::fromFile).orEmpty()
+            val chosen = albums.firstOrNull { own.album(it.key) != null }
+                ?: albums.firstOrNull { it.decided }
+                ?: albums.firstOrNull { it.embedded }
+                ?: albums.firstOrNull { online && it.release }
+                ?: albums.firstOrNull()
+            if (chosen != null) {
+                album(chosen.key, facts, own, saved, online)
+            } else {
+                facts.artistFile(request.key)?.let { song(it, saved, online) }.orEmpty()
+            }
         }
     }
 
-    /** An album's own cover, then the pictures of the song that stands for it; a song's own cover never does. */
-    private suspend fun album(key: String, facts: CoverFacts, own: OwnCoverIndex): List<CoverStep> =
-        listOfNotNull(own.album(key)?.let(CoverStep::Own)) + facts.albumFile(key)?.let(::fromFile).orEmpty()
+    /**
+     * An album's own cover, its decided cover, the pictures of the song that stands for it, then its release on Cover Art
+     * Archive; a song's own cover never stands for it.
+     */
+    private suspend fun album(key: String, facts: CoverFacts, own: OwnCoverIndex, saved: SavedCoverIndex, online: Boolean): List<CoverStep> =
+        listOfNotNull(own.album(key)?.let(CoverStep::Own), saved(facts.albumDecidedCover(key), saved)) +
+            facts.albumFile(key)?.let(::fromFile).orEmpty() +
+            // The release is read only while it can be used.
+            listOfNotNull(if (online) caa(facts.albumRelease(key)) else null)
+
+    /** A song's steps after its own covers: its decided cover, its file's pictures, then its release on Cover Art Archive. */
+    private suspend fun song(file: CoverFile, saved: SavedCoverIndex, online: Boolean): List<CoverStep> =
+        listOfNotNull(saved(file.decidedCover, saved)) + fromFile(file) + listOfNotNull(if (online) caa(file.release) else null)
+
+    /** The decided cover [id] while its row names a file. */
+    private suspend fun saved(id: Long?, saved: SavedCoverIndex): CoverStep? =
+        id?.let { saved.fileName(it) }?.let { CoverStep.Saved(id, it) }
+
+    /** The lazy Cover Art Archive step of [release], with plain MBIDs; none for a release ID that is not an MBID. */
+    private fun caa(release: CoverRelease?): CoverStep? {
+        val id = release?.release?.let(MusicBrainzClient::plainMbid) ?: return null
+        return CoverStep.Caa(CoverRelease(id, release.releaseGroup?.let(MusicBrainzClient::plainMbid)))
+    }
 
     /** The embedded picture, unless the tag pass found none, then the system thumbnail. */
     private fun fromFile(file: CoverFile): List<CoverStep> =

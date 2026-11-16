@@ -19,9 +19,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * Gives the session the current song's own cover, or the system thumbnail of a file the tag pass found without a picture
- * (docs/library.md §13.6); otherwise the stream's picture stays. [resolve] finds that picture for a file ID; [changes]
- * says when own covers change. Runs on [scope], the player's thread.
+ * Gives the session the current song's own or decided cover, or for a file the tag pass found without a picture its system
+ * thumbnail or lazy Cover Art Archive cover (docs/library.md §13.6); otherwise the stream's picture stays. [resolve] finds
+ * that picture for a file ID; [changes] says when own covers, decided values or online lookups change. Runs on [scope], the player's thread.
  */
 @OptIn(UnstableApi::class)
 class SessionCovers(
@@ -85,9 +85,10 @@ class SessionCovers(
             val own = Covers.own(context)
             own.load()
             val file = Covers.facts(context).file(fileId) ?: return null
-            val hasOwn = file.identityId?.let(own::track) != null || file.albumKey?.let(own::album) != null
+            // A decided cover replaces the stream's picture as an own cover does (docs/library.md §13.6).
+            val chosen = file.identityId?.let(own::track) != null || file.albumKey?.let(own::album) != null || file.decidedCover != null
             val px = when {
-                hasOwn -> OWN_PX
+                chosen -> OWN_PX
                 file.embedded == false -> THUMBNAIL_PX
                 else -> return null
             }

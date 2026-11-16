@@ -497,7 +497,8 @@ class CoverLoaderTest {
 
         assertThat(disk.read(caaStep.key + "@96")).isInstanceOf(Cached.Picture::class.java)
         assertThat(loader().load(request, 96)).isEqualTo("C@96")
-        assertThat(sources.reads).containsExactly(embedded)
+        // The embedded picture's absence is on disk too, so another process reads no source at all.
+        assertThat(sources.reads).isEmpty()
     }
 
     @Test

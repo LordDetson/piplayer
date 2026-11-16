@@ -142,8 +142,11 @@ class AndroidCoverSources(
             withContext(Dispatchers.Default) { BitmapCodec.decode(bytes, size) }
         }
         is CoverStep.Thumbnail -> thumbnail(step.file.uri.toUri(), size)?.let { BitmapCodec.scaled(it, size) }
-        is CoverStep.Saved -> null
-        is CoverStep.Caa -> null
+        // The row's file, as long as it is the one the step names: a row ID used again names other bytes.
+        is CoverStep.Saved -> saved?.file(step.id)?.takeIf { it.name == step.fileName }?.let { file ->
+            withContext(Dispatchers.IO) { BitmapCodec.decode(file, size) }
+        }
+        is CoverStep.Caa -> caa?.load(step, size)
     }
 
     /** The system thumbnail of [uri], or null when Android has none; a load cut short cancels the request. */

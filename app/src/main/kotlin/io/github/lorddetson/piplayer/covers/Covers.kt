@@ -6,7 +6,11 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.net.Uri
 import android.provider.MediaStore
+import io.github.lorddetson.piplayer.PiPlayerApplication
 import io.github.lorddetson.piplayer.ProcessRole
+import io.github.lorddetson.piplayer.identification.IdentificationServices
+import io.github.lorddetson.piplayer.identification.caa.CaaException
+import io.github.lorddetson.piplayer.net.SendBlockedException
 import io.github.lorddetson.piplayer.library.Library
 import io.github.lorddetson.piplayer.library.db.CoverFileRow
 import io.github.lorddetson.piplayer.library.db.LibraryDatabase
@@ -23,7 +27,13 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import io.github.lorddetson.piplayer.library.tagpass.TagPassState
 import kotlinx.coroutines.withContext
@@ -48,12 +58,25 @@ class LibraryCoverFacts(
         val shown = hidden()
         return read { database ->
             val albums = LibraryLists(database, shown).artistAlbums(artistKey).map { it.key }
-            val withPictures = albums.chunked(KEY_CHUNK).flatMap { database.library().albumsWithPictures(it) }.toSet()
-            albums.map { ArtistAlbum(it, it in withPictures) }
+            val dao = database.library()
+            val withPictures = albums.chunked(KEY_CHUNK).flatMap { dao.albumsWithPictures(it) }.toSet()
+            val withDecided = albums.chunked(KEY_CHUNK).flatMap { dao.albumsWithDecidedCovers(it) }.toSet()
+            val withReleases = albums.chunked(KEY_CHUNK).flatMap { dao.albumsWithReleases(it) }.toSet()
+            albums.map { ArtistAlbum(it, it in withPictures, decided = it in withDecided, release = it in withReleases) }
         }
     }
 
     override suspend fun artistFile(artistKey: String): CoverFile? = read { it.library().artistCoverFile(artistKey) }?.let { cover(it) }
+
+    override suspend fun albumDecidedCover(albumKey: String): Long? =
+        read { it.library().albumDecidedCover(albumKey) }?.toLongOrNull()
+
+    override suspend fun albumRelease(albumKey: String): CoverRelease? =
+        read { it.library().albumRelease(albumKey) }?.let { release(it.releaseMbid, it.releaseGroupMbid) }
+
+    /** A release as the library holds it; an empty value is none. */
+    private fun release(release: String?, group: String?): CoverRelease? =
+        release?.takeIf { it.isNotEmpty() }?.let { CoverRelease(it, group?.takeIf(String::isNotEmpty)) }
 
     private suspend fun cover(row: CoverFileRow) = CoverFile(
         fileId = row.fileId,
@@ -64,6 +87,8 @@ class LibraryCoverFacts(
         identityId = row.contentKey?.let { user.identities().idOfKey(Hex.bytes(it)) },
         albumKey = row.albumKey,
         contentKey = row.contentKey,
+        decidedCover = row.decidedCover?.toLongOrNull(),
+        release = release(row.releaseMbid, row.releaseGroupMbid),
     )
 
     private companion object {
@@ -128,16 +153,32 @@ object Covers {
         coverLoader ?: run {
             val app = context.applicationContext
             val own = own(app)
+            val saved = saved(app)
+            val gate = (app as PiPlayerApplication).onlineGate
+            val names = saved.names()
             CoverLoader(
                 plan = { request ->
                     own.load()
-                    CoverPlan.of(request, facts(app), own)
+                    CoverPlan.of(request, facts(app), own, names, online = gate.isOpen())
                 },
-                sources = AndroidCoverSources(app, own.dir),
+                sources = AndroidCoverSources(
+                    app,
+                    own.dir,
+                    saved,
+                    // The client comes into being with the first lazy cover, not with the loader.
+                    AndroidCoverSources.caa({ sources, size -> IdentificationServices.of(app).coverArtArchive.cover(sources, size) }, gate, gate.open),
+                ),
                 codec = BitmapCodec,
                 disk = CoverDiskCache(File(app.cacheDir, CACHE_DIR)),
                 memoryWeight = memoryWeight(),
-                failures = { e -> android.util.Log.i(TAG, "A cover could not be loaded now", e) },
+                failures = { e ->
+                    // Online lookups off, no network or a busy Cover Art Archive are expected; they need no stack trace.
+                    if (e is SendBlockedException || e is CaaBusyException || e is CaaException) {
+                        android.util.Log.d(TAG, "A Cover Art Archive cover could not be loaded now: ${e.message}")
+                    } else {
+                        android.util.Log.i(TAG, "A cover could not be loaded now", e)
+                    }
+                },
             ).also { loader ->
                 own.onChange = loader::invalidate
                 scope.launch {
@@ -146,13 +187,40 @@ object Covers {
                         TagPassState.progress.map { it.running },
                         IdentityAttacher.changes,
                         LibrarySettings(app).hiddenFiles,
+                        Library.decisionVersion(app),
+                        gate.open,
                     )
-                        .collect { loader.invalidate() }
+                        .collect { change ->
+                            loader.invalidate()
+                            // After the memory is emptied, so that the covers on screen load what is there now.
+                            if (change == CoverChange.RELOAD) reloads.update { it + 1 }
+                        }
                 }
                 coverLoader = loader
             }
         }
     }
+
+    /** Raised after a change that loads the covers on screen again besides own covers (docs/library.md §13.3). */
+    private val reloads = MutableStateFlow(0L)
+
+    /**
+     * What the covers on screen and the session load again on: a change of own covers, a decision that changed decided
+     * values, or online lookups turned on or off (docs/library.md §13.3, §13.6). It emits once at first and then at each.
+     */
+    fun changes(context: Context): StateFlow<Any> = coverChanges ?: synchronized(this) {
+        coverChanges ?: run {
+            val app = context.applicationContext
+            loader(app)
+            val own = own(app)
+            combine(own.version, reloads) { ownVersion, reload -> ownVersion to reload }
+                .stateIn(scope, SharingStarted.Eagerly, own.version.value to reloads.value)
+                .also { coverChanges = it }
+        }
+    }
+
+    @Volatile
+    private var coverChanges: StateFlow<Any>? = null
 
     @Volatile
     private var coverUris: CoverUris? = null

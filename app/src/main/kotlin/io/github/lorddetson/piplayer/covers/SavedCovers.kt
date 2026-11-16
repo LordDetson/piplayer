@@ -110,6 +110,9 @@ class SavedCovers(
         return withContext(ioDispatcher) { File(dir, row.path).takeIf { it.isFile && it.length() == row.bytes } }
     }
 
+    /** The names of the saved covers' files by row ID, for the cover order (docs/library.md §13.1); reads no file. */
+    fun names(): SavedCoverIndex = SavedCoverIndex { id -> database.decisions().savedCover(id)?.path }
+
     /**
      * Deletes the rows no decision refers to (saved for an Apply that never committed) and then the files no row names,
      * unless that was done in this instance; holds the lock. A cover saved in this process is never swept: the sweep

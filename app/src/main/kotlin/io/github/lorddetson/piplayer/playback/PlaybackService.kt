@@ -128,7 +128,7 @@ class PlaybackService : MediaLibraryService() {
         refresher.start()
         passBatches = mainScope.launch { SongList.batches.drop(1).collect { refresher.refresh() } }
         // Own covers and folder images for the session (docs/library.md §13.6).
-        sessionCovers = SessionCovers(sessionPlayer, { SessionCovers.pictureOf(this, it) }, Covers.own(this).version, mainScope)
+        sessionCovers = SessionCovers(sessionPlayer, { SessionCovers.pictureOf(this, it) }, Covers.changes(this), mainScope)
             .also { it.start() }
         removeTaskForTests = { onTaskRemoved(null) }
         isRunningForTests = true
