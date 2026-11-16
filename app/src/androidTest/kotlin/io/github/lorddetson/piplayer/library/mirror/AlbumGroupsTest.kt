@@ -144,9 +144,11 @@ class AlbumGroupsTest {
 
     @Test
     fun aWriteOfAnIdentifiedTrackReadsNoFileOfItsGroupWhileAnotherFileHasNeitherADecidedAlbumNorRelease() = runBlocking<Unit> {
-        library(listOf(track(1), track(2), track(3)))
+        // The hook is global and every other case builds the same album key: a folder of this case's own gives its group a
+        // key no write from elsewhere (a request an earlier case left behind) can report.
+        val path = "Music/Groups read/"
+        library(listOf(track(1, path), track(2, path), track(3, path)))
         val own = checkNotNull(albumKeyOf(1))
-        // Only this test's library is written meanwhile; a write elsewhere names other keys.
         val read = Collections.synchronizedList(ArrayList<String>())
         AlbumGroupKeys.onGroupsRead = { read += it }
 
