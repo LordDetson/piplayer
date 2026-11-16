@@ -99,6 +99,18 @@ object Covers {
         }
     }
 
+    @Volatile
+    private var savedCovers: SavedCovers? = null
+
+    /** The accepted covers of identification (TI §5.2), in the no-backup files; one instance for the process. */
+    fun saved(context: Context): SavedCovers = savedCovers ?: synchronized(this) {
+        savedCovers ?: run {
+            ProcessRole.current(context).requireMain("Saved covers")
+            val app = context.applicationContext
+            SavedCovers(UserData.database(app), SavedCovers.directory(app.noBackupFilesDir)).also { savedCovers = it }
+        }
+    }
+
     /** The library's facts while the library may be read, otherwise none. */
     fun facts(context: Context): CoverFacts {
         val app = context.applicationContext

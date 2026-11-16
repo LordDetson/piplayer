@@ -105,8 +105,11 @@ class TrackDisplayWriter(private val database: LibraryDatabase) {
     )
 
     companion object {
-        /** A change of the rules that derive the display values raises this; the next sync derives them all again. */
-        const val VERSION = 2
+        /**
+         * A change of the rules that derive the display values raises this; the next sync derives them all again. 3: the
+         * album key comes from the file's own values, and only a release every file of its group ends up with moves it.
+         */
+        const val VERSION = 3
 
         private const val CHUNK = 500
         private const val DELETE_CHUNK = 2_000
@@ -231,6 +234,9 @@ class TrackDisplayWriter(private val database: LibraryDatabase) {
                 text(genre.searchText)
                 blob(genre.sortKey.bytes)
             }
+            // The keys were written as the files' own; a group whose files all end up with one release takes its key, in
+            // the same transaction (docs/library.md §6.2).
+            with(AlbumGroupKeys) { settleAlbumGroups(fileIds, idChunks.indices.flatMap { c -> chunks[c].await() }) }
         }
 
         private fun SqlRows.Row.display(id: Long, values: DisplayValues) {

@@ -5,6 +5,8 @@ import androidx.room3.withWriteTransaction
 import io.github.lorddetson.piplayer.identification.contract.ApplyRequest
 import io.github.lorddetson.piplayer.identification.contract.IdentificationTarget
 import io.github.lorddetson.piplayer.library.identity.Hex
+import io.github.lorddetson.piplayer.library.identity.IdentityAttacher
+import io.github.lorddetson.piplayer.library.identity.IdentityMatcher
 import io.github.lorddetson.piplayer.library.identity.KeyedFile
 import io.github.lorddetson.piplayer.library.values.Decided
 import io.github.lorddetson.piplayer.library.values.DecidedField
@@ -438,10 +440,54 @@ class Decisions(private val database: UserDatabase, private val clock: () -> Lon
         if (rows.isNotEmpty()) dao.saveFileStates(rows)
     }
 
-    /** The identity of [target] for Apply, made when none holds its key (TI §10.2); null when none can be. */
+    /**
+     * The identity of [target] for Apply, inside its transaction: the one that holds the key, or else one made now (TI
+     * §10.2 "An identity at Apply"). A file opened from another app gets a missing identity with the app's name and size
+     * as hints; a library file, [libraryFile], gets the missing identity hinted at its place
+     * ([IdentityMatcher.atApply]) or else a new one with its place. Null when none can be (no file for a library target).
+     */
     private suspend fun identityAtApply(target: IdentificationTarget, libraryFile: KeyedFile?): Long? {
         if (target.startMs != 0L) return null
-        return database.identities().idOfKey(Hex.bytes(target.contentKey))
+        val dao = database.identities()
+        val key = Hex.bytes(target.contentKey)
+        dao.idOfKey(key)?.let { return it }
+        val now = clock()
+        return when (target) {
+            is IdentificationTarget.OpenedFile -> dao.add(
+                TrackIdentityEntity(
+                    contentKey = key, durationMs = null, recordingMbid = null, hintVolumeName = null, hintRelativePath = null,
+                    hintDisplayName = target.displayName, hintSize = target.size, createdAt = now,
+                    // No file of the library holds the key yet; step 1 of the attach pass clears it once one does.
+                    missingSince = now,
+                ),
+            )
+            is IdentificationTarget.LibraryFile -> {
+                val file = libraryFile?.takeIf { it.fileId == target.fileId }?.copy(contentKey = target.contentKey) ?: return null
+                val missing = dao.missingIdentities()
+                val taker = IdentityMatcher.atApply(file, missing.map(IdentityAttacher::identity))
+                if (taker == null) {
+                    dao.add(
+                        TrackIdentityEntity(
+                            contentKey = key, durationMs = file.durationMs, recordingMbid = null,
+                            hintVolumeName = file.place.volume, hintRelativePath = file.place.relativePath,
+                            hintDisplayName = file.place.displayName, hintSize = file.size, createdAt = now, missingSince = null,
+                        ),
+                    )
+                } else {
+                    val old = missing.first { it.id == taker.id }
+                    dao.updateAll(
+                        listOf(
+                            old.copy(
+                                contentKey = key, durationMs = taker.durationMs, recordingMbid = Hex.mbidBytes(taker.recordingMbid),
+                                hintVolumeName = file.place.volume, hintRelativePath = file.place.relativePath,
+                                hintDisplayName = file.place.displayName, hintSize = file.size, missingSince = null,
+                            ),
+                        ),
+                    )
+                    taker.id
+                }
+            }
+        }
     }
 
     private suspend fun committed(decisionId: Long, identity: Long): Committed {

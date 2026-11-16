@@ -161,7 +161,10 @@ object IdentityMatcher {
      * [identities] hinted at its place with a length within [DURATION_WINDOW_MS] (the newest first), attached to it;
      * null when the file gets a new identity.
      */
-    fun atApply(file: KeyedFile, identities: List<Identity>): Identity? = TODO("M3 step 16")
+    fun atApply(file: KeyedFile, identities: List<Identity>): Identity? = identities
+        .filter { it.missingSince != null && it.hint == file.place && withinWindow(file.durationMs, it.durationMs) }
+        .maxByOrNull { it.id }
+        ?.following(file)
 
     fun withinWindow(a: Long?, b: Long?): Boolean =
         a != null && b != null && kotlin.math.abs(a - b) <= DURATION_WINDOW_MS

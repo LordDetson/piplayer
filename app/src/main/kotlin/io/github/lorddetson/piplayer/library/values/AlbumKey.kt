@@ -1,6 +1,7 @@
 package io.github.lorddetson.piplayer.library.values
 
 import io.github.lorddetson.piplayer.identification.text.TextNormalizer
+import io.github.lorddetson.piplayer.library.identity.Hex
 
 /**
  * What makes tracks one album (TI §10.1): the release ID, or else the normalized title and album artist within a folder,
@@ -20,7 +21,7 @@ object AlbumKey {
         folder: (String) -> String = ::folderKey,
     ): String? {
         val album = tags.album ?: return null
-        tags.releaseMbid?.let { return "mbid:$it" }
+        tags.releaseMbid?.let { return RELEASE_PREFIX + it }
         return buildString {
             append(keyOf(album, normalize)).append(SEPARATOR)
             tags.albumArtist?.let { append(keyOf(it, normalize)) }
@@ -38,7 +39,21 @@ object AlbumKey {
      * their own values, unless every file ends up with the same release MBID, decided or from its tags ([releases], one
      * per file, null for none); then the key of that release, as if their tags carried it.
      */
-    fun ofGroup(ownKey: String, releases: Collection<String?>): String = TODO("M3 step 16")
+    fun ofGroup(ownKey: String, releases: Collection<String?>): String {
+        // In their usual form, so that a tag's spelling and a decided value of one release agree.
+        var release: String? = null
+        for (each in releases) {
+            val usual = Hex.mbidText(Hex.mbidBytes(each)) ?: return ownKey
+            if (release == null) release = usual else if (usual != release) return ownKey
+        }
+        release ?: return ownKey
+        // A group whose tags carry that release keeps the key they give.
+        if (ownKey.startsWith(RELEASE_PREFIX) && Hex.mbidText(Hex.mbidBytes(ownKey.removePrefix(RELEASE_PREFIX))) == release) return ownKey
+        return RELEASE_PREFIX + release
+    }
+
+    /** What starts the key of an album grouped by its release ID. */
+    private const val RELEASE_PREFIX = "mbid:"
 
     /** The normalized text; a name of punctuation alone, such as `+`, normalizes to nothing and keeps itself. */
     private fun keyOf(text: String, normalize: (String) -> String) = normalize(text).ifEmpty { text.lowercase() }

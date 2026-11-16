@@ -33,6 +33,7 @@ class TextForms(
     private val kept = HashMap<String, TextForm>()
     private val sortKeys = HashMap<String, SortKey>()
     private val albumFolders = HashMap<String, String>()
+    private val albumPlaces = HashMap<String, String>()
 
     /** The forms of a text that other files of the batch may share, such as an album or an artist. */
     fun shared(text: String): TextForm = kept.getOrPut(text) { TextForm(text, normalizer(text), this) }
@@ -51,6 +52,9 @@ class TextForms(
      * it took a third of resolving a first sync.
      */
     fun albumFolder(relativePath: String): String = albumFolders.getOrPut(relativePath) { folders(relativePath) }
+
+    /** The album folder of [relativePath] in its own spelling (AlbumKey.albumFolder), derived once per folder of the batch. */
+    fun albumPlace(relativePath: String): String = albumPlaces.getOrPut(relativePath) { AlbumKey.albumFolder(relativePath) }
 
     companion object {
         /** The search text of the given fields, missing ones left out, as `SearchText.of` gives it. */

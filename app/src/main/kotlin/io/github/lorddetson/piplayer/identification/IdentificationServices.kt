@@ -17,6 +17,7 @@ import io.github.lorddetson.piplayer.identification.provider.ProviderStatusStore
 import io.github.lorddetson.piplayer.identification.provider.identificationProviders
 import io.github.lorddetson.piplayer.identification.release.FolderReleaseHint
 import io.github.lorddetson.piplayer.identification.release.InMemoryReleaseCache
+import io.github.lorddetson.piplayer.identification.release.LibraryFolderReleaseHint
 import io.github.lorddetson.piplayer.identification.release.NoFolderReleaseHint
 import io.github.lorddetson.piplayer.identification.release.ReleaseCache
 import io.github.lorddetson.piplayer.identification.release.ReleaseChooser
@@ -227,8 +228,8 @@ class IdentificationServices(
          * The app's services: the real hosts, the build's [acoustIdApiKey] (empty for none), and the user's persisted
          * opt-in as the gate (TI §9), closed until the user enables online lookups. The type keeps any other gate, such
          * as an open one of a test, out of the app's services. The release cache and the failure entries live in the
-         * library database that [library] reaches (TI §10.1), which nothing opens before a cache is used; the folder
-         * hint is bound here too (none until M3 step 16 reads the decisions).
+         * library database that [library] reaches (TI §10.1), which nothing opens before a cache is used; so does the
+         * folder hint, which reads the decided and tagged releases of the library (TI §4.2 key 1).
          */
         fun production(
             userAgent: String,
@@ -246,7 +247,7 @@ class IdentificationServices(
                 acoustIdApiKey = acoustIdApiKey,
                 releaseCache = RoomReleaseCache(library, clock),
                 failureCache = RoomFailureCache(library),
-                folderReleaseHint = NoFolderReleaseHint,
+                folderReleaseHint = LibraryFolderReleaseHint(library),
             )
         }
 

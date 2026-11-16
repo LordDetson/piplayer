@@ -103,7 +103,16 @@ object MergedValues {
         val artistsForSearch = if (artistDecided || !tagValues?.artists.isNullOrEmpty()) artists.joinToString(" ").ifEmpty { null } else artist
         val albumArtist = pick(DecidedField.ALBUM_ARTIST) { if (read) tagValues?.albumArtist else indexValues?.albumArtist.present() }
         val compilation = if (DecidedField.COMPILATION in decided) decided[DecidedField.COMPILATION]?.value == "1" else tagValues?.compilation == true
-        val albumTags = album?.let { TrackTags(album = it, albumArtist = albumArtist, releaseMbid = tagValues?.releaseMbid, compilation = compilation) }
+        // The album key comes from the file's own values, never from decided ones (docs/library.md §6.2): the display
+        // writer settles a group whose files all end up with one release MBID. A decided empty release hides the tags'.
+        val decidedRelease = DecidedField.RELEASE_MBID in decided
+        val release = if (decidedRelease) decided[DecidedField.RELEASE_MBID]?.value else tagValues?.releaseMbid
+        val normalize = { text: String -> forms.shared(text).normalized }
+        val ownAlbumKey = ownAlbum(index, tags, read)?.let { AlbumKey.of(it, volume, relativePath, normalize, forms::albumFolder) }
+        // A file without an album of its own takes its key from its decided values.
+        val albumKey = ownAlbumKey ?: album?.let {
+            AlbumKey.of(TrackTags(album = it, albumArtist = albumArtist, releaseMbid = release, compilation = compilation), volume, relativePath, normalize, forms::albumFolder)
+        }
         val (fileDisc, fileTrack) = if (read) tagValues?.discNumber to tagValues?.trackNumber else splitTrackNumber(indexValues?.trackNumber)
         val disc = if (DecidedField.DISC_NUMBER in decided) decided[DecidedField.DISC_NUMBER]?.value?.toIntOrNull() else fileDisc
         val track = if (DecidedField.TRACK_NUMBER in decided) decided[DecidedField.TRACK_NUMBER]?.value?.toIntOrNull() else fileTrack
@@ -137,7 +146,7 @@ object MergedValues {
         val artistForm = artist?.let(forms::shared)
         val albumForm = album?.let(forms::shared)
         return DisplayValues(
-            albumKey = albumTags?.let { AlbumKey.of(it, volume, relativePath, { text -> forms.shared(text).normalized }, forms::albumFolder) },
+            albumKey = albumKey,
             albumArtist = albumArtist,
             compilation = compilation,
             year = year,
@@ -191,7 +200,19 @@ object MergedValues {
             },
             badgeState = DecisionResolver.badgeOf(decided),
             missingInfoDecision = overrides.missingInfo,
+            albumGroup = ownAlbumKey?.let { AlbumGroupFacts(release, decidedRelease, volume, forms.albumPlace(relativePath)) },
         )
+    }
+
+    /**
+     * The album part of the file's own values (docs/library.md §6.2): its tags once [read] (the album, album artist,
+     * release MBID and compilation flag), the index's album and album artist until then; null without an album. Its
+     * album key is the key of the file's album group.
+     */
+    fun ownAlbum(index: IndexValues?, tags: TrackTags?, read: Boolean): TrackTags? = if (read) {
+        tags?.album?.let { TrackTags(album = it, albumArtist = tags.albumArtist, releaseMbid = tags.releaseMbid, compilation = tags.compilation) }
+    } else {
+        index?.album.present()?.let { TrackTags(album = it, albumArtist = index?.albumArtist.present()) }
     }
 
     /**
