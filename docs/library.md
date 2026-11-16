@@ -979,29 +979,44 @@ Covers for controllers outside PiPlayer (part B, §13.8): a content provider tha
 
 ### 13.1 Sources and their order
 
-- A song's cover is the first of:
+- A song's cover is the first of (M3 adds steps 3 and 6, TI §5.2, §7.1):
   1. the song's own cover (§13.2);
   2. its album's own cover;
-  3. the picture embedded in the file, read on demand by Media3's extractors, the reader playback uses (§13.3): a front
+  3. its decided cover, saved in PiPlayer (TI §5.2): the cover of the cover picker (a user edit, level 1) or of an
+     identification (level 2), the newest decision that is not undone winning, as for every decided field (TI §7.1).
+     It is skipped when its file is gone (after a restore) or cut short, and when the decided cover is empty (no cover
+     was saved with the decision), so an empty decided cover never hides the file's own picture;
+  4. the picture embedded in the file, read on demand by Media3's extractors, the reader playback uses (§13.3): a front
      cover wins over other pictures, otherwise the last picture counts (playback.md §3.4). It is skipped when the tag pass
      found no picture in the file (`embedded_cover_present` is 0); an unread file is tried;
-  4. the system thumbnail of the file (`ContentResolver.loadThumbnail` on its media index URI), which Android takes from
+  5. the system thumbnail of the file (`ContentResolver.loadThumbnail` on its media index URI), which Android takes from
      the embedded picture or from an image in the file's folder;
-  5. the placeholder (§13.4).
-- An album's cover is its own cover, otherwise the embedded picture or system thumbnail of one of its songs: the first by
-  disc, track and file name among the songs whose picture the tag pass found, then among the unread ones, then among the
-  rest. A song's own cover stands for that song only, never for its album. Hidden files (§3.5) may stand for an album too:
-  their pictures are the album's all the same. An artist's albums, though, are exactly those of the artist page, with
-  its rule for hidden files.
-- An artist's cover is the cover of one of their albums, taken in the artist page's order (the album's year, then its
-  title, over all its songs, so that a compilation sorts by its own year): the first
-  with an own cover, otherwise the first with an embedded picture, otherwise the first. An artist without albums shows
-  the embedded picture or system thumbnail of their first song.
+  6. the lazy Cover Art Archive cover: only while online lookups are on (TI §9) and only for a song whose release MBID is
+     known, the decided one when the MusicBrainz IDs are decided (a decided field without a release counts as none),
+     otherwise the tags' one of a read file; an ID that is not an MBID gives none. It is the release's front image,
+     otherwise the release group's when its ID is known too (TI §5.2: the flags are not known, so the release is asked
+     first). It is tried only when no step before it has a picture, so nothing local is ever replaced by it;
+  7. the placeholder (§13.4).
+- An album's cover is the first of: its own cover; the decided cover of one of its songs, the first by disc, track and
+  file name among the songs with a decided cover that is not empty; the embedded picture or system thumbnail of one of
+  its songs: the first by disc, track and file name among the songs whose picture the tag pass found, then among the
+  unread ones, then among the rest; the lazy Cover Art Archive cover of the album's release, the release of its first
+  song by disc, track and file name that has one (decided or from the tags, as for a song), only while online lookups
+  are on; the placeholder. A song's own cover stands for that song only, never for its album. Hidden files (§3.5) may
+  stand for an album too: their pictures, decided covers and releases are the album's all the same. An artist's albums,
+  though, are exactly those of the artist page, with its rule for hidden files.
+- An artist's cover is the cover of one of their albums by the album rule above, taken in the artist page's order (the
+  album's year, then its title, over all its songs, so that a compilation sorts by its own year): the first with an own
+  cover, otherwise the first with a decided cover, otherwise the first with an embedded picture, otherwise, while online
+  lookups are on, the first with a release MBID, otherwise the first. An artist without albums shows the cover of their
+  first song without its own covers: its decided cover, its embedded picture or system thumbnail, then its lazy Cover
+  Art Archive cover.
 - Media3 reads the picture rather than `MediaMetadataRetriever`, because the platform's retriever takes the first picture
   of an MP3 even when it is a back cover, and because what lists show then matches what playback reads. The extractors
   run in Java in PiPlayer's process: a malformed file fails with an exception, not a crash.
 - A picture in the album folder (`cover.jpg`) through a folder grant comes with folder access in v1.x; until then folder
-  images reach PiPlayer only through the system thumbnail. Covers from Cover Art Archive come with identification (M3).
+  images reach PiPlayer only through the system thumbnail. Covers from Cover Art Archive come with identification (M3):
+  saved with a decision (step 3) or loaded lazily (step 6, §13.3).
 - A file opened from another app is not in the library: Now Playing shows the picture the player read from it, as before
   (playback.md §5.2).
 
@@ -1049,7 +1064,9 @@ Covers for controllers outside PiPlayer (part B, §13.8): a content provider tha
   pass empty it too (not every batch, so that scrolling back during a pass finds its covers), and so does an attach pass
   that wrote identities, since an own cover follows its identity to another file (§8.2), and a change of the hidden
   files, which decide the albums of an artist (§13.1) and raise no revision; views on screen then keep what they show
-  until they are drawn anew.
+  until they are drawn anew. A run of the decision mirror that changed decided values (TI §7.1) and a change of online
+  lookups (on or off) empty it as well, and the covers on screen load again, as after a change of own covers: a
+  decision may bring a saved cover or a release, and the gate decides the lazy Cover Art Archive step (M3).
 - A disk cache keeps the pictures of steps up to 768 px as JPEG at quality 90, and an empty file for an embedded picture
   that a file does not have, in `cache/covers/`. A missing thumbnail is not remembered on disk: an image put into the
   folder later changes neither the file's size nor its time, and a passing error of the media index must not stick. A
@@ -1059,6 +1076,23 @@ Covers for controllers outside PiPlayer (part B, §13.8): a content provider tha
   Now Playing's size is decoded from its source each time.
 - Own covers are read from `user.db` once and kept in memory; a change replaces them and raises a version that the
   views watch.
+- A saved cover (§13.1 step 3) is decoded from its file in `no_backup/saved_covers/` (TI §5.2); its key in the disk
+  cache is the file's name, the SHA-256 of its bytes, so a row ID used again for other bytes never finds an old picture.
+- The lazy Cover Art Archive step (§13.1 step 6, TI §5.2) loads through the app's one Cover Art Archive client, so its
+  online gate on every request and redirect hop, its limiter of one request a second and its failure entries apply: a
+  live entry (a 404 for 7 days, a 503 for 5 minutes and up) answers without a request, and a call the gate, a missing
+  network or the provider's stop blocks sends nothing. Steps up to 256 px load `front-250` (lists and tiles), up to
+  512 px `front-500`, larger ones `front-1200`, each with the fallbacks of TI §5.2. The step is in a cover's plan only
+  while online lookups are on, and the load checks the gate again before it asks the client. A found image is decoded
+  for its step and kept in both caches under the step's key (`caa/<release>/<release group>`); a cover Cover Art
+  Archive does not have is remembered in memory only, as the failure entry already keeps its 404, and a busy or
+  blocked answer is not remembered at all.
+- A Cover Art Archive load holds none of the four places of the loader: the local steps of a cover run in a place, and
+  the Cover Art Archive step runs after the place is given back, so the covers of other rows load from the device while
+  it waits for its turn at the limiter. A row that scrolls away cancels it like any load: a wait at the limiter ends
+  without using up a turn, so cancelled rows send nothing, and a request in flight is cancelled. Turning online
+  lookups off cancels every Cover Art Archive load waiting or in flight at once; those loads give no cover and store
+  nothing, and no further request is sent.
 
 ### 13.4 Placeholder
 
@@ -1082,10 +1116,12 @@ Covers for controllers outside PiPlayer (part B, §13.8): a content provider tha
 ### 13.6 The session
 
 - The session still shows the picture the player reads from the stream (playback.md §2.6). When the current song has an
-  own cover (its own or its album's), that cover replaces it, as JPEG bytes loaded for 1024 px (a copy is at most 1500 px
-  anyway); when the tag pass found no picture in the file, the system thumbnail loaded for 512 px stands in, so that a
-  folder image reaches the notification too. A file opened from another app keeps the stream's picture. The service
-  looks again at each change of the current item and of own covers (`SessionCovers`).
+  own cover (its own or its album's) or a decided cover (§13.1 step 3, M3), that cover replaces it, as JPEG bytes
+  loaded for 1024 px (a copy is at most 1500 px anyway); when the tag pass found no picture in the file, the system
+  thumbnail loaded for 512 px stands in, so that a folder image reaches the notification too, and without one the lazy
+  Cover Art Archive cover of §13.1 step 6 does, at that size. A file opened from another app keeps the stream's
+  picture. The service looks again at each change of the current item, of own covers, of decided values and of online
+  lookups (`SessionCovers`).
 - Since part B the playing library song's metadata also carries its cover URI (§13.8.6) next to the picture. Items of
   the queue carry no artwork.
 
@@ -1095,7 +1131,12 @@ JVM tests: the order of §13.1 for songs, albums and artists, with and without o
 size steps and the decode target of an oblong picture; the disk cache's limit, its least-recently-used order, its empty
 markers and a reopened cache; the memory cache's limit by weight; the loader: the first source with a picture wins, a
 disk or memory hit reads no source, a source without a picture is remembered, a change of own covers loads again, a
-cancelled load stores nothing; the placeholder's colors: the same name the same color, contrast in both themes, light
+cancelled load stores nothing; in M3 the decided and the Cover Art Archive steps of songs, albums and artists, the album
+and artist rule with decided covers and releases, no Cover Art Archive step while online lookups are off, and on the fake
+Cover Art Archive through the real client: 50 album rows keep at least 1 s between requests, a Cover Art Archive load
+holds no place of the loader, rows cancelled while they wait send nothing, a live failure entry sends nothing, a
+missing cover is not remembered on disk, and turning online lookups off during the loads cancels them, sends nothing more
+and stores nothing; decisions and online lookups empty the memory; the placeholder's colors: the same name the same color, contrast in both themes, light
 and dark lightness, spread hues.
 
 Instrumented tests (on GitHub Actions, API 30 and 36):
@@ -1105,7 +1146,11 @@ Instrumented tests (on GitHub Actions, API 30 and 36):
   follows its identity to a moved file, a copy without a reference is cleaned up, an identity with a cover is kept.
 - The sources on the cover fixtures: the embedded picture of MP3, FLAC, Ogg Vorbis, Opus and MP4, the front cover
   before a back cover, no picture in a file without one, the system thumbnail of a file in the media index, a picture
-  decoded at its step and not at full size.
+  decoded at its step and not at full size; in M3 a saved cover decoded from its file, none when its file is gone, and
+  a Cover Art Archive cover from the fake Cover Art Archive.
+- The library's facts in M3: a file's decided cover and release (decided before the tags, a decided field without a
+  release as none), an album's decided cover and release by disc, track and file name, and which of an artist's albums
+  have a decided cover or a release.
 - On the screen: a song row, an album row and tile, and the album page show an own album cover; a song's own cover
   wins over its album's; the placeholder without a cover; Now Playing and the mini player show an own cover.
 - Through the service: an own cover replaces the stream's picture in the session, and the stream's picture is kept
@@ -1116,7 +1161,10 @@ Instrumented tests (on GitHub Actions, API 30 and 36):
 Android Auto, Android Automotive, Wear and the system's media browsers load the covers of browse results themselves, by
 URI. Android Auto takes `content://` and `android.resource://` URIs only and asks for no bitmaps in browse results:
 many bitmaps can exceed the binder's 1 MB (playback.md §10.1). PiPlayer serves its covers through a read-only content
-provider of its own, `CoverProvider`, with the sources, their order and the disk cache of part A.
+provider of its own, `CoverProvider`, with the sources, their order and the disk cache of part A: saved covers and,
+while online lookups are on, the lazy Cover Art Archive covers too (M3), the latter within the load's time limit of
+§13.8.4 and through the one limiter, so a car that pages through many albums asks Cover Art Archive no faster than
+once a second.
 
 #### 13.8.1 Which items have a cover URI
 
@@ -1137,8 +1185,8 @@ provider of its own, `CoverProvider`, with the sources, their order and the disk
     they are long;
   - the version: four random characters (`0-9`, `a-z`) drawn when the process starts, then the cover generation in base
     36, at least four digits. The generation rises each time the loader's memory is emptied (§13.3): own covers
-    changed, a sync changed the library, a run of the tag pass ended, an attach pass wrote identities, or the hidden
-    files changed. A new generation keeps the URI's length, which browse items weigh, so that the borders between
+    changed, a sync changed the library, a run of the tag pass ended, an attach pass wrote identities, the hidden
+    files changed, a decision changed decided values or online lookups were turned on or off (M3). A new generation keeps the URI's length, which browse items weigh, so that the borders between
     buckets do not move under a controller that pages through a node (playback.md §10.2).
 - So a URI changes whenever the cover it names may have changed, and controllers that cache pictures by URI load it
   again. The tree's kept search results (playback.md §10.5) are built anew at a new generation, so that they never
@@ -1882,12 +1930,21 @@ are in playback.md §9.1. The owner left the open choices to the recommendations
 
 ### 18.3 Cover
 
-- The source is the one the loader shows (§13.1), tried in its order: the song's own cover, the album's own cover, the
-  picture embedded in the file (front cover first, as Media3 reads it), the system thumbnail, or "None" when only the
-  placeholder shows.
-- The size: for an own cover the width and height stored with it (§13.2); for an embedded picture the size of the picture
-  read again from the file (only its header is decoded) and its size in bytes from the tag pass. Decision: the system
-  thumbnail has no size row, because Android hands out only a scaled copy whose size says nothing about the original.
+- The source is the one the loader shows (§13.1). The details take the song's steps from the loader's own plan
+  (`CoverPlan`), never from a copy of the order, and try them in that order, each as the loader does: the song's own
+  cover and the album's own cover while their copy exists, the decided cover, shown as "Saved in PiPlayer", while its
+  file is there and whole (TI §5.2), the picture embedded in the file (front cover first, as Media3 reads it), the system
+  thumbnail, the lazy Cover Art Archive cover, shown as "Cover Art Archive", or "None" when only the placeholder shows
+  (M3).
+- The Cover Art Archive step is in the plan only while online lookups are on, as in the loader. The details ask the
+  loader for that step alone at 250 px: from its caches when they hold it, otherwise through the Cover Art Archive
+  client, with its gate, limiter and failure entries (§13.3), so opening the details sends at most the request the
+  header's own cover would send, and nothing while online lookups are off.
+- The size: for an own cover the width and height stored with it (§13.2); for a saved cover those of its `saved_cover`
+  row, read from the image header when it was saved (none for WebP, TI §10.2); for an embedded picture the size of the
+  picture read again from the file (only its header is decoded) and its size in bytes from the tag pass. Decision: the
+  system thumbnail and the Cover Art Archive cover have no size row, because the details see only a scaled copy whose
+  size says nothing about the original.
 - `embedded_cover_width` and `embedded_cover_height` stay unwritten: the details read the picture when they are opened,
   and the tag pass and the first sync do no more work for it.
 
@@ -1928,8 +1985,9 @@ formats of lengths; the screen's reads: an opened file read once per opening als
 library read again when shown again, a failed read keeping the values shown or saying so, a song that left the library.
 
 Instrumented tests on the emulators: the details read from the real databases for an unread file, a read one with an
-identity, a favorite, plays and date added, and each cover source (own song and album covers, embedded, thumbnail, none,
-with a probe for the pictures); a file not in the library; an opened file read through the real `:tagger` (technical data,
+identity, a favorite, plays and date added, and each cover source (own song and album covers, saved in PiPlayer,
+embedded, thumbnail, Cover Art Archive, none, with a probe for the pictures), the source always the one of the first
+step of the loader's plan that has a picture, and no Cover Art Archive source while online lookups are off; a file not in the library; an opened file read through the real `:tagger` (technical data,
 tags, the embedded picture's size), and one that can no longer be opened (the provider's name or the URI's last
 segment, "The file could not be read"); the counts of failed reads used only inside the library's access; on the screen, "Details" from the song menu of the Songs tab, an album page, a
 playlist page, a queue row and Now Playing's menu, a MusicBrainz row opening its page with `ACTION_VIEW`, a long press
