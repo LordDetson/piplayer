@@ -111,13 +111,15 @@ The data model it implements is sketched in track-identification.md §10 (TI bel
   keeps the order it is given.
 - The screen shows "Loading" until the library is ready, so a first launch never shows "No songs" while the first
   sync runs. It reads the list from the library when it starts and again after every sync that changed files and, since
-  M3, after every run of the decision mirror that changed decided values (§3.5, TI §7.1); it no longer watches the media
+  M3, after every run of the decision mirror that changed decided values (§3.5, TI §7.1; a run for the tag pass's
+  batches waits for the sort after the pass); it no longer watches the media
   index itself. Before the list is first shown, the screen reads its first 50 songs on their
   own and shows them while it reads the whole list, which takes a few hundred milliseconds for 20 000 songs; the
   rows keep their places when the rest arrives.
 - The list held in memory stays shared by the screen and the playback service (playback.md §2.1, §2.3); the service
   reads the library when it runs without the screen. A kept list is not handed out once a sync has changed the
-  library since it was read, or since M3 a decision has changed decided values (§3.5), so a tap never plays a list the
+  library since it was read, or since M3 a decision has changed decided values (§3.5, except a run for the tag pass's
+  batches, which counts as a batch), so a tap never plays a list the
   screen no longer shows. A read while the library is not
   ready yet (the service restoring a saved queue during the first sync) waits for it, up to 30 s. Without the audio
   permission the list is empty, although the database keeps its rows.
@@ -271,8 +273,17 @@ The data model it implements is sketched in track-identification.md §10 (TI bel
   the order and under the scroll thumb's letters those values give. A list kept for the playback service is not handed
   out after such a run either, so the service reads it again at its next request. Decision: a run that changed nothing
   (the same values again, a run at start-up with nothing new) raises no version and reloads nothing, since a read of
-  20 000 songs is not free. A reload follows the rules of every read: the read that started later is kept (§6.4), and
-  while the tag pass runs a song list keeps its order and changes the values in place (§5.4).
+  20 000 songs is not free. A reload follows the rules of every read: of two reads the one that started later is kept
+  (§6.4), and while the tag pass runs a song list keeps its order and changes the values in place (§5.4).
+- Decision: while the tag pass runs, a run of the decision mirror made only for the files its batches read (a copy of an
+  identified file appears, or a rebuilt library is read again with many decisions) reloads none of these lists, so
+  nothing is grouped again under the user's finger and the pass does not compete with a read of 20 000 songs for each
+  batch. Its values count as a change of rows by the pass: the song lists take them at the sort after the pass (§5.4),
+  the tabs and their pages' headers at the first return after it (§6.5), as they take the batches' own values. A list
+  kept for the playback service is still handed out after such a run, as after a batch. Smart lists and playlist pages,
+  which read after every batch anyway, read again at once. A decision of the user during the pass (Apply, Undo, an edit,
+  a revert), and a run of the mirror that also took anything else, reloads at once: the song lists keep their order and
+  change the values in place (§5.4), and the tabs group again, since the user made the change.
 
 ### 3.6 Settings screen and theme
 
@@ -649,7 +660,10 @@ keeps playing meanwhile, and the crash leaves a native crash report of `:tagger`
   list again. The screens and the service share one kept list per request without its start, so that a tap plays
   exactly what is visible: each screen holds the list it shows and the service the list it plays, and besides those the
   last six lists read are kept. Of two reads of one list, the one that started later is kept, also when an older one
-  ends after it, so the service never gets a list older than the screen's. A batch of the tag pass changes the rows of
+  ends after it, so the service never gets a list older than the screen's. The exception is a fresh read (the sort after
+  a pass, or a new list), which ends the order that a newer read may have been merged against and so replaces that one
+  too, also when it started earlier; if a sync, a change of the hidden files or a decision changed the list after the
+  fresh read started, the kept list is not handed out (§1.4), so the service reads it again. A batch of the tag pass changes the rows of
   every kept list in place, and every kept list follows the rules of §5.4.
 - A saved queue of an album or an artist whose key names nothing any more when it is restored (the tag pass has found a
   release ID or another album artist since) follows its saved song to that song's album or first artist, and the saved
@@ -664,8 +678,9 @@ keeps playing meanwhile, and the crash leaves a native crash report of `:tagger`
   found, with the way back.
 - While the tag pass runs, the lists of albums, artists and folders are not grouped again under the user's finger:
   they are read when the screen first starts, after a sync that changed the library, after a run of the decision mirror
-  that changed decided values (§3.5), after a change of the hidden files, the order or the search, and once more at the first return after a pass that changed rows; a return or a switch of
-  tabs reads nothing else. The songs on pages change in place as in §5.4.
+  that changed decided values (§3.5; not one made only for a pass's batches, whose values wait like the batches'), after
+  a change of the hidden files, the order or the search, and once more at the first return after a pass that changed
+  rows; a return or a switch of tabs reads nothing else. The songs on pages change in place as in §5.4.
 
 ### 6.6 Checks
 
@@ -2207,7 +2222,7 @@ smart lists (§17) in the controller tree (playback.md §10). The owner left the
   the order kept for genre pages, without a search.
 - With no music the tab shows the empty states of §14.1. The tab is read as the Artists tab is (§6.5): when it first
   starts, after a sync that changed the library (also one under another collation), after a run of the decision mirror
-  that changed decided values (§3.5), after a change of the hidden files,
+  that changed decided values (§3.5; not one made only for a pass's batches), after a change of the hidden files,
   the order or the search, and once more at the first return after a pass of the tag pass that changed rows; never for
   the batches of a pass, so that nothing is grouped again under the user's finger. A genre page's header follows the
   same rule, and its songs change in place as on every page (§5.4).
