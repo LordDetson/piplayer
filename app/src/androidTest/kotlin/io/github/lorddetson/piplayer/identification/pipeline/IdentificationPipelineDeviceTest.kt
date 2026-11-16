@@ -101,12 +101,17 @@ class IdentificationPipelineDeviceTest {
         val first = pipeline(services()).run(FileRef.Opened(uri)) { progress += it }
 
         val found = first.outcome as IdentificationOutcome.Found
-        assertThat(found.band).describedAs("stages %s, duration %s ms", first.stages, first.durationMs).isEqualTo(Band.HIGH)
+        val fingerprintStage = first.stages.firstOrNull { it.stage == PipelineStage.FINGERPRINT }?.result
+        assertThat(fingerprintStage).describedAs("duration %s ms", first.durationMs).isEqualTo(StageResult.Ran(1))
+        assertThat(found.band).isEqualTo(Band.HIGH)
         assertThat(found.choice.suggested!!.release.id).isEqualTo(FakeMusicBrainz.HARBOR_RELEASE)
         assertThat(found.choice.suggested.source).isEqualTo(EditionSource.RANKING)
         assertThat(found.acoustIdTrackId).isEqualTo(ID_ONLY_TRACK)
         assertThat(first.fingerprint).isEqualTo(FingerprintSource.COMPUTED)
-        assertThat(first.durationMs).isBetween(1_900L, 2_200L)
+        // A CBR MP3 without a frame-count header: its length is walked before the lookup (TI §3.1).
+        assertThat(first.lengthWalked).isTrue()
+        val seconds = (first.durationMs!! + 500) / 1_000
+        assertThat(seconds).isGreaterThan(3)
         assertThat(progress).contains(
             PipelineProgress.Decoding,
             PipelineProgress.ReleasePages(FakeMusicBrainz.HARBOR_RECORDING, 1),
@@ -118,7 +123,7 @@ class IdentificationPipelineDeviceTest {
         assertThat(row.decoderPath).startsWith("media3-")
         assertThat(sentFingerprints).hasSize(1)
         assertThat(sentFingerprints.single()).startsWith("AQ")
-        assertThat(log.entries.single { it.path.startsWith("/v2/") }.body).contains("duration=2&")
+        assertThat(log.entries.single { it.path.startsWith("/v2/") }.body).contains("duration=$seconds&")
         assertThat(log.entries.toString()).doesNotContain(KEY)
 
         progress.clear()
@@ -145,7 +150,8 @@ class IdentificationPipelineDeviceTest {
 
     private companion object {
         const val KEY = "testKey123"
-        const val FIXTURE = "decoding/mp3-44100-stereo.mp3"
+        /** Long enough for Chromaprint to give items; 2 s of audio give none. */
+        const val FIXTURE = "playback/seek-mp3-cbr-no-header.mp3"
         const val ID_ONLY_TRACK = "6f1c1f4e-3b0d-4c8e-9a52-000000000009"
     }
 }
