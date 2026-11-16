@@ -264,7 +264,7 @@ class SessionPlayer(private val player: ExoPlayer) : ForwardingPlayer(player) {
         if (item.artworkData != null || item.artworkUri != null) return item
         val own = artworks[current.mediaId]
         // A library song shows only the cover the resolver chose (TI §7.1); an opened file keeps the stream's picture.
-        val picture = own ?: stream.artworkData.takeIf { QueueIds.fileId(current.mediaId) == null }
+        val picture = own ?: stream.artworkData.takeIf { QueueIds.fileId(current.mediaId) == null && current.mediaId.isEmpty() }
         // The URI names the picture shown too: Media3's bitmap cache matches a URI before the data, so one URI for two
         // pictures would keep the first one (docs/library.md §13.8.6).
         val uri = artworkUriOf(current.mediaId, picture)
