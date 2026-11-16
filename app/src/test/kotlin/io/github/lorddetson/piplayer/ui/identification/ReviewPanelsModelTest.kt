@@ -23,6 +23,7 @@ import java.time.Instant
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceUntilIdle
@@ -293,6 +294,131 @@ class ReviewPanelsModelTest {
     }
 
     @Test
+    fun `a track of a looked-up release keeps its disc when the recording is on two discs at the same place`() = runTest {
+        val first = ReviewFixtures.harborRelease.media.first()
+        val twoDiscs = ReviewFixtures.harborRelease.copy(media = listOf(first.copy(position = 1), first.copy(position = 2, title = "Bonus")))
+        val model = started(backend({ lookupAnswer = RefLookup.Release(twoDiscs) }))
+        model.openSearch()
+        model.searchText("https://musicbrainz.org/release/${twoDiscs.id}")
+        model.search()
+        advanceUntilIdle()
+        val results = model.panel<Panel.Search>().results!!
+        val second = results.indexOfFirst { it.at == io.github.lorddetson.piplayer.identification.release.TrackPosition(2, 3) }
+
+        model.chooseResult(second)
+        advanceUntilIdle()
+
+        val details = model.card.edition!!.details
+        assertThat(details.at).isEqualTo(io.github.lorddetson.piplayer.identification.release.TrackPosition(2, 3))
+        assertThat(details.discSubtitle).isEqualTo("Bonus")
+    }
+
+    @Test
+    fun `a result's edition that comes after Try again leaves the new run alone`() = runTest {
+        val recording: RecordingDto = MusicBrainzJson.decodeFromString(FakeMusicBrainz.HARBOR_RECORDING_LOOKUP.text())
+        val backend = FakeReviewBackend(result(found(ReviewFixtures.match(score = 0.3)))).apply {
+            lookupAnswer = RefLookup.Recording(recording)
+            editions[FakeMusicBrainz.HARBOR_RECORDING] = ReviewFixtures.harborEdition
+            editionGate = CompletableDeferred()
+        }
+        val model = started(backend)
+        model.openSearch()
+        model.searchText(FakeMusicBrainz.HARBOR_RECORDING)
+        model.search()
+        advanceUntilIdle()
+        model.chooseResult(0)
+        advanceUntilIdle()
+        model.closePanel()
+        model.retry()
+        advanceUntilIdle()
+
+        backend.editionGate!!.complete(Unit)
+        advanceUntilIdle()
+        backend.editionGate = null
+        model.openSearch()
+        model.searchText(FakeMusicBrainz.HARBOR_RECORDING)
+        model.search()
+        advanceUntilIdle()
+        model.chooseResult(0)
+        advanceUntilIdle()
+
+        // The new run loads the edition itself rather than taking the old run's.
+        assertThat(backend.calls.count { it == "edition ${FakeMusicBrainz.HARBOR_RECORDING}" }).isEqualTo(2)
+        assertThat(model.card.edition).isEqualTo(ReviewFixtures.harborEdition)
+    }
+
+    @Test
+    fun `an edition whose tracklist comes after Close is not remembered`() = runTest {
+        val live = ReviewFixtures.match(ReviewFixtures.LIVE_RECORDING, score = 0.62)
+        val backend = FakeReviewBackend(result(found(ReviewFixtures.match(), live))).apply {
+            editionLists[ReviewFixtures.harborRelease.id] = ReviewFixtures.editionList()
+            openedEditions[ReviewFixtures.cdRelease.id] = ReviewFixtures.cdEdition
+            editions[ReviewFixtures.LIVE_RECORDING] = null
+            openGate = CompletableDeferred()
+        }
+        val model = started(backend)
+        model.openEditions()
+        advanceUntilIdle()
+        model.chooseEdition(1)
+        advanceUntilIdle()
+        model.closePanel()
+        backend.openGate!!.complete(Unit)
+        advanceUntilIdle()
+
+        model.choose(1)
+        advanceUntilIdle()
+        model.choose(0)
+        advanceUntilIdle()
+
+        assertThat(model.card.edition).isEqualTo(ReviewFixtures.harborEdition)
+    }
+
+    @Test
+    fun `an embedded read that failed is read again, and a picker reopened while loading loads nothing twice`() = runTest {
+        val picture = EmbeddedImage(ByteArray(4), PictureSize(600, 600))
+        val backend = backend({
+            embeddedFails = true
+            indexAnswer = CaaResult.Found(index)
+        })
+        val model = started(backend)
+        model.openCovers()
+        advanceUntilIdle()
+        assertThat(model.panel<Panel.Covers>().embedded).isEmpty()
+
+        backend.embeddedFails = false
+        backend.embedded = listOf(picture)
+        model.closePanel()
+        model.openCovers()
+        model.closePanel()
+        model.openCovers()
+        advanceUntilIdle()
+
+        assertThat(model.panel<Panel.Covers>().embedded).containsExactly(picture)
+        assertThat(model.panel<Panel.Covers>().images).isEqualTo(index.images)
+        assertThat(backend.calls.count { it.startsWith("embedded") }).isEqualTo(2)
+        assertThat(backend.calls.count { it.startsWith("index") }).isEqualTo(1)
+    }
+
+    @Test
+    fun `a thumbnail asked for again while it loads is fetched once`() = runTest {
+        val thumb = ReviewFixtures.indexCover(PictureSize(250, 250))
+        val backend = backend({ thumbnails["1"] = thumb })
+        val model = started(backend)
+        val scope = CoroutineScope(StandardTestDispatcher(testScheduler))
+        backend.imageGate = CompletableDeferred()
+
+        val first = scope.async { model.thumbnail(index.images[0]) }
+        val second = scope.async { model.thumbnail(index.images[0]) }
+        advanceUntilIdle()
+        backend.imageGate!!.complete(Unit)
+        advanceUntilIdle()
+
+        assertThat(first.await()).isSameAs(thumb)
+        assertThat(second.await()).isSameAs(thumb)
+        assertThat(backend.calls.filter { it.startsWith("image") }).containsExactly("image 1 250")
+    }
+
+    @Test
     fun `an unknown ID, an empty search and a failed one say so`() = runTest {
         val backend = backend()
         val model = started(backend)
@@ -487,6 +613,22 @@ class ReviewPanelsModelTest {
         // The other lines keep their ticks, and fields the user did not change are no edits.
         assertThat(model.card.lines.single { it.field == ProtectedField.ALBUM_ARTIST }.ticked).isFalse()
         assertThat(model.card.lines.filter { it.edited }.map { it.field }).containsExactly(ProtectedField.TITLE)
+    }
+
+    @Test
+    fun `a user line the user unticked stays unticked when another field is saved`() = runTest {
+        val model = started(backend())
+        model.openEditor()
+        model.editEntry(EditorEntry(ProtectedField.TITLE, "Mine"))
+        model.saveEdits()
+        model.toggle(ProtectedField.TITLE)
+
+        model.openEditor()
+        model.editEntry(EditorEntry(ProtectedField.ALBUM, "Other album"))
+        model.saveEdits()
+
+        assertThat(model.card.lines.single { it.field == ProtectedField.TITLE }.ticked).isFalse()
+        assertThat(model.card.lines.single { it.field == ProtectedField.ALBUM }.ticked).isTrue()
     }
 
     @Test

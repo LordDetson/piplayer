@@ -103,8 +103,11 @@ interface ReviewBackend {
     /** An image of a release index at [px] (its original for null), with the fallbacks of TI §5.2. Throws an IOException. */
     suspend fun image(image: CaaImage, px: Int?): CaaResult<CoverImage>
 
-    /** The pictures embedded in the file at [uri], as the player's extractors read them (TI §6, review screen B). */
-    suspend fun embeddedImages(uri: String): List<EmbeddedImage>
+    /**
+     * The pictures embedded in the file at [uri], as the player's extractors read them (TI §6, review screen B); null when
+     * the file cannot be read now.
+     */
+    suspend fun embeddedImages(uri: String): List<EmbeddedImage>?
 
     /**
      * Whether an edit decision can be stored for [target]: an identity holds its key (TI §7.1, §10.2). An edit makes no

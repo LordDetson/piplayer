@@ -83,16 +83,17 @@ object ReleaseDetailsExtractor {
     const val LENGTH_TOLERANCE_MS = 7_000L
 
     /**
-     * The details of [recordingId]'s track on [release] (chosen as [ReleaseTracks.choose] does), or null when the
-     * release does not contain the recording.
+     * The details of [recordingId]'s track on [release] (chosen as [ReleaseTracks.choose] does, the track at [at] first),
+     * or null when the release does not contain the recording.
      */
     fun extract(
         release: ReleaseDto,
         recordingId: String,
         trackNumberTag: Int?,
         fileDurationMs: Long?,
+        at: TrackPosition? = null,
     ): ReleaseDetails? {
-        val chosen = ReleaseTracks.choose(release, recordingId, trackNumberTag) ?: return null
+        val chosen = ReleaseTracks.choose(release, recordingId, trackNumberTag, at) ?: return null
         val track = chosen.track
         val length = track.length ?: track.recording?.length
         val releaseCredits = credits(release.artistCredit)

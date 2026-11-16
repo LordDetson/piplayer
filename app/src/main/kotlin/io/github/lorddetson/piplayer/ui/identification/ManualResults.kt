@@ -23,9 +23,6 @@ data class ManualResult(val match: RecordingMatch, val release: ReleaseDto? = nu
 /** Manual search's results (TI §3.3, §6 review screen B): scored as the text search scores (TI §4.1, similarity tier). */
 object ManualResults {
 
-    /** As the bands compare scores (TI §4.1). */
-    private const val SCORE_TOLERANCE = 1e-9
-
     /** The recordings a search found, best first, one per recording. */
     fun ofSearch(hint: TrackHint, candidates: List<TextCandidate>): List<ManualResult> =
         if (candidates.isEmpty()) emptyList() else scored(hint, candidates).map { ManualResult(it) }
@@ -50,7 +47,7 @@ object ManualResults {
     }
 
     /** A result's band: medium from 0.50, otherwise no match ("Low confidence"); never high. */
-    fun band(score: Double): Band = if (score >= Bands.MEDIUM - SCORE_TOLERANCE) Band.MEDIUM else Band.NO_MATCH
+    fun band(score: Double): Band = if (Bands.of(score, null) == Band.NO_MATCH) Band.NO_MATCH else Band.MEDIUM
 
     private fun scored(hint: TrackHint, candidates: List<TextCandidate>): List<RecordingMatch> =
         RecordingScorer.rank(hint, listOf(StageFinding.TextSearch(candidates))).matches

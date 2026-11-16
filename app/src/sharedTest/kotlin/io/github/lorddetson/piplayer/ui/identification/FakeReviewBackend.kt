@@ -213,15 +213,24 @@ class FakeReviewBackend(
         return indexAnswer
     }
 
+    /** When set, an image of the index waits for it. */
+    @Volatile
+    var imageGate: CompletableDeferred<Unit>? = null
+
     override suspend fun image(image: CaaImage, px: Int?): CaaResult<CoverImage> {
         calls += "image ${image.id} $px"
+        imageGate?.await()
         val found = if (px == THUMBNAIL_PX) thumbnails[image.id] else images[image.id]
         return found?.let { CaaResult.Found(it) } ?: CaaResult.NotFound
     }
 
-    override suspend fun embeddedImages(uri: String): List<EmbeddedImage> {
+    /** When set, the file's pictures cannot be read now. */
+    @Volatile
+    var embeddedFails: Boolean = false
+
+    override suspend fun embeddedImages(uri: String): List<EmbeddedImage>? {
         calls += "embedded $uri"
-        return embedded
+        return if (embeddedFails) null else embedded
     }
 
     override suspend fun canEdit(target: IdentificationTarget): Boolean = identityHeld

@@ -110,7 +110,7 @@ data class CoverLine(val old: ShownCover, val new: ProposedCover, val ticked: Bo
 object ReviewDiff {
 
     /** How the lists of a release's values are shown, as tags write a list (TI §7.5). */
-    private const val LIST_SEPARATOR = "; "
+    internal const val LIST_SEPARATOR = "; "
 
     /** The old values: what track details show for each field of the protected-fields list now. */
     fun current(details: TrackDetails?): Map<ProtectedField, FieldValue> {

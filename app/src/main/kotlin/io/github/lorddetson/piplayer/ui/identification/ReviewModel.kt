@@ -24,7 +24,9 @@ import io.github.lorddetson.piplayer.settings.ProtectedField
 import java.time.Instant
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -252,7 +254,11 @@ class ReviewModel(private val file: FileRef, private val backend: ReviewBackend,
     /** The cover picker's release indexes by release ID, the file's embedded pictures, and the thumbnails by address. */
     private val indexes = HashMap<String, Index>()
     private var embedded: List<EmbeddedImage>? = null
-    private val thumbnails = HashMap<String, CoverImage?>()
+    private val thumbnails = HashMap<String, Deferred<CoverImage?>>()
+
+    /** The release indexes being loaded, and whether the embedded pictures are being read. */
+    private val indexLoads = HashSet<String>()
+    private var embeddedLoading = false
 
     /** The user's values of Edit fields, which every card shows over its release's values. */
     private var edits: Map<ProtectedField, FieldValue?> = emptyMap()
@@ -491,12 +497,12 @@ class ReviewModel(private val file: FileRef, private val backend: ReviewBackend,
                 updatePanel<Panel.Editions>(generation) { copy(opening = null, withoutSong = without) }
                 return@launch
             }
-            editions[key] = opened
-            fetchedAt[key] = backend.now()
-            // Onto the card it was chosen for, while its picker is still open.
+            // Onto the card it was chosen for, while its picker is still open: one closed meanwhile chose nothing.
             val now = mutable.value as? ReviewState.Ended ?: return@launch
             val nowCard = now.card
             if (now.panel !is Panel.Editions || generation != panels || nowCard == null || keyOf(nowCard) != key) return@launch
+            editions[key] = opened
+            fetchedAt[key] = backend.now()
             update { copy(panel = null) }
             show(nowCard.index, opened, nowCard.manual)
         }
@@ -558,6 +564,7 @@ class ReviewModel(private val file: FileRef, private val backend: ReviewBackend,
         if (panel.searching || panel.choosing != null) return
         val key = keyOf(chosen)
         val generation = panels
+        val run = runs
         updatePanel<Panel.Search>(generation) { copy(choosing = index, note = null) }
         scope.launch {
             readCurrent()
@@ -567,7 +574,7 @@ class ReviewModel(private val file: FileRef, private val backend: ReviewBackend,
                 try {
                     edition = if (release != null) {
                         // A track of a looked-up release takes that release, without release choice.
-                        ReleaseDetailsExtractor.extract(release, chosen.match.recordingId, chosen.at?.position, result.durationMs)
+                        ReleaseDetailsExtractor.extract(release, chosen.match.recordingId, chosen.at?.position, result.durationMs, chosen.at)
                             ?.let { SuggestedEdition(release, it, EditionSource.PICKED) }
                     } else {
                         backend.edition(chosen.match, result)
@@ -578,6 +585,8 @@ class ReviewModel(private val file: FileRef, private val backend: ReviewBackend,
                     updatePanel<Panel.Search>(generation) { copy(choosing = null, note = SearchNote.EDITION_FAILED).also { lastSearch = it } }
                     return@launch
                 }
+                // A run that replaced this one has editions of its own.
+                if (run != runs) return@launch
                 editions[key] = edition
                 fetchedAt[key] = backend.now()
                 edition?.let { suggested.putIfAbsent(key, it) }
@@ -596,27 +605,41 @@ class ReviewModel(private val file: FileRef, private val backend: ReviewBackend,
         val ended = mutable.value as? ReviewState.Ended ?: return
         val releaseId = ended.card?.edition?.details?.releaseId ?: return
         if (!ended.canOpenPanel || ended.panel != null || ProtectedField.COVER in protected) return
-        val generation = ++panels
+        ++panels
         val index = indexes[releaseId]
         update { copy(panel = Panel.Covers(images = index?.images, indexNote = index?.note, embedded = embedded)) }
-        if (index == null) {
+        // A load still in flight from an earlier opening fills this panel too.
+        val run = runs
+        if (index == null && indexLoads.add(releaseId)) {
             scope.launch {
                 val loaded = when (val answer = quietly { backend.releaseImages(releaseId) }) {
                     is CaaResult.Found -> Index(answer.value.images, null)
                     CaaResult.NotFound -> Index(emptyList(), CoversNote.NO_IMAGES)
                     is CaaResult.Busy, null -> Index(emptyList(), CoversNote.FAILED)
                 }
+                indexLoads.remove(releaseId)
+                if (run != runs) return@launch
                 // A failure is asked again the next time the picker opens.
                 if (loaded.note != CoversNote.FAILED) indexes[releaseId] = loaded
-                updatePanel<Panel.Covers>(generation) { copy(images = loaded.images, indexNote = loaded.note) }
+                update {
+                    val covers = panel as? Panel.Covers
+                    if (covers == null || card?.edition?.details?.releaseId != releaseId) this else copy(panel = covers.copy(images = loaded.images, indexNote = loaded.note))
+                }
             }
         }
         val uri = result?.file?.uri
-        if (embedded == null && uri != null) {
+        if (embedded == null && uri != null && !embeddedLoading) {
+            embeddedLoading = true
             scope.launch {
-                val read = quietly { backend.embeddedImages(uri) }.orEmpty()
-                embedded = read
-                updatePanel<Panel.Covers>(generation) { copy(embedded = read) }
+                val read = quietly { backend.embeddedImages(uri) }
+                embeddedLoading = false
+                if (run != runs) return@launch
+                // A file that cannot be read now is read again the next time the picker opens.
+                if (read != null) embedded = read
+                update {
+                    val covers = panel as? Panel.Covers
+                    if (covers == null) this else copy(panel = covers.copy(embedded = read.orEmpty()))
+                }
             }
         }
     }
@@ -624,12 +647,16 @@ class ReviewModel(private val file: FileRef, private val backend: ReviewBackend,
     /** The 250 px thumbnail of a release image for the picker, fetched once; null without one. */
     suspend fun thumbnail(image: CaaImage): CoverImage? {
         val key = image.original.toString()
-        if (thumbnails.containsKey(key)) return thumbnails[key]
-        val answer = quietly { backend.image(image, THUMBNAIL_PX) }
-        val thumbnail = (answer as? CaaResult.Found)?.value
-        // A busy or failed fetch is tried again when the row shows again.
-        if (thumbnail != null || answer == CaaResult.NotFound) thumbnails[key] = thumbnail
-        return thumbnail
+        val load = thumbnails.getOrPut(key) {
+            scope.async {
+                val answer = quietly { backend.image(image, THUMBNAIL_PX) }
+                val thumbnail = (answer as? CaaResult.Found)?.value
+                // A busy or failed fetch is tried again when the row shows again.
+                if (thumbnail == null && answer != CaaResult.NotFound) thumbnails.remove(key)
+                thumbnail
+            }
+        }
+        return load.await()
     }
 
     /** Chooses the release image [index] of the picker: fetched at the embedding size, it becomes the cover line's. */
@@ -705,9 +732,10 @@ class ReviewModel(private val file: FileRef, private val backend: ReviewBackend,
         edits = edits + parsed.mapValues { (it.value as ParsedEntry.Value).value }
         val proposed = ReviewDiff.proposed(edition.details)
         val rebuilt = ReviewDiff.withEdits(ReviewDiff.lines(current, proposed, protected), current, proposed, edits)
-        // The release's lines keep the ticks the user gave them.
+        // Every line keeps the tick the user gave it, but a field this save changed is ticked as the user's new value.
         val lines = rebuilt.map { line ->
-            if (line.edited) line else card.lines.firstOrNull { it.field == line.field && !it.edited }?.let { line.copy(ticked = it.ticked) } ?: line
+            if (line.edited && line.field in parsed) return@map line
+            card.lines.firstOrNull { it.field == line.field && it.edited == line.edited }?.let { line.copy(ticked = it.ticked) } ?: line
         }
         update { copy(panel = null, card = card.copy(lines = lines)) }
     }

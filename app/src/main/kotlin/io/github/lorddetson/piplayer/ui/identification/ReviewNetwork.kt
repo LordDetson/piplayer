@@ -73,7 +73,7 @@ class ReviewNetwork(
         // The tracklist was just looked up, so this comes from the release cache (TI §5.1).
         val release = if (edition.release.id == suggested.release.id) suggested.release else services.releases.release(edition.release.id) ?: return null
         // The mapped track's own place picks it among tracks of the same recording.
-        val details = ReleaseDetailsExtractor.extract(release, recording, track.at.position, result.durationMs) ?: return null
+        val details = ReleaseDetailsExtractor.extract(release, recording, track.at.position, result.durationMs, track.at) ?: return null
         return SuggestedEdition(release, details, EditionSource.PICKED)
     }
 

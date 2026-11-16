@@ -25,9 +25,9 @@ object EmbeddedImages {
 
     private const val TAG = "EmbeddedImages"
 
-    /** The pictures of the file at [uri]; none for a file no extractor reads or that cannot be read now. */
+    /** The pictures of the file at [uri]; none for a file no extractor reads, null for one that cannot be read now. */
     @OptIn(UnstableApi::class)
-    suspend fun read(context: Context, uri: Uri): List<EmbeddedImage> = try {
+    suspend fun read(context: Context, uri: Uri): List<EmbeddedImage>? = try {
         val retriever = MetadataRetriever.Builder(context, MediaItem.fromUri(uri)).build()
         try {
             val groups = retriever.retrieveTrackGroups().await()
@@ -57,7 +57,7 @@ object EmbeddedImages {
         emptyList()
     } catch (e: Exception) {
         Log.d(TAG, "The pictures of a file could not be read", e)
-        emptyList()
+        null
     }
 
     private suspend fun <T> com.google.common.util.concurrent.ListenableFuture<T>.await(): T =

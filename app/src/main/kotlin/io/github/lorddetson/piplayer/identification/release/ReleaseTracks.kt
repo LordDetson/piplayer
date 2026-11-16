@@ -28,11 +28,14 @@ object ReleaseTracks {
     }.sortedWith(compareBy({ it.at.disc }, { it.at.position }))
 
     /**
-     * The track of [recordingId] on [release]: of several, the one whose position equals [trackNumberTag], otherwise
-     * the first. Null when the release does not contain the recording.
+     * The track of [recordingId] on [release]: the one at [at] when given and it holds the recording (a track the user
+     * chose, TI §6), otherwise of several the one whose position equals [trackNumberTag], otherwise the first. Null when
+     * the release does not contain the recording.
      */
-    fun choose(release: ReleaseDto, recordingId: String, trackNumberTag: Int?): ReleaseTrack? {
+    fun choose(release: ReleaseDto, recordingId: String, trackNumberTag: Int?, at: TrackPosition? = null): ReleaseTrack? {
         val tracks = of(release).filter { it.recordingId == recordingId }
-        return tracks.firstOrNull { trackNumberTag != null && it.at.position == trackNumberTag } ?: tracks.firstOrNull()
+        return tracks.firstOrNull { at != null && it.at == at }
+            ?: tracks.firstOrNull { trackNumberTag != null && it.at.position == trackNumberTag }
+            ?: tracks.firstOrNull()
     }
 }

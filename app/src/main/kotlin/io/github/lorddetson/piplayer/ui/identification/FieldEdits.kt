@@ -36,8 +36,8 @@ object FieldEdits {
         ProtectedField.ISRC,
     )
 
-    /** How the review shows a list's items, as tags write a list (TI §7.5). */
-    private const val LIST_SEPARATOR = "; "
+    /** How the diff shows a list's items: a list the user leaves as it was equals the release's value. */
+    private const val LIST_SEPARATOR = ReviewDiff.LIST_SEPARATOR
 
     /** A track or disc number, which has a total beside it. */
     fun hasTotal(field: ProtectedField): Boolean = field == ProtectedField.TRACK_NUMBER || field == ProtectedField.DISC_NUMBER

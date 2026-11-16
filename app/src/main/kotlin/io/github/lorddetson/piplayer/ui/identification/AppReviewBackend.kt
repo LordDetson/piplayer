@@ -82,7 +82,7 @@ class AppReviewBackend(context: Context) : ReviewBackend {
 
     override suspend fun image(image: CaaImage, px: Int?): CaaResult<CoverImage> = withContext(Dispatchers.IO) { network.image(image, px) }
 
-    override suspend fun embeddedImages(uri: String): List<EmbeddedImage> = withContext(Dispatchers.IO) { EmbeddedImages.read(app, uri.toUri()) }
+    override suspend fun embeddedImages(uri: String): List<EmbeddedImage>? = withContext(Dispatchers.IO) { EmbeddedImages.read(app, uri.toUri()) }
 
     override suspend fun canEdit(target: IdentificationTarget): Boolean = ReviewDecisions.of(app).canEdit(target)
 
