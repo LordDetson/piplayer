@@ -249,4 +249,34 @@
     </plurals>
     <string name="batch_none">Здесь нечего определять</string>
     <string name="batch_failed">Не удалось запустить пакет.</string>
+    <!-- Уведомления пакета (TI §8): свой канал, ход работы и её конец. -->
+    <string name="batch_channel_name">Пакеты</string>
+    <string name="batch_channel_description">Пакеты определения: как идёт работа и когда пакет ждёт проверки</string>
+    <plurals name="batch_notification_title">
+        <item quantity="one">Определяется %1$d файл</item>
+        <item quantity="few">Определяются %1$d файла</item>
+        <item quantity="many">Определяется %1$d файлов</item>
+        <item quantity="other">Определяется %1$d файла</item>
+    </plurals>
+    <plurals name="batch_notification_files">
+        <item quantity="one">%1$d из %2$d файла</item>
+        <item quantity="few">%1$d из %2$d файлов</item>
+        <item quantity="many">%1$d из %2$d файлов</item>
+        <item quantity="other">%1$d из %2$d файла</item>
+    </plurals>
+    <string name="batch_notification_eta_unknown">Оставшееся время оценивается</string>
+    <string name="batch_notification_eta_less_than_a_minute">Осталось меньше минуты</string>
+    <string name="batch_notification_eta_minutes">Осталось около %1$d мин</string>
+    <string name="batch_notification_eta_over_an_hour">Осталось больше часа</string>
+    <string name="batch_notification_done_title">Пакет готов к проверке</string>
+    <plurals name="batch_notification_done_text">
+        <item quantity="one">%1$d файл ждёт проверки во вкладке «Исправить»</item>
+        <item quantity="few">%1$d файла ждут проверки во вкладке «Исправить»</item>
+        <item quantity="many">%1$d файлов ждут проверки во вкладке «Исправить»</item>
+        <item quantity="other">%1$d файла ждут проверки во вкладке «Исправить»</item>
+    </plurals>
+    <string name="batch_notification_explanation_title">Уведомления о пакетах</string>
+    <string name="batch_notification_explanation">PiPlayer может показывать, как идёт определение пакета, и сообщать, когда он готов к проверке. Без уведомлений пакет работает так же, а его ход виден во вкладке «Исправить».</string>
+    <string name="batch_notification_explanation_allow">Разрешить</string>
+    <string name="batch_notification_explanation_skip">Не сейчас</string>
 </resources>

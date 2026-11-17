@@ -13,6 +13,7 @@ import io.github.lorddetson.piplayer.library.db.LibraryAccess
 import io.github.lorddetson.piplayer.library.sort.SortKeys
 import io.github.lorddetson.piplayer.net.AndroidConnectivity
 import io.github.lorddetson.piplayer.net.UserAgent
+import io.github.lorddetson.piplayer.notifications.BatchNotifier
 import io.github.lorddetson.piplayer.settings.DataStoreOnlineGate
 import io.github.lorddetson.piplayer.settings.IdentificationSettings
 import io.github.lorddetson.piplayer.settings.SettingsFiles
@@ -98,6 +99,8 @@ class PiPlayerApplication : Application() {
             warmLetters()
             // The library follows the media index for as long as the process lives (docs/library.md §1.3).
             Library.start(this)
+            // A batch that outlived the process gets its notification back (TI §8, PIM-21), after the library starts.
+            BatchNotifier.of(this).resume()
         }
         started.complete(Unit)
     }

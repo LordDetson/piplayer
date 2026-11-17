@@ -19,8 +19,11 @@ import io.github.lorddetson.piplayer.ui.library.FolderPage
 import io.github.lorddetson.piplayer.ui.library.GenrePage
 import io.github.lorddetson.piplayer.ui.library.LibraryHost
 import io.github.lorddetson.piplayer.ui.library.LibraryScreen
+import io.github.lorddetson.piplayer.ui.fix.BatchActions
 import io.github.lorddetson.piplayer.ui.fix.FixScreen
 import io.github.lorddetson.piplayer.ui.fix.rememberBatchActions
+import io.github.lorddetson.piplayer.ui.notifications.BatchNotificationExplanation
+import io.github.lorddetson.piplayer.ui.notifications.rememberBatchNotificationPrompt
 import io.github.lorddetson.piplayer.ui.search.SearchScreen
 import io.github.lorddetson.piplayer.library.lists.ListKind
 import io.github.lorddetson.piplayer.ui.playlists.PlaylistPage
@@ -251,6 +254,11 @@ fun PiPlayerApp(viewModel: PlayerViewModel = viewModel()) {
     }
     // Details open over whatever shows, Now Playing included, so that back returns there (docs/library.md §18.1).
     val showDetails = { route: TrackDetailsRoute -> if (backStack.lastOrNull() != route) backStack.add(route) }
+    // A batch's notification asks for the Fix tab (TI §8, PIM-21): the place becomes the base of the stack once.
+    val requestedPlace by Places.requested.collectAsStateWithLifecycle()
+    LaunchedEffect(requestedPlace) {
+        if (requestedPlace == Places.FIX && Places.take(Places.FIX)) switchTo(FixRoute)
+    }
     // The review opens over whatever shows too, Now Playing and details included (TI §1).
     val identify = remember {
         { target: IdentifyTarget ->
@@ -286,6 +294,12 @@ fun PiPlayerApp(viewModel: PlayerViewModel = viewModel()) {
         openSmart = { kind -> open(SmartListRoute(kind.token)) },
     )
     val batch = rememberBatchActions(snackbar)
+    // The explanation of the notification permission comes before the first batch (TI §8, PIM-21); the batch runs the
+    // same without it.
+    val batchNotifications = rememberBatchNotificationPrompt()
+    val batchAsked = remember(batch, batchNotifications) {
+        BatchActions { request -> batchNotifications.beforeBatch { batch.identify(request) } }
+    }
     val menu = remember {
         SongMenu(
             links = { song -> linksOf(context, song.id) },
@@ -320,7 +334,7 @@ fun PiPlayerApp(viewModel: PlayerViewModel = viewModel()) {
         openGenre = { open(GenreRoute(it)) },
         playSelection = viewModel::playSelection,
         favoriteBatch = favoriteBatch,
-        batch = batch,
+        batch = batchAsked,
     )
     // What the artist and the album on Now Playing open (docs/library.md §6.1).
     var playingLinks by remember { mutableStateOf<SongLinks?>(null) }
@@ -459,6 +473,7 @@ fun PiPlayerApp(viewModel: PlayerViewModel = viewModel()) {
         }
     }
     if (CrashReports.promptEnabled) CrashPrompt(CrashReports.of(LocalContext.current))
+    BatchNotificationExplanation(batchNotifications)
 }
 
 /** The bottom bar's places, in their order (TI §8, PIM-18). */

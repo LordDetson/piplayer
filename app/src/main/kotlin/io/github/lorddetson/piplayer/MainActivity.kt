@@ -20,6 +20,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import io.github.lorddetson.piplayer.playback.OpenWith
 import io.github.lorddetson.piplayer.ui.PiPlayerApp
+import io.github.lorddetson.piplayer.ui.Places
 import io.github.lorddetson.piplayer.ui.player.PlayerViewModel
 import io.github.lorddetson.piplayer.ui.theme.PiPlayerTheme
 import io.github.lorddetson.piplayer.ui.theme.ThemeWindow
@@ -68,5 +69,7 @@ class MainActivity : ComponentActivity() {
     private fun openFrom(intent: Intent?) {
         val uris = intent?.let(OpenWith::uris).orEmpty()
         if (uris.isNotEmpty()) playerViewModel.open(uris)
+        // A batch's notification opens the Fix tab (TI §8): the app takes the place asked for and forgets it.
+        Places.of(intent)?.let(Places::request)
     }
 }

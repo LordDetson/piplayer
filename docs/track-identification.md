@@ -1597,14 +1597,16 @@ Phases (a) to (c) land in M4a, with accepted results saved in PiPlayer only; pha
   their tracks are. The Fix tab moves a batch whose cards are all settled to `done` when it reads them, so a batch whose
   every result was in the high band closes without the user, and one with doubtful results closes when its last card is
   decided.
-- Notifications: separate channels for playback and for batches; the notification permission (API 33+) is requested,
-  with an explanation, before the first batch; without it, batches still run and show their progress in the Fix tab.
-  Progress with ETA; a final notification opens the review queue in the Fix tab.
+- Notifications (PIM-21): a channel of their own, apart from playback's, and the notification permission (API 33+) asked
+  for with an explanation before the first batch; without it, batches run the same and show their progress in the Fix
+  tab. Progress with an ETA, then a notification whose tap opens the review queue in the Fix tab. The subsection
+  "Notifications" below has the details.
 - Network: the setting "Run batches on unmetered networks only" (default on, stored as `batch_unmetered_only` in the
   `settings` file). A waiting batch says so and offers "Use
   mobile data this time"; batches make no network requests while roaming unless the user allows it. Single-file
   identification is started by the user and uses any network.
-- Manifest: `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_MEDIA_PLAYBACK` and `FOREGROUND_SERVICE_DATA_SYNC` (API 34+).
+- Manifest: `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_MEDIA_PLAYBACK` and `FOREGROUND_SERVICE_DATA_SYNC` (API 34+), and
+  `POST_NOTIFICATIONS` for the batches' notifications, asked for before the first batch.
   Play Console: declare the foreground service types `mediaPlayback` (playback) and `dataSync` (apply), with their
   justifications.
 - Rate limits: one limiter per provider for the whole process, held by the app's identification services in the main
@@ -1643,6 +1645,44 @@ Phases (a) to (c) land in M4a, with accepted results saved in PiPlayer only; pha
   fail without a request. The stop shows in Settings and in the review; it is not persisted, so the next process tries
   once more.
 - Random jitter; no jobs at fixed clock times; no polling MusicBrainz for changes.
+
+### Notifications
+
+A batch tells the user how it goes through notifications of its own, never through the playback service's
+(docs/playback.md §4). `notifications/BatchNotifications` holds the channel and the two notifications, and
+`notifications/BatchNotifier` keeps them in step with the batch's jobs. M4a posts no foreground service for a batch:
+WorkManager runs its jobs, and a notification is only their window, so a batch whose process dies is restarted by
+WorkManager and the app gives its notification back when it starts (`BatchNotifier.resume`, the newest batch in
+`processing` of the library database).
+
+- Channel: `batches`, its name from `batch_channel_name`, importance default, made lazily by the first notification
+  that posts, so a device that never starts a batch has no such channel. It is not playback's `playback`
+  (docs/playback.md §4.6), which nothing here touches: the two are separate entries in the system settings, and a user
+  who turned the batch channel off still hears playback, and the other way round.
+- Permission: `POST_NOTIFICATIONS` in the manifest, asked for with an explanation before the first batch, behind the
+  "Identify" the user taps (`ui/notifications/BatchNotificationPrompt`, the Compose path of onboarding, docs/library.md
+  §14.1). The prompt holds the start of the batch while the explanation says what the notification is for and that the
+  batch runs the same without it; "Allow" then asks through the system dialog, and "Not now" starts the batch at once.
+  Either answer starts it: with the permission the notifications come, without it the progress is in the Fix tab only.
+  The explanation comes once, its answer kept as `batch_notifications_asked` in the `device_state` file
+  (docs/library.md §3.2), so a later batch does not ask a user who already said no. Before API 33 there is nothing to
+  ask and the batch starts at once.
+- Progress: the workers report the files of the album group they work on (`BatchData.FILES_DONE` and `FILES_TOTAL`), and
+  a group is two jobs, phase (a) then phase (b), so the number of finished jobs gives the groups that are done:
+  `batchProgress` counts the files of those groups whole and adds the running job's files, never above the batch's own.
+  The notification shows them as files done of the batch's files in all (`batch_notification_files`) on a determinate
+  bar, then the time left, which `EtaMeter` takes from the rate of the files done over the last minute of samples. A
+  batch that waits for the network or for the battery makes no samples, so its ETA reads "Estimating the time left"
+  rather than an hour that is wrong; under a minute the notification says so, and from an hour on it gives no number.
+  The notification stays while the batch runs, its title naming the batch's files, and updates in place without a sound
+  for every file.
+- The end: once every job of the batch has finished, the notification that replaces the progress one says the batch
+  waits for review, and a tap opens the Fix tab there. The intent carries `Places.EXTRA_PLACE` with `Places.FIX`, and
+  the activity, single top, hands the place to the screens, which make the Fix tab the base of the back stack once
+  (`Places.take`). A cancelled batch, or one a library rebuild took away, has its notification taken away instead.
+- One batch at a time: one notification ID follows the batch started last, since that is the one the user just asked
+  for; a second batch started meanwhile keeps running and shows in the Fix tab, and the notification comes back to the
+  newer one. Nothing of this reaches the batch's jobs: the notifier only reads their progress and the batch's state.
 
 ## 9. Third-party services and compliance
 
@@ -2239,6 +2279,7 @@ tests, and a high-band error rate within the threshold of §11.4.
 | M4a | Entry points of a batch (§1, §8): a selection and a folder give their files in their order, each once; Songs missing information keeps the list's order and leaves out its Keep as-is and Skip tracks, and gives nothing when every listed track is decided; each entry point records its own source; a queued batch carries its UUID, its source and its creation time with `write_to_file` empty, and one without files or with a source that is no entry point is refused; a selection's menu shows "Identify" right before "Details" when it has songs and never without one |
 | M4a | Batch review by albums (§8): one card per album group of a batch in review, with the album's title, its tracks, the group's confidence (its least confident track) and the counts of found, no match, retry later and no run; a track counts as decided when a decision of the batch covers it, by its key or by the place a decision names for a file the tag pass has not read, so an Undo takes it back to its card; a card opens its first track left to decide, and a track with no run to show holds the batch open for nothing; a batch whose cards are all settled moves to `done`, and one without cards stays as it is (`BatchReviewTest`, `BatchReviewReadTest`) |
 | M4a | Automatic preparation of the high band (§8): a result in the high band with a chosen edition becomes an Apply decision of the batch without the user, with the release's values, without a cover, with a compilation flag only when the release is one and with the protected fields left alone; the medium band, no match, a result without an edition, a release that holds another recording and an opened file wait for a card; a decision that cannot be written leaves its track to its card (`BatchAutoApplyTest`, `BatchPhasesTest`) |
+| M4a | Batch notifications (PIM-21, §8): the progress of a batch counts the groups whose two jobs have finished whole and adds the files of the running job, never above the batch's own, and stays unknown without files; the ETA comes from the rate over the last minute of samples and is unknown without two of them, over a span under 3 s, when no file was done in it, when nothing is left, or when the batch made no sample for 30 s; a meter that finds fewer files than before starts again; the time left reads in whole minutes rounded up, under a minute and from an hour on the way the notification words them; the explanation of the permission is asked for once, only from API 33 and only while the permission is missing; a place asked for is opened once |
 | M4b | Tag diff: only decided keys change, and the full property map goes back with TagLib's own strings for unchanged keys; "fill empty only" fields are untouched when non-empty; protected data never appears in an identification diff |
 | M4b | Per-format rules (§7.5): multi-values, dates and partial dates, positions from `position`, totals, compilation, NFC, front cover selection, ID3v2.3 capabilities; the ID3v1 policy (§3.1) |
 | M4b | Own-write recognition: a sync event that matches a `pending`, `streamed` or `verified` entry keeps values and provenance and raises no flag, also when the change notification arrives between the stream-back and the verified commit |
@@ -2291,6 +2332,7 @@ tests, and a high-band error rate within the threshold of §11.4.
 | M3 | Covers in the chain on the real databases (library.md §13.1, §18.3): a file's decided cover and release, an album's decided cover and release, an artist's albums with decided covers and releases; a saved cover decoded from its file and none when the file is gone; a Cover Art Archive cover from the fake CAA; track details show "Saved in PiPlayer" and "Cover Art Archive" with the source of the first step of the plan that has a picture |
 | M3 | Track details with decisions on the real databases (library.md §18.7): an identification and a newer edit give their values and sources with the provider, a revert lets the tags win the field again, a field flagged as changed in the file is marked and "Keep PiPlayer's value" clears the mark, also through the details' own place, after which the tag pass comparing the file again with only an unrelated change (a file with the numbers of tracks and discs, album artists and their IDs) flags nothing, "Undo identification" undoes the newest identification, a Keep as-is and a Skip show with their reset, the AcoustID row comes from the decision, the trace from the content key's rows and the badge from the display row; Compose tests on fake details of the sources, the revert with its Undo, the two choices of a changed field, "Undo identification", the reset, the trace and the badge in the header and on Now Playing, with what a tap on it opens |
 | M4a | A 500-file batch started from a folder resumes after its process is killed in any phase, and its accepted results appear in every view and on system surfaces |
+| M4a | Batch notifications on a device (PIM-21, §8): the channel `batches` is made at the first notification under an ID of its own, with its name and the default importance, and never takes playback's channel; the progress notification carries the batch's title, its files done of its files in all with the ETA line in the language of the device, a determinate bar and the ongoing and alert-once flags; the end notification is not ongoing, goes once tapped and carries the Fix place; the explanation shows before the first batch, its "Allow" asks for the permission and its "Not now" starts the batch, which also starts at once with the permission held and before API 33. The system's own permission dialog is in the manual checklist |
 | M4a | On the named physical device, not an emulator: playback during a 500-file batch has no audible effect and no more underruns than without the batch |
 | M4b | Tag round trip for MP3 (ID3v2.3 with APIC, ID3v2.4, ID3v2.2), FLAC (PICTURE), M4A AAC/ALAC (`covr`), Ogg Vorbis, Opus, WAV: write → re-read → compare property maps → audio bytes unchanged → content key unchanged → ID3v2 version preserved (v2.2 written as v2.3). Also: no ID3v1 created on a file without one; an APE tag in an MP3 preserved; a v2.3 file with `TSST` and `TSOP` (`TSST` as its own diff line, `TSOP` kept); back cover preserved; gapless info and comment frames with a description untouched |
 | M4b | Write pipeline on app-private fixtures, through a test implementation of the write-access interface: free-space check, copy, partial update, copy verification, journal states, stream back, verification, the two database commits, undo after process death |

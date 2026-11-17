@@ -242,4 +242,28 @@
     </plurals>
     <string name="batch_none">Nothing to identify here</string>
     <string name="batch_failed">The batch could not be started.</string>
+    <!-- The notifications of a batch (TI §8): a channel of their own, its progress and its end. -->
+    <string name="batch_channel_name">Batches</string>
+    <string name="batch_channel_description">Identification batches: how far one is and when it waits for review</string>
+    <plurals name="batch_notification_title">
+        <item quantity="one">Identifying %1$d file</item>
+        <item quantity="other">Identifying %1$d files</item>
+    </plurals>
+    <plurals name="batch_notification_files">
+        <item quantity="one">%1$d of %2$d file</item>
+        <item quantity="other">%1$d of %2$d files</item>
+    </plurals>
+    <string name="batch_notification_eta_unknown">Estimating the time left</string>
+    <string name="batch_notification_eta_less_than_a_minute">Less than a minute left</string>
+    <string name="batch_notification_eta_minutes">About %1$d min left</string>
+    <string name="batch_notification_eta_over_an_hour">More than an hour left</string>
+    <string name="batch_notification_done_title">Batch ready for review</string>
+    <plurals name="batch_notification_done_text">
+        <item quantity="one">%1$d file is ready to review in Fix</item>
+        <item quantity="other">%1$d files are ready to review in Fix</item>
+    </plurals>
+    <string name="batch_notification_explanation_title">Batch notifications</string>
+    <string name="batch_notification_explanation">PiPlayer can show how far an identification batch is and tell you when it waits for review. Without notifications the batch runs the same, and the Fix tab shows its progress.</string>
+    <string name="batch_notification_explanation_allow">Allow</string>
+    <string name="batch_notification_explanation_skip">Not now</string>
 </resources>

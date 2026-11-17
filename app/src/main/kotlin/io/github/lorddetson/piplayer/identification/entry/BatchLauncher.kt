@@ -5,6 +5,7 @@ import io.github.lorddetson.piplayer.identification.batch.BatchQueue
 import io.github.lorddetson.piplayer.library.db.BatchEntity
 import io.github.lorddetson.piplayer.library.db.BatchFileEntity
 import io.github.lorddetson.piplayer.library.db.LibraryAccess
+import io.github.lorddetson.piplayer.notifications.BatchNotifier
 import java.util.UUID
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
@@ -39,7 +40,8 @@ fun queuedBatch(source: String, fileIds: List<Long>, uuid: String, createdAt: Lo
 /**
  * The launcher the app uses (TI §1, §8): writes the batch's `batch` row and its files through [library], then hands the
  * batch to [queue], which enqueues phase (a) of its first album group. A screen only starts batches; the queue and the
- * workers of [io.github.lorddetson.piplayer.identification.batch] take it from there.
+ * workers of [io.github.lorddetson.piplayer.identification.batch] take it from there. The batch's notification follows
+ * the batch through [follow], which watches the jobs the queue runs (TI §8, PIM-21).
  */
 class RoomBatchLauncher(
     context: Context,
@@ -47,6 +49,7 @@ class RoomBatchLauncher(
     private val queue: BatchQueues = WorkBatchQueues(context.applicationContext),
     private val uuid: () -> String = { UUID.randomUUID().toString() },
     private val clock: () -> Long = System::currentTimeMillis,
+    private val follow: (String) -> Unit = { BatchNotifier.of(context).started(it) },
 ) : BatchLauncher {
 
     override suspend fun start(source: String, fileIds: List<Long>): String {
@@ -61,6 +64,8 @@ class RoomBatchLauncher(
             }
         }
         queue.start(batch.uuid)
+        // After the queue, so that the notification finds the first job; a device without notifications posts none.
+        follow(batch.uuid)
         return batch.uuid
     }
 }
