@@ -1528,8 +1528,8 @@ Phases (a) to (c) land in M4a, with accepted results saved in PiPlayer only; pha
 - The Fix tab (PIM-18, M4a step 6) is the batch UI. A bottom bar with the places Library, Search and Fix runs under
   the top level of the app: Library is the library's tabs and pages, Search is the library's song search as a screen
   of its own, and Fix shows the batches. Fix lists them oldest first, each with its source, its start and its status,
-  counts them by status, and shows a "Needs attention" entry for the review queue (the per-album review cards arrive
-  in the next step) and a placeholder for the ETA, since M4a does not measure progress yet. The screen reads the
+  counts them by status, and shows a "Needs attention" entry for the review queue, the album cards of a batch in
+  review under its row, and a placeholder for the ETA, since M4a does not measure progress yet. The screen reads the
   `batch` rows through `Library.read` on each start, not through a flow, so a rebuild that closes the database can
   never be read.
 - Phases (a) and (b) run as WorkManager jobs, one album group per job, each finishing well inside WorkManager's
@@ -1569,6 +1569,34 @@ Phases (a) to (c) land in M4a, with accepted results saved in PiPlayer only; pha
   by one, merged afterwards when its recording resolves to the same release. Album groups keep the order of their
   first file and the files within a group their own order, and the files without an album follow. One release per
   album group (§4.2 step 5). Expect roughly 1 000 to 2 000 tracks per hour; show progress and ETA.
+- The review of a batch is by albums too (M4a step 7). The Fix tab shows one card per album group of a batch in
+  `review`, built from the batch's files through the grouping the workers use, so a card is the album the user sees. A
+  card shows the album's title (or that its file stands without an album), its number of tracks, the group's confidence
+  (the least confident of its tracks, the band of §4.1 as text beside its color) and how the group's runs ended:
+  found, no match, AcoustID asking to try again later (§3.2) or a track the card sees no run for, each with its count.
+  It also says how many of its tracks stand saved, which the decisions of the batch tell (`decision.batch_uuid`, §10.2).
+  A track's run and decision are read by the file's content key, or, for a file the tag pass has not read yet, by the
+  place the identity Apply made is hinted at, so an identified file shows its result rather than a missing key. A card
+  opens the single-file review (§6) of its first track left to decide, with the batch's UUID, so the review runs the
+  pipeline again as it does for one file; back returns to the Fix tab, which reads its cards again on the next start. A
+  batch without cards (a row whose files left the library) is shown as it is.
+- The high band is prepared without the user (the owner's decision of 17.11.2026). At the end of phase (b) of a group,
+  every result in the high band whose release choice gave an edition is stored as an Apply decision (§7.1) with the
+  batch's UUID, through the same decisions a review's Apply makes, so lists and Now Playing show it at once. An
+  automatic Apply takes every field the release gives a value for, as a card with all its lines ticked would, but
+  without the cover (its image would be fetched and saved for a result no one looked at) and without a compilation flag
+  that says "not a compilation", which would clear a flag a file holds; the fields the user protects (§6) are left
+  alone. The medium band and "no match" stay cards, and so does a high result whose release was not chosen or whose
+  release holds another recording, since those are the user's choices. A decision that cannot be written leaves its
+  track to its card.
+- Decisions made while the review was opened from a card carry the batch's UUID: Apply, Edit, Keep as-is and Skip write
+  it into `decision.batch_uuid`, which a single-file decision leaves empty. So a batch's decisions are told apart from
+  the rest, and an Undo of one takes its track back to its card.
+- A track is settled when a decision of the batch stands for it, or when there is no run to decide (the library holds no
+  content key for the file and no decision of the batch names its place); a card, and a batch, are settled when all
+  their tracks are. The Fix tab moves a batch whose cards are all settled to `done` when it reads them, so a batch whose
+  every result was in the high band closes without the user, and one with doubtful results closes when its last card is
+  decided.
 - Notifications: separate channels for playback and for batches; the notification permission (API 33+) is requested,
   with an explanation, before the first batch; without it, batches still run and show their progress in the Fix tab.
   Progress with ETA; a final notification opens the review queue in the Fix tab.
@@ -1960,7 +1988,8 @@ used, never through a stored content URI, which goes stale after a media index r
   is the AcoustID track ID of a confirmed result, so it survives rebuilds and restores. A skip stores the size and the
   modification time (in milliseconds) of the file it is made on, so that the tag pass can let it lapse, and `lapsed_at`
   once it lapses (§1). Keep as-is and Skip store no values and `fields` 0. `file_values` holds the references of §7.1
-  for the location the decision was made on.
+  for the location the decision was made on. `batch_uuid` holds the 16 bytes of the batch's UUID when a card of the batch
+  review made the decision (§8), and is null for a single-file decision.
 - `release_choice(id, release_mbid, release_group_mbid, values, saved_cover_id, fetched_at)`: release-level values
   (album, album artist credit and list, album artist sort names and IDs, dates, label, catalog number, barcode,
   totals, disc subtitles, compilation flag), stored once per chosen release; decisions that chose the same release
@@ -2208,6 +2237,8 @@ tests, and a high-band error rate within the threshold of §11.4.
 | M4a | Batch album groups: groups with a release MBID or an album title match the library's album entities; files without an album tag are looked up one by one and merged when their recordings resolve to the same release; one release per group (most recordings); a warning for split groups and folders |
 | M4a | Work constraints: "unmetered only" → `UNMETERED`, "Use mobile data this time" → `NOT_ROAMING`, roaming allowed → `CONNECTED`, battery not low; the pause and resume rules for underruns and thermal status |
 | M4a | Entry points of a batch (§1, §8): a selection and a folder give their files in their order, each once; Songs missing information keeps the list's order and leaves out its Keep as-is and Skip tracks, and gives nothing when every listed track is decided; each entry point records its own source; a queued batch carries its UUID, its source and its creation time with `write_to_file` empty, and one without files or with a source that is no entry point is refused; a selection's menu shows "Identify" right before "Details" when it has songs and never without one |
+| M4a | Batch review by albums (§8): one card per album group of a batch in review, with the album's title, its tracks, the group's confidence (its least confident track) and the counts of found, no match, retry later and no run; a track counts as decided when a decision of the batch covers it, by its key or by the place a decision names for a file the tag pass has not read, so an Undo takes it back to its card; a card opens its first track left to decide, and a track with no run to show holds the batch open for nothing; a batch whose cards are all settled moves to `done`, and one without cards stays as it is (`BatchReviewTest`, `BatchReviewReadTest`) |
+| M4a | Automatic preparation of the high band (§8): a result in the high band with a chosen edition becomes an Apply decision of the batch without the user, with the release's values, without a cover, with a compilation flag only when the release is one and with the protected fields left alone; the medium band, no match, a result without an edition, a release that holds another recording and an opened file wait for a card; a decision that cannot be written leaves its track to its card (`BatchAutoApplyTest`, `BatchPhasesTest`) |
 | M4b | Tag diff: only decided keys change, and the full property map goes back with TagLib's own strings for unchanged keys; "fill empty only" fields are untouched when non-empty; protected data never appears in an identification diff |
 | M4b | Per-format rules (§7.5): multi-values, dates and partial dates, positions from `position`, totals, compilation, NFC, front cover selection, ID3v2.3 capabilities; the ID3v1 policy (§3.1) |
 | M4b | Own-write recognition: a sync event that matches a `pending`, `streamed` or `verified` entry keeps values and provenance and raises no flag, also when the change notification arrives between the stream-back and the verified commit |
