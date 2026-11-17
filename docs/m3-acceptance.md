@@ -60,6 +60,7 @@ would admit text-only matches.
 
 ## Done on the S24, 17.11.2026
 
+- Online lookups turned off: the disclosure shows in place of a run (checked by hand, the expected result).
 - The quiet `--timing` pass: 14 of 14 green after the decided-value budgets were raised for step 22's rich decisions
   (`GeneratedLibraryDecisionsTest`, push 93c6164).
 - One live `DeviceFingerprintTest` run with `-e liveNetwork true`: 24 tests, the live AcoustID path the corpus also
