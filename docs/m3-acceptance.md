@@ -55,7 +55,8 @@ would admit text-only matches.
   The snippet itself (play and stop) is checked by test.
 - The notification and the lock screen after Apply and Undo on a Bluetooth device and on the watch (Apply and Undo on
   the phone were checked by hand and passed).
-- Captive portal and airplane mode by hand, and the archive.org redirect of the Cover Art Archive.
+- Captive portal by hand: the owner has no such network to check it; recorded as not checked.
+- Airplane mode by hand, and the archive.org redirect of the Cover Art Archive.
 
 ## Done on the S24, 17.11.2026
 
