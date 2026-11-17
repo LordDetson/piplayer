@@ -123,21 +123,23 @@ object ReviewTags {
     fun editorTotal(field: ProtectedField) = "review_editor_${field.stored}_total"
 }
 
-/** The review of one file, which runs its identification once when the screen first opens (TI §6). */
-class ReviewViewModel(application: Application, file: FileRef) : AndroidViewModel(application) {
-    val review = ReviewModel(file, AppReviewBackend(application), viewModelScope).also { it.start() }
+/** The review of one file, which runs its identification once when the screen first opens (TI §6, §8). */
+class ReviewViewModel(application: Application, file: FileRef, batchUuid: String? = null) :
+    AndroidViewModel(application) {
+    val review = ReviewModel(file, AppReviewBackend(application, batchUuid), viewModelScope).also { it.start() }
 }
 
 /**
  * The review screen (TI §6, review screen A) of the song [fileId] or of the file opened from another app at [uri]: a
- * route of its own beside track details, with a top bar with back and the title "Identify".
+ * route of its own beside track details, with a top bar with back and the title "Identify". [batchUuid] is the batch
+ * whose card opened it (TI §8): its decisions then carry the batch, so that the card finds the track decided.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ReviewScreen(fileId: Long?, uri: String?, onBack: () -> Unit) {
+fun ReviewScreen(fileId: Long?, uri: String?, onBack: () -> Unit, batchUuid: String? = null) {
     val app = LocalContext.current.applicationContext as Application
     val file = fileId?.let { FileRef.Library(it) } ?: FileRef.Opened(uri.orEmpty())
-    val model = viewModel(key = "review ${fileId ?: uri}") { ReviewViewModel(app, file) }
+    val model = viewModel(key = "review ${fileId ?: uri} ${batchUuid.orEmpty()}") { ReviewViewModel(app, file, batchUuid) }
     // The snippet's player pauses and resumes the main player through a controller of the playback service (TI §6).
     var snippet by remember { mutableStateOf<SnippetPlayer?>(null) }
     DisposableEffect(app) {

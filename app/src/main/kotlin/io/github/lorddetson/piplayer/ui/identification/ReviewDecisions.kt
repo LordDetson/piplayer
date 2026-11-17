@@ -37,10 +37,10 @@ class ReviewDecisions(
     suspend fun canKeepOrSkip(target: IdentificationTarget.LibraryFile): Boolean = identityOf(target) != null
 
     /** Saves [cover] first when it is given, then stores [request] (TI §5.2, §7.1); the decision's ID, or null. */
-    suspend fun apply(request: ApplyRequest, cover: CoverImage?): Long? {
+    suspend fun apply(request: ApplyRequest, cover: CoverImage?, batchUuid: String? = null): Long? {
         // The cover as part of Apply, never ahead of it (TI §5.2): the sweep deletes rows no decision refers to.
         val savedCoverId = cover?.let { covers.save(it, request.details.releaseId) ?: error("The cover could not be saved") }
-        return decisions.apply(request, savedCoverId, locations(request.target))?.decisionId
+        return decisions.apply(request, savedCoverId, locations(request.target), batchUuid)?.decisionId
     }
 
     /** Whether an identity holds [target]'s key, which an edit decision is stored by (TI §7.1, §10.2). */
@@ -49,9 +49,9 @@ class ReviewDecisions(
     /**
      * Apply with the user's values (TI §6, review screen B): saves [cover] and the chosen cover of [edit] first, stores
      * [request] when there is one, then [edit] as an edit decision by the identity of the key. Null when nothing was
-     * written.
+     * written. [batchUuid] is the batch whose review makes the decisions (TI §8), null for a single-file review.
      */
-    suspend fun applyWithEdit(request: ApplyRequest?, cover: CoverImage?, edit: ReviewEdit): Applied? {
+    suspend fun applyWithEdit(request: ApplyRequest?, cover: CoverImage?, edit: ReviewEdit, batchUuid: String? = null): Applied? {
         val target = edit.target
         // The covers as part of Apply, never ahead of it (TI §5.2): the sweep deletes rows no decision refers to.
         val frontId = cover?.let { covers.save(it, request?.details?.releaseId) ?: error("The cover could not be saved") }
@@ -59,13 +59,13 @@ class ReviewDecisions(
             covers.save(chosen.bytes, edit.releaseId, source(chosen.origin)) ?: error("The chosen cover could not be saved")
         }
         val locations = locations(target)
-        val identification = request?.let { decisions.apply(it, frontId, locations) ?: return null }
+        val identification = request?.let { decisions.apply(it, frontId, locations, batchUuid) ?: return null }
         val values = edit.values + listOfNotNull(chosenId?.let { DecidedField.COVER to it.toString() })
         if (values.isEmpty()) return identification?.let { Applied(it.decisionId) }
         // By the identity the identification used or made; an edit alone needs one that holds the key already.
         val identity = identification?.identityId ?: identityOf(target) ?: return null
         val edited = try {
-            decisions.edit(identity, values, Hex.bytes(target.contentKey), locations)
+            decisions.edit(identity, values, Hex.bytes(target.contentKey), locations, batchUuid)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -86,16 +86,16 @@ class ReviewDecisions(
     }
 
     /** Keep as-is by the identity of [target]'s key; null without one or when nothing was written. */
-    suspend fun keepAsIs(target: IdentificationTarget.LibraryFile): Long? {
+    suspend fun keepAsIs(target: IdentificationTarget.LibraryFile, batchUuid: String? = null): Long? {
         val identity = identityOf(target) ?: return null
-        return decisions.keepAsIs(identity, Hex.bytes(target.contentKey))?.decisionId
+        return decisions.keepAsIs(identity, Hex.bytes(target.contentKey), batchUuid)?.decisionId
     }
 
     /** Skip by the identity of [target]'s key, with the library's size and time of its file; null without one. */
-    suspend fun skip(target: IdentificationTarget.LibraryFile): Long? {
+    suspend fun skip(target: IdentificationTarget.LibraryFile, batchUuid: String? = null): Long? {
         val identity = identityOf(target) ?: return null
         val file = read { database -> database.library().file(target.fileId) } ?: return null
-        return decisions.skip(identity, file.size, file.mtime, Hex.bytes(target.contentKey))?.decisionId
+        return decisions.skip(identity, file.size, file.mtime, Hex.bytes(target.contentKey), batchUuid)?.decisionId
     }
 
     /** Undoes [decisionId]; whether it was undone now. */

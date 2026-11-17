@@ -71,22 +71,32 @@ class Decisions(private val database: UserDatabase, private val clock: () -> Lon
     data class Lapsed(val identityIds: Set<Long>, val counter: Long)
 
     /** Keep as-is for the track of [identityId] (TI §1): no values. Null when the track has no identity now. */
-    suspend fun keepAsIs(identityId: Long, contentKey: ByteArray? = null): Committed? =
-        listState(identityId, contentKey, DecisionKind.KEEP_AS_IS, size = null, mtimeMs = null)
+    suspend fun keepAsIs(identityId: Long, contentKey: ByteArray? = null, batchUuid: ByteArray? = null): Committed? =
+        listState(identityId, contentKey, DecisionKind.KEEP_AS_IS, size = null, mtimeMs = null, batchUuid = batchUuid)
 
     /**
      * Skip for the track of [identityId] (TI §1), with the [fileSize] and [fileMtimeMs] of the file it is made on, which let
      * it lapse: the library's stamp, the time a whole second in milliseconds (`SkipLapse.mtimeMs`), since the lapse looks
      * for a file of the library that holds it. Null when the track has no identity now.
      */
-    suspend fun skip(identityId: Long, fileSize: Long, fileMtimeMs: Long, contentKey: ByteArray? = null): Committed? =
-        listState(identityId, contentKey, DecisionKind.SKIP, fileSize, fileMtimeMs)
+    suspend fun skip(identityId: Long, fileSize: Long, fileMtimeMs: Long, contentKey: ByteArray? = null, batchUuid: ByteArray? = null): Committed? =
+        listState(identityId, contentKey, DecisionKind.SKIP, fileSize, fileMtimeMs, batchUuid)
 
-    private suspend fun listState(identityId: Long, contentKey: ByteArray?, kind: DecisionKind, size: Long?, mtimeMs: Long?): Committed? =
+    private suspend fun listState(
+        identityId: Long,
+        contentKey: ByteArray?,
+        kind: DecisionKind,
+        size: Long?,
+        mtimeMs: Long?,
+        batchUuid: ByteArray? = null,
+    ): Committed? =
         database.withWriteTransaction {
             val identity = database.identities().current(identityId, contentKey) ?: return@withWriteTransaction null
             val id = dao.add(
-                DecisionEntity(identityId = identity, kind = kind.code, fields = 0, fileSize = size, fileMtime = mtimeMs, createdAt = clock()),
+                DecisionEntity(
+                    identityId = identity, batchUuid = batchUuid, kind = kind.code, fields = 0, fileSize = size, fileMtime = mtimeMs,
+                    createdAt = clock(),
+                ),
             )
             committed(id, identity)
         }
@@ -156,13 +166,15 @@ class Decisions(private val database: UserDatabase, private val clock: () -> Lon
      * was made on. When no identity holds the target's key, the identity is made in the same transaction (TI §10.2 "An
      * identity at Apply"): for a file opened from another app from the target's hints, for a library file from
      * [libraryFile], the library's file of the target with stage 0's key. Null when a library target has no identity and
-     * no [libraryFile] (the file is gone), and then nothing is written.
+     * no [libraryFile] (the file is gone), and then nothing is written. [batchUuid] is the batch whose review makes the
+     * decision (TI §8), null for a single-file review.
      */
     suspend fun apply(
         request: ApplyRequest,
         savedCoverId: Long? = null,
         atDecision: List<LocationValues> = emptyList(),
         libraryFile: ApplyFile? = null,
+        batchUuid: ByteArray? = null,
     ): Committed? =
         database.withWriteTransaction {
             val identity = identityAtApply(request.target, libraryFile) ?: return@withWriteTransaction null
@@ -175,6 +187,7 @@ class Decisions(private val database: UserDatabase, private val clock: () -> Lon
             val id = dao.add(
                 DecisionEntity(
                     identityId = identity,
+                    batchUuid = batchUuid,
                     kind = DecisionKind.APPLY.code,
                     fields = DecisionCodec.bits(request.fields),
                     releaseChoiceId = choice,
@@ -198,13 +211,15 @@ class Decisions(private val database: UserDatabase, private val clock: () -> Lon
 
     /**
      * Stores the user's own [values] for the track of [identityId] (read with [contentKey]): every part of each field
-     * they touch, the parts not given empty. Null when the track has no identity now.
+     * they touch, the parts not given empty. Null when the track has no identity now. [batchUuid] is the batch whose
+     * review makes the decision (TI §8).
      */
     suspend fun edit(
         identityId: Long,
         values: Map<DecidedField, String?>,
         contentKey: ByteArray? = null,
         atDecision: List<LocationValues> = emptyList(),
+        batchUuid: ByteArray? = null,
     ): Committed? {
         require(values.isNotEmpty()) { "An edit sets at least one field" }
         return database.withWriteTransaction {
@@ -214,6 +229,7 @@ class Decisions(private val database: UserDatabase, private val clock: () -> Lon
             val id = dao.add(
                 DecisionEntity(
                     identityId = identity,
+                    batchUuid = batchUuid,
                     kind = DecisionKind.EDIT.code,
                     fields = DecisionCodec.bits(fields),
                     fileValues = atDecision.firstOrNull()?.let { FileReferences.encode(FileReferences.of(parts, it.values)) },

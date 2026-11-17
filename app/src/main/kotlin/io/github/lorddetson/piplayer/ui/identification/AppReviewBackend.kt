@@ -39,9 +39,10 @@ import kotlinx.coroutines.withContext
  * The review's backend in the app (TI §6, review screens A and B): the app's pipeline and services, track details for the
  * values shown now, and the review's decisions ([ReviewDecisions]) over the library and the saved covers. Writes (Apply
  * with its cover, Keep as-is, Skip, Undo and the disclosure's answers) run in a scope of their own, so that leaving the
- * screen never cuts one short.
+ * screen never cuts one short. [batchUuid] is the batch whose card opened the review (TI §8): every decision the screen
+ * makes then carries it, so the batch's cards find the track decided; null for a single-file review.
  */
-class AppReviewBackend(context: Context) : ReviewBackend {
+class AppReviewBackend(context: Context, private val batchUuid: String? = null) : ReviewBackend {
 
     private val app = context.applicationContext
     private val services by lazy { IdentificationServices.of(app) }
@@ -87,15 +88,16 @@ class AppReviewBackend(context: Context) : ReviewBackend {
     override suspend fun canEdit(target: IdentificationTarget): Boolean = ReviewDecisions.of(app).canEdit(target)
 
     override suspend fun applyWithEdit(request: ApplyRequest?, cover: CoverImage?, edit: ReviewEdit): Applied? =
-        write { ReviewDecisions.of(app).applyWithEdit(request, cover, edit) }
+        write { ReviewDecisions.of(app).applyWithEdit(request, cover, edit, batchUuid) }
 
-    override suspend fun apply(request: ApplyRequest, cover: CoverImage?): Long? = write { ReviewDecisions.of(app).apply(request, cover) }
+    override suspend fun apply(request: ApplyRequest, cover: CoverImage?): Long? =
+        write { ReviewDecisions.of(app).apply(request, cover, batchUuid) }
 
     override suspend fun canKeepOrSkip(target: IdentificationTarget.LibraryFile): Boolean = ReviewDecisions.of(app).canKeepOrSkip(target)
 
-    override suspend fun keepAsIs(target: IdentificationTarget.LibraryFile): Long? = write { ReviewDecisions.of(app).keepAsIs(target) }
+    override suspend fun keepAsIs(target: IdentificationTarget.LibraryFile): Long? = write { ReviewDecisions.of(app).keepAsIs(target, batchUuid) }
 
-    override suspend fun skip(target: IdentificationTarget.LibraryFile): Long? = write { ReviewDecisions.of(app).skip(target) }
+    override suspend fun skip(target: IdentificationTarget.LibraryFile): Long? = write { ReviewDecisions.of(app).skip(target, batchUuid) }
 
     override suspend fun undo(decisionId: Long): Boolean = write { ReviewDecisions.of(app).undo(decisionId) }
 

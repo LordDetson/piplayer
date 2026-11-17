@@ -134,9 +134,10 @@ suspend fun scanGroup(
 /**
  * Phase (b) of one album group (TI §8): [run] identifies each file, with [batchUuid], so the fingerprints phase (a)
  * cached are looked up and each run keeps its candidates, trace and lookup job under the batch's UUID (TI §10.1).
- * Then the worker enqueues phase (a) of the next group, and after the last group the batch moves to `review`
- * ([BatchStep.Review]). A run that ends without sending or storing anything still counts as done for the group, so
- * one unavailable provider does not stall the batch. Reports each finished file through [onProgress] (done, total).
+ * The group's high band is then prepared on its own ([BatchAutoApply]), while the medium band and "no match" stay
+ * cards of the review. Then the worker enqueues phase (a) of the next group, and after the last group the batch moves to
+ * `review` ([BatchStep.Review]). A run that ends without sending or storing anything still counts as done for the group,
+ * so one unavailable provider does not stall the batch. Reports each finished file through [onProgress] (done, total).
  */
 suspend fun lookupGroup(
     batchUuid: String,
@@ -144,15 +145,18 @@ suspend fun lookupGroup(
     state: BatchState,
     run: suspend (FileRef, String) -> PipelineResult,
     grouping: (List<BatchFile>) -> List<BatchGroup> = ::groupByAlbum,
+    prepare: BatchPreparation? = null,
     onProgress: suspend (done: Int, total: Int) -> Unit = { _, _ -> },
 ): BatchStep {
     val resolved = resolve(state, batchUuid, groupIndex, grouping)
     if (resolved !is Resolved.Group) return if (resolved is Resolved.Review) BatchStep.Review else BatchStep.Idle
     val group = resolved.group
-    group.files.forEachIndexed { index, file ->
-        run(FileRef.Library(file.fileId), batchUuid)
+    val results = group.files.mapIndexed { index, file ->
+        val result = run(FileRef.Library(file.fileId), batchUuid)
         onProgress(index + 1, group.files.size)
+        result
     }
+    if (prepare != null) BatchAutoApply.prepare(batchUuid, results, prepare)
     return if (groupIndex + 1 < resolved.count) {
         BatchStep.ScanNext(groupIndex + 1)
     } else {

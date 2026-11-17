@@ -1,5 +1,6 @@
 package io.github.lorddetson.piplayer.identification.batch
 
+import io.github.lorddetson.piplayer.identification.contract.ApplyRequest
 import io.github.lorddetson.piplayer.identification.contract.IdentificationOutcome
 import io.github.lorddetson.piplayer.identification.contract.IdentificationTarget
 import io.github.lorddetson.piplayer.identification.pipeline.CachedFingerprint
@@ -10,8 +11,11 @@ import io.github.lorddetson.piplayer.identification.pipeline.LocalStage
 import io.github.lorddetson.piplayer.identification.pipeline.PipelineResult
 import io.github.lorddetson.piplayer.identification.pipeline.StageDuration
 import io.github.lorddetson.piplayer.library.db.BatchEntity
+import io.github.lorddetson.piplayer.settings.ProtectedField
 import io.github.lorddetson.piplayer.tagging.contentkey.DurationPlan
+import io.github.lorddetson.piplayer.ui.identification.ReviewFixtures
 import java.io.IOException
+import java.time.Instant
 import kotlinx.coroutines.test.runTest
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -64,6 +68,22 @@ class BatchPhasesTest {
         }
 
         override suspend fun walk(file: LocalFile, plan: DurationPlan): Long? = null
+    }
+
+    /** The preparation of a group's high band as a fake: records what it applies, and what it leaves to the cards. */
+    private class RecordingPreparation : BatchPreparation {
+        val applied = mutableListOf<String>()
+        val requests = mutableListOf<ApplyRequest>()
+
+        override suspend fun fields(): Set<ProtectedField> = emptySet()
+
+        override fun now(): Instant = Instant.parse("2026-11-17T09:00:00Z")
+
+        override suspend fun apply(request: ApplyRequest, batchUuid: String): Long? {
+            requests += request
+            applied += batchUuid
+            return requests.size.toLong()
+        }
     }
 
     // Phase (a): local reads and fingerprints.
@@ -162,6 +182,26 @@ class BatchPhasesTest {
 
         assertThat(step).isEqualTo(BatchStep.ScanNext(1))
         assertThat(runs).containsExactly(FileRef.Library(1) to UUID, FileRef.Library(2) to UUID)
+    }
+
+    @Test
+    fun `phase b prepares the group's high band with the batch's UUID and leaves the rest to the cards`() = runTest {
+        val state = FakeBatchState(batch, mutableListOf(file(1, albumKey = "a", title = "An Album"), file(2, albumKey = "a", title = "An Album")))
+        val high = ReviewFixtures.result(ReviewFixtures.found(ReviewFixtures.match()))
+        val medium = ReviewFixtures.result(ReviewFixtures.found(ReviewFixtures.match(score = 0.70)))
+        val preparation = RecordingPreparation()
+
+        val step = lookupGroup(
+            UUID,
+            groupIndex = 0,
+            state = state,
+            run = { ref, _ -> if ((ref as FileRef.Library).fileId == 1L) high else medium },
+            prepare = preparation,
+        )
+
+        assertThat(step).isEqualTo(BatchStep.Review)
+        assertThat(preparation.applied).containsExactly(UUID)
+        assertThat(preparation.requests.map { it.target }).containsExactly(ReviewFixtures.libraryTarget)
     }
 
     @Test

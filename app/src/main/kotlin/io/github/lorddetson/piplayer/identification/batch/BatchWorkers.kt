@@ -141,8 +141,9 @@ class BatchScanWorker(appContext: Context, params: WorkerParameters) : BatchWork
 
 /**
  * Phase (b) of one album group (TI §8): one pipeline run per file, with the batch's UUID, so the cached fingerprints
- * of phase (a) are looked up and each run stores its rows under the batch. The worker ends with the next group's
- * phase (a) enqueued, or with the batch in review after the last group.
+ * of phase (a) are looked up and each run stores its rows under the batch. The group's high band is prepared on its
+ * own there, as Apply decisions of the batch, and the rest waits for the review's cards. The worker ends with the next
+ * group's phase (a) enqueued, or with the batch in review after the last group.
  */
 class BatchLookupWorker(appContext: Context, params: WorkerParameters) : BatchWorker(appContext, params) {
 
@@ -155,6 +156,7 @@ class BatchLookupWorker(appContext: Context, params: WorkerParameters) : BatchWo
                 groupIndex,
                 batchState(),
                 run = { file, batch -> pipeline.run(file, batchUuid = batch) },
+                prepare = LibraryBatchPreparation(applicationContext),
                 onProgress = ::report,
             )
         }
