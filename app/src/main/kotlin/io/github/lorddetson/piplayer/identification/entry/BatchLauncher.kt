@@ -1,7 +1,9 @@
 package io.github.lorddetson.piplayer.identification.entry
 
 import android.content.Context
+import io.github.lorddetson.piplayer.identification.batch.BatchQueue
 import io.github.lorddetson.piplayer.library.db.BatchEntity
+import io.github.lorddetson.piplayer.library.db.BatchFileEntity
 import io.github.lorddetson.piplayer.library.db.LibraryAccess
 import java.util.UUID
 import kotlinx.coroutines.Dispatchers
@@ -35,20 +37,45 @@ fun queuedBatch(source: String, fileIds: List<Long>, uuid: String, createdAt: Lo
 }
 
 /**
- * The launcher the app uses (TI §1, §8): writes the batch's `batch` row through [library] and gives back its UUID. The
- * batch stays `queued` until the queue of M4a step 2 (PIM-16) takes it: that step writes the batch's files into
- * `batch_file` and enqueues phase (a) for them, and until it lands the Fix tab lists the batch as it is.
+ * The launcher the app uses (TI §1, §8): writes the batch's `batch` row and its files through [library], then hands the
+ * batch to [queue], which enqueues phase (a) of its first album group. A screen only starts batches; the queue and the
+ * workers of [io.github.lorddetson.piplayer.identification.batch] take it from there.
  */
 class RoomBatchLauncher(
     context: Context,
     private val library: LibraryAccess = LibraryAccess.app(context),
+    private val queue: BatchQueues = WorkBatchQueues(context.applicationContext),
     private val uuid: () -> String = { UUID.randomUUID().toString() },
     private val clock: () -> Long = System::currentTimeMillis,
 ) : BatchLauncher {
 
     override suspend fun start(source: String, fileIds: List<Long>): String {
-        val batch = queuedBatch(source, BatchPicks.files(fileIds), uuid(), clock())
-        withContext(Dispatchers.IO) { library.use { database -> runBlocking { database.batches().save(batch) } } }
+        val files = BatchPicks.files(fileIds)
+        val batch = queuedBatch(source, files, uuid(), clock())
+        withContext(Dispatchers.IO) {
+            library.use { database ->
+                runBlocking {
+                    database.batches().save(batch)
+                    database.batches().addFiles(files.mapIndexed { position, fileId -> BatchFileEntity(batch.uuid, position, fileId) })
+                }
+            }
+        }
+        queue.start(batch.uuid)
         return batch.uuid
     }
+}
+
+/** How a started batch reaches its jobs (TI §8); [WorkBatchQueues] is the app's, tests use their own. */
+fun interface BatchQueues {
+
+    /** Enqueues the batch's first job; the batch row and its files are written already. */
+    fun start(batchUuid: String)
+}
+
+/** The app's queue: phase (a) of the first group, then the chain the workers enqueue (TI §8). */
+class WorkBatchQueues(context: Context) : BatchQueues {
+
+    private val context = context.applicationContext
+
+    override fun start(batchUuid: String) = BatchQueue(context).start(batchUuid)
 }

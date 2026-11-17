@@ -12,6 +12,7 @@ import androidx.work.workDataOf
 import io.github.lorddetson.piplayer.identification.pipeline.AppPipeline
 import io.github.lorddetson.piplayer.identification.pipeline.AndroidLocalStage
 import io.github.lorddetson.piplayer.identification.pipeline.LibraryFingerprintCache
+import io.github.lorddetson.piplayer.library.Library
 import io.github.lorddetson.piplayer.library.db.LibraryAccess
 import io.github.lorddetson.piplayer.settings.IdentificationSettings
 import io.github.lorddetson.piplayer.tagging.Tagger
@@ -130,8 +131,10 @@ class BatchScanWorker(appContext: Context, params: WorkerParameters) : BatchWork
 
     override suspend fun doWork(): Result = runPhase { batchUuid, groupIndex ->
         val context = applicationContext
+        // A batch reads and decodes on its own background lane and waits while the gate holds it (TI §8).
+        Library.passGate.awaitBatchOpen()
         val local = AndroidLocalStage(context, Tagger.client(context), LibraryAccess.app(context))
-        val fingerprints = LibraryFingerprintCache(context, LibraryAccess.app(context))
+        val fingerprints = LibraryFingerprintCache.batch(context, LibraryAccess.app(context))
         scanGroup(batchUuid, groupIndex, batchState(), local, fingerprints, onProgress = ::report)
     }
 }
