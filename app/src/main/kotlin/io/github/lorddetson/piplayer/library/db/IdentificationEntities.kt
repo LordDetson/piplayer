@@ -56,6 +56,11 @@ data class BatchEntity(
     val status: String,
     /** Reserved for M4b (TI §8): false or null throughout M4a. */
     @ColumnInfo(name = "write_to_file") val writeToFile: Boolean? = null,
+    /**
+     * The album group the batch is on (TI §8): the workers keep it up to date, and a process that died comes back to it
+     * instead of the first group.
+     */
+    @ColumnInfo(name = "group_index", defaultValue = "0") val groupIndex: Int = 0,
 ) {
     companion object {
         // What started the batch (TI §1 "Entry points").
@@ -269,6 +274,9 @@ interface BatchDao {
 
     @Query("UPDATE batch SET status = :status WHERE uuid = :uuid")
     suspend fun setStatus(uuid: String, status: String)
+
+    @Query("UPDATE batch SET group_index = :groupIndex WHERE uuid = :uuid")
+    suspend fun setGroup(uuid: String, groupIndex: Int)
 
     /** The batches in [status], oldest first: those a phase's worker picks up next. */
     @Query("SELECT * FROM batch WHERE status = :status ORDER BY created_at")

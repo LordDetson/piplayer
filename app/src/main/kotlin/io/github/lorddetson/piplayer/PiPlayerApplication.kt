@@ -101,6 +101,11 @@ class PiPlayerApplication : Application() {
             Library.start(this)
             // A batch that outlived the process gets its notification back (TI §8, PIM-21), after the library starts.
             BatchNotifier.of(this).resume()
+            // And its jobs: a force stop cancels WorkManager's queue, so its group is enqueued again (TI §8, PIM-16).
+            val app = this
+            thread(name = "batch-resume", priority = Thread.MIN_PRIORITY) {
+                runCatching { kotlinx.coroutines.runBlocking { io.github.lorddetson.piplayer.identification.batch.BatchResume.resume(app) } }
+            }
         }
         started.complete(Unit)
     }

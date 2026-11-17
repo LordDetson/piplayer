@@ -47,6 +47,7 @@ class BatchPhasesTest {
     /** The batch's state as a fake: [batch] is the row, [files] the files in their order; writes are recorded. */
     private class FakeBatchState(var batch: BatchEntity?, val files: MutableList<BatchFile> = mutableListOf()) : BatchState {
         val statuses = mutableListOf<String>()
+        val groups = mutableListOf<Int>()
 
         override suspend fun batch(uuid: String): BatchEntity? = if (uuid == UUID) batch else null
 
@@ -55,6 +56,11 @@ class BatchPhasesTest {
         override suspend fun setStatus(uuid: String, status: String) {
             statuses += status
             batch = batch?.copy(status = status)
+        }
+
+        override suspend fun setGroup(uuid: String, groupIndex: Int) {
+            groups += groupIndex
+            batch = batch?.copy(groupIndex = groupIndex)
         }
     }
 

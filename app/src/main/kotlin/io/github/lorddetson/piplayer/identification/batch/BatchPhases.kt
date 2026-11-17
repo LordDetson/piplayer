@@ -31,6 +31,9 @@ interface BatchState {
     suspend fun files(uuid: String): List<BatchFile>
 
     suspend fun setStatus(uuid: String, status: String)
+
+    /** Notes the album group the batch is on, so that a process that died resumes at it (TI §8). */
+    suspend fun setGroup(uuid: String, groupIndex: Int)
 }
 
 /** The batch state of the app, over the library database's `batch` and `batch_file` tables (TI §10.1). */
@@ -44,6 +47,10 @@ class RoomBatchState(private val library: LibraryAccess) : BatchState {
 
     override suspend fun setStatus(uuid: String, status: String) {
         library.use { database -> runBlocking { database.batches().setStatus(uuid, status) } }
+    }
+
+    override suspend fun setGroup(uuid: String, groupIndex: Int) {
+        library.use { database -> runBlocking { database.batches().setGroup(uuid, groupIndex) } }
     }
 }
 
@@ -94,6 +101,8 @@ private suspend fun resolve(
     }
     val groups = grouping(files)
     val group = groups.getOrNull(groupIndex) ?: return Resolved.Idle
+    // Where the batch is, so that a process killed now resumes at this group (TI §8).
+    state.setGroup(batchUuid, groupIndex)
     return Resolved.Group(group, groups.size)
 }
 

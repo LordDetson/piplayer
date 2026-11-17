@@ -14,8 +14,8 @@ import org.junit.Test
 import org.junit.runner.RunWith
 
 /**
- * Library database version 15 (TI §8, §10.1, §11.2 M4a): an older file is dropped and built again, with the tables,
- * columns and keys of batches (the `batch_file` table on top of version 14's `batch`).
+ * Library database version 16 (TI §8, §10.1, §11.2 M4a): an older file is dropped and built again, with the tables,
+ * columns and keys of batches (the `batch_file` table on top of version 14's `batch`, and the group a batch is on in version 16).
  */
 @RunWith(AndroidJUnit4::class)
 class LibraryDatabaseVersionTest {
@@ -65,13 +65,13 @@ class LibraryDatabaseVersionTest {
         strings("SELECT name FROM pragma_table_info('$table') WHERE pk > 0 ORDER BY pk")
 
     @Test
-    fun anOlderLibraryDatabaseIsDroppedAndBuiltAgainAtVersion15() = runBlocking<Unit> {
+    fun anOlderLibraryDatabaseIsDroppedAndBuiltAgainAtVersion16() = runBlocking<Unit> {
         writeVersion14()
         val database = LibraryDatabase.open(context, file)
         try {
             assertThat(database.library().files()).isEmpty()
             assertThat(database.library().mirroredRulesCounter()).isZero()
-            assertThat(database.strings("PRAGMA user_version")).containsExactly("15")
+            assertThat(database.strings("PRAGMA user_version")).containsExactly("16")
 
             val tables = database.strings("SELECT name FROM sqlite_master WHERE type = 'table'")
             assertThat(tables).contains(
@@ -101,8 +101,10 @@ class LibraryDatabaseVersionTest {
                 "content_key", "run_id", "position", "started_at", "stage", "provider", "http_status", "result_count",
                 "best_score", "elapsed_ms", "note",
             )
-            // A batch row (TI §8): one per batch, `write_to_file` reserved for M4b.
-            assertThat(database.columns("batch")).containsExactly("uuid", "created_at", "source", "status", "write_to_file")
+            // A batch row (TI §8): one per batch, `write_to_file` reserved for M4b, `group_index` the group it is on.
+            assertThat(database.columns("batch")).containsExactly(
+                "uuid", "created_at", "source", "status", "write_to_file", "group_index",
+            )
             // The batch's files (TI §8), one row per file in its position; the workers group them by album.
             assertThat(database.columns("batch_file")).containsExactly("batch_uuid", "position", "file_id")
             assertThat(database.primaryKey("batch_file")).containsExactly("batch_uuid", "position")

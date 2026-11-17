@@ -263,7 +263,7 @@ data class VolumeSyncStateEntity(
     // api_cache, decided_mirror, the identification columns of fingerprint and track_display, and both mirrored counters.
     // 14: the batch table (TI §8, §10.1, M4a).
     // 15: the batch_file table (TI §8, §10.1, M4a): the batch's files, in their order.
-    version = 15,
+    version = 16,
     exportSchema = false,
 )
 abstract class LibraryDatabase : RoomDatabase() {
@@ -308,3 +308,4 @@ abstract class LibraryDatabase : RoomDatabase() {
         }
     }
 }
+
