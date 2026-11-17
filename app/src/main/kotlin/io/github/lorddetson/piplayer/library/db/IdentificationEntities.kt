@@ -247,6 +247,10 @@ interface BatchDao {
     /** The batches in [status], oldest first: those a phase's worker picks up next. */
     @Query("SELECT * FROM batch WHERE status = :status ORDER BY created_at")
     suspend fun inStatus(status: String): List<BatchEntity>
+
+    /** Every batch, oldest first (TI §8): the order the Fix tab's queue shows. */
+    @Query("SELECT * FROM batch ORDER BY created_at")
+    suspend fun all(): List<BatchEntity>
 }
 
 /** A file's place and content key. */

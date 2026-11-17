@@ -1516,6 +1516,13 @@ Phases (a) to (c) land in M4a, with accepted results saved in PiPlayer only; pha
   PiPlayer, and `cancelled` when the user or a library rebuild cancels it; `done` and `cancelled` are final. A run
   that belongs to a batch writes the batch's UUID into `lookup_job.batch_uuid` (§10.1); a single-file run writes
   null. `write_to_file` is reserved for M4b and stays false or null in M4a.
+- The Fix tab (PIM-18, M4a step 6) is the batch UI. A bottom bar with the places Library, Search and Fix runs under
+  the top level of the app: Library is the library's tabs and pages, Search is the library's song search as a screen
+  of its own, and Fix shows the batches. Fix lists them oldest first, each with its source, its start and its status,
+  counts them by status, and shows a "Needs attention" entry for the review queue (the per-album review cards arrive
+  in the next step) and a placeholder for the ETA, since M4a does not measure progress yet. The screen reads the
+  `batch` rows through `Library.read` on each start, not through a flow, so a rebuild that closes the database can
+  never be read.
 - Phases (a) and (b) run as WorkManager jobs, one album group per job, each finishing well inside WorkManager's
   10-minute limit; a finished job enqueues the next group, and workers never call `setForeground`. Constraints:
   battery not low; network `UNMETERED` while "unmetered only" is on, `NOT_ROAMING` after "Use mobile data this time",

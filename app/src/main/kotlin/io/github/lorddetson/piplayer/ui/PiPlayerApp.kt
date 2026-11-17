@@ -19,6 +19,8 @@ import io.github.lorddetson.piplayer.ui.library.FolderPage
 import io.github.lorddetson.piplayer.ui.library.GenrePage
 import io.github.lorddetson.piplayer.ui.library.LibraryHost
 import io.github.lorddetson.piplayer.ui.library.LibraryScreen
+import io.github.lorddetson.piplayer.ui.fix.FixScreen
+import io.github.lorddetson.piplayer.ui.search.SearchScreen
 import io.github.lorddetson.piplayer.library.lists.ListKind
 import io.github.lorddetson.piplayer.ui.playlists.PlaylistPage
 import io.github.lorddetson.piplayer.ui.playlists.SmartListPage
@@ -63,15 +65,19 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarResult
@@ -94,6 +100,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalResources
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -122,6 +129,14 @@ import kotlinx.serialization.Serializable
 /** The library tabs with the mini player (docs/library.md §6.1). */
 @Serializable
 data object SongsRoute : NavKey
+
+/** The Search place of the bottom bar: the library's song search as a screen of its own (docs/library.md §6.1, PIM-18). */
+@Serializable
+data object SearchRoute : NavKey
+
+/** The Fix place of the bottom bar: the batch queue of identification (TI §8, PIM-18). */
+@Serializable
+data object FixRoute : NavKey
 
 /** An album page, found by its album key (docs/library.md §6.5). */
 @Serializable
@@ -227,6 +242,12 @@ fun PiPlayerApp(viewModel: PlayerViewModel = viewModel()) {
         if (backStack.lastOrNull() == NowPlayingRoute) backStack.removeLastOrNull()
         if (backStack.lastOrNull() != route) backStack.add(route)
     }
+    // An item of the bottom bar makes its place the base of the stack: the pages pushed over the place pop first, and
+    // the tapped place again takes back to its root (PIM-18, TI §8).
+    val switchTo = { route: NavKey ->
+        while (backStack.size > 1) backStack.removeLastOrNull()
+        if (backStack.firstOrNull() != route) backStack.set(0, route)
+    }
     // Details open over whatever shows, Now Playing included, so that back returns there (docs/library.md §18.1).
     val showDetails = { route: TrackDetailsRoute -> if (backStack.lastOrNull() != route) backStack.add(route) }
     // The review opens over whatever shows too, Now Playing and details included (TI §1).
@@ -304,117 +325,175 @@ fun PiPlayerApp(viewModel: PlayerViewModel = viewModel()) {
         playingLinks = null
         playingLinks = currentSongId?.let { linksOf(context, it) }
     }
-    NavDisplay(
-        backStack = backStack,
-        onBack = { close() },
-        entryDecorators = listOf(rememberSaveableStateHolderNavEntryDecorator(), rememberViewModelStoreNavEntryDecorator(), identifyDecorator),
-        transitionSpec = { slideInVertically(initialOffsetY = { it }) togetherWith ExitTransition.KeepUntilTransitionsFinished },
-        popTransitionSpec = { EnterTransition.None togetherWith slideOutVertically(targetOffsetY = { it }) },
-        predictivePopTransitionSpec = { EnterTransition.None togetherWith slideOutVertically(targetOffsetY = { it }) },
-        entryProvider = entryProvider {
-            entry<SongsRoute> {
-                OnboardingGate(
-                    onboarding,
-                    bottomBar = { MiniPlayer(host.player, host.cover, onOpen = host.openNowPlaying) },
-                    snackbarHost = { SnackbarHost(host.snackbar) },
-                ) {
-                    LibraryScreen(host, onOpenSettings = { if (backStack.lastOrNull() != SettingsRoute) backStack.add(SettingsRoute) })
-                }
-            }
-            entry<AlbumRoute>(metadata = FROM_THE_SIDE) { route -> AlbumPage(route.key, host, onBack = { close() }) }
-            entry<ArtistRoute>(metadata = FROM_THE_SIDE) { route -> ArtistPage(route.key, host, onBack = { close() }) }
-            entry<LibraryFolderRoute>(metadata = FROM_THE_SIDE) { route ->
-                FolderPage(route.volume, route.relativePath, host, onBack = { close() })
-            }
-            entry<PlaylistRoute>(metadata = FROM_THE_SIDE) { route -> PlaylistPage(route.id, host, playlists, onBack = { close() }) }
-            entry<GenreRoute>(metadata = FROM_THE_SIDE) { route -> GenrePage(route.key, host, onBack = { close() }) }
-            entry<SmartListRoute>(metadata = FROM_THE_SIDE) { route ->
-                ListKind.of(route.kind)?.takeIf { it.smart }?.let { SmartListPage(it, host, onBack = { close() }) }
-            }
-            entry<QueueRoute>(metadata = FROM_THE_SIDE) {
-                QueueScreen(
-                    player = player,
-                    actions = QueueActions(
-                        remove = { entry -> viewModel.removeFromQueue(entry.row, entry.mediaId, entry.title) },
-                        move = { entry, from, to -> viewModel.moveInQueue(from, to, entry.mediaId) },
-                    ),
-                    snackbar = snackbar,
-                    onBack = { close() },
-                    menu = menu,
-                    selectionActions = QueueSelectionActions(
-                        addToQueue = viewModel::addToQueue,
-                        removeAll = viewModel::removeFromQueue,
-                        addToPlaylist = playlists.addSelected,
-                        favorites = favoriteBatch,
-                    ),
-                    restored = viewModel.restored.collectAsStateWithLifecycle().value,
-                )
-            }
-            entry<TrackDetailsRoute>(metadata = FROM_THE_SIDE) { route ->
-                TrackDetailsScreen(route.fileId, route.uri, snackbar, onBack = { close() })
-            }
-            entry<IdentifyRoute>(metadata = FROM_THE_SIDE) { route -> ReviewScreen(route.fileId, route.uri, onBack = { close() }) }
-            entry<SettingsRoute>(metadata = FROM_THE_SIDE) {
-                SettingsScreen(
-                    onBack = { close() },
-                    onOpenFolders = { if (backStack.lastOrNull() != FoldersRoute) backStack.add(FoldersRoute) },
-                    onOpenLicenses = { if (backStack.lastOrNull() != LicensesRoute) backStack.add(LicensesRoute) },
-                )
-            }
-            entry<LicensesRoute>(metadata = FROM_THE_SIDE) {
-                LicensesScreen(
-                    onBack = { close() },
-                    onOpen = { title, notice, texts ->
-                        if (backStack.lastOrNull() !is LicenseTextRoute) backStack.add(LicenseTextRoute(title, notice, texts))
-                    },
-                )
-            }
-            entry<LicenseTextRoute>(metadata = FROM_THE_SIDE) { route ->
-                LicenseTextScreen(route.title, route.notice, route.texts, onBack = { close() })
-            }
-            entry<FoldersRoute>(metadata = FROM_THE_SIDE) {
-                FoldersScreen(onBack = { close() })
-            }
-            entry<NowPlayingRoute> {
-                Box(Modifier.fillMaxSize()) {
-                    val links = playingLinks
-                    val scope = rememberCoroutineScope()
-                    // The keys are read again at the tap: the tag pass may have changed them since the song began.
-                    val openLatest = { route: (SongLinks) -> NavKey? ->
-                        scope.launch {
-                            val latest = currentSongId?.let { linksOf(context, it) }
-                            latest?.let(route)?.let(open)
-                        }
-                        Unit
+    Column(Modifier.fillMaxSize()) {
+        NavDisplay(
+            backStack = backStack,
+            onBack = { close() },
+            modifier = Modifier.weight(1f).fillMaxWidth(),
+            entryDecorators = listOf(rememberSaveableStateHolderNavEntryDecorator(), rememberViewModelStoreNavEntryDecorator(), identifyDecorator),
+            transitionSpec = { slideInVertically(initialOffsetY = { it }) togetherWith ExitTransition.KeepUntilTransitionsFinished },
+            popTransitionSpec = { EnterTransition.None togetherWith slideOutVertically(targetOffsetY = { it }) },
+            predictivePopTransitionSpec = { EnterTransition.None togetherWith slideOutVertically(targetOffsetY = { it }) },
+            entryProvider = entryProvider {
+                entry<SongsRoute> {
+                    OnboardingGate(
+                        onboarding,
+                        snackbarHost = { SnackbarHost(host.snackbar) },
+                    ) {
+                        LibraryScreen(host, onOpenSettings = { if (backStack.lastOrNull() != SettingsRoute) backStack.add(SettingsRoute) })
                     }
-                    NowPlaying(
-                        player,
-                        cover,
-                        onClose = { close() },
-                        controls = rememberExtraControls(viewModel, player),
-                        onOpenArtist = links?.artists?.firstOrNull()?.let {
-                            { openLatest { latest -> latest.artists.firstOrNull()?.let { ArtistRoute(it.key) } } }
-                        },
-                        onOpenAlbum = links?.albumKey?.let { { openLatest { latest -> latest.albumKey?.let(::AlbumRoute) } } },
-                        onOpenQueue = { if (backStack.lastOrNull() != QueueRoute) backStack.add(QueueRoute) },
-                        coverName = coverName,
-                        favorite = currentSongId?.let { id ->
-                            val checked by remember(id) { favorites.favoriteFlow(id) }.collectAsStateWithLifecycle(false)
-                            FavoriteState(checked) { favoriteActions.setById(id, !checked) }
-                        },
-                        more = currentMediaId?.let { mediaId ->
-                            { closeMenu ->
-                                val song = currentSongId?.let { Song(id = it, uri = mediaId, title = "", artist = null, album = null, durationMs = null) }
-                                TrackMenuItems(song, TrackMenuPlace.NOW_PLAYING, menu, closeMenu, openedUri = mediaId.takeIf { song == null })
-                            }
+                }
+                entry<SearchRoute> { SearchScreen(host) }
+                entry<FixRoute> { FixScreen() }
+                entry<AlbumRoute>(metadata = FROM_THE_SIDE) { route -> AlbumPage(route.key, host, onBack = { close() }) }
+                entry<ArtistRoute>(metadata = FROM_THE_SIDE) { route -> ArtistPage(route.key, host, onBack = { close() }) }
+                entry<LibraryFolderRoute>(metadata = FROM_THE_SIDE) { route ->
+                    FolderPage(route.volume, route.relativePath, host, onBack = { close() })
+                }
+                entry<PlaylistRoute>(metadata = FROM_THE_SIDE) { route -> PlaylistPage(route.id, host, playlists, onBack = { close() }) }
+                entry<GenreRoute>(metadata = FROM_THE_SIDE) { route -> GenrePage(route.key, host, onBack = { close() }) }
+                entry<SmartListRoute>(metadata = FROM_THE_SIDE) { route ->
+                    ListKind.of(route.kind)?.takeIf { it.smart }?.let { SmartListPage(it, host, onBack = { close() }) }
+                }
+                entry<QueueRoute>(metadata = FROM_THE_SIDE) {
+                    QueueScreen(
+                        player = player,
+                        actions = QueueActions(
+                            remove = { entry -> viewModel.removeFromQueue(entry.row, entry.mediaId, entry.title) },
+                            move = { entry, from, to -> viewModel.moveInQueue(from, to, entry.mediaId) },
+                        ),
+                        snackbar = snackbar,
+                        onBack = { close() },
+                        menu = menu,
+                        selectionActions = QueueSelectionActions(
+                            addToQueue = viewModel::addToQueue,
+                            removeAll = viewModel::removeFromQueue,
+                            addToPlaylist = playlists.addSelected,
+                            favorites = favoriteBatch,
+                        ),
+                        restored = viewModel.restored.collectAsStateWithLifecycle().value,
+                    )
+                }
+                entry<TrackDetailsRoute>(metadata = FROM_THE_SIDE) { route ->
+                    TrackDetailsScreen(route.fileId, route.uri, snackbar, onBack = { close() })
+                }
+                entry<IdentifyRoute>(metadata = FROM_THE_SIDE) { route -> ReviewScreen(route.fileId, route.uri, onBack = { close() }) }
+                entry<SettingsRoute>(metadata = FROM_THE_SIDE) {
+                    SettingsScreen(
+                        onBack = { close() },
+                        onOpenFolders = { if (backStack.lastOrNull() != FoldersRoute) backStack.add(FoldersRoute) },
+                        onOpenLicenses = { if (backStack.lastOrNull() != LicensesRoute) backStack.add(LicensesRoute) },
+                    )
+                }
+                entry<LicensesRoute>(metadata = FROM_THE_SIDE) {
+                    LicensesScreen(
+                        onBack = { close() },
+                        onOpen = { title, notice, texts ->
+                            if (backStack.lastOrNull() !is LicenseTextRoute) backStack.add(LicenseTextRoute(title, notice, texts))
                         },
                     )
-                    SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).windowInsetsPadding(WindowInsets.navigationBars))
                 }
-            }
-        },
-    )
+                entry<LicenseTextRoute>(metadata = FROM_THE_SIDE) { route ->
+                    LicenseTextScreen(route.title, route.notice, route.texts, onBack = { close() })
+                }
+                entry<FoldersRoute>(metadata = FROM_THE_SIDE) {
+                    FoldersScreen(onBack = { close() })
+                }
+                entry<NowPlayingRoute> {
+                    Box(Modifier.fillMaxSize()) {
+                        val links = playingLinks
+                        val scope = rememberCoroutineScope()
+                        // The keys are read again at the tap: the tag pass may have changed them since the song began.
+                        val openLatest = { route: (SongLinks) -> NavKey? ->
+                            scope.launch {
+                                val latest = currentSongId?.let { linksOf(context, it) }
+                                latest?.let(route)?.let(open)
+                            }
+                            Unit
+                        }
+                        NowPlaying(
+                            player,
+                            cover,
+                            onClose = { close() },
+                            controls = rememberExtraControls(viewModel, player),
+                            onOpenArtist = links?.artists?.firstOrNull()?.let {
+                                { openLatest { latest -> latest.artists.firstOrNull()?.let { ArtistRoute(it.key) } } }
+                            },
+                            onOpenAlbum = links?.albumKey?.let { { openLatest { latest -> latest.albumKey?.let(::AlbumRoute) } } },
+                            onOpenQueue = { if (backStack.lastOrNull() != QueueRoute) backStack.add(QueueRoute) },
+                            coverName = coverName,
+                            favorite = currentSongId?.let { id ->
+                                val checked by remember(id) { favorites.favoriteFlow(id) }.collectAsStateWithLifecycle(false)
+                                FavoriteState(checked) { favoriteActions.setById(id, !checked) }
+                            },
+                            more = currentMediaId?.let { mediaId ->
+                                { closeMenu ->
+                                    val song = currentSongId?.let { Song(id = it, uri = mediaId, title = "", artist = null, album = null, durationMs = null) }
+                                    TrackMenuItems(song, TrackMenuPlace.NOW_PLAYING, menu, closeMenu, openedUri = mediaId.takeIf { song == null })
+                                }
+                            },
+                        )
+                        SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).windowInsetsPadding(WindowInsets.navigationBars))
+                    }
+                }
+            },
+        )
+        // The bottom bar of the three top-level places, the mini player above it (PIM-18, docs/playback.md §3.1).
+        // Onboarding keeps the mini player for a file opened from another app, without the bar (docs/library.md §14.1).
+        if (backStack.lastOrNull() in TOP_LEVEL_PLACES) {
+            MiniPlayer(
+                host.player,
+                host.cover,
+                onOpen = host.openNowPlaying,
+                coverName = host.coverName,
+                bottomInset = onboarding.showing,
+            )
+            if (!onboarding.showing) PiPlayerBottomBar(backStack.firstOrNull(), switchTo)
+        }
+    }
     if (CrashReports.promptEnabled) CrashPrompt(CrashReports.of(LocalContext.current))
+}
+
+/** The bottom bar's places, in their order (TI §8, PIM-18). */
+private val TOP_LEVEL_PLACES = listOf(SongsRoute, SearchRoute, FixRoute)
+
+/** Test tags of the bottom bar (PIM-18). */
+object BottomBarTags {
+    const val BAR = "bottom_bar"
+    const val LIBRARY = "bottom_library"
+    const val SEARCH = "bottom_search"
+    const val FIX = "bottom_fix"
+}
+
+/**
+ * The bottom bar (PIM-18, docs/library.md §6.1): Library, Search and Fix. [current] is the base entry of the back stack,
+ * so a page pushed over a place keeps its item selected, and an item makes its place the base again.
+ */
+@Composable
+private fun PiPlayerBottomBar(current: NavKey?, onSelect: (NavKey) -> Unit) {
+    NavigationBar(Modifier.testTag(BottomBarTags.BAR)) {
+        BottomBarItem(SongsRoute, current, BottomBarTags.LIBRARY, R.drawable.ic_library, R.string.bottom_library, onSelect)
+        BottomBarItem(SearchRoute, current, BottomBarTags.SEARCH, R.drawable.ic_search, R.string.bottom_search, onSelect)
+        BottomBarItem(FixRoute, current, BottomBarTags.FIX, R.drawable.ic_fix, R.string.bottom_fix, onSelect)
+    }
+}
+
+@Composable
+private fun RowScope.BottomBarItem(
+    route: NavKey,
+    current: NavKey?,
+    tag: String,
+    icon: Int,
+    label: Int,
+    onSelect: (NavKey) -> Unit,
+) {
+    NavigationBarItem(
+        selected = route == current,
+        onClick = { onSelect(route) },
+        icon = { Icon(painterResource(icon), contentDescription = null) },
+        label = { Text(stringResource(label)) },
+        modifier = Modifier.testTag(tag),
+    )
 }
 
 /**

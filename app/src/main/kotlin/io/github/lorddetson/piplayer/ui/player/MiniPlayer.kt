@@ -43,12 +43,21 @@ import androidx.media3.common.util.UnstableApi
 import io.github.lorddetson.piplayer.R
 
 /**
- * The mini player at the bottom of the list (docs/playback.md §3.2): nothing while the queue of [player] is empty. Its
- * background reaches the bottom edge of the window; its content sits above the navigation bar.
+ * The mini player at the bottom of the list (docs/playback.md §3.2): nothing while the queue of [player] is empty. At the
+ * bottom edge of the window its background reaches that edge and its content sits above the navigation bar; above the
+ * bottom bar of the top-level places (PIM-18) it gives the inset up ([bottomInset] false) and the bar below keeps the
+ * content clear of the navigation bar.
  */
 @OptIn(UnstableApi::class)
 @Composable
-fun MiniPlayer(player: Player?, cover: ImageBitmap?, onOpen: () -> Unit, modifier: Modifier = Modifier, coverName: String? = null) {
+fun MiniPlayer(
+    player: Player?,
+    cover: ImageBitmap?,
+    onOpen: () -> Unit,
+    modifier: Modifier = Modifier,
+    coverName: String? = null,
+    bottomInset: Boolean = true,
+) {
     val item = rememberCurrentItemState(player)
     if (player == null || item.mediaItem == null) return
     val metadata = item.mediaMetadata
@@ -60,7 +69,7 @@ fun MiniPlayer(player: Player?, cover: ImageBitmap?, onOpen: () -> Unit, modifie
             ProgressLine(player, item.durationMs)
             Row(
                 modifier = Modifier
-                    .windowInsetsPadding(barInsets)
+                    .then(if (bottomInset) Modifier.windowInsetsPadding(barInsets) else Modifier)
                     .clickable(onClickLabel = stringResource(R.string.player_open_now_playing), role = Role.Button, onClick = onOpen)
                     .padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),

@@ -180,4 +180,24 @@
     <string name="review_stop_snippet">Stop snippet</string>
     <string name="review_snippet_failed">The snippet could not be played.</string>
     <string name="review_snippet_refused">The snippet cannot play now: a call holds the sound.</string>
+    <!-- The Fix tab (TI §8): the batch queue of identification. -->
+    <string name="fix_title">Fix</string>
+    <string name="fix_needs_attention">Needs attention</string>
+    <string name="fix_needs_attention_none">Nothing needs your attention</string>
+    <plurals name="fix_review_waiting">
+        <item quantity="one">%1$d batch is waiting for your review</item>
+        <item quantity="other">%1$d batches are waiting for your review</item>
+    </plurals>
+    <string name="fix_batches">Batches</string>
+    <string name="fix_batches_none">No batches yet</string>
+    <string name="fix_eta_not_measured">Time left is not measured yet</string>
+    <string name="fix_started">Started %1$s</string>
+    <string name="fix_source_folder">Folder</string>
+    <string name="fix_source_selection">Selection</string>
+    <string name="fix_source_missing_info">Songs missing information</string>
+    <string name="batch_status_queued">Queued</string>
+    <string name="batch_status_processing">Processing</string>
+    <string name="batch_status_review">In review</string>
+    <string name="batch_status_done">Done</string>
+    <string name="batch_status_cancelled">Cancelled</string>
 </resources>

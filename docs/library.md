@@ -542,6 +542,13 @@ keeps playing meanwhile, and the crash leaves a native crash report of `:tagger`
   Songs, Albums, Artists and Folders (since M2b Songs, Albums, Artists, Playlists, Genres and Folders, §19.2), and the
   mini player at the bottom. Without the audio permission every tab and page
   shows the permission card of playback.md §2.2; access granted from any of them starts the library.
+- Since M4a (PIM-18) a bottom bar with the places Library, Search and Fix runs under the top level, with the mini
+  player above it. Library is the tabs and pages above; Search is the song search of §6.3 as a screen of its own,
+  bound to the same song list and menu as the Songs tab, which shows the whole list until the user types and then the
+  matching songs; Fix is the batch queue of track-identification.md §8. An item of the bottom bar makes its place the
+  base of the back stack, popping the pages pushed over it, and takes back to the place's root when it is tapped
+  again. The bar disappears under the pushed pages, Now Playing and onboarding; there the mini player keeps its place
+  at the bottom edge of the window.
 - A tap on an album, an artist or a folder opens its page, which comes in from the side and has its own top bar with
   back, search and sort, and the mini player.
     - **Album page:** the album's title, its artist and year, then its songs. When its songs carry more than one disc

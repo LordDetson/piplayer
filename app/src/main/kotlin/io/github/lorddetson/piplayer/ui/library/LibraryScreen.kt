@@ -95,7 +95,6 @@ import io.github.lorddetson.piplayer.library.lists.SongSort
 import io.github.lorddetson.piplayer.library.songs.Song
 import io.github.lorddetson.piplayer.settings.ListName
 import io.github.lorddetson.piplayer.settings.ListOrder
-import io.github.lorddetson.piplayer.ui.player.MiniPlayer
 import io.github.lorddetson.piplayer.ui.songs.AudioAccess
 import io.github.lorddetson.piplayer.ui.songs.NoMusic
 import io.github.lorddetson.piplayer.ui.songs.PermissionCard
@@ -174,8 +173,9 @@ private enum class LibraryTab(val label: Int) {
 }
 
 /**
- * The library screen (docs/library.md §6.1): the top bar with search, sort and the settings, the tabs Songs, Albums,
- * Artists, Playlists, Genres and Folders, and the mini player. The search filters the tab shown.
+ * The library screen (docs/library.md §6.1): the top bar with search, sort and the settings, then the tabs Songs, Albums,
+ * Artists, Playlists, Genres and Folders. The search filters the tab shown. The mini player hangs above the bottom bar
+ * at the app's root (PIM-18).
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -264,7 +264,8 @@ fun LibraryScreen(host: LibraryHost, onOpenSettings: () -> Unit) {
                 }
             }
         },
-        bottomBar = { MiniPlayer(host.player, host.cover, onOpen = host.openNowPlaying, coverName = host.coverName) },
+        // The mini player now hangs above the bottom bar at the app's root, with it on the three top-level places
+        // (PIM-18, docs/library.md §6.1); the pages keep their own (docs/library.md §6.1).
         snackbarHost = { SnackbarHost(host.snackbar) },
     ) { padding ->
         val modifier = Modifier.padding(padding).fillMaxSize()

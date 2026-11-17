@@ -259,7 +259,7 @@ class PiPlayerAppTest {
     }
 
     @Test
-    fun theMiniPlayerReachesTheBottomEdgeWithItsControlsAboveTheNavigationBar() {
+    fun theBottomBarReachesTheBottomEdgeAndTheMiniPlayerSitsAboveIt() {
         playAndPause("Alpha")
         val insets = compose.runOnUiThread { ViewCompat.getRootWindowInsets(compose.activity.window.decorView) }!!
         val navigationBarPx = insets.getInsets(WindowInsetsCompat.Type.navigationBars()).bottom
@@ -267,10 +267,12 @@ class PiPlayerAppTest {
         val navigationBar: Dp = with(compose.density) { navigationBarPx.toDp() }
 
         val window = compose.onRoot().getBoundsInRoot()
+        val bottomBar = compose.onNodeWithTag(BottomBarTags.BAR).getBoundsInRoot()
         val bar = compose.onNodeWithTag(PlayerTags.MINI_PLAYER).getBoundsInRoot()
         val play = compose.onNode(hasContentDescription(text(R.string.player_play)) and inMiniPlayer).getBoundsInRoot()
 
-        assertThat(bar.bottom.value).isCloseTo(window.bottom.value, org.assertj.core.data.Offset.offset(1f))
+        assertThat(bottomBar.bottom.value).isCloseTo(window.bottom.value, org.assertj.core.data.Offset.offset(1f))
+        assertThat(bar.bottom.value).isCloseTo(bottomBar.top.value, org.assertj.core.data.Offset.offset(1f))
         assertThat(play.bottom.value).isLessThanOrEqualTo((window.bottom - navigationBar + 0.5.dp).value)
     }
 

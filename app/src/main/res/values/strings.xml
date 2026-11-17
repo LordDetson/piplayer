@@ -185,6 +185,10 @@
     <string name="library_search_close">Close search</string>
     <string name="library_sort">Sort</string>
     <string name="library_back">Back</string>
+    <!-- The bottom bar's places (docs/library.md §6.1, track-identification.md §8). -->
+    <string name="bottom_library">Library</string>
+    <string name="bottom_search">Search</string>
+    <string name="bottom_fix">Fix</string>
     <string name="sort_title">Title</string>
     <string name="sort_artist">Artist</string>
     <string name="sort_album">Album</string>

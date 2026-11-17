@@ -169,4 +169,26 @@
     <string name="review_stop_snippet">Остановить фрагмент</string>
     <string name="review_snippet_failed">Фрагмент не удалось воспроизвести.</string>
     <string name="review_snippet_refused">Фрагмент сейчас не играет: звук занят звонком.</string>
+    <!-- Вкладка «Исправить» (TI §8): очередь пакетов идентификации. -->
+    <string name="fix_title">Исправить</string>
+    <string name="fix_needs_attention">Нужно внимание</string>
+    <string name="fix_needs_attention_none">Ничего не требует вашего внимания</string>
+    <plurals name="fix_review_waiting">
+        <item quantity="one">%1$d пакет ждёт проверки</item>
+        <item quantity="few">%1$d пакета ждут проверки</item>
+        <item quantity="many">%1$d пакетов ждут проверки</item>
+        <item quantity="other">%1$d пакета ждут проверки</item>
+    </plurals>
+    <string name="fix_batches">Пакеты</string>
+    <string name="fix_batches_none">Пакетов пока нет</string>
+    <string name="fix_eta_not_measured">Оставшееся время пока не измеряется</string>
+    <string name="fix_started">Начато %1$s</string>
+    <string name="fix_source_folder">Папка</string>
+    <string name="fix_source_selection">Выборка</string>
+    <string name="fix_source_missing_info">Песни с неполной информацией</string>
+    <string name="batch_status_queued">В очереди</string>
+    <string name="batch_status_processing">Обрабатывается</string>
+    <string name="batch_status_review">На проверке</string>
+    <string name="batch_status_done">Готово</string>
+    <string name="batch_status_cancelled">Отменён</string>
 </resources>

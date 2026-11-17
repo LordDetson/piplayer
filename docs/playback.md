@@ -299,9 +299,11 @@ large queue, and a song from an SD card if there is one.
 - The song list is a screen of its own, so it reads the library again each time Now Playing closes (§2.1,
   library.md §1.4).
 - Edge-to-edge: both screens draw behind the status and navigation bars and display cutouts. The list keeps its rows
-  clear of the bars; the mini player's background reaches the bottom edge of the window while its content sits above
-  the navigation bar. Now Playing keeps its content inside the safe drawing area, and the seek bar out of the side
-  areas where the system takes the back gesture.
+  clear of the bars. On the top-level places (library.md §6.1) the mini player's background runs into the bottom bar,
+  whose background reaches the bottom edge of the window and keeps its items above the navigation bar; without the bar
+  (Now Playing, the pages, onboarding) the mini player's background reaches the bottom edge itself, and its content
+  sits above the navigation bar. Now Playing keeps its content inside the safe drawing area, and the seek bar out of
+  the side areas where the system takes the back gesture.
 - One controller of the playback service serves the whole activity: the list, the mini player and Now Playing.
   Messages of the playback service (§2.4) show as a snackbar on either screen.
 
@@ -424,8 +426,9 @@ Instrumented tests on the API 30, 36 and 37 emulators:
   accessibility services.
 - Through the activity and the service: a tapped song brings up the mini player; it opens Now Playing; back returns to
   the list; a predictive back gesture in progress keeps Now Playing on screen and moved, cancelling keeps it, finishing
-  returns to the list; back on the list is left to the system; the mini player's background reaches the bottom edge and
-  its controls stay above the navigation bar; a library song whose file carries an embedded picture shows that picture
+  returns to the list; back on the list is left to the system; the bottom bar's background reaches the bottom edge, the
+  mini player's background runs into it and its controls stay above the navigation bar; a library song whose file
+  carries an embedded picture shows that picture
   in the mini player and on Now Playing, taken through the cover order (library.md §13.1) from a file the library holds,
   since the session gives a library song no picture of the stream (§2.6); a file opened from another app shows the
   picture the player read from it there (§5.2).
