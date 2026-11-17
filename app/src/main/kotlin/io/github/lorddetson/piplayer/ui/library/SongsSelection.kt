@@ -6,6 +6,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import io.github.lorddetson.piplayer.identification.entry.BatchRequest
 import io.github.lorddetson.piplayer.ui.selection.SelectionBack
 import io.github.lorddetson.piplayer.ui.selection.SelectionBar
 import io.github.lorddetson.piplayer.ui.selection.SelectionMenuItems
@@ -36,6 +37,7 @@ internal fun SongsSelectionBar(host: LibraryHost, viewModel: SongsViewModel, sta
             favorites = host.favoriteBatch != null,
             covers = false,
             details = host.menu.details != null,
+            identify = host.batch != null,
         )
         val entries = TrackMenu.selectionEntries(SelectionPlace.LIST, offers, SelectionMenuState(songs.size, songs.size, favorites))
         SelectionMenuItems(entries, close) { entry ->
@@ -47,6 +49,7 @@ internal fun SongsSelectionBar(host: LibraryHost, viewModel: SongsViewModel, sta
                 // A cancelled chooser keeps the selection (§20.3).
                 TrackMenuEntry.AddToPlaylist -> return@SelectionMenuItems host.playlists?.addSelected?.invoke(target, viewModel::endSelection) ?: Unit
                 is TrackMenuEntry.Favorite -> host.favoriteBatch?.set?.invoke(songs.map { it.id }, !entry.favorite)
+                TrackMenuEntry.Identify -> host.batch?.identify(BatchRequest.Selection(songs.map { it.id }))
                 TrackMenuEntry.Details -> songs.singleOrNull()?.let { host.menu.details?.invoke(it) }
                 else -> Unit
             }

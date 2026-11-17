@@ -38,6 +38,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.lorddetson.piplayer.R
+import io.github.lorddetson.piplayer.identification.entry.BatchRequest
 import io.github.lorddetson.piplayer.library.lists.ListKind
 import io.github.lorddetson.piplayer.library.lists.MissingReasons
 import io.github.lorddetson.piplayer.library.lists.SongQuery
@@ -76,6 +77,9 @@ object SmartListTags {
 
     /** A reason's filter chip of Songs missing information. */
     const val CHIP = "smart_list_reason_chip"
+
+    /** "Identify" over the whole list of Songs missing information (TI §1). */
+    const val IDENTIFY = "smart_list_identify"
 }
 
 /**
@@ -319,7 +323,18 @@ fun SmartListPage(kind: ListKind, host: LibraryHost, onBack: () -> Unit) {
 private fun Header(kind: ListKind, loaded: SongsState.Loaded?, chosen: Int, host: LibraryHost) {
     Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         PlayAndShuffle(loaded, host, SmartListTags.PLAY, SmartListTags.SHUFFLE)
+        // A batch over the whole list, without the tracks marked Keep as-is or Skip (TI §1).
         if (kind == ListKind.MISSING_INFO) {
+            host.batch?.let { batch ->
+                OutlinedButton(
+                    onClick = { batch.identify(BatchRequest.MissingInfo(chosen)) },
+                    enabled = !loaded?.songs.isNullOrEmpty(),
+                    modifier = Modifier.testTag(SmartListTags.IDENTIFY),
+                ) {
+                    Icon(painterResource(R.drawable.ic_identify), contentDescription = null)
+                    Text(stringResource(R.string.identify), modifier = Modifier.padding(start = 8.dp))
+                }
+            }
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 for (reason in MissingReasons.ORDER) {
                     FilterChip(

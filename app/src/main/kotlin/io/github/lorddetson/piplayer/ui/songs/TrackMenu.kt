@@ -88,7 +88,7 @@ data class TrackMenuOffers(
     val favorites: Boolean = true,
     val covers: Boolean = true,
     val details: Boolean = true,
-    /** "Identify" (TI §1): the place can open the review. */
+    /** "Identify" (TI §1): the place can open the review of a song, or start a batch over the selected songs. */
     val identify: Boolean = false,
 )
 
@@ -156,6 +156,8 @@ object TrackMenu {
                 )
             }
         }
+        // "Identify" of the songs, right before "Details" as in a song's own menu (TI §1): a batch over them (M4a).
+        if (offers.identify && state.songs > 0) add(TrackMenuEntry.Identify)
         // One song's details; on the queue screen also a file opened from another app's.
         if (offers.details && state.rows == 1 && (state.songs == 1 || place == SelectionPlace.QUEUE)) add(TrackMenuEntry.Details)
         when (place) {

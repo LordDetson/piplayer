@@ -109,6 +109,8 @@ import io.github.lorddetson.piplayer.ui.songs.rememberAudioAccess
 import io.github.lorddetson.piplayer.covers.CoverRequest
 import io.github.lorddetson.piplayer.ui.covers.CoverActions
 import io.github.lorddetson.piplayer.ui.covers.LibraryCover
+import io.github.lorddetson.piplayer.ui.fix.BatchActions
+import io.github.lorddetson.piplayer.identification.entry.BatchRequest
 import io.github.lorddetson.piplayer.ui.playlists.PlaylistActions
 import io.github.lorddetson.piplayer.ui.playlists.PlaylistsContent
 
@@ -157,6 +159,8 @@ class LibraryHost(
     val playSelection: (QueueTarget) -> Unit = {},
     /** Favorites of selected songs (docs/library.md §20.3). */
     val favoriteBatch: SelectionFavorites? = null,
+    /** "Identify" over many songs (TI §1): null where the app cannot start batches, which leaves its entries out. */
+    val batch: BatchActions? = null,
 )
 
 /**
@@ -555,6 +559,8 @@ internal class QueueMenu(
     val cover: CoverMenu? = null,
     /** "Add to playlist" (docs/library.md §16.3). */
     val addToPlaylist: (() -> Unit)? = null,
+    /** "Identify" of the folder's tracks (TI §1). */
+    val identify: (() -> Unit)? = null,
 )
 
 /** "Choose cover", and "Remove own cover" while [hasOwn]. */
@@ -564,6 +570,17 @@ internal fun queue(host: LibraryHost, target: QueueTarget) = QueueMenu(
     playNext = { host.addToQueue(target, true) },
     addToQueue = { host.addToQueue(target, false) },
     addToPlaylist = host.playlists?.let { playlists -> { playlists.addToPlaylist(target) } },
+)
+
+/**
+ * The menu of the folder [volume]/[relativePath] (TI §1): "Play next", "Add to queue" and the playlist of its tracks, and
+ * "Identify" over them and those of the folders below it, as "Play all, with subfolders" plays them.
+ */
+internal fun folderMenu(host: LibraryHost, volume: String, relativePath: String) = QueueMenu(
+    playNext = { host.addToQueue(QueueTarget.Folder(volume, relativePath), true) },
+    addToQueue = { host.addToQueue(QueueTarget.Folder(volume, relativePath), false) },
+    addToPlaylist = host.playlists?.let { playlists -> { playlists.addToPlaylist(QueueTarget.Folder(volume, relativePath)) } },
+    identify = host.batch?.let { batch -> { batch.identify(BatchRequest.Folder(volume, relativePath)) } },
 )
 
 /** The menu of the album [key]: the queue, and its own cover. */
@@ -599,6 +616,12 @@ internal fun QueueMenuButton(description: String, menu: QueueMenu) {
                 DropdownMenuItem(text = { Text(stringResource(R.string.add_to_playlist)) }, onClick = {
                     open = false
                     add()
+                })
+            }
+            menu.identify?.let { identify ->
+                DropdownMenuItem(text = { Text(stringResource(R.string.identify)) }, onClick = {
+                    open = false
+                    identify()
                 })
             }
             menu.cover?.let { cover ->
@@ -678,7 +701,7 @@ internal fun FolderContent(
             val name = if (entry.relativePath.isEmpty()) volumeName(entry.volume, internal) else entry.name
             val details = pluralStringResource(R.plurals.songs_count, entry.songs, entry.songs)
             GroupRow(name, if (page.searching) entry.relativePath + " · " + details else details,
-                stringResource(R.string.open_folder), queue(host, QueueTarget.Folder(entry.volume, entry.relativePath)),
+                stringResource(R.string.open_folder), folderMenu(host, entry.volume, entry.relativePath),
                 leading = { Icon(painterResource(R.drawable.ic_folder), contentDescription = null) }) {
                 host.openFolder(entry.volume, entry.relativePath)
             }

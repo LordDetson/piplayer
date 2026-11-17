@@ -341,7 +341,7 @@ fun FolderPage(volume: String, relativePath: String, host: LibraryHost, onBack: 
         onSearch = { search = it },
         onSearching = { open -> searching = open; if (!open) search = "" },
         sort = { SortButton(ListName.FOLDERS, page.order.collectAsStateWithLifecycle().value, page::setOrder) },
-        menu = queue(host, QueueTarget.Folder(volume, relativePath)),
+        menu = folderMenu(host, volume, relativePath),
         selection = songs,
     ) { modifier -> FolderContent(access, page, folder, host, modifier, search, onSongs = { songs = it }) }
 }

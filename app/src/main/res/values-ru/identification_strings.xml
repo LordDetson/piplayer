@@ -191,4 +191,13 @@
     <string name="batch_status_review">На проверке</string>
     <string name="batch_status_done">Готово</string>
     <string name="batch_status_cancelled">Отменён</string>
+    <!-- The entry points of a batch (TI §1): "Identify" over many songs. -->
+    <plurals name="batch_started">
+        <item quantity="one">%1$d песня в очереди на определение</item>
+        <item quantity="few">%1$d песни в очереди на определение</item>
+        <item quantity="many">%1$d песен в очереди на определение</item>
+        <item quantity="other">%1$d песни в очереди на определение</item>
+    </plurals>
+    <string name="batch_none">Здесь нечего определять</string>
+    <string name="batch_failed">Не удалось запустить пакет.</string>
 </resources>

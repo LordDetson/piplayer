@@ -200,4 +200,11 @@
     <string name="batch_status_review">In review</string>
     <string name="batch_status_done">Done</string>
     <string name="batch_status_cancelled">Cancelled</string>
+    <!-- The entry points of a batch (TI §1): "Identify" over many songs. -->
+    <plurals name="batch_started">
+        <item quantity="one">%1$d song queued for identification</item>
+        <item quantity="other">%1$d songs queued for identification</item>
+    </plurals>
+    <string name="batch_none">Nothing to identify here</string>
+    <string name="batch_failed">The batch could not be started.</string>
 </resources>

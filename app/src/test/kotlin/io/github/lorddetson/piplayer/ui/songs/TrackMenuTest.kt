@@ -124,12 +124,18 @@ class TrackMenuTest {
     }
 
     @Test
-    fun `a selection's menu has no Identify until batches come`() {
+    fun `a selection's menu has Identify right before Details when batches can start`() {
         val one = SelectionMenuState(rows = 1, songs = 1, favorites = FavoriteBatch(counted = 1, notFavorite = 0))
+        val identify = TrackMenuOffers(identify = true)
 
         for (place in SelectionPlace.entries) {
-            assertThat(selection(place, one, TrackMenuOffers(identify = true))).doesNotContain(TrackMenuEntry.Identify)
+            val withIdentify = selection(place, one, identify)
+            assertThat(withIdentify - TrackMenuEntry.Identify).isEqualTo(selection(place, one))
+            assertThat(withIdentify.indexOf(TrackMenuEntry.Identify)).isEqualTo(withIdentify.indexOf(Details) - 1)
         }
+        // No library song in the selection: nothing to start a batch over.
+        assertThat(selection(SelectionPlace.LIST, SelectionMenuState(rows = 2, songs = 0), identify))
+            .doesNotContain(TrackMenuEntry.Identify)
     }
 
     @Test

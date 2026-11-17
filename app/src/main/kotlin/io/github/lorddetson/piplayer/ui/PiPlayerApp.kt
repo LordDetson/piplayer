@@ -20,6 +20,7 @@ import io.github.lorddetson.piplayer.ui.library.GenrePage
 import io.github.lorddetson.piplayer.ui.library.LibraryHost
 import io.github.lorddetson.piplayer.ui.library.LibraryScreen
 import io.github.lorddetson.piplayer.ui.fix.FixScreen
+import io.github.lorddetson.piplayer.ui.fix.rememberBatchActions
 import io.github.lorddetson.piplayer.ui.search.SearchScreen
 import io.github.lorddetson.piplayer.library.lists.ListKind
 import io.github.lorddetson.piplayer.ui.playlists.PlaylistPage
@@ -284,6 +285,7 @@ fun PiPlayerApp(viewModel: PlayerViewModel = viewModel()) {
         open = { id -> open(PlaylistRoute(id)) },
         openSmart = { kind -> open(SmartListRoute(kind.token)) },
     )
+    val batch = rememberBatchActions(snackbar)
     val menu = remember {
         SongMenu(
             links = { song -> linksOf(context, song.id) },
@@ -318,6 +320,7 @@ fun PiPlayerApp(viewModel: PlayerViewModel = viewModel()) {
         openGenre = { open(GenreRoute(it)) },
         playSelection = viewModel::playSelection,
         favoriteBatch = favoriteBatch,
+        batch = batch,
     )
     // What the artist and the album on Now Playing open (docs/library.md §6.1).
     var playingLinks by remember { mutableStateOf<SongLinks?>(null) }
