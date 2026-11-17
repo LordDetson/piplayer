@@ -521,17 +521,18 @@ PiPlayer never adds an ID3v1 tag to a file that has none; §7.5 lists the TagLib
   is never decoded or cached. A partial copy that a process left behind when it died while copying is deleted by a
   later copy once it is an hour old by the file's time; a copy that this process is still writing is never deleted
   that way, even when the wall clock jumps ahead by more than an hour while it runs. A regular file is never copied.
-- Threads: fingerprints are computed through one entry of the fingerprint cache with two lanes. Re-attachment (§3.1,
+- Threads: fingerprints are computed through one entry of the fingerprint cache with three lanes. Re-attachment (§3.1,
   step 4) queues on one thread of background priority, which also decodes; single-file identification that the user
   waits for has its own thread at normal priority, so the user's request never waits behind queued re-attachment work,
   not even behind the file being decoded. Batches (M4a) are started by the user but not waited for: they never take
-  the user's lane; they take the background lane, or one of their own at background priority, under the batch rules
-  of §8 (background priority, at most one decoder for the batch while music plays). Requests of one lane start and end
-  one after another: a request holds its lane only while it opens, copies and decodes its file, and leaves it before
-  the fingerprint is cached, so a request that has decoded completes without waiting for the next one in its lane to
-  decode. Both lanes cache the fingerprint by content key with its decoder path; a recomputed fingerprint replaces the
-  cached fingerprint, format, decoder path and time but keeps the cached AcoustID track ID (§10.1), since the content
-  key names the same audio.
+  the user's lane; a batch has a lane of its own at background priority, whose one thread means at most one decoder
+  runs for the batch while music plays (and at any time), under the batch rules of §8. Before each decode a batch
+  waits at the same politeness gate as the tag pass (docs/library.md §5.5), so an audio underrun or a hot device also
+  holds its fingerprints for a minute. Requests of one lane start and end one after another: a request holds its lane
+  only while it opens, copies and decodes its file, and leaves it before the fingerprint is cached, so a request that
+  has decoded completes without waiting for the next one in its lane to decode. Every lane caches the fingerprint by
+  content key with its decoder path; a recomputed fingerprint replaces the cached fingerprint, format, decoder path and
+  time but keeps the cached AcoustID track ID (§10.1), since the content key names the same audio.
 - Decoder output: the decoder is asked for 16-bit PCM, which is all Chromaprint takes, and the request also replaces
   the 24-bit encoding the extractor proposes for 24-bit FLAC. A float request would keep more precision, but on
   Android 13 and later the platform converts the output before it trims the MP3 and AAC encoder delay, and the trimming
@@ -1528,12 +1529,13 @@ Phases (a) to (c) land in M4a, with accepted results saved in PiPlayer only; pha
   service through `ClipData` with the grant flags. If the process dies during apply, the grant is gone: verified files
   stay done, a notification leads back to the app, and a new consent from the UI covers the remaining and
   interrupted files (§7.2 step 9).
-- Batches never disturb playback: batch threads run at background priority; while music plays at most one decoder
-  runs for the batch; the batch pauses when the playback player reports an audio underrun
-  (`AnalyticsListener.onAudioUnderrun`) or the thermal status reaches `THERMAL_STATUS_MODERATE`
-  (`PowerManager.addThermalStatusListener`), and continues once there has been no underrun for 60 s and the status
-  has stayed below moderate for 60 s. Fingerprints are computed only for identification, never as part of the library
-  scan, except the on-demand matching of orphaned identities (§3.1).
+- Batches never disturb playback: batch threads run at background priority, and their fingerprints decode on a lane
+  of their own, never the user's (TI §3.2), whose one thread means at most one decoder runs for the batch while music
+  plays; the batch waits at the same politeness gate as the tag pass (docs/library.md §5.5), which holds it when the
+  playback player reports an audio underrun (`AnalyticsListener.onAudioUnderrun`) or the thermal status reaches
+  `THERMAL_STATUS_MODERATE` (`PowerManager.addThermalStatusListener`), and lets it go on once there has been no
+  underrun for 60 s and the status has stayed below moderate for 60 s. Fingerprints are computed only for
+  identification, never as part of the library scan, except the on-demand matching of orphaned identities (§3.1).
 - Group files by album first, using the library's album entities (§10.1), so that "one card per album" matches the
   albums the user sees and one release lookup serves the whole album. The pure function that groups them keys each
   file by its album's release MBID when it has one, else by the album's key; because the library groups an album by

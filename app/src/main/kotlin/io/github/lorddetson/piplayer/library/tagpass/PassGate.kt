@@ -8,9 +8,12 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 
 /**
- * When the tag pass may read (docs/library.md §5.5): while the app shows or music plays, because otherwise Android freezes
- * the process soon and a read frozen in the middle could count as a hang. An underrun of the audio or a hot device holds it
- * for a minute more. A run waits here between files; nothing is cancelled, because cancelling a read kills `:tagger`.
+ * When background work that must not disturb playback may run, told by the app and the playback service: the tag pass
+ * reads (docs/library.md §5.5) while the app shows or music plays, because otherwise Android freezes the process soon
+ * and a read frozen in the middle could count as a hang; a batch's fingerprints decode ([awaitBatchOpen], TI §8)
+ * whenever the device allows, since a batch runs as background WorkManager jobs. An underrun of the audio or a hot
+ * device holds both for a minute more. A run waits here between files; nothing is cancelled, because cancelling a read
+ * kills `:tagger`.
  */
 class PassGate(private val now: () -> Long = SystemClock::elapsedRealtime) {
 
@@ -54,6 +57,22 @@ class PassGate(private val now: () -> Long = SystemClock::elapsedRealtime) {
         combine(uiVisible, playing, hot, holds) { visible, plays, isHot, _ ->
             !(visible || plays) || isHot || heldUntil > now()
         }.first { it }
+    }
+
+    /**
+     * Returns once a batch may decode its next fingerprint (TI §8): while the device is not hot, its status has stayed
+     * below moderate for a minute and there has been no audio underrun for a minute. Music alone does not hold a batch,
+     * whose fingerprints decode on a lane of one background thread, so at most one decoder runs for the batch while
+     * music plays. The signals are the ones the tag pass shares: [setPlaying] matters only to it, [audioUnderrun] and
+     * [setHot] to a batch too.
+     */
+    suspend fun awaitBatchOpen() {
+        while (true) {
+            combine(hot, holds) { isHot, _ -> !isHot }.first { it }
+            val remaining = heldUntil - now()
+            if (remaining <= 0) return
+            delay(remaining)
+        }
     }
 
     private fun hold() {

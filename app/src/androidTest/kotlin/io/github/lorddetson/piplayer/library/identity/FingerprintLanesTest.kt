@@ -32,8 +32,8 @@ import org.junit.Test
 import org.junit.runner.RunWith
 
 /**
- * The two lanes of the fingerprint cache (TI §3.2 "Threads"): a user's request does not wait behind re-attachment
- * work that was queued before it. The sources are fakes that wait on a gate, so the test checks the order in which the
+ * The lanes of the fingerprint cache (TI §3.2 "Threads"): a user's request does not wait behind re-attachment work
+ * that was queued before it. The sources are fakes that wait on a gate, so the test checks the order in which the
  * computations run and end, never how fast they are; the timeouts only keep a broken lane from hanging the run.
  */
 @RunWith(AndroidJUnit4::class)

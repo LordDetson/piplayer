@@ -43,14 +43,34 @@ object UserLaneDecoder {
 }
 
 /**
+ * Stage 3's decode of a batch (TI §8): the fingerprint of [file], decoded on the batch's lane of [LibraryFingerprints]
+ * without caching it, never on the user's lane. The lane's one background thread keeps a batch to at most one decoder
+ * while music plays. Throws the same as [UserLaneDecoder.decode].
+ */
+object BatchLaneDecoder {
+
+    suspend fun decode(context: Context, file: LocalFile): FingerprintResult = try {
+        LibraryFingerprints.decode(context, Uri.parse(file.uri), LibraryFingerprints.Lane.BATCH)
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: IOException) {
+        throw e
+    } catch (e: RuntimeException) {
+        throw DecodingException.Failed("The file could not be fingerprinted: ${e.message}", e)
+    }
+}
+
+/**
  * The fingerprint cache of the library database that [library] reaches (TI §3.2, §10.1), as stage 3 uses it: a file is
- * decoded on the user's lane of [LibraryFingerprints] and its fingerprint cached with its decoder path, keeping the
- * AcoustID track ID cached for the key.
+ * decoded on the [LibraryFingerprints] lane [decode] uses and its fingerprint cached with its decoder path, keeping
+ * the AcoustID track ID cached for the key. A single-file run decodes on the user's lane; a batch decodes on the
+ * batch's ([batch]), never the user's (TI §8).
  */
 class LibraryFingerprintCache(
     private val context: Context,
     private val library: LibraryAccess,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+    private val decode: suspend (Context, LocalFile) -> FingerprintResult = UserLaneDecoder::decode,
 ) : FingerprintCache {
 
     override suspend fun cached(contentKey: String): CachedFingerprint? = withContext(ioDispatcher) {
@@ -60,7 +80,7 @@ class LibraryFingerprintCache(
 
     override suspend fun compute(file: LocalFile): ComputedFingerprint {
         // Decoded without the library's lock, which a decode of seconds must not hold.
-        val result = UserLaneDecoder.decode(context, file)
+        val result = decode(context, file)
         // Cached under the lock, so that a rebuild never closes the database under the write; a write that fails costs
         // the next run a decode, not this run its lookup.
         try {
@@ -79,6 +99,17 @@ class LibraryFingerprintCache(
 
     override suspend fun keepAcoustIdTrack(contentKey: String, trackId: String) = withContext(ioDispatcher) {
         library.use { database -> runBlocking { database.identificationCache().keepAcoustIdTrack(contentKey, trackId) } }
+    }
+
+    companion object {
+
+        /**
+         * The cache a batch (TI §8) reaches [library] through: its fingerprints decode on the batch's lane of
+         * [LibraryFingerprints], one background thread that keeps the batch to at most one decoder while music plays,
+         * and never on the user's lane.
+         */
+        fun batch(context: Context, library: LibraryAccess, ioDispatcher: CoroutineDispatcher = Dispatchers.IO) =
+            LibraryFingerprintCache(context, library, ioDispatcher, decode = BatchLaneDecoder::decode)
     }
 }
 

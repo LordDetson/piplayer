@@ -23,11 +23,11 @@ import kotlinx.coroutines.withContext
 
 /**
  * The fingerprint cache of the library database (docs/library.md §8.3), filled by fingerprints of at most 120 s of
- * audio, made with the decoders of identification. One entry, [compute], serves two lanes (TI §3.2 "Threads"):
- * re-attachment's computations run one after another on a thread of background priority, and single-file
- * identification that the user waits for has a thread of its own at normal priority, so it never waits behind them.
- * Batches (M4a) never take the user's lane. [sources] makes the decoding source of an open file; the lane's thread
- * decodes too.
+ * audio, made with the decoders of identification. One entry, [compute], serves three lanes (TI §3.2 "Threads"):
+ * re-attachment's computations run one after another on a thread of background priority, single-file identification
+ * that the user waits for has a thread of its own at normal priority, so it never waits behind them, and a batch's
+ * computations run on a thread of their own at background priority, so they never take the user's lane (TI §8).
+ * [sources] makes the decoding source of an open file; the lane's thread decodes too.
  */
 class LibraryFingerprints(
     private val context: Context,
@@ -47,9 +47,17 @@ class LibraryFingerprints(
 
         /**
          * Single-file identification that the user waits for: one thread at normal priority, apart from
-         * re-attachment's. Batches are started by the user but not waited for, so they never take it (TI §8).
+         * re-attachment's. Batches are started by the user but not waited for, so they take [BATCH] instead, never
+         * this lane (TI §8).
          */
         USER(lane("fingerprints-user", Process.THREAD_PRIORITY_DEFAULT)),
+
+        /**
+         * A batch (TI §8): one thread at background priority, apart from re-attachment's. A batch runs while music
+         * may play, and its one thread means at most one decoder runs for the batch then; a batch always decodes
+         * here, never on [USER].
+         */
+        BATCH(lane("fingerprints-batch", Process.THREAD_PRIORITY_BACKGROUND)),
     }
 
     override suspend fun cached(contentKey: String): CachedPrint? =
