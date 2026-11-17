@@ -130,4 +130,78 @@ class RateLimiterTest {
         limiter.acquire()
         assertThat(testScheduler.currentTime).isEqualTo(1_100)
     }
+
+    /** A base beyond the explored virtual time, so wall times stay positive and in step with it. */
+    private val wallBase = 10_000L
+
+    private fun TestScope.wallClock() = { wallBase + testScheduler.currentTime }
+
+    @Test
+    fun `a restored last request holds the next process back to the interval`() = runTest {
+        val store = InMemoryRateLimitPersistence()
+        // A first process sends one request.
+        RateLimiter(interval, testTimeSource, wallClock(), store).acquire()
+        assertThat(store.lastRequest).isEqualTo(wallBase)
+        // The process dies and the next one starts 200 ms later.
+        advanceTimeBy(200)
+
+        val next = RateLimiter(interval, testTimeSource, wallClock(), store)
+        next.acquire()
+
+        // The interval holds across the gap: 200 ms are gone, 900 ms remain.
+        assertThat(testScheduler.currentTime).isEqualTo(1_100)
+        assertThat(store.lastRequest).isEqualTo(wallBase + 1_100)
+    }
+
+    @Test
+    fun `a last request from before the interval holds nothing back`() = runTest {
+        val store = InMemoryRateLimitPersistence()
+        store.lastRequest = wallBase - 2_000
+
+        RateLimiter(interval, testTimeSource, wallClock(), store).acquire()
+
+        assertThat(testScheduler.currentTime).isZero()
+        assertThat(store.lastRequest).isEqualTo(wallBase)
+    }
+
+    @Test
+    fun `every granted slot stores the time of the last request`() = runTest {
+        val store = InMemoryRateLimitPersistence()
+        val limiter = RateLimiter(interval, testTimeSource, wallClock(), store)
+
+        limiter.acquire()
+        advanceTimeBy(5_000)
+        limiter.acquire()
+
+        assertThat(store.lastRequest).isEqualTo(wallBase + 5_000)
+    }
+
+    @Test
+    fun `the stored time is read once, before the first acquire of a process`() = runTest {
+        val store = InMemoryRateLimitPersistence()
+        store.lastRequest = wallBase
+        val limiter = RateLimiter(interval, testTimeSource, wallClock(), store)
+
+        limiter.acquire()
+        advanceTimeBy(2_000)
+        limiter.acquire()
+
+        assertThat(store.restores).isEqualTo(1)
+    }
+}
+
+/** A persisted last-request time in memory, as the `device_state` file stands in for in JVM tests. */
+private class InMemoryRateLimitPersistence : RateLimitPersistence {
+    var lastRequest: Long? = null
+    var restores = 0
+        private set
+
+    override suspend fun restore(): Long? {
+        restores++
+        return lastRequest
+    }
+
+    override suspend fun persist(lastRequestMillis: Long) {
+        lastRequest = lastRequestMillis
+    }
 }

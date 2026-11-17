@@ -2,6 +2,8 @@ package io.github.lorddetson.piplayer.identification
 
 import android.content.Context
 import androidx.annotation.VisibleForTesting
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.Preferences
 import io.github.lorddetson.piplayer.PiPlayerApplication
 import io.github.lorddetson.piplayer.identification.acoustid.AcoustIdClient
 import io.github.lorddetson.piplayer.identification.caa.CoverArtArchiveClient
@@ -79,6 +81,7 @@ class IdentificationServices(
     val releaseCache: ReleaseCache = InMemoryReleaseCache(),
     val failureCache: FailureCache = InMemoryFailureCache(),
     val folderReleaseHint: FolderReleaseHint = NoFolderReleaseHint,
+    private val deviceState: DataStore<Preferences>? = null,
 ) {
 
     init {
@@ -96,8 +99,17 @@ class IdentificationServices(
         }
     }
 
-    private val limiters: Map<ProviderId, RateLimiter> =
-        identificationProviders.associate { it.id to RateLimiter(it.minInterval, timeSource) }
+    /** The limiters' last-request times in the `device_state` file, when the services persist them (TI §8). */
+    private val persistedLimits: RateLimitTimes? = deviceState?.let(::RateLimitTimes)
+
+    private val limiters: Map<ProviderId, RateLimiter> = identificationProviders.associate { provider ->
+        provider.id to RateLimiter(
+            minInterval = provider.minInterval,
+            timeSource = timeSource,
+            wallClock = { clock.instant().toEpochMilli() },
+            persistence = persistedLimits?.forProvider(provider.id),
+        )
+    }
 
     /** The limiter every request to [provider] goes through. */
     fun limiter(provider: ProviderId): RateLimiter = limiters.getValue(provider)
@@ -207,6 +219,7 @@ class IdentificationServices(
             releaseCache: ReleaseCache = InMemoryReleaseCache(),
             failureCache: FailureCache = InMemoryFailureCache(),
             folderReleaseHint: FolderReleaseHint = NoFolderReleaseHint,
+            deviceState: DataStore<Preferences>? = null,
             configureHttp: OkHttpClient.Builder.() -> Unit = {},
         ): IdentificationServices = IdentificationServices(
             http = HttpClients.create(userAgent, gate).newBuilder().apply(configureHttp).build(),
@@ -222,6 +235,7 @@ class IdentificationServices(
             releaseCache = releaseCache,
             failureCache = failureCache,
             folderReleaseHint = folderReleaseHint,
+            deviceState = deviceState,
         )
 
         /**
@@ -229,7 +243,9 @@ class IdentificationServices(
          * opt-in as the gate (TI §9), closed until the user enables online lookups. The type keeps any other gate, such
          * as an open one of a test, out of the app's services. The release cache and the failure entries live in the
          * library database that [library] reaches (TI §10.1), which nothing opens before a cache is used; so does the
-         * folder hint, which reads the decided and tagged releases of the library (TI §4.2 key 1).
+         * folder hint, which reads the decided and tagged releases of the library (TI §4.2 key 1). Each provider's
+         * limiter keeps its last-request time in the `device_state` file ([deviceState], TI §8), so the interval also
+         * holds across processes.
          */
         fun production(
             userAgent: String,
@@ -237,6 +253,7 @@ class IdentificationServices(
             acoustIdApiKey: String,
             gate: DataStoreOnlineGate,
             library: LibraryAccess,
+            deviceState: DataStore<Preferences>,
         ): IdentificationServices {
             val clock = Clock.systemUTC()
             return create(
@@ -248,6 +265,7 @@ class IdentificationServices(
                 releaseCache = RoomReleaseCache(library, clock),
                 failureCache = RoomFailureCache(library),
                 folderReleaseHint = LibraryFolderReleaseHint(library),
+                deviceState = deviceState,
             )
         }
 

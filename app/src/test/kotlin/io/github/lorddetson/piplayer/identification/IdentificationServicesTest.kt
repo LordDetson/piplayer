@@ -97,6 +97,9 @@ class IdentificationServicesTest {
     /** The gate of the app: the opt-in in a `settings` file, empty here as on a new install. */
     private val persistedGate = DataStoreOnlineGate(IdentificationSettings(MemoryDataStore()), settingsScope)
 
+    /** The app's `device_state` file, empty here as on a new install. */
+    private val deviceState = MemoryDataStore()
+
     private fun TestScope.services(
         gate: io.github.lorddetson.piplayer.net.OnlineGate = TestServices.openGate(),
         connectivity: io.github.lorddetson.piplayer.net.Connectivity = TestServices.FakeConnectivity(),
@@ -117,7 +120,9 @@ class IdentificationServicesTest {
     @Test
     fun `the app's services use the real hosts and the persisted opt-in, closed until the user enables it`() {
         val services =
-            IdentificationServices.production(TestServices.USER_AGENT, TestServices.FakeConnectivity(), "", persistedGate, noLibrary)
+            IdentificationServices.production(
+                TestServices.USER_AGENT, TestServices.FakeConnectivity(), "", persistedGate, noLibrary, deviceState,
+            )
         assertThat(services.gate).isSameAs(persistedGate)
         assertThat(services.gate.isOpen()).isFalse()
         runBlocking { persistedGate.awaitLoaded() }
@@ -333,16 +338,22 @@ class IdentificationServicesTest {
     @Test
     fun `the app's services take the build's key and treat an empty one as none`() {
         val connectivity = TestServices.FakeConnectivity()
-        assertThat(IdentificationServices.production(TestServices.USER_AGENT, connectivity, "", persistedGate, noLibrary).fingerprintStage)
-            .isEqualTo(FingerprintStage.Unavailable(UnavailableReason.NoKey))
-        assertThat(IdentificationServices.production(TestServices.USER_AGENT, connectivity, key, persistedGate, noLibrary).fingerprintStage)
-            .isInstanceOf(FingerprintStage.Available::class.java)
+        assertThat(
+            IdentificationServices.production(TestServices.USER_AGENT, connectivity, "", persistedGate, noLibrary, deviceState)
+                .fingerprintStage,
+        ).isEqualTo(FingerprintStage.Unavailable(UnavailableReason.NoKey))
+        assertThat(
+            IdentificationServices.production(TestServices.USER_AGENT, connectivity, key, persistedGate, noLibrary, deviceState)
+                .fingerprintStage,
+        ).isInstanceOf(FingerprintStage.Available::class.java)
     }
 
     @Test
     fun `the app's services keep their caches in the library database and open it only when a cache is used`() {
         val services =
-            IdentificationServices.production(TestServices.USER_AGENT, TestServices.FakeConnectivity(), "", persistedGate, noLibrary)
+            IdentificationServices.production(
+                TestServices.USER_AGENT, TestServices.FakeConnectivity(), "", persistedGate, noLibrary, deviceState,
+            )
         assertThat(services.releaseCache).isInstanceOf(RoomReleaseCache::class.java)
         assertThat(services.failureCache).isInstanceOf(RoomFailureCache::class.java)
         assertThat(services.coverArtArchive).isNotNull()

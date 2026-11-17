@@ -15,6 +15,7 @@ import io.github.lorddetson.piplayer.net.AndroidConnectivity
 import io.github.lorddetson.piplayer.net.UserAgent
 import io.github.lorddetson.piplayer.settings.DataStoreOnlineGate
 import io.github.lorddetson.piplayer.settings.IdentificationSettings
+import io.github.lorddetson.piplayer.settings.SettingsFiles
 import kotlin.concurrent.thread
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -64,6 +65,7 @@ class PiPlayerApplication : Application() {
             acoustIdApiKey = BuildConfig.ACOUSTID_API_KEY,
             gate = onlineGate,
             library = LibraryAccess.app(this),
+            deviceState = SettingsFiles.deviceState(this),
         )
     }
 
