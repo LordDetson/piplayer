@@ -2,6 +2,8 @@ package io.github.lorddetson.piplayer.ui.fix
 
 import android.app.Application
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -12,7 +14,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -42,10 +43,19 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.lorddetson.piplayer.R
+import io.github.lorddetson.piplayer.identification.batch.BatchCard
+import io.github.lorddetson.piplayer.identification.batch.BatchReview
+import io.github.lorddetson.piplayer.identification.batch.BatchReviewRead
+import io.github.lorddetson.piplayer.identification.batch.FileOutcome
+import io.github.lorddetson.piplayer.identification.batch.RoomBatchReviewStore
+import io.github.lorddetson.piplayer.identification.score.Band
 import io.github.lorddetson.piplayer.library.Library
 import io.github.lorddetson.piplayer.library.db.BatchEntity
+import io.github.lorddetson.piplayer.library.db.LibraryAccess
+import io.github.lorddetson.piplayer.userdata.UserData
 import java.text.DateFormat
 import java.util.Date
+import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -56,47 +66,73 @@ import kotlinx.coroutines.withContext
 
 /** Test tags of the Fix tab (TI §8). */
 object FixTags {
-    /** The "Needs attention" entry of the review queue; the per-album cards arrive in the next step. */
+    /** The "Needs attention" entry of the review queue. */
     const val NEEDS_ATTENTION = "fix_needs_attention"
 
     /** The counts of the batches by status. */
     const val COUNTERS = "fix_counters"
 
-    /** The queue of the batches. */
+    /** The queue of the batches, each review batch with its album cards. */
     const val LIST = "fix_batches"
 
     /** The ETA placeholder of a processing batch. */
     const val ETA = "fix_eta"
+
+    /** The album card [index] of the batch [batchUuid]. */
+    fun card(batchUuid: String, index: Int) = "fix_card_${batchUuid}_$index"
 }
 
 /**
- * The batches of the Fix tab (TI §8), read again on every start: nothing writes `batch` yet, and a one-shot read through
- * `Library.read` can never read a database that a rebuild closed.
+ * The batches of the Fix tab and the album cards of those in review (TI §8), read again on every start: a one-shot read
+ * through `Library.read` and the user database can never read a database that a rebuild closed. A batch whose cards are
+ * all settled moves to `done` during that read ([BatchReviewRead]).
  */
 class FixViewModel(application: Application) : AndroidViewModel(application) {
 
     private val mutableBatches = MutableStateFlow<List<BatchEntity>?>(null)
+    private val mutableCards = MutableStateFlow<Map<String, List<BatchCard>>>(emptyMap())
 
     /** The batches, oldest first; null until the first read. */
     val batches: StateFlow<List<BatchEntity>?> = mutableBatches.asStateFlow()
 
+    /** The album cards of each batch in review, by the batch's UUID. */
+    val cards: StateFlow<Map<String, List<BatchCard>>> = mutableCards.asStateFlow()
+
     fun onStart() {
         val app = getApplication<Application>()
         viewModelScope.launch {
-            val read = withContext(Dispatchers.IO) { Library.read(app) { database -> runBlocking { database.batches().all() } } }
-            mutableBatches.value = read
+            val views = withContext(Dispatchers.IO) {
+                try {
+                    BatchReviewRead(RoomBatchReviewStore(LibraryAccess.app(app)) { UserData.database(app) }).review()
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                    // The queue still shows: a review that cannot be read leaves the batches without cards.
+                    emptyList()
+                }
+            }
+            val batches = withContext(Dispatchers.IO) {
+                Library.read(app) { database -> runBlocking { database.batches().all() } }
+            }
+            mutableBatches.value = batches
+            // The cards of the batches that are still in review: a batch the read finished has none to show.
+            val reviewing = batches.filter { it.status == BatchEntity.STATUS_REVIEW }.mapTo(HashSet()) { it.uuid }
+            mutableCards.value = views.filter { it.batch.uuid in reviewing }.associate { it.batch.uuid to it.cards }
         }
     }
 }
 
 /**
- * The Fix tab (TI §8, PIM-18): "Needs attention" (the review queue; the per-album review cards arrive in the next step),
- * the counts of the batches by status, then the batches oldest first, each with its source, its start and its status. A
- * processing batch also shows the placeholder of the ETA, which M4a does not measure yet.
+ * The Fix tab (TI §8, PIM-18): "Needs attention" (the review queue), the counts of the batches by status, then the
+ * batches oldest first, each with its source, its start and its status. A batch in review shows the cards of its album
+ * groups under it: the album, its tracks, the group's confidence, how its runs ended and how many tracks stand saved.
+ * A card opens the single-file review for its first track left to decide ([onOpenReview]), which carries the batch's
+ * UUID into the decision it makes. A processing batch also shows the placeholder of the ETA, which M4a does not measure
+ * yet.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun FixScreen(modifier: Modifier = Modifier) {
+fun FixScreen(modifier: Modifier = Modifier, onOpenReview: (fileId: Long, batchUuid: String) -> Unit = { _, _ -> }) {
     val app = LocalContext.current.applicationContext as Application
     val model = viewModel { FixViewModel(app) }
     LifecycleStartEffect(model) {
@@ -104,6 +140,7 @@ fun FixScreen(modifier: Modifier = Modifier) {
         onStopOrDispose { }
     }
     val batches by model.batches.collectAsStateWithLifecycle()
+    val cards by model.cards.collectAsStateWithLifecycle()
     Scaffold(
         topBar = {
             TopAppBar(title = { Text(stringResource(R.string.fix_title), modifier = Modifier.semantics { heading() }) })
@@ -115,13 +152,13 @@ fun FixScreen(modifier: Modifier = Modifier) {
             Counters(batches)
             when (batches) {
                 null -> Loading()
-                else -> BatchQueue(batches.orEmpty())
+                else -> BatchQueue(batches.orEmpty(), cards, onOpenReview)
             }
         }
     }
 }
 
-/** The review queue's entry (TI §8): the number of batches waiting for the cards of the next step. */
+/** The review queue's entry (TI §8): the number of batches waiting for their cards. */
 @Composable
 private fun NeedsAttention(batches: List<BatchEntity>?) {
     val waiting = batches.orEmpty().count { it.status == BatchEntity.STATUS_REVIEW }
@@ -165,9 +202,21 @@ private fun Counters(batches: List<BatchEntity>?) {
     }
 }
 
-/** The batches oldest first, as the workers pick them up (TI §8). */
+/** A row of the queue: a batch, or one of the album cards of a batch in review (TI §8). */
+private sealed interface FixRow {
+
+    class Batch(val batch: BatchEntity) : FixRow
+
+    class Card(val batchUuid: String, val card: BatchCard) : FixRow
+}
+
+/** The batches oldest first, as the workers pick them up, each review batch followed by its cards (TI §8). */
 @Composable
-private fun BatchQueue(batches: List<BatchEntity>) {
+private fun BatchQueue(
+    batches: List<BatchEntity>,
+    cards: Map<String, List<BatchCard>>,
+    onOpenReview: (fileId: Long, batchUuid: String) -> Unit,
+) {
     if (batches.isEmpty()) {
         Text(
             stringResource(R.string.fix_batches_none),
@@ -176,8 +225,29 @@ private fun BatchQueue(batches: List<BatchEntity>) {
         )
         return
     }
+    val rows = buildList {
+        for (batch in batches) {
+            add(FixRow.Batch(batch))
+            if (batch.status == BatchEntity.STATUS_REVIEW) {
+                cards[batch.uuid].orEmpty().forEach { add(FixRow.Card(batch.uuid, it)) }
+            }
+        }
+    }
     LazyColumn(Modifier.fillMaxSize().testTag(FixTags.LIST)) {
-        items(batches, key = { it.uuid }) { batch -> BatchRow(batch) }
+        items(
+            rows,
+            key = { row ->
+                when (row) {
+                    is FixRow.Batch -> row.batch.uuid
+                    is FixRow.Card -> "${row.batchUuid}#${row.card.index}"
+                }
+            },
+        ) { row ->
+            when (row) {
+                is FixRow.Batch -> BatchRow(row.batch)
+                is FixRow.Card -> BatchCardRow(row.batchUuid, row.card, onOpenReview)
+            }
+        }
     }
 }
 
@@ -205,6 +275,83 @@ private fun BatchRow(batch: BatchEntity) {
             }
         },
     )
+}
+
+/**
+ * One album card (TI §8): the album (or "No album" for a file that stands alone), its tracks and the group's confidence,
+ * how the group's runs ended and how many tracks stand saved. A card with a track left to decide opens that track's
+ * review; a settled card is a plain row.
+ */
+@Composable
+private fun BatchCardRow(batchUuid: String, card: BatchCard, onOpenReview: (fileId: Long, batchUuid: String) -> Unit) {
+    val next = BatchReview.next(card)
+    val open = next != null
+    ListItem(
+        headlineContent = { Text(card.title ?: stringResource(R.string.fix_card_no_album), maxLines = 1, overflow = TextOverflow.Ellipsis) },
+        supportingContent = {
+            Column {
+                Text(
+                    "${pluralStringResource(R.plurals.fix_card_tracks, card.tracks, card.tracks)} · ${stringResource(bandLabel(card.band))}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.testTag("${FixTags.card(batchUuid, card.index)}_band"),
+                )
+                val outcomes = outcomesText(card)
+                if (outcomes.isNotEmpty()) Text(outcomes, style = MaterialTheme.typography.bodySmall)
+                if (card.automatic > 0) {
+                    Text(
+                        pluralStringResource(R.plurals.fix_card_automatic, card.automatic, card.automatic),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                Text(
+                    pluralStringResource(R.plurals.fix_card_saved, card.tracks, card.decided, card.tracks),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+        },
+        leadingContent = { Box(Modifier.size(12.dp).background(bandColor(card.band), CircleShape)) },
+        trailingContent = {
+            Surface(color = MaterialTheme.colorScheme.surfaceVariant, shape = MaterialTheme.shapes.small) {
+                Text(
+                    stringResource(if (card.settled) R.string.fix_card_saved_chip else R.string.fix_card_needs_review),
+                    style = MaterialTheme.typography.labelMedium,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                )
+            }
+        },
+        modifier = Modifier
+            .testTag(FixTags.card(batchUuid, card.index))
+            .clickable(enabled = open) { next?.let { onOpenReview(it.file.fileId, batchUuid) } },
+    )
+}
+
+/** How the card's runs ended, one part per outcome that occurred, in the order of [FileOutcome] (TI §8). */
+@Composable
+private fun outcomesText(card: BatchCard): String = FileOutcome.entries.mapNotNull { outcome ->
+    val count = card.count(outcome)
+    if (count == 0) return@mapNotNull null
+    pluralStringResource(outcomeLabel(outcome), count, count)
+}.joinToString(" · ")
+
+private fun outcomeLabel(outcome: FileOutcome): Int = when (outcome) {
+    FileOutcome.FOUND -> R.plurals.fix_card_found
+    FileOutcome.NO_MATCH -> R.plurals.fix_card_no_match
+    FileOutcome.RETRY_LATER -> R.plurals.fix_card_retry_later
+    FileOutcome.NO_RUN -> R.plurals.fix_card_no_run
+}
+
+/** The confidence band as text, so that the color is never alone (TI §6). */
+private fun bandLabel(band: Band): Int = when (band) {
+    Band.HIGH -> R.string.fix_band_high
+    Band.MEDIUM -> R.string.fix_band_medium
+    Band.NO_MATCH -> R.string.fix_band_no_match
+}
+
+@Composable
+private fun bandColor(band: Band) = when (band) {
+    Band.HIGH -> MaterialTheme.colorScheme.secondary
+    Band.MEDIUM -> MaterialTheme.colorScheme.tertiary
+    Band.NO_MATCH -> MaterialTheme.colorScheme.outline
 }
 
 /** "Started" the way the device writes a date and a time. */

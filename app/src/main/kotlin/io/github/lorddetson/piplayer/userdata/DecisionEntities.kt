@@ -258,6 +258,17 @@ interface DecisionDao {
     @Query("SELECT * FROM decision WHERE undone_at IS NULL AND identity_id IN (:identityIds) ORDER BY id")
     suspend fun liveDecisionsOf(identityIds: List<Long>): List<DecisionEntity>
 
+    /**
+     * The tracks a decision of the batch [batchUuid] stands for, undone ones left out (TI §7.1, §8): each with its content
+     * key and its identity's location hint, which names the file of a track the tag pass has not read yet.
+     */
+    @Query(
+        "SELECT i.content_key AS contentKey, i.hint_volume_name AS hintVolume, i.hint_relative_path AS hintRelativePath, " +
+            "i.hint_display_name AS hintDisplayName FROM decision d JOIN track_identity i ON i.id = d.identity_id " +
+            "WHERE d.batch_uuid = :batchUuid AND d.undone_at IS NULL AND i.start_ms = 0",
+    )
+    suspend fun decidedTracksOfBatch(batchUuid: ByteArray): List<BatchDecisionTrackRow>
+
     @Upsert
     suspend fun saveFileStates(rows: List<FileStateEntity>)
 
@@ -282,6 +293,14 @@ interface DecisionDao {
 
 /** A Keep as-is or Skip decision of [identityId] with its identity's [contentKey]. */
 data class StateDecisionRow(val id: Long, val identityId: Long, val kind: Int, val contentKey: ByteArray)
+
+/** A track a decision of a batch stands for (TI §8): its [contentKey] and its identity's location hint. */
+data class BatchDecisionTrackRow(
+    val contentKey: ByteArray,
+    val hintVolume: String?,
+    val hintRelativePath: String?,
+    val hintDisplayName: String?,
+)
 
 /** A Skip that counts, with its identity's key and location hint and the stamp it stored. */
 data class LiveSkipRow(

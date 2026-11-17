@@ -186,6 +186,55 @@
     <string name="fix_source_folder">Папка</string>
     <string name="fix_source_selection">Выборка</string>
     <string name="fix_source_missing_info">Песни с неполной информацией</string>
+    <!-- Карточки альбомов пакета на проверке (TI §8): одна карточка на альбомную группу. -->
+    <string name="fix_card_no_album">Без альбома</string>
+    <plurals name="fix_card_tracks">
+        <item quantity="one">%1$d трек</item>
+        <item quantity="few">%1$d трека</item>
+        <item quantity="many">%1$d треков</item>
+        <item quantity="other">%1$d трека</item>
+    </plurals>
+    <string name="fix_band_high">Высокая уверенность</string>
+    <string name="fix_band_medium">Средняя уверенность</string>
+    <string name="fix_band_no_match">Совпадений нет</string>
+    <plurals name="fix_card_found">
+        <item quantity="one">%1$d найден</item>
+        <item quantity="few">%1$d найдено</item>
+        <item quantity="many">%1$d найдено</item>
+        <item quantity="other">%1$d найдено</item>
+    </plurals>
+    <plurals name="fix_card_no_match">
+        <item quantity="one">%1$d без совпадения</item>
+        <item quantity="few">%1$d без совпадения</item>
+        <item quantity="many">%1$d без совпадения</item>
+        <item quantity="other">%1$d без совпадения</item>
+    </plurals>
+    <plurals name="fix_card_retry_later">
+        <item quantity="one">%1$d повторить позже</item>
+        <item quantity="few">%1$d повторить позже</item>
+        <item quantity="many">%1$d повторить позже</item>
+        <item quantity="other">%1$d повторить позже</item>
+    </plurals>
+    <plurals name="fix_card_no_run">
+        <item quantity="one">%1$d без прогона</item>
+        <item quantity="few">%1$d без прогона</item>
+        <item quantity="many">%1$d без прогона</item>
+        <item quantity="other">%1$d без прогона</item>
+    </plurals>
+    <plurals name="fix_card_saved">
+        <item quantity="one">Сохранено %1$d из %2$d</item>
+        <item quantity="few">Сохранено %1$d из %2$d</item>
+        <item quantity="many">Сохранено %1$d из %2$d</item>
+        <item quantity="other">Сохранено %1$d из %2$d</item>
+    </plurals>
+    <plurals name="fix_card_automatic">
+        <item quantity="one">%1$d подготовлен автоматически</item>
+        <item quantity="few">%1$d подготовлено автоматически</item>
+        <item quantity="many">%1$d подготовлено автоматически</item>
+        <item quantity="other">%1$d подготовлено автоматически</item>
+    </plurals>
+    <string name="fix_card_needs_review">Нужна проверка</string>
+    <string name="fix_card_saved_chip">Сохранено в PiPlayer</string>
     <string name="batch_status_queued">В очереди</string>
     <string name="batch_status_processing">Обрабатывается</string>
     <string name="batch_status_review">На проверке</string>

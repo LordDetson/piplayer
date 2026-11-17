@@ -241,7 +241,21 @@ interface IdentificationRunDao {
 
     @Query("DELETE FROM identification_trace WHERE content_key = :contentKey AND run_id IN (:runIds)")
     suspend fun dropTracedRuns(contentKey: String, runIds: List<String>)
+
+    /**
+     * The scores of the last run's candidates of [contentKeys] (at most [CHUNK] at once), best first within each key
+     * (TI §10.1): what a batch card reads the confidence of its tracks from (TI §8).
+     */
+    @Query("SELECT content_key AS contentKey, score FROM candidate WHERE content_key IN (:contentKeys) ORDER BY content_key, position")
+    suspend fun scores(contentKeys: List<String>): List<CandidateScoreRow>
+
+    /** The content keys of [contentKeys] (at most [CHUNK] at once) whose AcoustID lookup waits for its retry (TI §3.2). */
+    @Query("SELECT content_key FROM lookup_job WHERE content_key IN (:contentKeys) AND status = 'retry_later'")
+    suspend fun retryLater(contentKeys: List<String>): List<String>
 }
+
+/** A candidate's score of a run, by content key (TI §8). */
+data class CandidateScoreRow(val contentKey: String, val score: Double)
 
 /** The batches of phases (a) to (c) (TI §8, §10.1), by UUID. */
 @Dao
@@ -280,6 +294,17 @@ interface BatchDao {
             "WHERE bf.batch_uuid = :uuid ORDER BY bf.position",
     )
     suspend fun files(uuid: String): List<BatchFile>
+
+    /**
+     * The places and content keys of the batch's files in `batch_file` order (TI §8), so that a card reads a track's
+     * last run and its decision by the file's key or, for a file the tag pass has not read, by its place.
+     */
+    @Query(
+        "SELECT f.id AS fileId, f.volume_name AS volume, f.relative_path AS relativePath, f.display_name AS displayName, " +
+            "f.content_key AS contentKey FROM batch_file bf JOIN audio_file f ON f.id = bf.file_id " +
+            "WHERE bf.batch_uuid = :uuid ORDER BY bf.position",
+    )
+    suspend fun places(uuid: String): List<FilePlaceRow>
 }
 
 /** A file's place and content key. */

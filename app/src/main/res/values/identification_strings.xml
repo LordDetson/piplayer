@@ -195,6 +195,41 @@
     <string name="fix_source_folder">Folder</string>
     <string name="fix_source_selection">Selection</string>
     <string name="fix_source_missing_info">Songs missing information</string>
+    <!-- The album cards of a batch in review (TI §8): one card per album group. -->
+    <string name="fix_card_no_album">No album</string>
+    <plurals name="fix_card_tracks">
+        <item quantity="one">%1$d track</item>
+        <item quantity="other">%1$d tracks</item>
+    </plurals>
+    <string name="fix_band_high">High confidence</string>
+    <string name="fix_band_medium">Medium confidence</string>
+    <string name="fix_band_no_match">No match</string>
+    <plurals name="fix_card_found">
+        <item quantity="one">%1$d found</item>
+        <item quantity="other">%1$d found</item>
+    </plurals>
+    <plurals name="fix_card_no_match">
+        <item quantity="one">%1$d without a match</item>
+        <item quantity="other">%1$d without a match</item>
+    </plurals>
+    <plurals name="fix_card_retry_later">
+        <item quantity="one">%1$d to try again later</item>
+        <item quantity="other">%1$d to try again later</item>
+    </plurals>
+    <plurals name="fix_card_no_run">
+        <item quantity="one">%1$d with no run</item>
+        <item quantity="other">%1$d with no run</item>
+    </plurals>
+    <plurals name="fix_card_saved">
+        <item quantity="one">%1$d of %2$d saved</item>
+        <item quantity="other">%1$d of %2$d saved</item>
+    </plurals>
+    <plurals name="fix_card_automatic">
+        <item quantity="one">%1$d prepared automatically</item>
+        <item quantity="other">%1$d prepared automatically</item>
+    </plurals>
+    <string name="fix_card_needs_review">Needs review</string>
+    <string name="fix_card_saved_chip">Saved in PiPlayer</string>
     <string name="batch_status_queued">Queued</string>
     <string name="batch_status_processing">Processing</string>
     <string name="batch_status_review">In review</string>
