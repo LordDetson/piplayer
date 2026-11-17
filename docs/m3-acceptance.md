@@ -5,7 +5,7 @@ of PIM-60 runs the whole pipeline over the owner's files against the real servic
 measure of quality; the phone runs that a device can only do by hand are listed as open.
 
 **Verdict, 17.11.2026: the corpus holds; M3 is not closed yet.** The corpus check passed on 121 of the owner's files:
-the high band held no confirmed wrong match (0 %, target at most 2 %), 7 files stayed unmatched, and the thresholds of
+the high band held one wrong match (1.2 %, target at most 2 %), 7 files stayed unmatched, and the thresholds of
 TI §4.1 stayed as they are. The quiet `--timing` pass on the S24 is green (14 of 14) after step 22's richer decisions
 raised the write-join budget and the start-up-mirror bound by the owner's decision. Apply and Undo were checked by hand
 on the S24: a wrong tag changed to the identified value on every surface and Undo brought it back. The phone-only runs
@@ -39,9 +39,9 @@ wrong identification. One artist differs in writing only ("Fitz & The Tantrums" 
 "Majestic" against "Majestic x Boney M.", Cyrillic "Молчат Дома" against "Molchat Doma", "See Siang Wong" with a track
 credited to the game's character). Two have the title in another writing ("インフェルノ" against "Inferno", Cyrillic or
 Japanese against the Latin tag). Four carry tags the downloader gave, not the recording ("Astronomia" tagged Vicetone,
-"Not The One" tagged DJ HAI CENA, "Still Alive" tagged to the in-game character). One is a remix whose tag names the
-original ("Summertime (Imanbek remix)" tagged "Summertime Sadness"): the owner's file, so the owner decides whether that
-one counts. Confirmed wrong identifications in the high band: 0 of 81.
+"Not The One" tagged DJ HAI CENA, "Still Alive" tagged to the in-game character). The tenth is the one wrong match:
+the file is the original "Summertime Sadness", but the pipeline identified "Summertime (Imanbek remix)"; the owner
+confirmed the file is the original. Confirmed wrong identifications in the high band: 1 of 81 (1.2 %).
 
 Not found (7): five files the services do not know, one an empty AcoustID result left for a later retry, and one
 "CITY LIGHT$ 2" whose name the query could not match. The thresholds of TI §4.1 (HIGH 0.90 with a 0.10 runner-up gap,
