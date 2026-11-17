@@ -255,11 +255,13 @@ data class VolumeSyncStateEntity(
         ReleaseCacheEntity::class,
         ApiCacheEntity::class,
         DecidedMirrorEntity::class,
+        BatchEntity::class,
     ],
     // 10: the mirror of favorites and plays (docs/library.md §15.4). 11: the smart lists' date added and indexes (§17.4).
     // 12: the genres of display rows (§19.5). 13: identification (TI §10.1): the content-key tables, the release cache,
     // api_cache, decided_mirror, the identification columns of fingerprint and track_display, and both mirrored counters.
-    version = 13,
+    // 14: the batch table (TI §8, §10.1, M4a).
+    version = 14,
     exportSchema = false,
 )
 abstract class LibraryDatabase : RoomDatabase() {
@@ -276,6 +278,9 @@ abstract class LibraryDatabase : RoomDatabase() {
 
     /** The lookup jobs, candidates and trace of identification, by content key (TI §10.1). */
     abstract fun identificationRuns(): IdentificationRunDao
+
+    /** The batches of phases (a) to (c) (TI §8, §10.1). */
+    abstract fun batches(): BatchDao
 
     companion object {
         const val FILE_NAME = "library.db"

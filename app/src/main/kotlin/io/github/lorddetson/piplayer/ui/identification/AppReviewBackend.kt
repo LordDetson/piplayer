@@ -51,7 +51,7 @@ class AppReviewBackend(context: Context) : ReviewBackend {
 
     override suspend fun identify(file: FileRef, onProgress: (PipelineProgress) -> Unit): PipelineResult =
         // Off the main thread: the services build their HTTP client on first use, and the run reads and waits.
-        withContext(Dispatchers.IO) { pipeline.run(file, onProgress) }
+        withContext(Dispatchers.IO) { pipeline.run(file, onProgress = onProgress) }
 
     override suspend fun current(file: FileRef): TrackDetails? = withContext(Dispatchers.IO) {
         when (file) {

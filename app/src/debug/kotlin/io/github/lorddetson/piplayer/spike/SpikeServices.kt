@@ -81,5 +81,5 @@ object SpikeServices {
         uri: String,
         pipeline: IdentificationPipeline,
         onProgress: (PipelineProgress) -> Unit = {},
-    ): PipelineResult = SpikeGate.open().use { pipeline.run(FileRef.Opened(uri), onProgress) }
+    ): PipelineResult = SpikeGate.open().use { pipeline.run(FileRef.Opened(uri), onProgress = onProgress) }
 }

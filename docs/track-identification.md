@@ -1505,6 +1505,13 @@ Phases (a) to (c) land in M4a, with accepted results saved in PiPlayer only; pha
 - Phases with their own state: (a) local read + fingerprint (CPU), (b) network lookups, (c) user review (UI only,
   never background), (d) apply writes. Phases (a) to (c) keep their state in the library database; the apply phase
   keeps its per-file journal in the user database (§7.2, §10).
+- One `batch` row per batch (PIM-16, §10.1), made when the batch starts and kept for phases (a) to (c). `source`
+  records what started it: `folder`, `selection` or `missing_info`. `status` runs `queued` once the batch is made,
+  `processing` while any phase (a) or (b) job waits or runs, `review` once every group job has finished and the review
+  queue (the Fix tab) waits for the user, `done` once the user has reviewed and the accepted results are saved in
+  PiPlayer, and `cancelled` when the user or a library rebuild cancels it; `done` and `cancelled` are final. A run
+  that belongs to a batch writes the batch's UUID into `lookup_job.batch_uuid` (§10.1); a single-file run writes
+  null. `write_to_file` is reserved for M4b and stays false or null in M4a.
 - Phases (a) and (b) run as WorkManager jobs, one album group per job, each finishing well inside WorkManager's
   10-minute limit; a finished job enqueues the next group, and workers never call `setForeground`. Constraints:
   battery not low; network `UNMETERED` while "unmetered only" is on, `NOT_ROAMING` after "Use mobile data this time",
@@ -1525,10 +1532,13 @@ Phases (a) to (c) land in M4a, with accepted results saved in PiPlayer only; pha
   has stayed below moderate for 60 s. Fingerprints are computed only for identification, never as part of the library
   scan, except the on-demand matching of orphaned identities (§3.1).
 - Group files by album first, using the library's album entities (§10.1), so that "one card per album" matches the
-  albums the user sees and one release lookup serves the whole album. Only groups with a release MBID or a non-empty
-  album title count as album groups; files without an album tag are looked up one by one and merged afterwards when
-  their recordings resolve to the same release. One release per album group (§4.2 step 5). Expect roughly 1 000 to
-  2 000 tracks per hour; show progress and ETA.
+  albums the user sees and one release lookup serves the whole album. The pure function that groups them keys each
+  file by its album's release MBID when it has one, else by the album's key; because the library groups an album by
+  its release MBID first and by title, album artist and folder otherwise, the key covers both, so files whose album has
+  a release MBID or a non-empty title group by that album. A file without an album stands alone and is looked up one
+  by one, merged afterwards when its recording resolves to the same release. Album groups keep the order of their
+  first file and the files within a group their own order, and the files without an album follow. One release per
+  album group (§4.2 step 5). Expect roughly 1 000 to 2 000 tracks per hour; show progress and ETA.
 - Notifications: separate channels for playback and for batches; the notification permission (API 33+) is requested,
   with an explanation, before the first batch; without it, batches still run and show their progress in the Fix tab.
   Progress with ETA; a final notification opens the review queue in the Fix tab.
@@ -1722,7 +1732,8 @@ Everything that can be rebuilt from the media index and file tags, or safely los
 caches). Rebuilding the library means deleting this file and filling it again from the media index, the tag pass and
 the user database; user data is not touched. A rebuild cancels running batch phases (a) to (c); decisions already
 made live in the user database. A new schema version rebuilds it the same way (library.md §1.1); M3 brings version 13,
-whose first sync after the update runs as on a first launch (about 1.7 s on the owner's phone).
+whose first sync after the update runs as on a first launch (about 1.7 s on the owner's phone). M4a brings version 14,
+which adds the `batch` table and keeps the `lookup_job` column `batch_uuid` in use.
 
 - `audio_file(id, media_store_id, volume_name, relative_path, display_name, document_uri, size, mtime,
   generation_modified, date_added, mime_type, <media kinds>, format, codec, sample_rate, bit_depth, channels, bitrate, duration_ms, duration_source,
@@ -1799,7 +1810,10 @@ whose first sync after the update runs as on a first launch (about 1.7 s on the 
   key, with the "retry later" time of §3.2. A single-file run (M3) writes `batch_uuid` null, `phase` `lookup` (phase
   (b) of §8), `status` `retry_later` or `final`, `attempts` the empty AcoustID answers so far, `next_attempt_at` in
   milliseconds since the epoch (null when final) and `last_error` `acoustid_empty`, and deletes the row when the retry
-  finds results or a text candidate of at least 0.50 cancels a waiting retry (§3.2).
+  finds results or a text candidate of at least 0.50 cancels a waiting retry (§3.2). A run that belongs to a batch
+  writes that batch's UUID into `batch_uuid` instead of null; the retry statuses stay the single-file run's, and the
+  batch keeps its own state in `batch.status`. In code the single-file values live beside `LookupJobEntity` and the
+  batch's beside `BatchEntity`, so the two sets never mix.
 - `candidate(content_key, position, source, recording_mbid, release_mbid, score, reason, payload_json)`: the ranked
   candidates of the last run, `position` 0 for the best. A run replaces the rows of the run before with its ranked
   recordings, at most 10: `source` is the stage of the recording's best score (`tag_recording_id`, `isrc`,
@@ -1993,7 +2007,11 @@ used, never through a stored content URI, which goes stale after a media index r
   identity. `identity_id` is empty while the entry's song has no identity (its tags not read yet, or an imported line
   that found no file); such an entry is linked by its hints.
 - `library_folder_rule(volume_name, relative_path, mode)`: include or exclude (M2a).
-- `batch(uuid, created_at, source, status, write_to_file)`.
+- `batch(uuid, created_at, source, status, write_to_file)` (M4a, version 14): one row per batch of phases (a) to (c)
+  (§8). `uuid` is the batch's own UUID, which `lookup_job.batch_uuid` carries and later phases pass in WorkManager
+  `Data` (§8); `created_at` is in milliseconds since the epoch. `source` is `folder`, `selection` or `missing_info`
+  (§1 "Entry points"); `status` runs `queued`, `processing`, `review`, `done` or `cancelled` as §8 describes, and
+  `write_to_file` is reserved for M4b, false or null in M4a.
 - `tag_backup(id, identity_id, volume_name, relative_path, display_name, created_at, tags_path, tags_hash,
   cover_path, cover_hash, id3_version)`: undo metadata; the snapshot files live in no-backup app storage.
 - `applied_change(id, identity_id, decision_id, batch_uuid, volume_name, relative_path, display_name, state,

@@ -24,7 +24,42 @@ data class LookupJobEntity(
     val attempts: Int,
     @ColumnInfo(name = "next_attempt_at") val nextAttemptAt: Long?,
     @ColumnInfo(name = "last_error") val lastError: String?,
-)
+) {
+    companion object {
+        // The values a single-file run (M3) writes (TI §10.1), kept apart from the batch's, which live beside
+        // [BatchEntity]: a batch run writes the same phase with its own batch UUID and keeps its state in `batch`.
+        const val PHASE_LOOKUP = "lookup"
+        const val STATUS_RETRY_LATER = "retry_later"
+        const val STATUS_FINAL = "final"
+        const val ERROR_EMPTY = "acoustid_empty"
+    }
+}
+
+/** A batch of phases (a) to (c) (TI §8, §10.1): what started it, when, how far it is and whether M4b writes tags. */
+@Entity(tableName = "batch")
+data class BatchEntity(
+    @PrimaryKey val uuid: String,
+    @ColumnInfo(name = "created_at") val createdAt: Long,
+    val source: String,
+    val status: String,
+    /** Reserved for M4b (TI §8): false or null throughout M4a. */
+    @ColumnInfo(name = "write_to_file") val writeToFile: Boolean? = null,
+) {
+    companion object {
+        // What started the batch (TI §1 "Entry points").
+        const val SOURCE_FOLDER = "folder"
+        const val SOURCE_SELECTION = "selection"
+        const val SOURCE_MISSING_INFO = "missing_info"
+
+        // The batch's state (TI §8): made, then running phase (a) and (b) jobs, then waiting for review, then done or
+        // cancelled. `done` and `cancelled` are final.
+        const val STATUS_QUEUED = "queued"
+        const val STATUS_PROCESSING = "processing"
+        const val STATUS_REVIEW = "review"
+        const val STATUS_DONE = "done"
+        const val STATUS_CANCELLED = "cancelled"
+    }
+}
 
 /** A ranked candidate of the last run (TI §10.1); [position] 0 is the best. */
 @Entity(tableName = "candidate", primaryKeys = ["content_key", "position"])
@@ -194,6 +229,24 @@ interface IdentificationRunDao {
 
     @Query("DELETE FROM identification_trace WHERE content_key = :contentKey AND run_id IN (:runIds)")
     suspend fun dropTracedRuns(contentKey: String, runIds: List<String>)
+}
+
+/** The batches of phases (a) to (c) (TI §8, §10.1), by UUID. */
+@Dao
+interface BatchDao {
+
+    @Query("SELECT * FROM batch WHERE uuid = :uuid")
+    suspend fun batch(uuid: String): BatchEntity?
+
+    @Upsert
+    suspend fun save(batch: BatchEntity)
+
+    @Query("UPDATE batch SET status = :status WHERE uuid = :uuid")
+    suspend fun setStatus(uuid: String, status: String)
+
+    /** The batches in [status], oldest first: those a phase's worker picks up next. */
+    @Query("SELECT * FROM batch WHERE status = :status ORDER BY created_at")
+    suspend fun inStatus(status: String): List<BatchEntity>
 }
 
 /** A file's place and content key. */

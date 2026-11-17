@@ -60,10 +60,11 @@ class IdentificationPipeline(
 ) {
 
     /**
-     * Runs the stages for [file], reporting through [onProgress] on the caller's coroutine. Cancelling the caller ends
-     * the run at its next request or decoder buffer, with no result.
+     * Runs the stages for [file], reporting through [onProgress] on the caller's coroutine. [batchUuid] names the batch
+     * the run belongs to (TI §8), null for a single-file run: a batch run writes it into its lookup job (TI §10.1).
+     * Cancelling the caller ends the run at its next request or decoder buffer, with no result.
      */
-    suspend fun run(file: FileRef, onProgress: (PipelineProgress) -> Unit = {}): PipelineResult {
+    suspend fun run(file: FileRef, batchUuid: String? = null, onProgress: (PipelineProgress) -> Unit = {}): PipelineResult {
         services.awaitGateRead()
         // What every MusicBrainz attempt checks, in its order: the gate, MusicBrainz's stop, the network (TI §8).
         try {
@@ -71,7 +72,7 @@ class IdentificationPipeline(
         } catch (e: SendBlockedException) {
             return PipelineResult(IdentificationOutcome.blocked(e) ?: throw e)
         }
-        return Run(onProgress).run(file)
+        return Run(batchUuid, onProgress).run(file)
     }
 
     /** A call that may not send ended the run with [outcome]. */
@@ -90,7 +91,7 @@ class IdentificationPipeline(
     }
 
     /** The state of one run. */
-    private inner class Run(private val onProgress: (PipelineProgress) -> Unit) {
+    private inner class Run(private val batchUuid: String?, private val onProgress: (PipelineProgress) -> Unit) {
         private val runMark = timeSource.markNow()
         private val runStartedAt = services.clock.millis()
         private val stages = mutableListOf<StageReport>()
@@ -223,14 +224,14 @@ class IdentificationPipeline(
             val duration = durationMs
             val startedAt = services.clock.millis()
             // A time more than the delay ahead was stored by a clock that ran ahead: it counts as due (TI §3.2).
-            val waitsUntil = job?.takeIf { it.status == STATUS_RETRY_LATER }?.nextAttemptAt
+            val waitsUntil = job?.takeIf { it.status == LookupJobEntity.STATUS_RETRY_LATER }?.nextAttemptAt
                 ?.takeIf { it > startedAt && it - startedAt <= RETRY_DELAY.inWholeMilliseconds }
             val reason = when {
                 confident -> SkipReason.STOPPED_EARLY
                 stage !is FingerprintStage.Available -> SkipReason.NO_KEY
                 stop != null -> SkipReason.PROVIDER_STOPPED
                 waitsUntil != null -> SkipReason.RETRY_PENDING.also { pendingUntil = waitsUntil }
-                job?.status == STATUS_FINAL -> SkipReason.EMPTY_RESULT_FINAL
+                job?.status == LookupJobEntity.STATUS_FINAL -> SkipReason.EMPTY_RESULT_FINAL
                 duration == null -> SkipReason.NO_DURATION
                 else -> null
             }
@@ -473,12 +474,12 @@ class IdentificationPipeline(
                         JobChange.Save(
                             LookupJobEntity(
                                 contentKey = file!!.target.contentKey,
-                                batchUuid = null,
-                                phase = PHASE_LOOKUP,
-                                status = if (final) STATUS_FINAL else STATUS_RETRY_LATER,
+                                batchUuid = batchUuid,
+                                phase = LookupJobEntity.PHASE_LOOKUP,
+                                status = if (final) LookupJobEntity.STATUS_FINAL else LookupJobEntity.STATUS_RETRY_LATER,
                                 attempts = attempts,
                                 nextAttemptAt = if (final) null else emptyAt + RETRY_DELAY.inWholeMilliseconds,
-                                lastError = ERROR_EMPTY,
+                                lastError = LookupJobEntity.ERROR_EMPTY,
                             ),
                         )
                     }
@@ -486,7 +487,7 @@ class IdentificationPipeline(
                 // Deleting a row that is not there costs nothing.
                 AcoustIdAnswer.RESULTS -> JobChange.Drop
                 AcoustIdAnswer.NONE ->
-                    if (textCancels && job?.status == STATUS_RETRY_LATER) JobChange.Drop else JobChange.Keep
+                    if (textCancels && job?.status == LookupJobEntity.STATUS_RETRY_LATER) JobChange.Drop else JobChange.Keep
             }
         }
 
@@ -578,12 +579,6 @@ class IdentificationPipeline(
 
         /** Empty AcoustID answers after which the empty result is final for a single file (TI §3.2, M3). */
         const val EMPTY_ANSWERS = 2
-
-        /** The values of `lookup_job` that a single-file run writes (TI §10.1). */
-        const val PHASE_LOOKUP = "lookup"
-        const val STATUS_RETRY_LATER = "retry_later"
-        const val STATUS_FINAL = "final"
-        const val ERROR_EMPTY = "acoustid_empty"
 
         private val ZERO = kotlin.time.Duration.ZERO
     }
