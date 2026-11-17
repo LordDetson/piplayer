@@ -6,8 +6,11 @@ measure of quality; the phone runs that a device can only do by hand are listed 
 
 **Verdict, 17.11.2026: the corpus holds; M3 is not closed yet.** The corpus check passed on 121 of the owner's files:
 the high band held no confirmed wrong match (0 %, target at most 2 %), 7 files stayed unmatched, and the thresholds of
-TI §4.1 stayed as they are. The phone-only runs below (a real call, notification, lock screen, Bluetooth, watch,
-captive portal, airplane mode, one live `DeviceFingerprintTest`) are still open and belong to the owner.
+TI §4.1 stayed as they are. The quiet `--timing` pass on the S24 is green (14 of 14) after step 22's richer decisions
+raised the write-join budget and the start-up-mirror bound by the owner's decision. Apply and Undo were checked by hand
+on the S24: a wrong tag changed to the identified value on every surface and Undo brought it back. The phone-only runs
+below (a real call the owner cannot make, notification and lock screen after Apply on Bluetooth and the watch, captive
+portal, airplane mode) are still open and belong to the owner.
 
 ## Devices
 
@@ -48,9 +51,16 @@ would admit text-only matches.
 
 ## Open for the owner (device-only)
 
-- A snippet while a real call interrupts, and the notification, lock screen, Bluetooth and watch after Apply and Undo
-  (TI §11.4, step 23).
+- A snippet while a real call interrupts: the owner cannot make a real call to check it; recorded as not checked.
+  The snippet itself (play and stop) is checked by test.
+- The notification and the lock screen after Apply and Undo on a Bluetooth device and on the watch (Apply and Undo on
+  the phone were checked by hand and passed).
 - Captive portal and airplane mode by hand, and the archive.org redirect of the Cover Art Archive.
-- One live `DeviceFingerprintTest` run with `-e liveNetwork true` (the corpus already exercised the same live AcoustID
-  path, so this is a formality on the final build).
-- The quiet `--timing` pass on the S24, and a smoke run of a minified build against the real services.
+
+## Done on the S24, 17.11.2026
+
+- The quiet `--timing` pass: 14 of 14 green after the decided-value budgets were raised for step 22's rich decisions
+  (`GeneratedLibraryDecisionsTest`, push 93c6164).
+- One live `DeviceFingerprintTest` run with `-e liveNetwork true`: 24 tests, the live AcoustID path the corpus also
+  exercised.
+- A smoke run of the minified `benchmark` build: `MinifiedClientsTest` with `-e minified true`, 13 of 13.
