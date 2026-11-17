@@ -9,8 +9,7 @@ the high band held no confirmed wrong match (0 %, target at most 2 %), 7 files s
 TI §4.1 stayed as they are. The quiet `--timing` pass on the S24 is green (14 of 14) after step 22's richer decisions
 raised the write-join budget and the start-up-mirror bound by the owner's decision. Apply and Undo were checked by hand
 on the S24: a wrong tag changed to the identified value on every surface and Undo brought it back. The phone-only runs
-below (a real call the owner cannot make, notification and lock screen after Apply on Bluetooth and the watch, captive
-portal, airplane mode) are still open and belong to the owner.
+below (a real call the owner cannot make, captive portal, airplane mode) are still open and belong to the owner.
 
 ## Devices
 
@@ -53,14 +52,14 @@ would admit text-only matches.
 
 - A snippet while a real call interrupts: the owner cannot make a real call to check it; recorded as not checked.
   The snippet itself (play and stop) is checked by test.
-- The notification and the lock screen after Apply and Undo on a Bluetooth device and on the watch (Apply and Undo on
-  the phone were checked by hand and passed).
 - Captive portal by hand: the owner has no such network to check it; recorded as not checked.
 - Airplane mode by hand, and the archive.org redirect of the Cover Art Archive.
 
 ## Done on the S24, 17.11.2026
 
 - Online lookups turned off: the disclosure shows in place of a run (checked by hand, the expected result).
+- Apply and Undo on the surfaces: the notification, the lock screen and Bluetooth/watch controls show the new value and
+  Undo brings the old one back (checked by hand, the expected result).
 - The quiet `--timing` pass: 14 of 14 green after the decided-value budgets were raised for step 22's rich decisions
   (`GeneratedLibraryDecisionsTest`, push 93c6164).
 - One live `DeviceFingerprintTest` run with `-e liveNetwork true`: 24 tests, the live AcoustID path the corpus also
