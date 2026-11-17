@@ -9,7 +9,7 @@ the high band held one wrong match (1.2 %, target at most 2 %), 7 files stayed u
 TI §4.1 stayed as they are. The quiet `--timing` pass on the S24 is green (14 of 14) after step 22's richer decisions
 raised the write-join budget and the start-up-mirror bound by the owner's decision. Apply and Undo were checked by hand
 on the S24: a wrong tag changed to the identified value on every surface and Undo brought it back. The phone-only runs
-below (a real call the owner cannot make, captive portal, airplane mode) are still open and belong to the owner.
+below (a real call the owner cannot make, captive portal) are still open and belong to the owner.
 
 ## Devices
 
@@ -53,13 +53,16 @@ would admit text-only matches.
 - A snippet while a real call interrupts: the owner cannot make a real call to check it; recorded as not checked.
   The snippet itself (play and stop) is checked by test.
 - Captive portal by hand: the owner has no such network to check it; recorded as not checked.
-- Airplane mode by hand, and the archive.org redirect of the Cover Art Archive.
+- The archive.org redirect of the Cover Art Archive on a live run: the corpus run fetched live Cover Art Archive covers,
+  which already went through the redirect, so this is recorded as exercised rather than a separate check.
 
 ## Done on the S24, 17.11.2026
 
 - Online lookups turned off: the disclosure shows in place of a run (checked by hand, the expected result).
 - Apply and Undo on the surfaces: the notification, the lock screen and Bluetooth/watch controls show the new value and
   Undo brings the old one back (checked by hand, the expected result).
+- Airplane mode: the run fails fast with the expected no-network result and sends nothing (checked by hand). An earlier
+  run in airplane mode waited on AcoustID because a VPN kept the validated network up; without the VPN the check works.
 - The quiet `--timing` pass: 14 of 14 green after the decided-value budgets were raised for step 22's rich decisions
   (`GeneratedLibraryDecisionsTest`, push 93c6164).
 - One live `DeviceFingerprintTest` run with `-e liveNetwork true`: 24 tests, the live AcoustID path the corpus also
