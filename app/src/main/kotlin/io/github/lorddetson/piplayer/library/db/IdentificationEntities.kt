@@ -9,6 +9,7 @@ import androidx.room3.PrimaryKey
 import androidx.room3.Query
 import androidx.room3.Upsert
 import androidx.room3.withWriteTransaction
+import io.github.lorddetson.piplayer.identification.batch.BatchFile
 
 // The working rows of identification (TI §10.1). They are kept by content key, not by file ID: a file opened from
 // another app has none, and a library file the tag pass has not read gets its key at stage 0 (TI §3.1). The pipeline
@@ -36,6 +37,17 @@ data class LookupJobEntity(
 }
 
 /** A batch of phases (a) to (c) (TI §8, §10.1): what started it, when, how far it is and whether M4b writes tags. */
+/**
+ * One file of a batch, in the batch's order (TI §8, §10.1): the batch's files, which the workers take one album group
+ * of at a time. A file is a file ID, so the workers join its album data when they group the batch.
+ */
+@Entity(tableName = "batch_file", primaryKeys = ["batch_uuid", "position"], indices = [Index("batch_uuid")])
+data class BatchFileEntity(
+    @ColumnInfo(name = "batch_uuid") val batchUuid: String,
+    val position: Int,
+    @ColumnInfo(name = "file_id") val fileId: Long,
+)
+
 @Entity(tableName = "batch")
 data class BatchEntity(
     @PrimaryKey val uuid: String,
@@ -251,6 +263,23 @@ interface BatchDao {
     /** Every batch, oldest first (TI §8): the order the Fix tab's queue shows. */
     @Query("SELECT * FROM batch ORDER BY created_at")
     suspend fun all(): List<BatchEntity>
+
+    @Insert
+    suspend fun addFiles(rows: List<BatchFileEntity>)
+
+    /**
+     * The batch's files in [BatchFile] order, joined to the album data that groups them (TI §8): each file's display
+     * album key, and from the album entity its release MBID and title. A file whose display row has no album stands
+     * alone, as [groupByAlbum] groups it.
+     */
+    @Query(
+        "SELECT bf.file_id AS fileId, al.release_mbid AS releaseMbid, d.album_key AS albumKey, al.title AS title " +
+            "FROM batch_file bf JOIN audio_file f ON f.id = bf.file_id " +
+            "LEFT JOIN track_display d ON d.file_id = f.id " +
+            "LEFT JOIN album al ON al.album_key = d.album_key " +
+            "WHERE bf.batch_uuid = :uuid ORDER BY bf.position",
+    )
+    suspend fun files(uuid: String): List<BatchFile>
 }
 
 /** A file's place and content key. */

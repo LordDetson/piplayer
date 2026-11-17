@@ -25,6 +25,7 @@ navigation3 = "1.2.0"
 reorderable = "3.1.0"
 ksp = "2.3.12"
 room3 = "3.0.3"
+work = "2.12.0"
 # The version room3-runtime 3.0.3 itself depends on.
 androidxSqlite = "2.7.1"
 
@@ -79,6 +80,8 @@ media3-ui-compose = { module = "androidx.media3:media3-ui-compose", version.ref 
 androidx-navigation3-runtime = { module = "androidx.navigation3:navigation3-runtime", version.ref = "navigation3" }
 androidx-navigation3-ui = { module = "androidx.navigation3:navigation3-ui", version.ref = "navigation3" }
 room3-runtime = { module = "androidx.room3:room3-runtime", version.ref = "room3" }
+# Batch phases (a) and (b) of TI §8; CoroutineWorker lives in work-runtime since 2.9.0.
+androidx-work-runtime = { module = "androidx.work:work-runtime", version.ref = "work" }
 room3-compiler = { module = "androidx.room3:room3-compiler", version.ref = "room3" }
 room3-testing = { module = "androidx.room3:room3-testing", version.ref = "room3" }
 androidx-sqlite-bundled = { module = "androidx.sqlite:sqlite-bundled", version.ref = "androidxSqlite" }

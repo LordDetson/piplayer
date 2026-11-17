@@ -91,6 +91,19 @@ class IdentificationSettings(
         ProtectedField.entries.filterTo(LinkedHashSet()) { it.stored in stored }
     }.distinctUntilChanged()
 
+    /**
+     * Whether batches run on unmetered networks only (TI §8), the default. Absent means on, so a restored settings
+     * file from before the key exists keeps the safer choice. The one-off answers of a waiting batch ("Use mobile
+     * data this time", roaming allowed) are the Fix tab's (M4a step 6); until then only this key drives the workers'
+     * network constraint. There is no UI row for it yet (TODO M4a step 6).
+     */
+    val batchUnmeteredOnly: Flow<Boolean> = file.data.map { it[BATCH_UNMETERED_ONLY] ?: true }.distinctUntilChanged()
+
+    /** Stores whether batches run on unmetered networks only (TI §8). */
+    suspend fun setBatchUnmeteredOnly(only: Boolean) {
+        SettingsFiles.edit(file) { it[BATCH_UNMETERED_ONLY] = only }
+    }
+
     /** The answer Enable: the setting on, this build's disclosure answered. Whether it was stored. */
     suspend fun enable(): Boolean = SettingsFiles.edit(file) {
         it[ENABLED] = true
@@ -118,6 +131,9 @@ class IdentificationSettings(
         val ENABLED = booleanPreferencesKey("online_lookups_enabled")
         val VERSION = intPreferencesKey("disclosure_version")
         val PROTECTED_FIELDS = stringSetPreferencesKey("protected_fields")
+
+        /** "Run batches on unmetered networks only" (TI §8), absent means on. */
+        val BATCH_UNMETERED_ONLY = booleanPreferencesKey("batch_unmetered_only")
 
         fun consentOf(preferences: Preferences) =
             OnlineConsent(enabled = preferences[ENABLED] ?: false, disclosureVersion = preferences[VERSION] ?: 0)

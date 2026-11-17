@@ -256,12 +256,14 @@ data class VolumeSyncStateEntity(
         ApiCacheEntity::class,
         DecidedMirrorEntity::class,
         BatchEntity::class,
+        BatchFileEntity::class,
     ],
     // 10: the mirror of favorites and plays (docs/library.md §15.4). 11: the smart lists' date added and indexes (§17.4).
     // 12: the genres of display rows (§19.5). 13: identification (TI §10.1): the content-key tables, the release cache,
     // api_cache, decided_mirror, the identification columns of fingerprint and track_display, and both mirrored counters.
     // 14: the batch table (TI §8, §10.1, M4a).
-    version = 14,
+    // 15: the batch_file table (TI §8, §10.1, M4a): the batch's files, in their order.
+    version = 15,
     exportSchema = false,
 )
 abstract class LibraryDatabase : RoomDatabase() {

@@ -1524,10 +1524,19 @@ Phases (a) to (c) land in M4a, with accepted results saved in PiPlayer only; pha
   `batch` rows through `Library.read` on each start, not through a flow, so a rebuild that closes the database can
   never be read.
 - Phases (a) and (b) run as WorkManager jobs, one album group per job, each finishing well inside WorkManager's
-  10-minute limit; a finished job enqueues the next group, and workers never call `setForeground`. Constraints:
-  battery not low; network `UNMETERED` while "unmetered only" is on, `NOT_ROAMING` after "Use mobile data this time",
-  `CONNECTED` when the user allows roaming. WorkManager `Data` carries row IDs only; jobs are idempotent and resumable
-  after process death.
+  10-minute limit, and workers never call `setForeground`. Two workers: `BatchScanWorker` (phase (a), the local reads
+  and fingerprints of the group's files) and `BatchLookupWorker` (phase (b), one pipeline run per file of the group,
+  with the fingerprints phase (a) cached). A finished job enqueues the next one, so the jobs of a batch run one group
+  at a time, phase (a) then phase (b), and the batch waits for the network between groups; the lookup of the last
+  group moves the batch to `review`. All jobs of a batch carry its UUID as their tag, so a cancel stops the whole
+  batch. WorkManager `Data` carries only the batch UUID and the group's index; the worker resolves the group itself
+  from the batch's files (`batch_file`) through the album grouping, and the state lives in `batch` and `lookup_job`,
+  so jobs are idempotent and resume after a process death: a re-run of phase (a) re-reads the files and keeps cached
+  fingerprints (a recomputed one replaces its row, and a file that cannot be read or fingerprinted is skipped), and a
+  re-run of phase (b) replaces the run before's rows (TI §3 "One run"). A library rebuild drops the `batch` row, and
+  the queued jobs then end without work. Constraints: battery not low for both phases; phase (a) takes no network
+  constraint (nothing is sent), and phase (b) takes the network type the batch choices give: `UNMETERED` while
+  "unmetered only" is on, `NOT_ROAMING` after "Use mobile data this time", `CONNECTED` when the user allows roaming.
 - Phase (d) runs in a service started from the Activity with `foregroundServiceType="dataSync"`. On
   `Service.onTimeout` (API 35+, when the daily dataSync allowance of 6 hours runs out) it stops cleanly between files
   and posts a notification that resumes the apply from the app.
@@ -1554,7 +1563,8 @@ Phases (a) to (c) land in M4a, with accepted results saved in PiPlayer only; pha
 - Notifications: separate channels for playback and for batches; the notification permission (API 33+) is requested,
   with an explanation, before the first batch; without it, batches still run and show their progress in the Fix tab.
   Progress with ETA; a final notification opens the review queue in the Fix tab.
-- Network: the setting "Run batches on unmetered networks only" (default on). A waiting batch says so and offers "Use
+- Network: the setting "Run batches on unmetered networks only" (default on, stored as `batch_unmetered_only` in the
+  `settings` file). A waiting batch says so and offers "Use
   mobile data this time"; batches make no network requests while roaming unless the user allows it. Single-file
   identification is started by the user and uses any network.
 - Manifest: `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_MEDIA_PLAYBACK` and `FOREGROUND_SERVICE_DATA_SYNC` (API 34+).
@@ -1735,6 +1745,7 @@ Where things live:
     total), `disc_subtitle`, `compilation`, `label`, `catalog_number`, `barcode`, `isrc`, `musicbrainz_ids` and
     `cover`. A name this build does not know is kept when the list changes, so a newer build's choice survives a
     downgrade or a restore into an older build.
+  - `batch_unmetered_only` (boolean, absent means on, M4a): "Run batches on unmetered networks only" (§8).
 - Library folder rules are user decisions and live in the user database.
 - The persisted queue lives in its own DataStore file, `playback_state`, and in `queue.bin` under the no-backup files
   (playback.md §4.8), which the backup rules leave out: it refers to tracks by file ID, identity, content key and
@@ -1747,7 +1758,8 @@ caches). Rebuilding the library means deleting this file and filling it again fr
 the user database; user data is not touched. A rebuild cancels running batch phases (a) to (c); decisions already
 made live in the user database. A new schema version rebuilds it the same way (library.md §1.1); M3 brings version 13,
 whose first sync after the update runs as on a first launch (about 1.7 s on the owner's phone). M4a brings version 14,
-which adds the `batch` table and keeps the `lookup_job` column `batch_uuid` in use.
+which adds the `batch` table and keeps the `lookup_job` column `batch_uuid` in use, and version 15, which adds the
+`batch_file` table: both land within M4a, before anything ships.
 
 - `audio_file(id, media_store_id, volume_name, relative_path, display_name, document_uri, size, mtime,
   generation_modified, date_added, mime_type, <media kinds>, format, codec, sample_rate, bit_depth, channels, bitrate, duration_ms, duration_source,
@@ -2026,6 +2038,9 @@ used, never through a stored content URI, which goes stale after a media index r
   `Data` (§8); `created_at` is in milliseconds since the epoch. `source` is `folder`, `selection` or `missing_info`
   (§1 "Entry points"); `status` runs `queued`, `processing`, `review`, `done` or `cancelled` as §8 describes, and
   `write_to_file` is reserved for M4b, false or null in M4a.
+- `batch_file(batch_uuid, position, file_id)` (M4a, version 15): the files of a batch in their order, one row per
+  file. The workers take one album group at a time: each job's `Data` names the batch and the group's index, and the
+  worker joins the files' album data and groups them (§8).
 - `tag_backup(id, identity_id, volume_name, relative_path, display_name, created_at, tags_path, tags_hash,
   cover_path, cover_hash, id3_version)`: undo metadata; the snapshot files live in no-backup app storage.
 - `applied_change(id, identity_id, decision_id, batch_uuid, volume_name, relative_path, display_name, state,

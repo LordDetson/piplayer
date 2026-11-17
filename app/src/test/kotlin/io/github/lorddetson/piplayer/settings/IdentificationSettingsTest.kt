@@ -376,4 +376,17 @@ class IdentificationSettingsTest {
             "disc_subtitle", "compilation", "label", "catalog_number", "barcode", "isrc", "musicbrainz_ids", "cover",
         )
     }
+
+    @Test
+    fun `batches run on unmetered networks only by default, and the choice is stored under its key`() = runBlocking<Unit> {
+        val settings = IdentificationSettings(file)
+        assertThat(settings.batchUnmeteredOnly.first()).isTrue()
+
+        settings.setBatchUnmeteredOnly(false)
+        assertThat(settings.batchUnmeteredOnly.first()).isFalse()
+        assertThat(file.data.first()[IdentificationSettings.BATCH_UNMETERED_ONLY]).isFalse()
+
+        settings.setBatchUnmeteredOnly(true)
+        assertThat(settings.batchUnmeteredOnly.first()).isTrue()
+    }
 }

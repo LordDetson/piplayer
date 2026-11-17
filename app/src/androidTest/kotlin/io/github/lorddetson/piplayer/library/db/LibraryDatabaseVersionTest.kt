@@ -14,8 +14,8 @@ import org.junit.Test
 import org.junit.runner.RunWith
 
 /**
- * Library database version 14 (TI §8, §10.1, §11.2 M4a): an older file is dropped and built again, with the tables,
- * columns and keys of batches on top of the version 13 ones.
+ * Library database version 15 (TI §8, §10.1, §11.2 M4a): an older file is dropped and built again, with the tables,
+ * columns and keys of batches (the `batch_file` table on top of version 14's `batch`).
  */
 @RunWith(AndroidJUnit4::class)
 class LibraryDatabaseVersionTest {
@@ -28,8 +28,8 @@ class LibraryDatabaseVersionTest {
         SQLiteDatabase.deleteDatabase(file)
     }
 
-    /** A file as version 13 left it, reduced to a few of its tables with rows, including the `batch_uuid` column. */
-    private fun writeVersion13() {
+    /** A file as version 14 left it, reduced to a few of its tables with rows, including the `batch` table. */
+    private fun writeVersion14() {
         SQLiteDatabase.deleteDatabase(file)
         BundledSQLiteDriver().open(file.absolutePath).let { connection ->
             try {
@@ -38,9 +38,11 @@ class LibraryDatabaseVersionTest {
                     "INSERT INTO audio_file VALUES (1, 'old.mp3')",
                     "CREATE TABLE lookup_job (content_key TEXT PRIMARY KEY, batch_uuid TEXT, phase TEXT, status TEXT, attempts INTEGER, next_attempt_at INTEGER, last_error TEXT)",
                     "INSERT INTO lookup_job VALUES ('key', NULL, 'lookup', 'retry_later', 1, 1000, 'acoustid_empty')",
+                    "CREATE TABLE batch (uuid TEXT PRIMARY KEY, created_at INTEGER, source TEXT, status TEXT, write_to_file INTEGER)",
+                    "INSERT INTO batch VALUES ('batch-1', 1000, 'folder', 'processing', NULL)",
                     "CREATE TABLE library_meta (id INTEGER PRIMARY KEY, mirrored_user_counter INTEGER NOT NULL)",
                     "INSERT INTO library_meta VALUES (1, 41)",
-                    "PRAGMA user_version = 13",
+                    "PRAGMA user_version = 14",
                 )) {
                     connection.prepare(sql).use { it.step() }
                 }
@@ -63,19 +65,19 @@ class LibraryDatabaseVersionTest {
         strings("SELECT name FROM pragma_table_info('$table') WHERE pk > 0 ORDER BY pk")
 
     @Test
-    fun anOlderLibraryDatabaseIsDroppedAndBuiltAgainAtVersion14() = runBlocking<Unit> {
-        writeVersion13()
+    fun anOlderLibraryDatabaseIsDroppedAndBuiltAgainAtVersion15() = runBlocking<Unit> {
+        writeVersion14()
         val database = LibraryDatabase.open(context, file)
         try {
             assertThat(database.library().files()).isEmpty()
             assertThat(database.library().mirroredRulesCounter()).isZero()
-            assertThat(database.strings("PRAGMA user_version")).containsExactly("14")
+            assertThat(database.strings("PRAGMA user_version")).containsExactly("15")
 
             val tables = database.strings("SELECT name FROM sqlite_master WHERE type = 'table'")
             assertThat(tables).contains(
                 "audio_file", "track_display", "track_mirror", "fingerprint", "library_meta",
                 "lookup_job", "candidate", "identification_trace", "release_cache", "api_cache", "decided_mirror",
-                "batch",
+                "batch", "batch_file",
             )
 
             assertThat(database.columns("fingerprint")).contains("content_key", "fingerprint", "format", "acoustid_id", "decoder_path", "computed_at")
@@ -101,6 +103,9 @@ class LibraryDatabaseVersionTest {
             )
             // A batch row (TI §8): one per batch, `write_to_file` reserved for M4b.
             assertThat(database.columns("batch")).containsExactly("uuid", "created_at", "source", "status", "write_to_file")
+            // The batch's files (TI §8), one row per file in its position; the workers group them by album.
+            assertThat(database.columns("batch_file")).containsExactly("batch_uuid", "position", "file_id")
+            assertThat(database.primaryKey("batch_file")).containsExactly("batch_uuid", "position")
             // One job per content key, one candidate per place in the ranking, one trace row per step of a run.
             assertThat(database.primaryKey("lookup_job")).containsExactly("content_key")
             assertThat(database.primaryKey("candidate")).containsExactly("content_key", "position")

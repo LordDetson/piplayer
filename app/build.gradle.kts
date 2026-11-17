@@ -276,6 +276,8 @@ dependencies {
     implementation(libs.media3.ui.compose)
     implementation(libs.androidx.navigation3.runtime)
     implementation(libs.androidx.navigation3.ui)
+    // Batch identification phases (a) and (b) (TI §8): one WorkManager job per album group.
+    implementation(libs.androidx.work.runtime)
     implementation(libs.room3.runtime)
     // The SQLite bundled with the app: one version on every device, with JSON for bulk writes (docs/library.md §1.1).
     implementation(libs.androidx.sqlite.bundled)
