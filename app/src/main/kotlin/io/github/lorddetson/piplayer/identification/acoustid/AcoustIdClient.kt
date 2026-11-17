@@ -50,6 +50,12 @@ sealed class AcoustIdException(message: String, cause: Throwable? = null) : IOEx
 }
 
 /**
+ * One compressed, base64-encoded Chromaprint [fingerprint] with the exact length of the file it was made from, sent
+ * with [AcoustIdClient.lookupBatch] (TI §3.2, M4a).
+ */
+data class AcoustIdFingerprint(val fingerprint: String, val durationMs: Long)
+
+/**
  * AcoustID `/v2/lookup` client (TI §3.2). The fingerprint goes in a gzip-compressed form POST, so the application key
  * never appears in a URL. All requests go through one [limiter] for api.acoustid.org; busy answers (429 and error 14,
  * 500, 502, 503, 504 and the proxy's 520 to 524) and network errors are retried by [retryPolicy] as pauses of that
@@ -78,16 +84,44 @@ class AcoustIdClient(
      * The answer lists AcoustID tracks with their score and linked recordings, best first.
      */
     suspend fun lookup(fingerprint: String, durationMs: Long): AcoustIdResponse {
-        require(fingerprint.isNotBlank()) { "The fingerprint is empty" }
-        val seconds = durationSeconds(durationMs)
-        require(seconds >= 1) { "A duration of $durationMs ms is shorter than AcoustID takes" }
         val form = FormBody.Builder()
             .add("client", apiKey)
-            .add("duration", seconds.toString())
+            .add("duration", secondsOf(fingerprint, durationMs))
             .add("fingerprint", fingerprint)
             .add("meta", META)
             .add("format", "json")
             .build()
+        return post(form)
+    }
+
+    /**
+     * Looks up [fingerprints], 10 to 20 compressed Chromaprint fingerprints each with its own duration, in one
+     * gzip-compressed form POST. The answer has the same [AcoustIdResponse] shape as [lookup], with the results of the
+     * fingerprints listed in their order. A batch never sends `maxdurationdiff` (TI §3.2): it is a legacy flag that
+     * will likely be removed or replaced.
+     */
+    suspend fun lookupBatch(fingerprints: List<AcoustIdFingerprint>): AcoustIdResponse {
+        require(fingerprints.size in MIN_BATCH_SIZE..MAX_BATCH_SIZE) {
+            "A batch holds $MIN_BATCH_SIZE to $MAX_BATCH_SIZE fingerprints, not ${fingerprints.size}"
+        }
+        val form = FormBody.Builder().add("client", apiKey)
+        fingerprints.forEach { item ->
+            form.add("duration", secondsOf(item.fingerprint, item.durationMs))
+            form.add("fingerprint", item.fingerprint)
+        }
+        return post(form.add("meta", META).add("format", "json").build())
+    }
+
+    /** The duration in whole seconds, after the same checks as [lookup]. */
+    private fun secondsOf(fingerprint: String, durationMs: Long): String {
+        require(fingerprint.isNotBlank()) { "The fingerprint is empty" }
+        val seconds = durationSeconds(durationMs)
+        require(seconds >= 1) { "A duration of $durationMs ms is shorter than AcoustID takes" }
+        return seconds.toString()
+    }
+
+    /** Sends a gzip-compressed form POST to `/v2/lookup` and reads the answer through the caller. */
+    private suspend fun post(form: FormBody): AcoustIdResponse {
         val request = Request.Builder()
             .url(baseUrl.resolve("lookup")!!)
             .header("Content-Encoding", "gzip")
@@ -142,6 +176,10 @@ class AcoustIdClient(
 
         /** A margin over the documented limit of three requests per second. */
         val MIN_INTERVAL = 350.milliseconds
+
+        /** A batch request carries 10 to 20 fingerprints; larger ones time out at the server (TI §3.2). */
+        const val MIN_BATCH_SIZE = 10
+        const val MAX_BATCH_SIZE = 20
 
         /**
          * Statuses retried like error 14 ("too many requests"): busy or failing servers, and the errors of the proxy in

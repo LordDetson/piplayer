@@ -90,6 +90,18 @@ class AcoustIdClientTest {
         return parsed.queryParameterNames.associateWith { requireNotNull(parsed.queryParameter(it)) }
     }
 
+    /** Every value of each form field of a request, in order, for the repeated fields of a batch. */
+    private fun RecordedRequest.formValues(): Map<String, List<String>> {
+        val bytes = requireNotNull(body).toByteArray()
+        val text = GZIPInputStream(bytes.inputStream()).bufferedReader().readText()
+        val parsed = "http://localhost/?$text".toHttpUrl()
+        return parsed.queryParameterNames.associateWith { parsed.queryParameterValues(it).orEmpty().filterNotNull() }
+    }
+
+    /** [size] fingerprints with their own durations, `fingerprint-1` of 211 s up to `fingerprint-20` of 230 s. */
+    private fun batch(size: Int): List<AcoustIdFingerprint> =
+        (1..size).map { AcoustIdFingerprint("fingerprint-$it", (210L + it) * 1_000) }
+
     @Test
     fun `posts a gzip-compressed form to the lookup endpoint`() = runTest {
         server.enqueue(ok())
@@ -384,5 +396,68 @@ class AcoustIdClientTest {
         dropping = false
         client.lookup(fingerprint, 214_400)
         assertThat(testScheduler.currentTime - gaveUpAt).isLessThanOrEqualTo(350)
+    }
+
+    @Test
+    fun `a batch lookup posts one gzip form with every fingerprint and its own duration and no maxdurationdiff`() = runTest {
+        server.enqueue(ok())
+        val fingerprints = batch(10)
+        client().lookupBatch(fingerprints)
+
+        val request = server.takeRequest()
+        assertThat(request.method).isEqualTo("POST")
+        assertThat(request.url.encodedPath).isEqualTo("/v2/lookup")
+        assertThat(request.headers["Content-Encoding"]).isEqualTo("gzip")
+        assertThat(request.headers["Content-Type"]).startsWith("application/x-www-form-urlencoded")
+        val values = request.formValues()
+        assertThat(values["client"]).containsExactly(key)
+        assertThat(values["meta"]).containsExactly("recordings releasegroups releases tracks isrcs compress")
+        assertThat(values["format"]).containsExactly("json")
+        assertThat(values["fingerprint"]).containsExactlyElementsOf(fingerprints.map { it.fingerprint })
+        assertThat(values["duration"]).containsExactlyElementsOf(
+            fingerprints.map { AcoustIdClient.durationSeconds(it.durationMs).toString() },
+        )
+        assertThat(values.keys).doesNotContain("maxdurationdiff")
+    }
+
+    @Test
+    fun `a batch answer parses into the same tracks in the order they come`() = runTest {
+        server.enqueue(ok())
+        val response = client().lookupBatch(batch(10))
+
+        assertThat(response.status).isEqualTo("ok")
+        assertThat(response.results).hasSize(2)
+        assertThat(response.results.map { it.id }).containsExactly(
+            "6f1c1f4e-3b0d-4c8e-9a52-1d2e3f405162",
+            "7a2b3c4d-5e6f-4071-8293-a4b5c6d7e8f9",
+        )
+        assertThat(response.results[0].score).isEqualTo(0.97)
+        assertThat(response.results[0].recordings.map { it.title }).containsExactly(
+            "Paper Lanterns",
+            "Paper Lanterns (live)",
+            null,
+        )
+    }
+
+    @Test
+    fun `a batch outside 10 to 20 fingerprints is refused before any request`() = runTest {
+        val client = client()
+        for (size in listOf(0, 9, 21)) {
+            assertThat(runCatching { client.lookupBatch(batch(size)) }.exceptionOrNull())
+                .isInstanceOf(IllegalArgumentException::class.java)
+        }
+        assertThat(server.requestCount).isZero()
+    }
+
+    @Test
+    fun `an empty fingerprint or a too-short duration in a batch is refused before any request`() = runTest {
+        val client = client()
+        val withEmpty = batch(10).toMutableList().also { it[3] = it[3].copy(fingerprint = "") }
+        val withShort = batch(10).toMutableList().also { it[5] = it[5].copy(durationMs = 499) }
+        assertThat(runCatching { client.lookupBatch(withEmpty) }.exceptionOrNull())
+            .isInstanceOf(IllegalArgumentException::class.java)
+        assertThat(runCatching { client.lookupBatch(withShort) }.exceptionOrNull())
+            .isInstanceOf(IllegalArgumentException::class.java)
+        assertThat(server.requestCount).isZero()
     }
 }
