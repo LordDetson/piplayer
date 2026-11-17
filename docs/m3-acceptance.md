@@ -4,12 +4,14 @@ The checks that close milestone M3 (features.md, M3 "Done when", TI §11.4) and 
 of PIM-60 runs the whole pipeline over the owner's files against the real services, on real files, and is the milestone's
 measure of quality; the phone runs that a device can only do by hand are listed as open.
 
-**Verdict, 17.11.2026: the corpus holds; M3 is not closed yet.** The corpus check passed on 121 of the owner's files:
+**Verdict, 17.11.2026: M3 is closed.** The corpus check passed on 121 of the owner's files:
 the high band held one wrong match (1.2 %, target at most 2 %), 7 files stayed unmatched, and the thresholds of
 TI §4.1 stayed as they are. The quiet `--timing` pass on the S24 is green (14 of 14) after step 22's richer decisions
 raised the write-join budget and the start-up-mirror bound by the owner's decision. Apply and Undo were checked by hand
 on the S24: a wrong tag changed to the identified value on every surface and Undo brought it back. The phone-only runs
-below (a real call the owner cannot make, captive portal) are still open and belong to the owner.
+below (a real call the owner cannot make, captive portal) stay not checked by the owner's word and do not hold the
+milestone. Media3 stays on 1.12.0-beta01 (PIM-69): the CI A/B is green, and its quiet timing pass moves to when a stable
+1.12 appears.
 
 ## Devices
 
