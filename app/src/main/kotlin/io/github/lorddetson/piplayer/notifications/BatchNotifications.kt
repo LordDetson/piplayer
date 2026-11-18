@@ -80,10 +80,10 @@ object BatchNotifications {
     }
 
     /** The notification of a batch the user paused (TI §8): it keeps its place until Resume or Stop is tapped. */
-    fun paused(context: Context, batchUuid: String, filesTotal: Int): Notification = NotificationCompat.Builder(context, CHANNEL_ID)
+    fun paused(context: Context, batchUuid: String): Notification = NotificationCompat.Builder(context, CHANNEL_ID)
         .setSmallIcon(R.drawable.ic_notification)
         .setContentTitle(context.getString(R.string.batch_notification_paused_title))
-        .setContentText(context.resources.getQuantityString(R.plurals.batch_notification_files, filesTotal, 0, filesTotal))
+        .setContentText(context.getString(R.string.batch_notification_paused_text))
         .setContentIntent(openFix(context))
         .setCategory(NotificationCompat.CATEGORY_PROGRESS)
         .setPriority(NotificationCompat.PRIORITY_LOW)

@@ -264,6 +264,7 @@
         <item quantity="other">Определяется %1$d файла</item>
     </plurals>
     <string name="batch_notification_paused_title">Определение приостановлено</string>
+    <string name="batch_notification_paused_text">Приостановлено; коснитесь, чтобы открыть «Исправить»</string>
     <plurals name="batch_notification_files">
         <item quantity="one">%1$d из %2$d файла</item>
         <item quantity="few">%1$d из %2$d файлов</item>

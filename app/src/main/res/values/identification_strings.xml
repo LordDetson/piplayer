@@ -255,6 +255,7 @@
         <item quantity="other">Identifying %1$d files</item>
     </plurals>
     <string name="batch_notification_paused_title">Identification paused</string>
+    <string name="batch_notification_paused_text">Paused; tap to open the Fix tab</string>
     <plurals name="batch_notification_files">
         <item quantity="one">%1$d of %2$d file</item>
         <item quantity="other">%1$d of %2$d files</item>

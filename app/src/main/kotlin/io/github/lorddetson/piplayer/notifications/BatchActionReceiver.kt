@@ -30,7 +30,7 @@ class BatchActionReceiver : BroadcastReceiver() {
                     BatchNotifications.ACTION_PAUSE -> if (control.pause(uuid)) {
                         BatchNotifier.of(app).stopWatching()
                         // The paused notification keeps the way back: Resume and Stop.
-                        BatchNotifications.post(app, BatchNotifications.paused(app, uuid, filesOf(app, uuid)))
+                        BatchNotifications.post(app, BatchNotifications.paused(app, uuid))
                     }
                     BatchNotifications.ACTION_RESUME -> if (control.resume(uuid)) BatchNotifier.of(app).started(uuid)
                     BatchNotifications.ACTION_STOP -> if (control.stop(uuid)) {
@@ -44,15 +44,6 @@ class BatchActionReceiver : BroadcastReceiver() {
                 pending.finish()
             }
         }
-    }
-
-    /** How many files the batch has, for the paused notification's line; 0 when the library cannot say. */
-    private suspend fun filesOf(context: Context, uuid: String): Int = try {
-        io.github.lorddetson.piplayer.identification.batch.RoomBatchState(
-            io.github.lorddetson.piplayer.library.db.LibraryAccess.app(context),
-        ).files(uuid).size
-    } catch (e: Exception) {
-        0
     }
 
     private companion object {
