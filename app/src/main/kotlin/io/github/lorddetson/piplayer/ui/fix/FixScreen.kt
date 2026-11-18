@@ -3,17 +3,16 @@ package io.github.lorddetson.piplayer.ui.fix
 import android.app.Application
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -182,10 +181,12 @@ private fun NeedsAttention(batches: List<BatchEntity>?) {
 @Composable
 private fun Counters(batches: List<BatchEntity>?) {
     val counts = batches.orEmpty().groupingBy { it.status }.eachCount()
-    Row(
+    // Wrapped rather than scrolled: on a narrow screen every status stays visible, so a counter is never cut off
+    // (PIM-26, found by the acceptance run).
+    FlowRow(
         horizontalArrangement = Arrangement.spacedBy(16.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
         modifier = Modifier
-            .horizontalScroll(rememberScrollState())
             .padding(horizontal = 16.dp, vertical = 8.dp)
             .testTag(FixTags.COUNTERS),
     ) {
