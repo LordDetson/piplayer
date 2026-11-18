@@ -1688,6 +1688,14 @@ WorkManager and the app gives its notification back when it starts (`BatchNotifi
 - One batch at a time: one notification ID follows the batch started last, since that is the one the user just asked
   for; a second batch started meanwhile keeps running and shows in the Fix tab, and the notification comes back to the
   newer one. Nothing of this reaches the batch's jobs: the notifier only reads their progress and the batch's state.
+- Pause, Resume and Stop sit on the notification itself (PIM-26), next to the same three in the Fix tab's menu: they
+  are broadcasts to `notifications/BatchActionReceiver`, not an activity, so a tap changes the batch with the app in the
+  background. `notifications/BatchUserActions` is the one place both the notification and the Fix tab end in, so the
+  batch's state and its notification never disagree: pausing stops the notifier before the state changes, so a late
+  progress post cannot overwrite the paused notification, and that notification offers Resume and Stop. Resuming starts
+  the notifier again, since the batch's jobs were cancelled when it was paused. All three need no notification
+  permission to change the batch; without it only the notification's buttons are missing, and the Fix tab keeps all
+  three.
 
 ## 9. Third-party services and compliance
 
