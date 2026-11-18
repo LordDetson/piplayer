@@ -24,12 +24,12 @@ notification permission. Two rows are proven by unit tests only (Keep as-is and 
 M3 corpus of 121 files, unpacked into `Music/batch500` on the phone and indexed by the media scanner. The list is kept
 at `~/m4a-batch500.txt` on tuf.
 
-The run of 18.11.2026 started at 12:00 and reached 437 of 500 files by 14:40, then the owner paused it to leave. That is
-about 3 to 5 files a minute with music playing, where TI §8 expects roughly 1 000 to 2 000 tracks an hour: the corpus
-spreads 500 files over some 200 albums, and every album group is two WorkManager jobs whose scheduling costs more than
-the group's own reads when a group holds two or three files. A group of thirty files would carry the same overhead once.
-The throughput is recorded here as measured, not as a promise of M4a; the Fix tab's ETA placeholder and the notification's
-own estimate both read from the files done, so neither promises the TI figure.
+The run of 18.11.2026 started at 11:50 and reached review at about 16:10, about four and a half hours with one pause and
+two process kills on the way. That is about 3 to 5 files a minute with music playing, where TI §8 expects roughly 1 000 to
+2 000 tracks an hour: the corpus spreads 500 files over some 200 albums, and every album group is two WorkManager jobs
+whose scheduling costs more than the group's own reads when a group holds two or three files. A group of thirty files
+would carry the same overhead once. The throughput is recorded here as measured, not as a promise of M4a; the Fix tab's
+ETA placeholder and the notification's own estimate both read from the files done, so neither promises the TI figure.
 
 The paused batch keeps the album group it stopped on, and Resume continues from it (row A8).
 
@@ -37,7 +37,7 @@ The paused batch keeps the album group it stopped on, and Resume continues from 
 
 | ID | What M4a promises | How | Result | Date |
 |---|---|---|---|---|
-| A1 | A 500-file batch started from a folder completes | H: start the batch from the folder, watch the Fix tab and the notification | pass on the S24: started from `Music/batch500` at 12:00, finished at 16:12 (four hours with one pause and two process kills on the way), and the notification turned into "Batch ready for review", which opens the Fix tab | 18.11.2026 |
+| A1 | A 500-file batch started from a folder completes | H: start the batch from the folder, watch the Fix tab and the notification | pass on the S24: started from `Music/batch500` at 11:50 and reached review at about 16:10 (four and a half hours with one pause and two process kills on the way), and the notification turned into "Batch ready for review", which opens the Fix tab | 18.11.2026 |
 | A2 | It resumes after the process is killed in any phase | H: kill the process (force stop) in phase (a), in phase (b) and while review waits; each time the batch continues where it stopped | pass on the S24: killed at 70 of 500 files during phase (b) and again a moment after a start during phase (a); each restart continued from the recorded album group (73, then 75), with `BatchScanWorker` logging its start again | 18.11.2026 |
 | A3 | Accepted results appear in every view and on system surfaces | H: accept a card, check the Songs and Albums tabs, Now Playing, the notification, the lock screen | pass on the S24: 305 of the 500 files were in the high band and prepared without the user, and the library holds them as decided values (6942 `decided_mirror` rows over 305 files, badge "Identified" on the same 305, each title equal to the decided one), so the lists, Now Playing and the notification show the identified values; 480 files kept candidates and 24 wait for an AcoustID retry; the Fix tab shows one card per album with "Needs review" and "prepared automatically" | 18.11.2026 |
 | A4 | Playback during the batch has no audible effect and no more underruns than without it | H: play an album through the batch, listen; compare the underrun count in the log with a run without the batch | pass by ear and by the debug audio journal: music played through the batch while it ran, the owner heard no effect, and the journal held no underrun of this run (its only line is from 8.11.2026) | 18.11.2026 |
