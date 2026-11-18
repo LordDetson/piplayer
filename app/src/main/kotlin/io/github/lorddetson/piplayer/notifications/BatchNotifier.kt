@@ -43,10 +43,20 @@ class BatchNotifier private constructor(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var watching: Job? = null
 
+    /** The batch the notification follows, for the actions it carries (TI §8). */
+    private var following: String? = null
+
     /** Follows [batchUuid] and shows its progress from now on, instead of the batch followed before. */
     fun started(batchUuid: String) {
+        following = batchUuid
         watching?.cancel()
         watching = scope.launch { follow(batchUuid) }
+    }
+
+    /** Stops following: the user paused or stopped the batch, and the notification says so instead (TI §8). */
+    fun stopWatching() {
+        watching?.cancel()
+        watching = null
     }
 
     /**
@@ -113,7 +123,7 @@ class BatchNotifier private constructor(
         val now = clock()
         meter.record(now, progress.done)
         val eta = etaOf(meter.etaMillis(now, progress.done, progress.total))
-        BatchNotifications.post(context, BatchNotifications.progress(context, progress, eta))
+        BatchNotifications.post(context, BatchNotifications.progress(context, progress, eta, following.orEmpty()))
     }
 
     /** The sizes of the batch's album groups in their order, or null when the library cannot give them. */

@@ -113,6 +113,10 @@ class ExportedComponentsTest {
             "androidx.media3.session.BluetoothValidationActivity" to "android.permission.BLUETOOTH_PRIVILEGED",
             // Covers for controllers; each open checks its caller in code (docs/library.md §13.8.3, CoverProviderTest).
             "io.github.lorddetson.piplayer.covers.CoverProvider" to null,
+            // WorkManager's job service and diagnostics receiver (batches, TI §8): both need a signature or system
+            // permission that no ordinary app holds, so nothing of PiPlayer's own is reachable through them.
+            "androidx.work.impl.background.systemjob.SystemJobService" to "android.permission.BIND_JOB_SERVICE",
+            "androidx.work.impl.diagnostics.DiagnosticsReceiver" to "android.permission.DUMP",
         )
 
         /** Added only to debug builds by debugImplementation tooling: Compose previews and Compose UI tests. */

@@ -109,7 +109,8 @@ class GenresScreenTest {
     @Test
     fun theTabsComeInTheOrderOfTheControllerTreeAndTheChosenOneIsKept() {
         waitFor(isTab and hasText(text(R.string.tab_genres)))
-        val tabs = compose.onAllNodes(isTab).fetchSemanticsNodes().map { node ->
+        // The library's own tab row: the bottom bar's places are tabs too (PIM-18), and they are not library tabs.
+        val tabs = compose.onAllNodes(isTab and hasAnyAncestor(hasTestTag(LibraryTags.TABS))).fetchSemanticsNodes().map { node ->
             node.config.getOrNull(SemanticsProperties.Text)?.joinToString { it.text } ?: ""
         }
         assertThat(tabs).containsExactly(

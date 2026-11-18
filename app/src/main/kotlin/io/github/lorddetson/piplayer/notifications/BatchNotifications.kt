@@ -57,11 +57,11 @@ object BatchNotifications {
     }
 
     /** The notification of a batch that goes on (TI §8): its files done of its files in all, and the time left. */
-    fun progress(context: Context, progress: BatchProgress, eta: Eta): Notification {
+    fun progress(context: Context, progress: BatchProgress, eta: Eta, batchUuid: String, paused: Boolean = false): Notification {
         val resources = context.resources
         return NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle(resources.getQuantityString(R.plurals.batch_notification_title, progress.total, progress.total))
+            .setContentTitle(pausedTitleOr(context, progress.total, paused))
             .setContentText(progressText(context, progress, eta))
             .setProgress(progress.total, progress.done, progress.fraction == null)
             .setContentIntent(openFix(context))
@@ -70,8 +70,33 @@ object BatchNotifications {
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setSilent(true)
+            .addAction(
+                0,
+                context.getString(if (paused) R.string.fix_batch_resume else R.string.fix_batch_pause),
+                control(context, if (paused) ACTION_RESUME else ACTION_PAUSE, batchUuid),
+            )
+            .addAction(0, context.getString(R.string.fix_batch_stop), control(context, ACTION_STOP, batchUuid))
             .build()
     }
+
+    /** The notification of a batch the user paused (TI §8): it keeps its place until Resume or Stop is tapped. */
+    fun paused(context: Context, batchUuid: String, filesTotal: Int): Notification = NotificationCompat.Builder(context, CHANNEL_ID)
+        .setSmallIcon(R.drawable.ic_notification)
+        .setContentTitle(context.getString(R.string.batch_notification_paused_title))
+        .setContentText(context.resources.getQuantityString(R.plurals.batch_notification_files, filesTotal, 0, filesTotal))
+        .setContentIntent(openFix(context))
+        .setCategory(NotificationCompat.CATEGORY_PROGRESS)
+        .setPriority(NotificationCompat.PRIORITY_LOW)
+        .setOngoing(true)
+        .setOnlyAlertOnce(true)
+        .setSilent(true)
+        .addAction(0, context.getString(R.string.fix_batch_resume), control(context, ACTION_RESUME, batchUuid))
+        .addAction(0, context.getString(R.string.fix_batch_stop), control(context, ACTION_STOP, batchUuid))
+        .build()
+
+    private fun pausedTitleOr(context: Context, files: Int, paused: Boolean): String =
+        if (paused) context.getString(R.string.batch_notification_paused_title) else
+            context.resources.getQuantityString(R.plurals.batch_notification_title, files, files)
 
     /** The notification of a batch that reached review (TI §8): a tap opens the Fix tab, which holds the review queue. */
     fun finished(context: Context, filesTotal: Int): Notification {
@@ -142,4 +167,29 @@ object BatchNotifications {
     /** The intent a tap sends: the activity with the place [Places.FIX], its single top instance coming forward. */
     fun fixIntent(context: Context): Intent =
         Intent(context, MainActivity::class.java).putExtra(Places.EXTRA_PLACE, Places.FIX)
+
+    /** What the notification's actions ask for (TI §8, PIM-26): pause, resume or stop the batch [batchUuid]. */
+    const val ACTION_PAUSE = "io.github.lorddetson.piplayer.notifications.BATCH_PAUSE"
+    const val ACTION_RESUME = "io.github.lorddetson.piplayer.notifications.BATCH_RESUME"
+    const val ACTION_STOP = "io.github.lorddetson.piplayer.notifications.BATCH_STOP"
+
+    /** The batch an action names. */
+    const val EXTRA_BATCH = "io.github.lorddetson.piplayer.notifications.BATCH"
+
+    /**
+     * The broadcast one action sends, to [BatchActionReceiver] for the batch [batchUuid]: a broadcast, not an activity,
+     * so that a tap works with the app in the background and does not bring the screen up for a pause.
+     */
+    fun control(context: Context, action: String, batchUuid: String): PendingIntent {
+        val intent = Intent(context, BatchActionReceiver::class.java)
+            .setAction(action)
+            .setPackage(context.packageName)
+            .putExtra(EXTRA_BATCH, batchUuid)
+        return PendingIntent.getBroadcast(
+            context,
+            (action + batchUuid).hashCode(),
+            intent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+    }
 }

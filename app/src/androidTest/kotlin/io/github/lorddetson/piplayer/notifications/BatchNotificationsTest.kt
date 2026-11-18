@@ -40,7 +40,7 @@ class BatchNotificationsTest {
 
     @Test
     fun theProgressNotificationSaysTheFilesAndTheTimeLeft() {
-        val notification = BatchNotifications.progress(context, BatchProgress(45, 120), Eta.Minutes(3))
+        val notification = BatchNotifications.progress(context, BatchProgress(45, 120), Eta.Minutes(3), "batch-1")
         val extras = notification.extras
 
         assertThat(notification.channelId).isEqualTo(BatchNotifications.CHANNEL_ID)
@@ -58,7 +58,7 @@ class BatchNotificationsTest {
 
     @Test
     fun aBatchWithoutAnEstimateStillSaysItsFiles() {
-        val notification = BatchNotifications.progress(context, BatchProgress(0, 3), Eta.Unknown)
+        val notification = BatchNotifications.progress(context, BatchProgress(0, 3), Eta.Unknown, "batch-1")
 
         val text = notification.extras.getCharSequence(NotificationCompat.EXTRA_TEXT).toString()
         val files = context.resources.getQuantityString(R.plurals.batch_notification_files, 3, 0, 3)

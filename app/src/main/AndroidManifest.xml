@@ -81,6 +81,11 @@
             </intent-filter>
         </receiver>
 
+        <!-- The batch notification's Pause, Resume and Stop actions (TI §8, PIM-26); PiPlayer's own notifications send them. -->
+        <receiver
+            android:name=".notifications.BatchActionReceiver"
+            android:exported="false" />
+
         <!-- Reads tags with TagLib in a process of its own, so that a malformed file cannot stop playback (docs/library.md §4). -->
         <service
             android:name=".tagging.TaggerService"
