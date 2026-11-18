@@ -20,6 +20,15 @@ M4a is batch identification saved in PiPlayer only. Phases (a) local read and fi
 M3 corpus of 121 files, unpacked into `Music/batch500` on the phone and indexed by the media scanner. The list is kept
 at `~/m4a-batch500.txt` on tuf.
 
+The run of 18.11.2026 started at 12:00 and reached 437 of 500 files by 14:40, then the owner paused it to leave. That is
+about 3 to 5 files a minute with music playing, where TI §8 expects roughly 1 000 to 2 000 tracks an hour: the corpus
+spreads 500 files over some 200 albums, and every album group is two WorkManager jobs whose scheduling costs more than
+the group's own reads when a group holds two or three files. A group of thirty files would carry the same overhead once.
+The throughput is recorded here as measured, not as a promise of M4a; the Fix tab's ETA placeholder and the notification's
+own estimate both read from the files done, so neither promises the TI figure.
+
+The paused batch keeps the album group it stopped on, and Resume continues from it (row A8).
+
 ## Rows
 
 | ID | What M4a promises | How | Result | Date |
