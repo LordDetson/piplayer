@@ -59,6 +59,7 @@ import io.github.lorddetson.piplayer.identification.score.Band
 import io.github.lorddetson.piplayer.library.Library
 import io.github.lorddetson.piplayer.library.db.BatchEntity
 import io.github.lorddetson.piplayer.library.db.LibraryAccess
+import io.github.lorddetson.piplayer.notifications.BatchUserActions
 import io.github.lorddetson.piplayer.userdata.UserData
 import java.text.DateFormat
 import java.util.Date
@@ -129,20 +130,20 @@ class FixViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /** Pauses a running batch and reads the queue again (TI §8). */
-    fun pause(uuid: String) = control { it.pause(uuid) }
+    fun pause(uuid: String) = control(uuid, BatchUserActions::pause)
 
     /** Resumes a paused batch at the group it stopped on (TI §8). */
-    fun resume(uuid: String) = control { it.resume(uuid) }
+    fun resume(uuid: String) = control(uuid, BatchUserActions::resume)
 
     /** Stops a batch for good (TI §8). */
-    fun stop(uuid: String) = control { it.stop(uuid) }
+    fun stop(uuid: String) = control(uuid, BatchUserActions::stop)
 
     /** Runs one change off the main thread and reads the queue again, whatever it answered. */
-    private fun control(change: suspend (BatchControl) -> Boolean) {
+    private fun control(uuid: String, change: suspend (android.content.Context, String) -> Boolean) {
         val app = getApplication<Application>()
         viewModelScope.launch {
             withContext(Dispatchers.IO) {
-                runCatching { change(BatchControl.of(app)) }
+                runCatching { change(app, uuid) }
             }
             onStart()
         }
