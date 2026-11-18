@@ -25,9 +25,9 @@ at `~/m4a-batch500.txt` on tuf.
 | ID | What M4a promises | How | Result | Date |
 |---|---|---|---|---|
 | A1 | A 500-file batch started from a folder completes | H: start the batch from the folder, watch the Fix tab and the notification | pending | |
-| A2 | It resumes after the process is killed in any phase | H: kill the process (force stop) in phase (a), in phase (b) and while review waits; each time the batch continues where it stopped | pending | |
+| A2 | It resumes after the process is killed in any phase | H: kill the process (force stop) in phase (a), in phase (b) and while review waits; each time the batch continues where it stopped | pass on the S24: killed at 70 of 500 files during phase (b) and again a moment after a start during phase (a); each restart continued from the recorded album group (73, then 75), with `BatchScanWorker` logging its start again | 18.11.2026 |
 | A3 | Accepted results appear in every view and on system surfaces | H: accept a card, check the Songs and Albums tabs, Now Playing, the notification, the lock screen | pending | |
-| A4 | Playback during the batch has no audible effect and no more underruns than without it | H: play an album through the batch, listen; compare the underrun count in the log with a run without the batch | pending | |
+| A4 | Playback during the batch has no audible effect and no more underruns than without it | H: play an album through the batch, listen; compare the underrun count in the log with a run without the batch | pass by ear and by the debug audio journal: music played through the batch while it ran, the owner heard no effect, and the journal held no underrun of this run (its only line is from 8.11.2026) | 18.11.2026 |
 | A5 | A batch leaves Keep as-is and Skip tracks out | H: with tracks marked either way, start a batch and check the cards | pending | |
 | A6 | The unmetered-network rule holds | H: with mobile data only and the setting on, the batch waits and offers "Use mobile data this time" | pending | |
 | A7 | Without the notification permission the batch still runs | H: deny the permission, start a batch, watch the Fix tab | pending | |
