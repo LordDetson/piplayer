@@ -31,3 +31,4 @@ at `~/m4a-batch500.txt` on tuf.
 | A5 | A batch leaves Keep as-is and Skip tracks out | H: with tracks marked either way, start a batch and check the cards | pending | |
 | A6 | The unmetered-network rule holds | H: with mobile data only and the setting on, the batch waits and offers "Use mobile data this time" | pending | |
 | A7 | Without the notification permission the batch still runs | H: deny the permission, start a batch, watch the Fix tab | pending | |
+| A8 | A batch can be paused, resumed and stopped | H: both in the Fix tab's menu and on the notification; after a pause the batch stops moving and the notification offers Resume and Stop; a resume continues at the group it stopped on | pass on the S24: paused from the notification (it turned into "Identification paused" with Resume and Stop, the Fix tab showed Paused: 1), then resumed from the notification and the batch went on (306 to 307 to 369 of 500) | 18.11.2026 |
