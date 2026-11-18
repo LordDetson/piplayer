@@ -15,8 +15,12 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -25,11 +29,14 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.heading
@@ -43,6 +50,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.lorddetson.piplayer.R
 import io.github.lorddetson.piplayer.identification.batch.BatchCard
+import io.github.lorddetson.piplayer.identification.batch.BatchControl
 import io.github.lorddetson.piplayer.identification.batch.BatchReview
 import io.github.lorddetson.piplayer.identification.batch.BatchReviewRead
 import io.github.lorddetson.piplayer.identification.batch.FileOutcome
@@ -119,6 +127,26 @@ class FixViewModel(application: Application) : AndroidViewModel(application) {
             mutableCards.value = views.filter { it.batch.uuid in reviewing }.associate { it.batch.uuid to it.cards }
         }
     }
+
+    /** Pauses a running batch and reads the queue again (TI §8). */
+    fun pause(uuid: String) = control { it.pause(uuid) }
+
+    /** Resumes a paused batch at the group it stopped on (TI §8). */
+    fun resume(uuid: String) = control { it.resume(uuid) }
+
+    /** Stops a batch for good (TI §8). */
+    fun stop(uuid: String) = control { it.stop(uuid) }
+
+    /** Runs one change off the main thread and reads the queue again, whatever it answered. */
+    private fun control(change: suspend (BatchControl) -> Boolean) {
+        val app = getApplication<Application>()
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) {
+                runCatching { change(BatchControl.of(app)) }
+            }
+            onStart()
+        }
+    }
 }
 
 /**
@@ -151,7 +179,7 @@ fun FixScreen(modifier: Modifier = Modifier, onOpenReview: (fileId: Long, batchU
             Counters(batches)
             when (batches) {
                 null -> Loading()
-                else -> BatchQueue(batches.orEmpty(), cards, onOpenReview)
+                else -> BatchQueue(batches.orEmpty(), cards, onOpenReview, model::pause, model::resume, model::stop)
             }
         }
     }
@@ -217,6 +245,9 @@ private fun BatchQueue(
     batches: List<BatchEntity>,
     cards: Map<String, List<BatchCard>>,
     onOpenReview: (fileId: Long, batchUuid: String) -> Unit,
+    onPause: (String) -> Unit,
+    onResume: (String) -> Unit,
+    onStop: (String) -> Unit,
 ) {
     if (batches.isEmpty()) {
         Text(
@@ -245,7 +276,7 @@ private fun BatchQueue(
             },
         ) { row ->
             when (row) {
-                is FixRow.Batch -> BatchRow(row.batch)
+                is FixRow.Batch -> BatchRow(row.batch, onPause, onResume, onStop)
                 is FixRow.Card -> BatchCardRow(row.batchUuid, row.card, onOpenReview)
             }
         }
@@ -254,9 +285,15 @@ private fun BatchQueue(
 
 /** One batch: a dot of its status, its source, its start (and the ETA placeholder while processing), and its status. */
 @Composable
-private fun BatchRow(batch: BatchEntity) {
+private fun BatchRow(
+    batch: BatchEntity,
+    onPause: (String) -> Unit,
+    onResume: (String) -> Unit,
+    onStop: (String) -> Unit,
+) {
     val started = stringResource(R.string.fix_started, startedText(batch.createdAt))
     val eta = if (batch.status == BatchEntity.STATUS_PROCESSING) stringResource(R.string.fix_eta_not_measured) else null
+    var menu by remember { mutableStateOf(false) }
     ListItem(
         headlineContent = { Text(stringResource(sourceLabel(batch.source)), maxLines = 1, overflow = TextOverflow.Ellipsis) },
         supportingContent = {
@@ -264,15 +301,44 @@ private fun BatchRow(batch: BatchEntity) {
         },
         leadingContent = { Box(Modifier.size(12.dp).background(statusColor(batch.status), CircleShape)) },
         trailingContent = {
-            Surface(
-                color = MaterialTheme.colorScheme.surfaceVariant,
-                shape = MaterialTheme.shapes.small,
-            ) {
-                Text(
-                    stringResource(statusLabel(batch.status)),
-                    style = MaterialTheme.typography.labelMedium,
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Surface(
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    shape = MaterialTheme.shapes.small,
+                ) {
+                    Text(
+                        stringResource(statusLabel(batch.status)),
+                        style = MaterialTheme.typography.labelMedium,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                    )
+                }
+                if (batch.status in RUNNING) {
+                    Box {
+                        IconButton(onClick = { menu = true }) {
+                            Icon(
+                                painter = painterResource(R.drawable.ic_more_vert),
+                                contentDescription = stringResource(R.string.fix_batch_actions),
+                            )
+                        }
+                        DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                            if (batch.status == BatchEntity.STATUS_PAUSED) {
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.fix_batch_resume)) },
+                                    onClick = { menu = false; onResume(batch.uuid) },
+                                )
+                            } else {
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.fix_batch_pause)) },
+                                    onClick = { menu = false; onPause(batch.uuid) },
+                                )
+                            }
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.fix_batch_stop)) },
+                                onClick = { menu = false; onStop(batch.uuid) },
+                            )
+                        }
+                    }
+                }
             }
         },
     )
@@ -365,14 +431,19 @@ private fun startedText(createdAt: Long): String = remember(createdAt) {
 private val STATUSES = listOf(
     BatchEntity.STATUS_QUEUED,
     BatchEntity.STATUS_PROCESSING,
+    BatchEntity.STATUS_PAUSED,
     BatchEntity.STATUS_REVIEW,
     BatchEntity.STATUS_DONE,
     BatchEntity.STATUS_CANCELLED,
 )
 
+/** The batches whose jobs can be paused or stopped from the queue; a batch in review has no jobs left to stop. */
+private val RUNNING = setOf(BatchEntity.STATUS_QUEUED, BatchEntity.STATUS_PROCESSING, BatchEntity.STATUS_PAUSED)
+
 private fun statusLabel(status: String): Int = when (status) {
     BatchEntity.STATUS_QUEUED -> R.string.batch_status_queued
     BatchEntity.STATUS_PROCESSING -> R.string.batch_status_processing
+    BatchEntity.STATUS_PAUSED -> R.string.batch_status_paused
     BatchEntity.STATUS_REVIEW -> R.string.batch_status_review
     BatchEntity.STATUS_DONE -> R.string.batch_status_done
     BatchEntity.STATUS_CANCELLED -> R.string.batch_status_cancelled
@@ -390,6 +461,7 @@ private fun sourceLabel(source: String): Int = when (source) {
 private fun statusColor(status: String) = when (status) {
     BatchEntity.STATUS_QUEUED -> MaterialTheme.colorScheme.outline
     BatchEntity.STATUS_PROCESSING -> MaterialTheme.colorScheme.primary
+    BatchEntity.STATUS_PAUSED -> MaterialTheme.colorScheme.outlineVariant
     BatchEntity.STATUS_REVIEW -> MaterialTheme.colorScheme.tertiary
     BatchEntity.STATUS_DONE -> MaterialTheme.colorScheme.secondary
     BatchEntity.STATUS_CANCELLED -> MaterialTheme.colorScheme.error

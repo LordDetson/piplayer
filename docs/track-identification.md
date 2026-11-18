@@ -1597,6 +1597,11 @@ Phases (a) to (c) land in M4a, with accepted results saved in PiPlayer only; pha
   their tracks are. The Fix tab moves a batch whose cards are all settled to `done` when it reads them, so a batch whose
   every result was in the high band closes without the user, and one with doubtful results closes when its last card is
   decided.
+- The user may pause a batch, resume it and stop it (PIM-26). Pausing cancels the batch's queued jobs and marks it
+  `paused`, which keeps the album group it is on; resuming enqueues phase (a) of that group again and marks it
+  `processing`, and the phases are idempotent, so a group whose phase had finished costs one re-read. Stopping cancels
+  the jobs and marks the batch `cancelled`; neither `done` nor `cancelled` changes any more. The actions sit in the Fix
+  tab's row of a batch that is queued, processing or paused; a batch in review has no jobs left to pause.
 - Notifications (PIM-21): a channel of their own, apart from playback's, and the notification permission (API 33+) asked
   for with an explanation before the first batch; without it, batches run the same and show their progress in the Fix
   tab. Progress with an ETA, then a notification whose tap opens the review queue in the Fix tab. The subsection

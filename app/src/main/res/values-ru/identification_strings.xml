@@ -237,6 +237,11 @@
     <string name="fix_card_saved_chip">Сохранено в PiPlayer</string>
     <string name="batch_status_queued">В очереди</string>
     <string name="batch_status_processing">Обрабатывается</string>
+    <string name="batch_status_paused">Приостановлен</string>
+    <string name="fix_batch_actions">Действия с пакетом</string>
+    <string name="fix_batch_pause">Приостановить</string>
+    <string name="fix_batch_resume">Продолжить</string>
+    <string name="fix_batch_stop">Остановить</string>
     <string name="batch_status_review">На проверке</string>
     <string name="batch_status_done">Готово</string>
     <string name="batch_status_cancelled">Отменён</string>

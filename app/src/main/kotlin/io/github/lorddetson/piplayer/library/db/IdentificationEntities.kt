@@ -69,9 +69,11 @@ data class BatchEntity(
         const val SOURCE_MISSING_INFO = "missing_info"
 
         // The batch's state (TI §8): made, then running phase (a) and (b) jobs, then waiting for review, then done or
-        // cancelled. `done` and `cancelled` are final.
+        // cancelled. `paused` is the user's own stop that keeps the batch to resume at its group later; `done` and
+        // `cancelled` are final.
         const val STATUS_QUEUED = "queued"
         const val STATUS_PROCESSING = "processing"
+        const val STATUS_PAUSED = "paused"
         const val STATUS_REVIEW = "review"
         const val STATUS_DONE = "done"
         const val STATUS_CANCELLED = "cancelled"

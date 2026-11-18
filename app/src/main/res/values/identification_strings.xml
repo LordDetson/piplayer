@@ -232,6 +232,11 @@
     <string name="fix_card_saved_chip">Saved in PiPlayer</string>
     <string name="batch_status_queued">Queued</string>
     <string name="batch_status_processing">Processing</string>
+    <string name="batch_status_paused">Paused</string>
+    <string name="fix_batch_actions">Batch actions</string>
+    <string name="fix_batch_pause">Pause</string>
+    <string name="fix_batch_resume">Resume</string>
+    <string name="fix_batch_stop">Stop</string>
     <string name="batch_status_review">In review</string>
     <string name="batch_status_done">Done</string>
     <string name="batch_status_cancelled">Cancelled</string>
