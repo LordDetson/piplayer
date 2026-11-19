@@ -6,11 +6,10 @@ measurement that proves each, and the result with its date.
 M4a is batch identification saved in PiPlayer only. Phases (a) local read and fingerprints, (b) network lookups and
 (c) user review are in scope; phase (d) apply writes belongs to M4b.
 
-**Verdict: not run yet.** The steps land in `main` first; this file is filled by the acceptance run.
-
-The run of 18.11.2026 closes the six rows that matter: a 500-file batch started from a folder, resumes after process
-death in both phases, its results in the library, playback untouched, pause and stop, and the batch running without the
-notification permission. Two rows are proven by unit tests only (Keep as-is and Skip, the unmetered rule).
+**Verdict, 18.11.2026: M4a is closed.** The run closes the six rows that matter: a 500-file batch started from a
+folder, resumes after process death in both phases, its results in the library, playback untouched, pause and stop,
+and the batch running without the notification permission. Two rows are proven by unit tests only (Keep as-is and
+Skip, the unmetered rule).
 
 ## Devices
 
