@@ -18,6 +18,7 @@ and [Track Identification §11](track-identification.md#11-acceptance-criteria-a
 |---|---|
 | Build a diff from decided keys, retain unchanged property values, and apply protected-field rules | `TagDiffTest` and `TagWritePreparationTest` |
 | Write and reread MP3, FLAC, M4A, Ogg Vorbis, Opus and WAV while preserving the audio content key | Native `TagWriterRoundTripTest`, `TagWriterId3v1Test` and `TagWriterCoverTest` |
+| Identify the changed fields that keep their existing ID3v1 values | `ManualTagEditorTest` and `TagWriterId3v1Test`, including a comparison against the bytes after writing |
 | Prepare and verify the copy, record the write before streaming, verify the original, and keep the journal for undo | `TagWriteSessionTest` and `TagWriteJournalTest` |
 | Reopen the journal with a deferred single-file write, require consent and verify the final file | `SingleTagWriteRecoveryTest` |
 | Resume a batch with the verified files excluded from the next write request | `BatchTagRecoveryTest` and the 500-file procedure below |
@@ -63,6 +64,8 @@ and tapping the recovery notification opens Fix. Restore the original setting be
   hashes were checked on files 001, 250 and 500. The reproducible test preparation is in commit `65027812`.
 - API 36, one MP3 owned by `com.android.shell`: Deny preserved the file and the pending manual edit. Allow wrote the
   title and preserved the audio hash. After force-stop and relaunch, a subsequent edit showed a new system dialog.
+- API 36, manual ID3v1 preview on a shell-owned MP3: the editor reported that the title exceeded ID3v1 capacity. After
+  consent, ID3v2 held the new title, ID3v1 held the old title, both tags held the new album, and the audio hash matched.
 - API 36, 500 app-owned test files after journal compaction: a new process found 72 verified entries and completed the
   remaining 428. The test used write access from ownership.
 - API 36, 500 MP3 files owned by `com.android.shell` on the foreground service: the initial dialog covered all 500.

@@ -69,12 +69,14 @@ import kotlinx.coroutines.withContext
 
 private data class EditorState(
     val plan: ManualTagPlan? = null,
-    val preview: Map<String, TagChange>? = null,
+    val preview: EditorPreview? = null,
     val busy: Boolean = true,
     val message: Int? = null,
     val savedEdit: Long? = null,
     val waitingForPlayback: Boolean = false,
 )
+
+private data class EditorPreview(val changes: Map<String, TagChange>, val id3v1KeptFields: Set<String>? = null)
 
 private data class EditorSubmission(
     val plan: ManualTagPlan,
@@ -107,8 +109,22 @@ private class ManualTagEditorModel(
         val plan = current.plan ?: return
         if (current.busy) return
         val diff = TagDiff.between(plan.properties, changes, fillEmptyOnly)
-        if (diff.changes.isNotEmpty() || plan.removesId3v1) {
-            mutableState.value = current.copy(preview = diff.changes, message = null)
+        if (diff.changes.isEmpty() && !plan.removesId3v1) return
+        if (plan.legacyId3 == null || plan.options.id3v1 != Id3v1WritePolicy.UPDATE_IF_PRESENT) {
+            mutableState.value = current.copy(preview = EditorPreview(diff.changes), message = null)
+            return
+        }
+        mutableState.value = current.copy(busy = true, message = null)
+        viewModelScope.launch {
+            val keptFields = try {
+                writer.previewId3v1(plan, diff.changes)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                Log.w(TAG, "Could not preview ID3v1 changes", error)
+                null
+            }
+            mutableState.value = current.copy(preview = EditorPreview(diff.changes, keptFields), message = null)
         }
     }
 
@@ -122,7 +138,7 @@ private class ManualTagEditorModel(
     fun submit(launch: (IntentSenderRequest) -> Unit) {
         val current = mutableState.value
         val plan = current.plan ?: return
-        val diff = current.preview ?: return
+        val diff = current.preview?.changes ?: return
         if (current.busy) return
         mutableState.value = current.copy(busy = true, message = null)
         val submission = EditorSubmission(plan, diff.mapValues { it.value.after })
@@ -154,7 +170,7 @@ private class ManualTagEditorModel(
     fun saveInPiPlayer() {
         val current = mutableState.value
         val plan = current.plan ?: return
-        val changes = current.preview ?: return
+        val changes = current.preview?.changes ?: return
         if (current.busy) return
         mutableState.value = current.copy(busy = true, message = null)
         viewModelScope.launch {
@@ -282,11 +298,12 @@ internal fun ManualTagEditorScreen(fileId: Long, onBack: () -> Unit) {
                         onSubmit = model::preview,
                     )
                 } else {
-                    val canSave = remember(plan, shown.preview) { manualLibraryEdit(plan.properties, shown.preview) != null }
+                    val canSave = remember(plan, shown.preview) { manualLibraryEdit(plan.properties, shown.preview.changes) != null }
                     ManualTagPreview(
-                        shown.preview, plan.format, shown.busy, onBack = { model.closePreview() },
+                        shown.preview.changes, plan.format, shown.busy, onBack = { model.closePreview() },
                         onSave = (model::saveInPiPlayer).takeIf { canSave },
                         legacyId3Policy = plan.options.id3v1.takeIf { plan.legacyId3 != null },
+                        id3v1KeptFields = shown.preview.id3v1KeptFields,
                     ) { model.submit { consent.launch(it) } }
                 }
             }
@@ -324,6 +341,7 @@ internal fun ManualTagPreview(
     onBack: () -> Unit,
     onSave: (() -> Unit)? = null,
     legacyId3Policy: Id3v1WritePolicy? = null,
+    id3v1KeptFields: Set<String>? = null,
     onWrite: () -> Unit,
 ) {
     val empty = stringResource(R.string.tag_history_empty_value)
@@ -348,6 +366,16 @@ internal fun ManualTagPreview(
                         Id3v1WritePolicy.REMOVE -> R.string.tag_writing_id3v1_preview_remove
                         Id3v1WritePolicy.LEAVE_UNTOUCHED -> R.string.tag_writing_id3v1_preview_keep
                     }))
+                    if (legacyId3Policy == Id3v1WritePolicy.UPDATE_IF_PRESENT) {
+                        if (id3v1KeptFields == null) Text(stringResource(R.string.tag_writing_id3v1_preview_unavailable))
+                        for (key in id3v1KeptFields.orEmpty()) {
+                            val label = mainFields.firstOrNull { it.key == key }?.label
+                            Text(
+                                stringResource(R.string.tag_writing_id3v1_preview_kept_field, label?.let { stringResource(it) } ?: key),
+                                modifier = Modifier.testTag("manual-id3v1-kept-$key"),
+                            )
+                        }
+                    }
                 }
             }
         }

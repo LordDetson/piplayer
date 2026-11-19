@@ -110,16 +110,30 @@ class TaggerClient(
         restoreId3v1: ByteArray? = null,
     ): TaggerResult<Boolean> = call(target) { tagger, kill ->
         guard.run(target, kill, background = true) {
-            val edits = File.createTempFile("changes-", ".json", spillDir.apply { mkdirs() })
-            try {
-                val legacy = restoreId3v1?.let { Base64.getEncoder().encodeToString(it) }
-                edits.writeText(Json.encodeToString(TagFileEdits(changes, id3v1Policy, frontCovers, legacy)))
-                ParcelFileDescriptor.open(edits, ParcelFileDescriptor.MODE_READ_ONLY).use { descriptor ->
-                    reaching { tagger.writeWorkingCopy(file, descriptor) }
-                }
-            } finally {
-                edits.delete()
+            val legacy = restoreId3v1?.let { Base64.getEncoder().encodeToString(it) }
+            withEdits(TagFileEdits(changes, id3v1Policy, frontCovers, legacy)) { descriptor ->
+                reaching { tagger.writeWorkingCopy(file, descriptor) }
             }
+        }
+    }
+
+    internal suspend fun previewId3v1(
+        target: TagTarget,
+        tag: ByteArray,
+        changes: Map<String, List<String>>,
+    ): TaggerResult<Set<String>?> = call(target) { tagger, kill ->
+        guard.run(target, kill) {
+            withEdits(TagFileEdits(changes)) { descriptor -> reaching { tagger.previewId3v1(tag, descriptor)?.toSet() } }
+        }
+    }
+
+    private inline fun <T> withEdits(changes: TagFileEdits, block: (ParcelFileDescriptor) -> T): T {
+        val edits = File.createTempFile("changes-", ".json", spillDir.apply { mkdirs() })
+        try {
+            edits.writeText(Json.encodeToString(changes))
+            return ParcelFileDescriptor.open(edits, ParcelFileDescriptor.MODE_READ_ONLY).use(block)
+        } finally {
+            edits.delete()
         }
     }
 

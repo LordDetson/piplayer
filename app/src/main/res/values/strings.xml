@@ -491,6 +491,8 @@
     <string name="tag_writing_cover_car_stereo">Car stereo (JPEG up to 600 px)</string>
     <string name="tag_writing_cover_original">Original</string>
     <string name="tag_writing_id3v1_preview_update">Update fields that fit ID3v1. Keep existing values for fields that do not fit.</string>
+    <string name="tag_writing_id3v1_preview_kept_field">ID3v1 keeps the current value for %1$s.</string>
+    <string name="tag_writing_id3v1_preview_unavailable">Could not check which changes fit ID3v1.</string>
     <string name="tag_writing_id3v1_preview_remove">Remove the ID3v1 tag.</string>
     <string name="tag_writing_id3v1_preview_keep">Keep the ID3v1 tag as it is.</string>
     <string name="tag_history_conflicts">Kept edits from another app (%1$s).</string>

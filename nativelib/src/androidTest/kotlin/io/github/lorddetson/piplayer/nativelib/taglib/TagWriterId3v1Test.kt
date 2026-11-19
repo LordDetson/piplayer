@@ -34,6 +34,37 @@ class TagWriterId3v1Test {
     }
 
     @Test
+    fun thePreviewNamesTheLegacyFieldsKeptByTheActualWrite() {
+        val file = TestFiles.copy("tags/id3v1.mp3")
+        val original = file.readBytes()
+        val before = original.copyOfRange(original.size - 128, original.size)
+        before[125] = 0
+        before[126] = 7
+        file.writeBytes(original.copyOf(original.size - 128) + before)
+        val changes = mapOf(
+            "TITLE" to listOf("Кино"),
+            "ALBUM" to listOf("Café"),
+            "ARTIST" to listOf("Two", "Artists"),
+            "COMMENT" to listOf("c".repeat(29)),
+            "DATE" to listOf("2026-11-19"),
+            "GENRE" to listOf("PiPlayer experimental genre"),
+            "TRACKNUMBER" to listOf("256"),
+        )
+
+        assertThat(TagWriter.previewId3v1(before, changes))
+            .containsExactlyInAnyOrder("TITLE", "ARTIST", "COMMENT", "DATE", "GENRE", "TRACKNUMBER")
+        assertThat(TagWriter.previewId3v1(before, mapOf("LYRICS" to listOf("No ID3v1 field")))).isEmpty()
+        assertThat(TagWriter.previewId3v1(ByteArray(128), changes)).isNull()
+        ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_WRITE).use {
+            assertThat(TagWriter.write(it.fd, changes)).isTrue()
+        }
+        val after = file.readBytes().takeLast(128).toByteArray()
+        assertThat(after.copyOfRange(0, 63)).isEqualTo(before.copyOfRange(0, 63))
+        assertThat(after.copyOfRange(93, 128)).isEqualTo(before.copyOfRange(93, 128))
+        assertThat(String(after, 63, 30, Charsets.ISO_8859_1).trimEnd('\u0000')).isEqualTo("Café")
+    }
+
+    @Test
     fun leaveUntouchedPreservesTheWholeLegacyTagWhileWritingId3v2() {
         val file = TestFiles.copy("tags/id3v1.mp3")
         val oldLegacyTag = file.readBytes().takeLast(128)

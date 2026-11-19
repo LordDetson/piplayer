@@ -500,6 +500,8 @@
     <string name="tag_writing_cover_car_stereo">Для автомагнитолы (JPEG до 600 пикселей)</string>
     <string name="tag_writing_cover_original">Исходная</string>
     <string name="tag_writing_id3v1_preview_update">Подходящие поля будут обновлены. Остальные значения сохранятся.</string>
+    <string name="tag_writing_id3v1_preview_kept_field">В ID3v1 сохранится прежнее значение поля «%1$s».</string>
+    <string name="tag_writing_id3v1_preview_unavailable">Не удалось проверить, какие изменения помещаются в ID3v1.</string>
     <string name="tag_writing_id3v1_preview_remove">Тег ID3v1 будет удалён.</string>
     <string name="tag_writing_id3v1_preview_keep">Тег ID3v1 останется без изменений.</string>
     <string name="tag_history_conflicts">Сохранены правки из другого приложения (%1$s).</string>

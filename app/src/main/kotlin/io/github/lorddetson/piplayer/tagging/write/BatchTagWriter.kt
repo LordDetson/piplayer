@@ -26,6 +26,7 @@ import io.github.lorddetson.piplayer.userdata.UserData
 import io.github.lorddetson.piplayer.userdata.UserDatabase
 import java.io.File
 import java.io.FileNotFoundException
+import java.util.Base64
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -198,6 +199,13 @@ internal class BatchTagWriter(
     }
 
     fun request(plan: ManualTagPlan): IntentSender? = access.requestAccess(listOf(plan.target.uri))
+
+    suspend fun previewId3v1(plan: ManualTagPlan, changes: Map<String, TagChange>): Set<String>? {
+        val legacy = plan.legacyId3 ?: return null
+        val tag = Base64.getDecoder().decode(legacy.rawTag)
+        val result = tagger.previewId3v1(plan.target.taggerTarget, tag, changes.mapValues { it.value.after })
+        return (result as? TaggerResult.Replied)?.value
+    }
 
     suspend fun reviewPlan(fileId: Long, decisionId: Long, editId: Long?): ReviewTagPlan? {
         val file = manualPlan(fileId) ?: return null

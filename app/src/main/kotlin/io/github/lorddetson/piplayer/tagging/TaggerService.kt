@@ -60,6 +60,12 @@ class TaggerService : Service() {
                 }
             }
 
+        override fun previewId3v1(tag: ByteArray, changes: ParcelFileDescriptor): Array<String>? =
+            ParcelFileDescriptor.AutoCloseInputStream(changes).bufferedReader().use { reader ->
+                val edits = Json.decodeFromString<TagFileEdits>(reader.readText())
+                TagWriter.previewId3v1(tag, edits.properties)
+            }
+
         /** A walk reads a whole file: it yields to the music (docs/library.md §7). */
         private inline fun <T> lowPriority(block: () -> T): T {
             val priority = Process.getThreadPriority(Process.myTid())

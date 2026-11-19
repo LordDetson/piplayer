@@ -23,4 +23,7 @@ interface ITagger {
 
     /** Applies the JSON property changes to a private working copy. The service closes both descriptors. */
     boolean writeWorkingCopy(in ParcelFileDescriptor file, in ParcelFileDescriptor changes);
+
+    /** Reports ID3v1 fields that reject the JSON values. The service closes the changes descriptor. */
+    @nullable String[] previewId3v1(in byte[] tag, in ParcelFileDescriptor changes);
 }

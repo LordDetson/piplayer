@@ -1,5 +1,6 @@
 package io.github.lorddetson.piplayer.ui.details
 
+import android.database.sqlite.SQLiteDatabase
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.onNodeWithTag
@@ -10,9 +11,14 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.github.lorddetson.piplayer.R
 import io.github.lorddetson.piplayer.TestFiles
 import io.github.lorddetson.piplayer.nativelib.taglib.Id3v1WritePolicy
+import io.github.lorddetson.piplayer.tagging.TagReadGuard
+import io.github.lorddetson.piplayer.tagging.TagTarget
+import io.github.lorddetson.piplayer.tagging.TaggerResult
+import io.github.lorddetson.piplayer.tagging.TaggerTesting
 import io.github.lorddetson.piplayer.tagging.write.TagChange
 import io.github.lorddetson.piplayer.tagging.write.TagFileFormat
 import io.github.lorddetson.piplayer.ui.theme.PiPlayerTheme
+import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.Rule
 import org.junit.Test
@@ -68,6 +74,41 @@ class ManualTagEditorTest {
         compose.onNodeWithText(context.getString(R.string.tag_writing_id3v1)).assertIsDisplayed()
         compose.onNodeWithText(context.getString(R.string.tag_writing_id3v1_preview_remove)).assertIsDisplayed()
         compose.onNodeWithText(context.getString(R.string.manual_tag_write)).assertIsDisplayed()
+    }
+
+    @Test
+    fun theId3v1PreviewNamesTheChangedFieldThatKeepsItsLegacyValue() {
+        val changes = mapOf(
+            "TITLE" to TagChange(listOf("Original title"), listOf("Кино")),
+            "ALBUM" to TagChange(listOf("Original album"), listOf("Disintegration")),
+        )
+        val file = TestFiles.copy("tagging/legacy-id3v1.mp3")
+        val legacy = file.readBytes().takeLast(128).toByteArray()
+        val (database, databaseFile) = TaggerTesting.freshDatabase("manual-id3v1-preview.db")
+        val client = TaggerTesting.client(database, TagReadGuard.DEFAULT_TIMEOUT)
+        val kept = try {
+            val target = TagTarget.Outside(TaggerTesting.uri(file), file.length(), file.lastModified())
+            runBlocking {
+                val reply = client.previewId3v1(target, legacy, changes.mapValues { it.value.after })
+                (reply as TaggerResult.Replied).value
+            }
+        } finally {
+            client.close()
+            database.close()
+            SQLiteDatabase.deleteDatabase(databaseFile)
+            file.delete()
+        }
+        compose.setContent {
+            PiPlayerTheme {
+                ManualTagPreview(
+                    changes, TagFileFormat.ID3V24, busy = false, onBack = {},
+                    legacyId3Policy = Id3v1WritePolicy.UPDATE_IF_PRESENT, id3v1KeptFields = kept,
+                ) {}
+            }
+        }
+
+        compose.onNodeWithTag("manual-id3v1-kept-TITLE").assertIsDisplayed()
+        compose.onNodeWithTag("manual-id3v1-kept-ALBUM").assertDoesNotExist()
     }
 
     @Test

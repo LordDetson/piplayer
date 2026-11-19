@@ -33,6 +33,15 @@ object TagWriter {
         )
     }
 
+    /** Reports the ID3v1 fields whose proposed values leave the old bytes in place. */
+    fun previewId3v1(rawTag: ByteArray, changes: Map<String, List<String>>): Array<String>? {
+        check(TagReader.anyProcess || Application.getProcessName().endsWith(":tagger")) {
+            "TagWriter previews only in the :tagger process"
+        }
+        val entries = changes.entries.toList()
+        return nativePreviewId3v1(rawTag, entries.map { it.key }.toTypedArray(), entries.map { it.value.toTypedArray() }.toTypedArray())
+    }
+
     @JvmStatic
     private external fun nativeWrite(
         fd: Int,
@@ -44,4 +53,7 @@ object TagWriter {
         pictureBytes: Array<ByteArray>?,
         restoreId3v1: ByteArray?,
     ): Boolean
+
+    @JvmStatic
+    private external fun nativePreviewId3v1(rawTag: ByteArray, keys: Array<String>, values: Array<Array<String>>): Array<String>?
 }

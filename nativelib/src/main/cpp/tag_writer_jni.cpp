@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -124,44 +125,98 @@ TagLib::ID3v2::Version versionOf(TagLib::ID3v2::Tag *tag, bool exists) {
   return exists && tag->header()->majorVersion() < 4 ? TagLib::ID3v2::v3 : TagLib::ID3v2::v4;
 }
 
-void updateId3v1Text(TagLib::ByteVector &tag, const TagLib::String &value, size_t offset, size_t width) {
-  if (!value.isLatin1()) return;
+bool updateId3v1Text(TagLib::ByteVector &tag, const TagLib::String &value, size_t offset, size_t width) {
+  if (!value.isLatin1()) return false;
   const auto bytes = value.data(TagLib::String::Latin1);
-  if (bytes.size() > width) return;
+  if (bytes.size() > width) return false;
   std::fill_n(tag.begin() + offset, width, '\0');
   std::copy(bytes.begin(), bytes.end(), tag.begin() + offset);
+  return true;
+}
+
+// A missing result means the property has no ID3v1 field. A rejected value keeps the existing bytes.
+std::optional<bool> updateId3v1Field(TagLib::ByteVector &tag, const TagLib::String &key,
+                                   const TagLib::StringList &values) {
+  const bool single = values.size() <= 1;
+  const auto value = values.isEmpty() ? TagLib::String() : values.front();
+  if (key == "TITLE") return single && updateId3v1Text(tag, value, 3, 30);
+  if (key == "ARTIST") return single && updateId3v1Text(tag, value, 33, 30);
+  if (key == "ALBUM") return single && updateId3v1Text(tag, value, 63, 30);
+  if (key == "DATE") {
+    return single && (value.isEmpty() || (value.size() == 4 && value.toInt() >= 1000)) &&
+           updateId3v1Text(tag, value, 93, 4);
+  }
+  if (key == "COMMENT") {
+    return single && updateId3v1Text(tag, value, 97, tag[125] == 0 && tag[126] != 0 ? 28 : 30);
+  }
+  if (key == "TRACKNUMBER") {
+    if (!single || tag[125] != 0) return false;
+    bool numeric = false;
+    const auto track = value.toInt(&numeric);
+    if (!value.isEmpty() && (!numeric || track <= 0 || track >= 256)) return false;
+    tag[126] = static_cast<char>(track);
+    return true;
+  }
+  if (key == "GENRE") {
+    if (!single) return false;
+    const auto genre = TagLib::ID3v1::genreIndex(value);
+    if (!value.isEmpty() && (genre < 0 || genre >= 255)) return false;
+    tag[127] = static_cast<char>(value.isEmpty() ? 255 : genre);
+    return true;
+  }
+  return std::nullopt;
+}
+
+bool validId3v1(const TagLib::ByteVector &tag) {
+  return tag.size() == ID3V1_SIZE && tag.startsWith(TagLib::ByteVector::fromCString("TAG"));
+}
+
+void updateId3v1(TagLib::ByteVector &tag, const TagLib::PropertyMap &changes, std::vector<std::string> *kept = nullptr) {
+  for (const auto &[key, values] : changes) {
+    const auto updated = updateId3v1Field(tag, key, values);
+    if (kept && updated == false) kept->push_back(key.to8Bit());
+  }
 }
 
 bool updateExistingId3v1(TagLib::MPEG::File *file, const TagLib::PropertyMap &changes) {
   // Edit only the bytes of selected fields. Re-rendering the frame can change the padding or the old comment.
   file->seek(-ID3V1_SIZE, TagLib::File::End);
   auto tag = file->readBlock(ID3V1_SIZE);
-  if (tag.size() != ID3V1_SIZE || !tag.startsWith(TagLib::ByteVector::fromCString("TAG"))) return false;
+  if (!validId3v1(tag)) return false;
   const auto before = tag;
-  for (const auto &[key, values] : changes) {
-    if (values.size() > 1) continue;
-    const auto value = values.isEmpty() ? TagLib::String() : values.front();
-    if (key == "TITLE") updateId3v1Text(tag, value, 3, 30);
-    else if (key == "ARTIST") updateId3v1Text(tag, value, 33, 30);
-    else if (key == "ALBUM") updateId3v1Text(tag, value, 63, 30);
-    else if (key == "DATE" && (value.isEmpty() || (value.size() == 4 && value.toInt() >= 1000))) {
-      updateId3v1Text(tag, value, 93, 4);
-    } else if (key == "COMMENT") {
-      updateId3v1Text(tag, value, 97, tag[125] == 0 && tag[126] != 0 ? 28 : 30);
-    } else if (key == "TRACKNUMBER" && tag[125] == 0) {
-      bool numeric = false;
-      const auto track = value.toInt(&numeric);
-      if (value.isEmpty() || (numeric && track > 0 && track < 256)) tag[126] = static_cast<char>(track);
-    } else if (key == "GENRE") {
-      const auto genre = TagLib::ID3v1::genreIndex(value);
-      if (value.isEmpty() || (genre >= 0 && genre < 255)) tag[127] = static_cast<char>(value.isEmpty() ? 255 : genre);
-    }
-  }
+  updateId3v1(tag, changes);
   if (tag != before) {
     file->seek(-ID3V1_SIZE, TagLib::File::End);
     file->writeBlock(tag);
   }
   return true;
+}
+
+jobjectArray previewId3v1(JNIEnv *env, jclass, jbyteArray rawTag, jobjectArray keys, jobjectArray values) {
+  if (env->GetArrayLength(rawTag) != ID3V1_SIZE) return nullptr;
+  try {
+    TagLib::ByteVector tag(ID3V1_SIZE, '\0');
+    env->GetByteArrayRegion(rawTag, 0, ID3V1_SIZE, reinterpret_cast<jbyte *>(tag.data()));
+    TagLib::PropertyMap changes;
+    if (env->ExceptionCheck() || !validId3v1(tag) || !readChanges(env, keys, values, changes)) return nullptr;
+
+    std::vector<std::string> kept;
+    updateId3v1(tag, changes, &kept);
+    const auto stringClass = env->FindClass("java/lang/String");
+    if (stringClass == nullptr) return nullptr;
+    const auto result = env->NewObjectArray(static_cast<jsize>(kept.size()), stringClass, nullptr);
+    if (result == nullptr) return nullptr;
+    for (jsize i = 0; i < static_cast<jsize>(kept.size()); i++) {
+      const auto key = env->NewStringUTF(kept[i].c_str());
+      if (key == nullptr) return nullptr;
+      env->SetObjectArrayElement(result, i, key);
+      env->DeleteLocalRef(key);
+      if (env->ExceptionCheck()) return nullptr;
+    }
+    return result;
+  } catch (...) {
+    return nullptr;
+  }
 }
 
 bool restoreId3v1Tag(TagLib::MPEG::File *file, const TagLib::ByteVector &tag) {
@@ -238,7 +293,7 @@ jboolean write(JNIEnv *env, jclass, jint fd, jobjectArray keys, jobjectArray val
       if (size == ID3V1_SIZE) {
         legacy.resize(size);
         env->GetByteArrayRegion(restoreId3v1, 0, size, reinterpret_cast<jbyte *>(legacy.data()));
-        if (env->ExceptionCheck() || !legacy.startsWith(TagLib::ByteVector::fromCString("TAG"))) return JNI_FALSE;
+        if (env->ExceptionCheck() || !validId3v1(legacy)) return JNI_FALSE;
       }
     }
     if (changes.isEmpty() && !pictureBytes && !restoreId3v1 && policy != Id3v1Policy::Remove) return JNI_TRUE;
@@ -262,8 +317,10 @@ bool registerTagWriter(JNIEnv *env) {
   static const JNINativeMethod methods[] = {
       {"nativeWrite", "(I[Ljava/lang/String;[[Ljava/lang/String;I[Ljava/lang/String;[Ljava/lang/String;[[B[B)Z",
        reinterpret_cast<void *>(write)},
+      {"nativePreviewId3v1", "([B[Ljava/lang/String;[[Ljava/lang/String;)[Ljava/lang/String;",
+       reinterpret_cast<void *>(previewId3v1)},
   };
-  return env->RegisterNatives(writer, methods, 1) == JNI_OK;
+  return env->RegisterNatives(writer, methods, sizeof(methods) / sizeof(methods[0])) == JNI_OK;
 }
 
 }  // namespace piplayer
