@@ -263,9 +263,10 @@ interface DecisionDao {
      * key and its identity's location hint, which names the file of a track the tag pass has not read yet.
      */
     @Query(
-        "SELECT i.content_key AS contentKey, i.hint_volume_name AS hintVolume, i.hint_relative_path AS hintRelativePath, " +
+        "SELECT d.id AS decisionId, d.kind AS kind, i.content_key AS contentKey, " +
+            "i.hint_volume_name AS hintVolume, i.hint_relative_path AS hintRelativePath, " +
             "i.hint_display_name AS hintDisplayName FROM decision d JOIN track_identity i ON i.id = d.identity_id " +
-            "WHERE d.batch_uuid = :batchUuid AND d.undone_at IS NULL AND i.start_ms = 0",
+            "WHERE d.batch_uuid = :batchUuid AND d.undone_at IS NULL AND i.start_ms = 0 ORDER BY d.id",
     )
     suspend fun decidedTracksOfBatch(batchUuid: ByteArray): List<BatchDecisionTrackRow>
 
@@ -300,6 +301,8 @@ data class BatchDecisionTrackRow(
     val hintVolume: String?,
     val hintRelativePath: String?,
     val hintDisplayName: String?,
+    val decisionId: Long,
+    val kind: Int,
 )
 
 /** A Skip that counts, with its identity's key and location hint and the stamp it stored. */

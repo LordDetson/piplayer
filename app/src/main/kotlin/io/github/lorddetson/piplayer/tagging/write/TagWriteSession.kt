@@ -98,7 +98,7 @@ internal class TagWriteSession(
             val backup = TagBackupEntity(
                 identityId = target.identityId, volumeName = target.volume, relativePath = target.relativePath,
                 displayName = target.displayName, createdAt = at, tagsPath = "snapshots/${snapshot.name}",
-                tagsHash = sha256(snapshot), coverPath = null, coverHash = null, id3Version = null,
+                tagsHash = sha256(snapshot), coverPath = null, coverHash = null, id3Version = copy.before.id3Version,
             )
             val entry = AppliedChangeEntity(
                 identityId = target.identityId, decisionId = target.decisionId, batchUuid = target.batchUuid,

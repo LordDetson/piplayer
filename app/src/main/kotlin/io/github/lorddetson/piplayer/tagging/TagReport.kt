@@ -21,6 +21,8 @@ data class TagReport(
     val codec: String? = null,
     val bitDepth: Int? = null,
     val content: Content? = null,
+    /** The major version of a leading ID3v2 header in an MP3. */
+    val id3Version: Int? = null,
 ) {
 
     /** The content key in hex, its format token and how far the file's header settles its length (TI §3.1). */

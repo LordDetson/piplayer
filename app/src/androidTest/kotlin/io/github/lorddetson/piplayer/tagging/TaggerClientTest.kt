@@ -100,6 +100,16 @@ class TaggerClientTest {
     }
 
     @Test
+    fun reportsTheId3v2VersionBeforeEditing() = runBlocking<Unit> {
+        val reader = client()
+        val versionTwoThree = TestFiles.copy("tagging/legacy-id3v23.mp3")
+        val versionOne = TestFiles.copy("tagging/legacy-id3v1.mp3")
+
+        assertThat((reader.readFile(versionTwoThree, target) as TaggerResult.Replied).value.report.id3Version).isEqualTo(3)
+        assertThat((reader.readFile(versionOne, target) as TaggerResult.Replied).value.report.id3Version).isNull()
+    }
+
+    @Test
     fun theServiceRunsInTheTaggerProcessAndIsNotExported() {
         val service = context.packageManager.getServiceInfo(ComponentName(context, TaggerService::class.java), 0)
 

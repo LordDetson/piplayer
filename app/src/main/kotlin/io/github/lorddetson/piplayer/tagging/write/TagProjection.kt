@@ -2,8 +2,18 @@ package io.github.lorddetson.piplayer.tagging.write
 
 import io.github.lorddetson.piplayer.library.values.DecidedField
 import io.github.lorddetson.piplayer.library.values.PartKind
+import io.github.lorddetson.piplayer.tagging.TagReport
+import io.github.lorddetson.piplayer.tagging.contentkey.KeyFormat
 
 internal enum class TagFileFormat { ID3V23, ID3V24, VORBIS, MP4, WAV, UNSUPPORTED }
+
+internal fun TagReport.writeFormat(): TagFileFormat = when (content?.token) {
+    KeyFormat.MP3.token -> if (id3Version == 2 || id3Version == 3) TagFileFormat.ID3V23 else TagFileFormat.ID3V24
+    KeyFormat.FLAC.token, KeyFormat.OGG_VORBIS.token, KeyFormat.OPUS.token -> TagFileFormat.VORBIS
+    KeyFormat.MP4.token -> TagFileFormat.MP4
+    KeyFormat.WAV.token -> TagFileFormat.WAV
+    else -> TagFileFormat.UNSUPPORTED
+}
 
 internal data class TagProjection(
     val properties: Map<String, List<String>>,
