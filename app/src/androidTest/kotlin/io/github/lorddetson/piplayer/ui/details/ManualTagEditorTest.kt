@@ -1,0 +1,41 @@
+package io.github.lorddetson.piplayer.ui.details
+
+import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTextReplacement
+import androidx.test.ext.junit.runners.AndroidJUnit4
+import io.github.lorddetson.piplayer.R
+import io.github.lorddetson.piplayer.TestFiles
+import io.github.lorddetson.piplayer.ui.theme.PiPlayerTheme
+import org.assertj.core.api.Assertions.assertThat
+import org.junit.Rule
+import org.junit.Test
+import org.junit.runner.RunWith
+
+@RunWith(AndroidJUnit4::class)
+class ManualTagEditorTest {
+    @get:Rule
+    val compose = createComposeRule()
+
+    @Test
+    fun submitsOnlyEditedTagsAndDefaultsToKeepingExistingGenreAndComment() {
+        val original = mapOf(
+            "TITLE" to listOf("Original title"), "ARTIST" to listOf("First artist", "Second artist"),
+            "COMMENT" to listOf("Curated comment"), "GENRE" to listOf("Soul"), "REPLAYGAIN_TRACK_GAIN" to listOf("-8 dB"),
+        )
+        val requests = mutableListOf<Pair<Map<String, List<String>>, Set<String>>>()
+        compose.setContent {
+            PiPlayerTheme {
+                ManualTagForm(original) { changes, fills -> requests += changes to fills }
+            }
+        }
+        compose.onNodeWithTag("manual-tag-TITLE").performTextReplacement("Edited title")
+        compose.onNodeWithText(TestFiles.targetContext.getString(R.string.manual_tag_write)).performClick()
+
+        compose.runOnIdle {
+            assertThat(requests).containsExactly(mapOf("TITLE" to listOf("Edited title")) to setOf("GENRE", "COMMENT"))
+        }
+    }
+}

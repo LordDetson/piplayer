@@ -3,20 +3,26 @@ package io.github.lorddetson.piplayer.tagging.write
 import android.content.Context
 import android.content.IntentSender
 import android.net.Uri
+import android.os.ParcelFileDescriptor
 import android.os.storage.StorageManager
 import io.github.lorddetson.piplayer.library.db.LibraryAccess
 import io.github.lorddetson.piplayer.tagging.Tagger
 import io.github.lorddetson.piplayer.tagging.TaggerClient
+import io.github.lorddetson.piplayer.tagging.TaggerResult
 import io.github.lorddetson.piplayer.userdata.TagApplyQueue
 import io.github.lorddetson.piplayer.userdata.TagWriteJournal
 import io.github.lorddetson.piplayer.userdata.UserData
 import io.github.lorddetson.piplayer.userdata.UserDatabase
 import java.io.File
 import java.io.FileNotFoundException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 
 internal data class TagUndoPlan(val identityId: Long, val changeId: Long, val uri: Uri)
+
+internal data class ManualTagPlan(val fileId: Long, val target: TagWriteTarget, val properties: Map<String, List<String>>)
 
 internal sealed interface TagUndoOutcome {
     data class Restored(val conflicts: Set<String>) : TagUndoOutcome
@@ -30,7 +36,7 @@ internal class BatchTagWriter(
     context: Context,
     library: LibraryAccess = LibraryAccess.app(context),
     database: UserDatabase = UserData.database(context),
-    tagger: TaggerClient = Tagger.client(context),
+    private val tagger: TaggerClient = Tagger.client(context),
     staging: File = File(context.applicationContext.noBackupFilesDir, "tag-writes"),
 ) {
     private val app = context.applicationContext
@@ -44,7 +50,7 @@ internal class BatchTagWriter(
         tagger = tagger,
         journal = journal,
         access = access,
-        openForRead = { uri -> app.contentResolver.openFileDescriptor(uri, "r") ?: throw FileNotFoundException(uri.toString()) },
+        openForRead = ::openRead,
         availableBytes = { path ->
             val storage = app.getSystemService(StorageManager::class.java)
             storage?.getAllocatableBytes(storage.getUuidForPath(path)) ?: path.usableSpace
@@ -69,6 +75,37 @@ internal class BatchTagWriter(
     suspend fun results(batchUuid: String): Map<String, Int> = queue.results(batchUuid)
 
     suspend fun historyForTrack(identityId: Long): List<TagWriteHistoryEntry> = session.historyForTrack(identityId)
+
+    suspend fun manualPlan(fileId: Long): ManualTagPlan? = withContext(Dispatchers.IO) {
+        val target = plans.manualTarget(fileId) ?: return@withContext null
+        val report = openRead(target.uri).use { descriptor ->
+            (tagger.read(target.taggerTarget, descriptor, target.displayName) as? TaggerResult.Replied)?.value?.report
+        } ?: return@withContext null
+        if (report.error != null || report.content?.key != target.contentKey || report.writeFormat() == TagFileFormat.UNSUPPORTED) {
+            return@withContext null
+        }
+        ManualTagPlan(fileId, target, report.properties)
+    }
+
+    fun request(plan: ManualTagPlan): IntentSender? = access.requestAccess(listOf(plan.target.uri))
+
+    suspend fun applyManual(
+        plan: ManualTagPlan,
+        changes: Map<String, List<String>>,
+        fillEmptyOnly: Set<String> = emptySet(),
+    ): WriteBackResult? {
+        val target = plans.manualTarget(plan.fileId) ?: return null
+        if (target.uri != plan.target.uri || target.identityId != plan.target.identityId || target.contentKey != plan.target.contentKey) return null
+        val lease = playbackTagWriteGate.tryWrite(target.uri.toString()) ?: return null
+        return lease.use {
+            val queued = session.prepare(target) { report -> TagDiff.between(report.properties, changes, fillEmptyOnly) }
+            val ready = queued as? QueuedTagWrite.Ready ?: return@use null
+            session.write(ready.id, target, consent = true)
+        }
+    }
+
+    private fun openRead(uri: Uri): ParcelFileDescriptor =
+        app.contentResolver.openFileDescriptor(uri, "r") ?: throw FileNotFoundException(uri.toString())
 
     suspend fun undoPlan(identityId: Long, changeId: Long): TagUndoPlan? =
         undoTarget(identityId, changeId)?.let { TagUndoPlan(identityId, changeId, it.uri) }

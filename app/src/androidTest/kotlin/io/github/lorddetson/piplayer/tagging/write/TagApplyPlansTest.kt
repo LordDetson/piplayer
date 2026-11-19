@@ -2,6 +2,7 @@ package io.github.lorddetson.piplayer.tagging.write
 
 import android.content.ContentUris
 import android.content.ContentValues
+import android.net.Uri
 import android.provider.MediaStore
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.github.lorddetson.piplayer.TestFiles
@@ -34,6 +35,8 @@ import io.github.lorddetson.piplayer.userdata.UserDatabase
 import java.io.File
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeout
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.After
 import org.junit.Test
@@ -178,6 +181,7 @@ class TagApplyPlansTest {
             assertThat(after.properties).isEqualTo(before.properties + ("TITLE" to listOf(title)))
             assertThat(after.content?.key).isEqualTo(key)
             assertThat(writer.results(batchUuid)).isEqualTo(mapOf("written" to 1))
+            awaitIndexedTitle(uri, title)
 
             val written = writer.historyForTrack(identity).single()
             val plan = requireNotNull(writer.undoPlan(identity, written.id))
@@ -187,10 +191,31 @@ class TagApplyPlansTest {
             assertThat(restored.properties).isEqualTo(before.properties)
             assertThat(restored.content?.key).isEqualTo(key)
             assertThat(writer.historyForTrack(identity).last().undoneAt).isNotNull()
+            awaitIndexedTitle(uri, requireNotNull(before.properties["TITLE"]?.singleOrNull()))
+
+            val manual = requireNotNull(writer.manualPlan(file.id))
+            assertThat(manual.target.uri).isEqualTo(uri)
+            assertThat(manual.properties).isEqualTo(before.properties)
+            val comment = listOf("Entered in the tag editor")
+            assertThat(writer.applyManual(manual, mapOf("COMMENT" to comment))).isEqualTo(WriteBackResult.VERIFIED)
+            val edited = report()
+            assertThat(edited.properties).isEqualTo(before.properties + ("COMMENT" to comment))
+            assertThat(edited.content?.key).isEqualTo(key)
         } finally {
             client.close()
             resolver.delete(uri, null, null)
             staging.deleteRecursively()
+        }
+    }
+
+    private suspend fun awaitIndexedTitle(uri: Uri, expected: String) = withTimeout(10_000) {
+        val titleColumn = MediaStore.Audio.Media.TITLE
+        while (true) {
+            val title = context.contentResolver.query(uri, arrayOf(titleColumn), null, null, null)?.use { cursor ->
+                if (cursor.moveToFirst()) cursor.getString(0) else null
+            }
+            if (title == expected) return@withTimeout
+            delay(150)
         }
     }
 }

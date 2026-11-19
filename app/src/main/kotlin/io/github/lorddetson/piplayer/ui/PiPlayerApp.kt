@@ -38,6 +38,7 @@ import io.github.lorddetson.piplayer.ui.songs.SongMenu
 import io.github.lorddetson.piplayer.ui.songs.TrackMenuItems
 import io.github.lorddetson.piplayer.ui.songs.TrackMenuPlace
 import io.github.lorddetson.piplayer.ui.details.TrackDetailsScreen
+import io.github.lorddetson.piplayer.ui.details.ManualTagEditorScreen
 import io.github.lorddetson.piplayer.ui.details.TagHistoryScreen
 import io.github.lorddetson.piplayer.ui.identification.IdentifyTarget
 import io.github.lorddetson.piplayer.ui.identification.LocalIdentify
@@ -185,6 +186,9 @@ data class TrackDetailsRoute(val fileId: Long? = null, val uri: String? = null) 
 @Serializable
 data class TagHistoryRoute(val identityId: Long) : NavKey
 
+@Serializable
+data class ManualTagEditRoute(val fileId: Long) : NavKey
+
 /**
  * The review of a song of the library by its file ID, or of a file opened from another app by its URI (TI §6, review
  * screen A). [batchUuid] is the batch whose card opened it (TI §8), null for a single-file review.
@@ -321,6 +325,7 @@ fun PiPlayerApp(viewModel: PlayerViewModel = viewModel()) {
             addToPlaylist = { playlists.addToPlaylist(QueueTarget.Songs(listOf(it.id))) },
             details = { showDetails(TrackDetailsRoute(fileId = it.id)) },
             openedDetails = { uri -> showDetails(TrackDetailsRoute(uri = uri)) },
+            editTags = { open(ManualTagEditRoute(it.id)) },
         )
     }
     val host = LibraryHost(
@@ -411,6 +416,7 @@ fun PiPlayerApp(viewModel: PlayerViewModel = viewModel()) {
                     TrackDetailsScreen(route.fileId, route.uri, snackbar, onBack = { close() }, onTagHistory = { open(TagHistoryRoute(it)) })
                 }
                 entry<TagHistoryRoute>(metadata = FROM_THE_SIDE) { route -> TagHistoryScreen(route.identityId, onBack = { close() }) }
+                entry<ManualTagEditRoute>(metadata = FROM_THE_SIDE) { route -> ManualTagEditorScreen(route.fileId, onBack = { close() }) }
                 entry<IdentifyRoute>(metadata = FROM_THE_SIDE) { route ->
                     ReviewScreen(route.fileId, route.uri, onBack = { close() }, batchUuid = route.batchUuid)
                 }

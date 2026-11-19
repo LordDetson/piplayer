@@ -2,6 +2,7 @@ package io.github.lorddetson.piplayer.tagging.write
 
 import android.content.ContentUris
 import android.provider.MediaStore
+import io.github.lorddetson.piplayer.library.db.AudioFileEntity
 import io.github.lorddetson.piplayer.library.db.BatchEntity
 import io.github.lorddetson.piplayer.library.db.LibraryAccess
 import io.github.lorddetson.piplayer.library.identity.Hex
@@ -56,6 +57,14 @@ internal class TagApplyPlans(private val library: LibraryAccess, private val use
         )
     }
 
+    suspend fun manualTarget(fileId: Long): TagWriteTarget? {
+        val file = withContext(Dispatchers.IO) { library.use { database -> runBlocking { database.library().file(fileId) } } }
+            ?: return null
+        val key = file.contentKey ?: return null
+        val identityId = user.identities().idOfKey(Hex.bytes(key)) ?: return null
+        return file.writeTarget(identityId, null, null, key)
+    }
+
     private suspend fun targetAt(
         place: Place,
         identity: Long,
@@ -72,11 +81,15 @@ internal class TagApplyPlans(private val library: LibraryAccess, private val use
                 }
             }
         } ?: return null
-        if (file.mediaStoreId <= 0) return null
-        val uri = ContentUris.withAppendedId(MediaStore.Audio.Media.getContentUri(file.volumeName), file.mediaStoreId)
+        return file.writeTarget(identity, decision, batch, key)
+    }
+
+    private fun AudioFileEntity.writeTarget(identity: Long, decision: Long?, batch: ByteArray?, key: String): TagWriteTarget? {
+        if (mediaStoreId <= 0) return null
+        val uri = ContentUris.withAppendedId(MediaStore.Audio.Media.getContentUri(volumeName), mediaStoreId)
         return TagWriteTarget(
-            uri, TagTarget.LibraryFile(file.id), identity, decision, batch,
-            file.volumeName, file.relativePath, file.displayName, key,
+            uri, TagTarget.LibraryFile(id), identity, decision, batch,
+            volumeName, relativePath, displayName, key,
         )
     }
 

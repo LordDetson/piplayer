@@ -115,6 +115,17 @@ class TrackMenuTest {
     }
 
     @Test
+    fun `Edit tags is offered for library tracks immediately before Details`() {
+        val offers = TrackMenuOffers(identify = true, editTags = true)
+        for (place in TrackMenuPlace.entries) {
+            assertThat(entries(place, offers = offers)).endsWith(TrackMenuEntry.Identify, TrackMenuEntry.EditTags, Details)
+            assertThat(entries(place, TrackMenuState(inLibrary = false), offers)).doesNotContain(TrackMenuEntry.EditTags)
+        }
+        val one = SelectionMenuState(rows = 1, songs = 1)
+        assertThat(selection(SelectionPlace.LIST, one, offers)).doesNotContain(TrackMenuEntry.EditTags)
+    }
+
+    @Test
     fun `a file opened from another app has Identify and Details`() {
         val opened = TrackMenuState(inLibrary = false)
 

@@ -40,6 +40,7 @@ fun TrackMenuItems(song: Song?, place: TrackMenuPlace, menu: SongMenu, close: ()
         covers = menu.covers != null,
         details = if (song != null) menu.details != null else openedUri != null && menu.openedDetails != null,
         identify = identify != null && (song != null || openedUri != null),
+        editTags = menu.editTags != null && song != null,
     )
     for (entry in TrackMenu.entries(place, offers, state)) {
         DropdownMenuItem(text = { Text(label(entry)) }, onClick = {
@@ -66,6 +67,7 @@ internal fun label(entry: TrackMenuEntry): String = when (entry) {
     TrackMenuEntry.ChooseCover -> stringResource(R.string.cover_choose)
     TrackMenuEntry.RemoveCover -> stringResource(R.string.cover_remove)
     TrackMenuEntry.Identify -> stringResource(R.string.identify)
+    TrackMenuEntry.EditTags -> stringResource(R.string.manual_tag_open)
     TrackMenuEntry.Details -> stringResource(R.string.details)
     TrackMenuEntry.Play -> stringResource(R.string.playlist_play)
     is TrackMenuEntry.FavoriteUnavailable ->
@@ -88,6 +90,7 @@ private fun SongMenu.run(entry: TrackMenuEntry, song: Song) {
         TrackMenuEntry.RemoveCover -> covers?.removeForSong?.invoke(song)
         // Opened through LocalIdentify by the menu itself.
         TrackMenuEntry.Identify -> Unit
+        TrackMenuEntry.EditTags -> editTags?.invoke(song)
         TrackMenuEntry.Details -> details?.invoke(song)
         // A selection's entries, which a song's own menu never has.
         TrackMenuEntry.Play, is TrackMenuEntry.FavoriteUnavailable, TrackMenuEntry.RemoveFromPlaylist, TrackMenuEntry.RemoveFromQueue -> Unit

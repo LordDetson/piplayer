@@ -43,6 +43,8 @@ sealed interface TrackMenuEntry {
     /** "Identify", which opens the review of the song or the opened file (TI §1, §6). */
     data object Identify : TrackMenuEntry
 
+    data object EditTags : TrackMenuEntry
+
     data object Details : TrackMenuEntry
 
     /** "Play" of the selected songs (docs/library.md §20.3). */
@@ -90,6 +92,7 @@ data class TrackMenuOffers(
     val details: Boolean = true,
     /** "Identify" (TI §1): the place can open the review of a song, or start a batch over the selected songs. */
     val identify: Boolean = false,
+    val editTags: Boolean = false,
 )
 
 /**
@@ -129,7 +132,7 @@ object TrackMenu {
             if (state.ownCover) add(TrackMenuEntry.RemoveCover)
         }
         if (offers.identify) add(TrackMenuEntry.Identify)
-        // "Edit tags" (M4b) will come here, before "Details".
+        if (offers.editTags) add(TrackMenuEntry.EditTags)
         if (offers.details) add(TrackMenuEntry.Details)
     }
 

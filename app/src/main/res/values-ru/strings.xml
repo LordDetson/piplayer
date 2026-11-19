@@ -484,4 +484,13 @@
     <string name="tag_history_cancelled">Откат отменён.</string>
     <string name="tag_history_no_change">Нет тегов, которые можно восстановить.</string>
     <string name="tag_history_deferred">Файл используется при воспроизведении. Повторите откат позже.</string>
+    <string name="manual_tag_open">Редактировать теги</string>
+    <string name="manual_tag_write">Записать теги</string>
+    <string name="manual_tag_comment">Комментарий</string>
+    <string name="manual_tag_lyrics">Текст песни</string>
+    <string name="manual_tag_fill_empty">Заполнять только пустое поле (%1$s)</string>
+    <string name="manual_tag_written">Теги файла обновлены.</string>
+    <string name="manual_tag_unavailable">Этот файл недоступен для редактирования тегов.</string>
+    <string name="manual_tag_cancelled">Доступ к файлу отменён.</string>
+    <string name="manual_tag_failed">Не удалось записать теги. Введённые изменения сохранены в редакторе.</string>
 </resources>

@@ -110,6 +110,7 @@ class SongMenu(
     val details: ((Song) -> Unit)? = null,
     /** "Details" of a file opened from another app, by its URI (docs/library.md §18.5). */
     val openedDetails: ((uri: String) -> Unit)? = null,
+    val editTags: ((Song) -> Unit)? = null,
 )
 
 /**
