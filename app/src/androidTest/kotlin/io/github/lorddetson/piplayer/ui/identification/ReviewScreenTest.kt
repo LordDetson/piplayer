@@ -67,10 +67,14 @@ class ReviewScreenTest {
     @After
     fun stop() = scope.cancel()
 
-    private fun show(backend: FakeReviewBackend, file: io.github.lorddetson.piplayer.identification.pipeline.FileRef = ReviewFixtures.libraryFile) {
+    private fun show(
+        backend: FakeReviewBackend,
+        file: io.github.lorddetson.piplayer.identification.pipeline.FileRef = ReviewFixtures.libraryFile,
+        onFileWrite: ((LastAction) -> Unit)? = {},
+    ) {
         val model = ReviewModel(file, backend, scope)
         compose.setContent {
-            PiPlayerTheme { ReviewContent(model, onBack = { closed = true }) }
+            PiPlayerTheme { ReviewContent(model, onBack = { closed = true }, onFileWrite = onFileWrite) }
         }
         compose.runOnUiThread { model.start() }
     }
@@ -153,9 +157,28 @@ class ReviewScreenTest {
     }
 
     @Test
+    fun fileWritingIsAnExplicitOptInForAnIdentifiedLibraryFile() {
+        val backend = FakeReviewBackend(result(found()))
+        val writes = mutableListOf<LastAction>()
+        show(backend, onFileWrite = { writes += it })
+        waitForCard()
+
+        val write = compose.onNodeWithTag(ReviewTags.ALSO_WRITE).performScrollTo()
+        write.assert(isCheckbox()).assertIsOff()
+        write.performClick()
+        write.assertIsOn()
+        click(R.string.review_apply)
+
+        waitForText(text(R.string.review_applied))
+        assertThat(backend.applied).hasSize(1)
+        compose.runOnIdle { assertThat(writes).containsExactly(LastAction(ActionKind.APPLY, 101)) }
+    }
+
+    @Test
     fun applyThenUndo() {
         val backend = FakeReviewBackend(result(found()))
-        show(backend)
+        val writes = mutableListOf<LastAction>()
+        show(backend, onFileWrite = { writes += it })
         waitForCard()
         compose.waitUntilAtLeastOneExists(hasTestTag(ReviewTags.COVER_LINE), timeoutMillis = 10_000)
 
@@ -166,6 +189,7 @@ class ReviewScreenTest {
 
         waitForText(text(R.string.review_undone))
         assertThat(backend.calls).endsWith("apply", "undo 101")
+        compose.runOnIdle { assertThat(writes).isEmpty() }
         compose.onNode(hasText(text(R.string.review_apply)) and isButton()).assertIsEnabled()
     }
 
@@ -204,6 +228,7 @@ class ReviewScreenTest {
 
         assertThat(compose.onAllNodes(hasText(text(R.string.review_keep_as_is))).fetchSemanticsNodes()).isEmpty()
         assertThat(compose.onAllNodes(hasText(text(R.string.review_skip))).fetchSemanticsNodes()).isEmpty()
+        compose.onNodeWithTag(ReviewTags.ALSO_WRITE).assertDoesNotExist()
         compose.onNode(hasText(text(R.string.review_apply)) and isButton()).assertExists()
     }
 

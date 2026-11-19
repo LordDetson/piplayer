@@ -7,6 +7,7 @@ import io.github.lorddetson.piplayer.library.db.BatchEntity
 import io.github.lorddetson.piplayer.library.db.LibraryAccess
 import io.github.lorddetson.piplayer.library.identity.Hex
 import io.github.lorddetson.piplayer.library.identity.Place
+import io.github.lorddetson.piplayer.library.values.DecidedField
 import io.github.lorddetson.piplayer.library.values.DecisionKind
 import io.github.lorddetson.piplayer.library.values.DecisionResolver
 import io.github.lorddetson.piplayer.tagging.TagReport
@@ -63,6 +64,17 @@ internal class TagApplyPlans(private val library: LibraryAccess, private val use
         val key = file.contentKey ?: return null
         val identityId = user.identities().idOfKey(Hex.bytes(key)) ?: return null
         return file.writeTarget(identityId, null, null, key)
+    }
+
+    suspend fun reviewValues(identityId: Long, decisionIds: Set<Long>): Map<DecidedField, String?>? {
+        val stored = Decisions(user).storedOf(identityId)
+        val approved = stored.filter { decision ->
+            decision.row.id in decisionIds && decision.row.batchUuid == null && decision.row.undoneAt == null &&
+                (decision.values.kind == DecisionKind.APPLY || decision.values.kind == DecisionKind.EDIT)
+        }
+        if (approved.size != decisionIds.size) return null
+        return DecisionResolver.resolve(stored.map { it.values })
+            .filterValues { it.decisionId in decisionIds }.mapValues { it.value.value }
     }
 
     private suspend fun targetAt(

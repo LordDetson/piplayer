@@ -45,12 +45,16 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.lorddetson.piplayer.PiPlayerApplication
 import io.github.lorddetson.piplayer.R
+import io.github.lorddetson.piplayer.identification.contract.IdentificationTarget
 import io.github.lorddetson.piplayer.tagging.write.BatchTagWriter
 import io.github.lorddetson.piplayer.tagging.write.ManualTagPlan
 import io.github.lorddetson.piplayer.tagging.write.TagChange
 import io.github.lorddetson.piplayer.tagging.write.TagDiff
 import io.github.lorddetson.piplayer.tagging.write.TagFileFormat
 import io.github.lorddetson.piplayer.tagging.write.WriteBackResult
+import io.github.lorddetson.piplayer.tagging.write.manualLibraryEdit
+import io.github.lorddetson.piplayer.ui.identification.ReviewDecisions
+import io.github.lorddetson.piplayer.ui.identification.ReviewEdit
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -63,6 +67,7 @@ private data class EditorState(
     val preview: Map<String, TagChange>? = null,
     val busy: Boolean = true,
     val message: Int? = null,
+    val savedEdit: Long? = null,
 )
 
 private data class EditorSubmission(
@@ -70,7 +75,11 @@ private data class EditorSubmission(
     val changes: Map<String, List<String>>,
 )
 
-private class ManualTagEditorModel(private val fileId: Long, private val writer: BatchTagWriter) : ViewModel() {
+private class ManualTagEditorModel(
+    private val fileId: Long,
+    private val writer: BatchTagWriter,
+    private val decisions: ReviewDecisions,
+) : ViewModel() {
     private val mutableState = MutableStateFlow(EditorState())
     val state = mutableState.asStateFlow()
     private var awaitingConsent: EditorSubmission? = null
@@ -126,6 +135,52 @@ private class ManualTagEditorModel(private val fileId: Long, private val writer:
         if (granted) viewModelScope.launch { apply(submission) } else finish(R.string.manual_tag_cancelled)
     }
 
+    fun saveInPiPlayer() {
+        val current = mutableState.value
+        val plan = current.plan ?: return
+        val changes = current.preview ?: return
+        if (current.busy) return
+        mutableState.value = current.copy(busy = true, message = null)
+        viewModelScope.launch {
+            storeDecision {
+                val live = writer.manualPlan(fileId)
+                if (live == null || live.target != plan.target || changes.any { (key, change) -> live.properties[key].orEmpty() != change.before }) {
+                    finish(R.string.manual_tag_changed)
+                    return@storeDecision
+                }
+                val values = manualLibraryEdit(live.properties, changes)
+                val target = IdentificationTarget.LibraryFile(fileId, live.target.contentKey)
+                val saved = values?.let { decisions.applyWithEdit(null, null, ReviewEdit(target, it, null, null)) }
+                if (saved == null) finish(R.string.manual_tag_save_failed)
+                else reload(R.string.manual_tag_saved_in_player, saved.decisionId)
+            }
+        }
+    }
+
+    fun undoSavedEdit() {
+        val current = mutableState.value
+        val id = current.savedEdit ?: return
+        if (current.busy) return
+        mutableState.value = current.copy(busy = true, message = null)
+        viewModelScope.launch {
+            storeDecision {
+                if (decisions.undo(id)) reload(R.string.review_undone)
+                else finish(R.string.review_undo_failed)
+            }
+        }
+    }
+
+    private suspend fun storeDecision(block: suspend () -> Unit) {
+        try {
+            block()
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            Log.w(TAG, "Could not store the manual tag decision", error)
+            finish(R.string.manual_tag_save_failed)
+        }
+    }
+
     private suspend fun apply(submission: EditorSubmission) {
         try {
             when (writer.applyManual(submission.plan, submission.changes)) {
@@ -141,7 +196,7 @@ private class ManualTagEditorModel(private val fileId: Long, private val writer:
         }
     }
 
-    private suspend fun reload(message: Int? = null) {
+    private suspend fun reload(message: Int? = null, savedEdit: Long? = null) {
         val plan = try {
             writer.manualPlan(fileId)
         } catch (error: CancellationException) {
@@ -150,7 +205,9 @@ private class ManualTagEditorModel(private val fileId: Long, private val writer:
             Log.w(TAG, "Could not read current file tags", error)
             null
         }
-        mutableState.value = EditorState(plan, busy = false, message = message ?: R.string.manual_tag_unavailable.takeIf { plan == null })
+        mutableState.value = EditorState(
+            plan, busy = false, message = message ?: R.string.manual_tag_unavailable.takeIf { plan == null }, savedEdit = savedEdit,
+        )
     }
 
     private fun finish(message: Int) {
@@ -166,7 +223,9 @@ private class ManualTagEditorModel(private val fileId: Long, private val writer:
 @Composable
 internal fun ManualTagEditorScreen(fileId: Long, onBack: () -> Unit) {
     val app = LocalContext.current.applicationContext as PiPlayerApplication
-    val model = viewModel(key = "manual-tag-editor-$fileId") { ManualTagEditorModel(fileId, app.batchTagWriter) }
+    val model = viewModel(key = "manual-tag-editor-$fileId") {
+        ManualTagEditorModel(fileId, app.batchTagWriter, ReviewDecisions.of(app))
+    }
     val state by model.state.collectAsStateWithLifecycle()
     val consent = rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
         model.consentResult(result.resultCode == Activity.RESULT_OK)
@@ -186,16 +245,21 @@ internal fun ManualTagEditorScreen(fileId: Long, onBack: () -> Unit) {
             val shown = state
             if (shown.busy) LinearProgressIndicator(Modifier.fillMaxWidth())
             shown.message?.let { Text(stringResource(it), Modifier.padding(16.dp)) }
+            if (shown.savedEdit != null && shown.preview == null) {
+                TextButton(onClick = model::undoSavedEdit, enabled = !shown.busy) { Text(stringResource(R.string.review_undo)) }
+            }
             shown.plan?.let { plan ->
-                val draft = remember(plan.properties) { ManualTagDraft() }
+                val draft = remember(plan, shown.savedEdit) { ManualTagDraft() }
                 if (shown.preview == null) {
                     ManualTagForm(
                         plan.properties, modifier = Modifier.weight(1f), busy = shown.busy,
                         draft = draft, actionLabel = R.string.manual_tag_review, onSubmit = model::preview,
                     )
                 } else {
+                    val canSave = remember(plan, shown.preview) { manualLibraryEdit(plan.properties, shown.preview) != null }
                     ManualTagPreview(
                         shown.preview, plan.format, shown.busy, onBack = { model.closePreview() },
+                        onSave = (model::saveInPiPlayer).takeIf { canSave },
                     ) { model.submit { consent.launch(it) } }
                 }
             }
@@ -231,6 +295,7 @@ internal fun ManualTagPreview(
     format: TagFileFormat,
     busy: Boolean,
     onBack: () -> Unit,
+    onSave: (() -> Unit)? = null,
     onWrite: () -> Unit,
 ) {
     val empty = stringResource(R.string.tag_history_empty_value)
@@ -248,9 +313,18 @@ internal fun ManualTagPreview(
                 }
             }
         }
-        if (format == TagFileFormat.WAV) Text(stringResource(R.string.manual_tag_wav_notice))
-        Text(stringResource(R.string.manual_tag_access))
-        Button(onClick = onWrite, enabled = !busy) { Text(stringResource(R.string.manual_tag_write)) }
+        if (onSave != null) {
+            Button(onClick = onSave, enabled = !busy, modifier = Modifier.testTag("manual-tag-save-in-player")) {
+                Text(stringResource(R.string.manual_tag_save_in_player))
+            }
+        } else {
+            Text(stringResource(R.string.manual_tag_file_only))
+        }
+        if (format != TagFileFormat.UNSUPPORTED) {
+            if (format == TagFileFormat.WAV) Text(stringResource(R.string.manual_tag_wav_notice))
+            Text(stringResource(R.string.manual_tag_access))
+            TextButton(onClick = onWrite, enabled = !busy) { Text(stringResource(R.string.manual_tag_write)) }
+        }
         TextButton(onClick = onBack, enabled = !busy) { Text(stringResource(R.string.manual_tag_continue_editing)) }
     }
 }

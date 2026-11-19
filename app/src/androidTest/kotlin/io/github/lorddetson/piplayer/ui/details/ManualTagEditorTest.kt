@@ -39,6 +39,24 @@ class ManualTagEditorTest {
     }
 
     @Test
+    fun theManualPreviewOffersSavingInPiPlayer() {
+        val changes = mapOf("TITLE" to TagChange(listOf("Original title"), listOf("Edited title")))
+        var saved = false
+        var written = false
+        compose.setContent {
+            PiPlayerTheme {
+                ManualTagPreview(changes, TagFileFormat.ID3V24, busy = false, onBack = {}, onSave = { saved = true }) { written = true }
+            }
+        }
+
+        compose.onNodeWithTag("manual-tag-save-in-player").assertIsDisplayed().performClick()
+        compose.runOnIdle {
+            assertThat(saved).isTrue()
+            assertThat(written).isFalse()
+        }
+    }
+
+    @Test
     fun submitsOnlyEditedTagsAndDefaultsToKeepingExistingGenreAndComment() {
         val original = mapOf(
             "TITLE" to listOf("Original title"), "ARTIST" to listOf("First artist", "Second artist"),

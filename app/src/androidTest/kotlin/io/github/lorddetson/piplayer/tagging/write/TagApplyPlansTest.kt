@@ -207,6 +207,22 @@ class TagApplyPlansTest {
             assertThat(edited.content?.key).isEqualTo(key)
             assertThat(writer.applyManual(manual, mapOf("COMMENT" to listOf("Stale preview")))).isEqualTo(WriteBackResult.SOURCE_CHANGED)
             assertThat(report().properties).isEqualTo(edited.properties)
+
+            val decision = user.decisions().add(
+                DecisionEntity(
+                    identityId = identity, kind = DecisionKind.EDIT.code,
+                    fields = DecisionCodec.bits(setOf(ProtectedField.TITLE)), createdAt = 3,
+                ),
+            )
+            val recognizedTitle = "Written from the review card"
+            user.decisions().addMetadata(listOf(TrackMetadataEntity(decision, DecidedField.TITLE.code, recognizedTitle.toByteArray())))
+            assertThat(writer.reviewPlan(file.id, id, null)).isNull()
+            val review = requireNotNull(writer.reviewPlan(file.id, decision, null))
+            assertThat(review.file.target.uri).isEqualTo(uri)
+            assertThat(writer.applyReview(review) {}).isEqualTo(WriteBackResult.VERIFIED)
+            assertThat(report().properties).isEqualTo(edited.properties + ("TITLE" to listOf(recognizedTitle)))
+            assertThat(report().content?.key).isEqualTo(key)
+            assertThat(writer.historyForTrack(identity).first().changes.keys).containsExactly("TITLE")
         } finally {
             client.close()
             resolver.delete(uri, null, null)

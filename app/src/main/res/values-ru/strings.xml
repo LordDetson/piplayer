@@ -494,6 +494,10 @@
     <string name="tag_history_deferred">Файл используется при воспроизведении. Повторите откат позже.</string>
     <string name="manual_tag_open">Редактировать теги</string>
     <string name="manual_tag_write">Записать теги</string>
+    <string name="manual_tag_save_in_player">Сохранить в PiPlayer</string>
+    <string name="manual_tag_saved_in_player">Изменения сохранены в PiPlayer.</string>
+    <string name="manual_tag_save_failed">Не удалось сохранить изменения в PiPlayer.</string>
+    <string name="manual_tag_file_only">Для выбранных тегов сохранение в PiPlayer недоступно.</string>
     <string name="manual_tag_wav_notice">Android не индексирует теги WAV. Другие приложения могут продолжить показывать имя файла.</string>
     <string name="manual_tag_review">Проверить изменения</string>
     <string name="manual_tag_access">Android может запросить разрешение на изменение этого файла.</string>

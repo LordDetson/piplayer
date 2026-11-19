@@ -27,6 +27,8 @@ import io.github.lorddetson.piplayer.library.values.DecidedField
 import io.github.lorddetson.piplayer.library.values.DecisionKind
 import io.github.lorddetson.piplayer.settings.ProtectedField
 import io.github.lorddetson.piplayer.tagging.TagReport
+import io.github.lorddetson.piplayer.tagging.write.TagChange
+import io.github.lorddetson.piplayer.tagging.write.manualLibraryEdit
 import io.github.lorddetson.piplayer.tagging.contentkey.DurationCheck
 import io.github.lorddetson.piplayer.tagging.contentkey.DurationPlan
 import io.github.lorddetson.piplayer.userdata.DecisionFixtures
@@ -213,6 +215,22 @@ class ReviewDecisionsTest {
         if (cover) ProposedCover.Chosen(Fixtures.bytes("caa/front-250.jpg"), PictureSize(250, 250), ProposedCover.Origin.EMBEDDED) else null,
         releaseId = details().releaseId,
     )
+
+    @Test
+    fun aManualLibraryEditWinsInPiPlayerAndUndoRestoresTheFileValue() = runBlocking<Unit> {
+        val read = target(1, key = 1)
+        val identity = checkNotNull(identityOf(1))
+        val rawTitle = listOf("Tag 1")
+        val values = checkNotNull(manualLibraryEdit(
+            mapOf("TITLE" to rawTitle), mapOf("TITLE" to TagChange(rawTitle, listOf("My title"))),
+        ))
+        val saved = checkNotNull(review.applyWithEdit(null, null, edit(read, values, cover = false)))
+        assertThat(Decisions(user).decidedOf(listOf(identity)).getValue(identity).getValue(DecidedField.TITLE).value)
+            .isEqualTo("My title")
+        assertThat(library.library().tracksOf(listOf(read.fileId)).single().title).isEqualTo(rawTitle.single())
+        assertThat(review.undo(saved.decisionId)).isTrue()
+        assertThat(Decisions(user).decidedOf(listOf(identity))[identity]).isNullOrEmpty()
+    }
 
     @Test
     fun applyWithTheUsersValuesStoresTheIdentificationThenAnEditWithTheSavedCoverWhichWinsAndUndoUndoesBoth() = runBlocking<Unit> {

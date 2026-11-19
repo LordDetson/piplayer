@@ -386,7 +386,7 @@ class ReviewModel(private val file: FileRef, private val backend: ReviewBackend,
      * Apply (TI §6, §7.1): the ticked fields of the card's edition, with the cover when its line is ticked; with the user's
      * values (review screen B) followed by their edit decision.
      */
-    fun apply() {
+    fun apply(afterApply: ((LastAction) -> Unit)? = null) {
         val ended = mutable.value as? ReviewState.Ended ?: return
         if (!ended.canApply) return
         val card = ended.card!!
@@ -397,32 +397,36 @@ class ReviewModel(private val file: FileRef, private val backend: ReviewBackend,
         val recording = card.match.recordingId
         val provenance = Provenance.of(card.match, details, found?.acoustIdTrackIds?.get(recording), fetchedAt[keyOf(card)] ?: backend.now())
         val front = (line?.new as? ProposedCover.Front)?.image?.takeIf { ProtectedField.COVER in parts.identification }
-        if (!parts.hasEdit) {
-            if (parts.identification.isEmpty()) return
-            val request = ApplyRequest(target, details, parts.identification, front?.source, provenance)
-            act(ActionKind.APPLY, ReviewNote.APPLY_FAILED) { backend.apply(request, front) }
-            return
-        }
         val request = parts.identification.takeIf { it.isNotEmpty() }?.let { ApplyRequest(target, details, it, front?.source, provenance) }
-        val edit = ReviewEdit(target, FieldEdits.parts(parts.edits), parts.chosen, details.releaseId)
+        val edit = if (parts.hasEdit) ReviewEdit(target, FieldEdits.parts(parts.edits), parts.chosen, details.releaseId) else null
         update { copy(busy = true, note = null) }
         scope.launch {
-            val applied = quietly { backend.applyWithEdit(request, front, edit) }
+            val applied = quietly {
+                if (edit != null) backend.applyWithEdit(request, front, edit)
+                else backend.apply(checkNotNull(request), front)?.let { Applied(it) }
+            }
+            val action = applied?.let { LastAction(ActionKind.APPLY, it.decisionId, it.editId) }
             update {
-                if (applied == null) {
+                if (action == null) {
                     copy(busy = false, note = ReviewNote.APPLY_FAILED)
                 } else {
                     copy(
                         busy = false,
-                        last = LastAction(ActionKind.APPLY, applied.decisionId, applied.editId),
+                        last = action,
                         applied = true,
                         note = if (applied.editFailed) ReviewNote.EDIT_FAILED else null,
                     )
                 }
             }
-            if (applied != null) refreshCanEdit()
+            if (action != null) {
+                afterApply?.invoke(action)
+                refreshCanEdit()
+            }
         }
     }
+
+    internal val canWriteFile: Boolean
+        get() = (result?.file?.target as? IdentificationTarget.LibraryFile)?.startMs == 0L
 
     /** Keep as-is (TI §1) for a library file. */
     fun keepAsIs() {
@@ -984,10 +988,9 @@ class ReviewModel(private val file: FileRef, private val backend: ReviewBackend,
                 if (id == null) {
                     copy(busy = false, note = failed)
                 } else {
-                    copy(busy = false, last = LastAction(kind, id), applied = applied || kind == ActionKind.APPLY)
+                    copy(busy = false, last = LastAction(kind, id))
                 }
             }
-            if (id != null && kind == ActionKind.APPLY) refreshCanEdit()
         }
     }
 

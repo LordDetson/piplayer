@@ -1,7 +1,10 @@
 package io.github.lorddetson.piplayer.ui.identification
 
 import android.app.Application
+import android.app.Activity
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import android.graphics.BitmapFactory
 import android.text.format.DateFormat
 import android.text.format.Formatter
@@ -46,6 +49,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -71,6 +75,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.lorddetson.piplayer.R
+import io.github.lorddetson.piplayer.PiPlayerApplication
 import io.github.lorddetson.piplayer.covers.CoverRequest
 import io.github.lorddetson.piplayer.identification.contract.IdentificationOutcome
 import io.github.lorddetson.piplayer.identification.pipeline.FileRef
@@ -101,6 +106,7 @@ object ReviewTags {
     const val CONFIDENCE = "review_confidence"
     const val REASON = "review_reason"
     const val COVER_LINE = "review_cover_line"
+    const val ALSO_WRITE = "review-also-write"
 
     /** Review screen B (step 20): the panel shown in place of the card, its rows and fields, and the snippet. */
     const val PANEL = "review_panel"
@@ -127,6 +133,9 @@ object ReviewTags {
 class ReviewViewModel(application: Application, file: FileRef, batchUuid: String? = null) :
     AndroidViewModel(application) {
     val review = ReviewModel(file, AppReviewBackend(application, batchUuid), viewModelScope).also { it.start() }
+    internal val fileWrite = if (file is FileRef.Library && batchUuid == null) {
+        ReviewFileWrite(file.fileId, (application as PiPlayerApplication).batchTagWriter, viewModelScope)
+    } else null
 }
 
 /**
@@ -140,6 +149,11 @@ fun ReviewScreen(fileId: Long?, uri: String?, onBack: () -> Unit, batchUuid: Str
     val app = LocalContext.current.applicationContext as Application
     val file = fileId?.let { FileRef.Library(it) } ?: FileRef.Opened(uri.orEmpty())
     val model = viewModel(key = "review ${fileId ?: uri} ${batchUuid.orEmpty()}") { ReviewViewModel(app, file, batchUuid) }
+    val writer = model.fileWrite
+    val consent = rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) {
+        writer?.consentResult(it.resultCode == Activity.RESULT_OK)
+    }
+    val writeState = writer?.state?.collectAsStateWithLifecycle()?.value
     // The snippet's player pauses and resumes the main player through a controller of the playback service (TI §6).
     var snippet by remember { mutableStateOf<SnippetPlayer?>(null) }
     DisposableEffect(app) {
@@ -174,6 +188,9 @@ fun ReviewScreen(fileId: Long?, uri: String?, onBack: () -> Unit, batchUuid: Str
             // The cover the loader resolves now (docs/library.md §13.1); an opened file shows only its line's text.
             oldCover = fileId?.let { id -> { LibraryCover(CoverRequest.Track(id), null, size = COVER_DP.dp, shape = RoundedCornerShape(4.dp)) } },
             snippetPlayer = snippet,
+            onFileWrite = writer?.let { write -> { action -> write.start(action) { consent.launch(it) } } },
+            fileWriteBusy = writeState?.busy == true,
+            fileWriteMessage = { id -> writeState?.takeIf { it.decisionId == id }?.message },
         )
     }
 }
@@ -189,8 +206,12 @@ fun ReviewContent(
     modifier: Modifier = Modifier,
     oldCover: (@Composable () -> Unit)? = null,
     snippetPlayer: SnippetPlayer? = null,
+    onFileWrite: ((LastAction) -> Unit)? = null,
+    fileWriteBusy: Boolean = false,
+    fileWriteMessage: (Long?) -> Int? = { null },
 ) {
     val state by model.state.collectAsStateWithLifecycle()
+    var alsoWrite by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(state) { if (state == ReviewState.Closed) onBack() }
     // Leaving the review stops the snippet as the card closing does (TI §6).
     if (snippetPlayer != null) DisposableEffect(snippetPlayer) { onDispose { snippetPlayer.stop() } }
@@ -210,7 +231,15 @@ fun ReviewContent(
         }
         ReviewState.Failed -> Column(scrolling) { Message(stringResource(R.string.review_failed), model::retry) }
         is ReviewState.Ended -> when (val panel = shown.panel) {
-            null -> Ended(shown, model, scrolling, oldCover, snippetPlayer)
+            null -> Ended(
+                if (fileWriteBusy) shown.copy(busy = true) else shown, model, scrolling, oldCover, snippetPlayer,
+                model.canWriteFile && onFileWrite != null, alsoWrite, { alsoWrite = it }, fileWriteMessage(shown.last?.decisionId),
+                onApply = {
+                    val write = onFileWrite.takeIf { alsoWrite && model.canWriteFile }
+                    alsoWrite = false
+                    model.apply(write)
+                },
+            )
             else -> ReviewPanel(panel, model, modifier)
         }
         ReviewState.Closed -> Unit
@@ -298,6 +327,11 @@ private fun Ended(
     modifier: Modifier,
     oldCover: (@Composable () -> Unit)?,
     snippetPlayer: SnippetPlayer?,
+    fileWriteAvailable: Boolean,
+    alsoWrite: Boolean,
+    onAlsoWrite: (Boolean) -> Unit,
+    fileWriteMessage: Int?,
+    onApply: () -> Unit,
 ) {
     Column(modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
         val card = state.card
@@ -313,8 +347,22 @@ private fun Ended(
             if (state.candidates.size > 1 || (card.manual && state.candidates.isNotEmpty())) Candidates(state, model::choose)
         }
         Status(state, model::undo)
+        fileWriteMessage?.let {
+            Text(stringResource(it), Modifier.semantics { liveRegion = LiveRegionMode.Polite })
+        }
+        if (card?.edition != null && fileWriteAvailable && !state.applied) {
+            Row(
+                Modifier.fillMaxWidth().testTag(ReviewTags.ALSO_WRITE)
+                    .toggleable(alsoWrite, enabled = state.canApply, role = Role.Checkbox, onValueChange = onAlsoWrite),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Checkbox(alsoWrite, onCheckedChange = null, enabled = state.canApply)
+                Text(stringResource(R.string.review_also_write))
+            }
+        }
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (card != null) Button(onClick = model::apply, enabled = state.canApply) { Text(stringResource(R.string.review_apply)) }
+            if (card != null) Button(onClick = onApply, enabled = state.canApply) { Text(stringResource(R.string.review_apply)) }
             if (state.keepOrSkip) {
                 OutlinedButton(onClick = model::keepAsIs, enabled = !state.busy) { Text(stringResource(R.string.review_keep_as_is)) }
                 OutlinedButton(onClick = model::skip, enabled = !state.busy) { Text(stringResource(R.string.review_skip)) }

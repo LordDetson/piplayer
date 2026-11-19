@@ -36,6 +36,12 @@ internal data class ManualTagPlan(
     val format: TagFileFormat,
 )
 
+internal data class ReviewTagPlan(
+    val file: ManualTagPlan,
+    val decisionIds: Set<Long>,
+    val changes: Map<String, List<String>>,
+)
+
 internal sealed interface TagUndoOutcome {
     data class Restored(val conflicts: Set<String>) : TagUndoOutcome
     data class NoChange(val conflicts: Set<String>) : TagUndoOutcome
@@ -113,7 +119,7 @@ internal class BatchTagWriter(
             (tagger.read(target.taggerTarget, descriptor, target.displayName) as? TaggerResult.Replied)?.value?.report
         } ?: return@withContext null
         val format = report.writeFormat()
-        if (report.error != null || report.content?.key != target.contentKey || format == TagFileFormat.UNSUPPORTED) {
+        if (report.error != null || report.content?.key != target.contentKey) {
             return@withContext null
         }
         ManualTagPlan(fileId, target, report.properties, format)
@@ -121,27 +127,64 @@ internal class BatchTagWriter(
 
     fun request(plan: ManualTagPlan): IntentSender? = access.requestAccess(listOf(plan.target.uri))
 
+    suspend fun reviewPlan(fileId: Long, decisionId: Long, editId: Long?): ReviewTagPlan? {
+        val file = manualPlan(fileId) ?: return null
+        val ids = setOfNotNull(decisionId, editId)
+        val changes = reviewChanges(file, ids) ?: return null
+        if (TagDiff.between(file.properties, changes).changes.isEmpty()) return null
+        return ReviewTagPlan(file.copy(target = file.target.copy(decisionId = editId ?: decisionId)), ids, changes)
+    }
+
+    suspend fun applyReview(plan: ReviewTagPlan, onWaiting: (Boolean) -> Unit): WriteBackResult? {
+        val uri = plan.file.target.uri.toString()
+        try {
+            while (true) {
+                val lease = playbackTagWriteGate.tryWrite(uri)
+                if (lease != null) return lease.use {
+                    onWaiting(false)
+                    if (reviewChanges(plan.file, plan.decisionIds) != plan.changes) WriteBackResult.SOURCE_CHANGED
+                    else applySelection(plan.file, plan.changes, emptySet())
+                }
+                onWaiting(true)
+                playbackTagWriteGate.awaitAnyWritable(setOf(uri))
+            }
+        } finally {
+            onWaiting(false)
+        }
+    }
+
+    private suspend fun reviewChanges(file: ManualTagPlan, ids: Set<Long>): Map<String, List<String>>? =
+        plans.reviewValues(file.target.identityId, ids)?.let { projectTags(file.format, file.properties, it).properties }
+
     suspend fun applyManual(
         plan: ManualTagPlan,
         changes: Map<String, List<String>>,
         fillEmptyOnly: Set<String> = emptySet(),
     ): WriteBackResult? {
+        val lease = playbackTagWriteGate.tryWrite(plan.target.uri.toString()) ?: return null
+        return lease.use { applySelection(plan, changes, fillEmptyOnly) }
+    }
+
+    private suspend fun applySelection(
+        plan: ManualTagPlan,
+        changes: Map<String, List<String>>,
+        fillEmptyOnly: Set<String>,
+    ): WriteBackResult? {
+        if (plan.format == TagFileFormat.UNSUPPORTED) return null
         val intended = TagDiff.between(plan.properties, changes, fillEmptyOnly).changes
         if (intended.isEmpty()) return null
-        val target = plans.manualTarget(plan.fileId) ?: return null
-        if (target.uri != plan.target.uri || target.identityId != plan.target.identityId || target.contentKey != plan.target.contentKey) return null
-        val lease = playbackTagWriteGate.tryWrite(target.uri.toString()) ?: return null
-        return lease.use {
-            var changed = false
-            val queued = session.prepare(target) { report ->
-                changed = intended.any { (key, change) -> report.properties[key].orEmpty() != change.before }
-                if (changed) TagDiff(report.properties, emptyMap())
-                else TagDiff.between(report.properties, intended.mapValues { (_, change) -> change.after })
-            }
-            if (changed) return@use WriteBackResult.SOURCE_CHANGED
-            val ready = queued as? QueuedTagWrite.Ready ?: return@use null
-            session.write(ready.id, target, consent = true)
+        val live = plans.manualTarget(plan.fileId) ?: return null
+        val target = plan.target
+        if (live != target.copy(decisionId = null)) return null
+        var changed = false
+        val queued = session.prepare(target) { report ->
+            changed = intended.any { (key, change) -> report.properties[key].orEmpty() != change.before }
+            if (changed) TagDiff(report.properties, emptyMap())
+            else TagDiff.between(report.properties, intended.mapValues { (_, change) -> change.after })
         }
+        if (changed) return WriteBackResult.SOURCE_CHANGED
+        val ready = queued as? QueuedTagWrite.Ready ?: return null
+        return session.write(ready.id, target, consent = true)
     }
 
     private fun openRead(uri: Uri): ParcelFileDescriptor =
