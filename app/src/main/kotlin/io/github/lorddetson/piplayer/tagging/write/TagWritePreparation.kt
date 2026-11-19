@@ -14,7 +14,7 @@ import kotlinx.coroutines.withContext
 
 internal sealed interface PreparationResult
 
-internal enum class PreparationFailure : PreparationResult { NO_SPACE, CONTENT_CHANGED, NO_CHANGES, UNVERIFIED }
+internal enum class PreparationFailure : PreparationResult { NO_SPACE, CONTENT_CHANGED, NO_CHANGES, UNVERIFIED, QUEUE_CHANGED }
 
 internal class PreparedTagCopy(
     val file: File,

@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <string>
 #include <vector>
 
@@ -7,6 +8,7 @@
 
 #include <fileref.h>
 #include <flacfile.h>
+#include <id3v1genres.h>
 #include <id3v2header.h>
 #include <id3v2tag.h>
 #include <infotag.h>
@@ -70,14 +72,56 @@ TagLib::ID3v2::Version versionOf(TagLib::ID3v2::Tag *tag, bool exists) {
   return exists && tag->header()->majorVersion() < 4 ? TagLib::ID3v2::v3 : TagLib::ID3v2::v4;
 }
 
+void updateId3v1Text(TagLib::ByteVector &tag, const TagLib::String &value, size_t offset, size_t width) {
+  if (!value.isLatin1()) return;
+  const auto bytes = value.data(TagLib::String::Latin1);
+  if (bytes.size() > width) return;
+  std::fill_n(tag.begin() + offset, width, '\0');
+  std::copy(bytes.begin(), bytes.end(), tag.begin() + offset);
+}
+
+bool updateExistingId3v1(TagLib::MPEG::File *file, const TagLib::PropertyMap &changes) {
+  // Edit only the bytes of selected fields. Re-rendering the frame can change the padding or the old comment.
+  constexpr int size = 128;
+  file->seek(-size, TagLib::File::End);
+  auto tag = file->readBlock(size);
+  if (tag.size() != size || !tag.startsWith(TagLib::ByteVector::fromCString("TAG"))) return false;
+  const auto before = tag;
+  for (const auto &[key, values] : changes) {
+    if (values.size() > 1) continue;
+    const auto value = values.isEmpty() ? TagLib::String() : values.front();
+    if (key == "TITLE") updateId3v1Text(tag, value, 3, 30);
+    else if (key == "ARTIST") updateId3v1Text(tag, value, 33, 30);
+    else if (key == "ALBUM") updateId3v1Text(tag, value, 63, 30);
+    else if (key == "DATE" && (value.isEmpty() || (value.size() == 4 && value.toInt() >= 1000))) {
+      updateId3v1Text(tag, value, 93, 4);
+    } else if (key == "COMMENT") {
+      updateId3v1Text(tag, value, 97, tag[125] == 0 && tag[126] != 0 ? 28 : 30);
+    } else if (key == "TRACKNUMBER" && tag[125] == 0) {
+      bool numeric = false;
+      const auto track = value.toInt(&numeric);
+      if (value.isEmpty() || (numeric && track > 0 && track < 256)) tag[126] = static_cast<char>(track);
+    } else if (key == "GENRE") {
+      const auto genre = TagLib::ID3v1::genreIndex(value);
+      if (value.isEmpty() || (genre >= 0 && genre < 255)) tag[127] = static_cast<char>(value.isEmpty() ? 255 : genre);
+    }
+  }
+  if (tag != before) {
+    file->seek(-size, TagLib::File::End);
+    file->writeBlock(tag);
+  }
+  return true;
+}
+
 bool save(TagLib::File *file, const TagLib::PropertyMap &changes) {
   if (auto *mpeg = dynamic_cast<TagLib::MPEG::File *>(file)) {
     const bool hasId3 = mpeg->hasID3v2Tag();
     auto *tag = mpeg->ID3v2Tag(true);
     const auto version = versionOf(tag, hasId3);
     if (!tag->setProperties(merge(tag->properties(), changes)).isEmpty()) return false;
-    return mpeg->save(TagLib::MPEG::File::ID3v2, TagLib::File::StripNone, version,
-                      TagLib::File::DoNotDuplicate);
+    if (!mpeg->save(TagLib::MPEG::File::ID3v2, TagLib::File::StripNone, version,
+                    TagLib::File::DoNotDuplicate)) return false;
+    return !mpeg->hasID3v1Tag() || updateExistingId3v1(mpeg, changes);
   }
   if (auto *wav = dynamic_cast<TagLib::RIFF::WAV::File *>(file)) {
     auto *tag = wav->ID3v2Tag();

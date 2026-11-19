@@ -65,9 +65,9 @@ class UserDatabaseTest {
 
     @Test
     fun freshDatabaseHasWriteHistoryAndBackups() = runBlocking<Unit> {
-        assertThat(rows(database, "PRAGMA user_version")).containsExactly(listOf("7"))
-        assertThat(rows(database, "SELECT name FROM sqlite_master WHERE name IN ('applied_change', 'tag_backup') ORDER BY name"))
-            .containsExactly(listOf("applied_change"), listOf("tag_backup"))
+        assertThat(rows(database, "PRAGMA user_version")).containsExactly(listOf("8"))
+        assertThat(rows(database, "SELECT name FROM sqlite_master WHERE name IN ('applied_change', 'tag_apply_item', 'tag_backup') ORDER BY name"))
+            .containsExactly(listOf("applied_change"), listOf("tag_apply_item"), listOf("tag_backup"))
     }
 
     @Test

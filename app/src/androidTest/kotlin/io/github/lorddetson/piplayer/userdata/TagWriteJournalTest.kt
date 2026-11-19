@@ -52,6 +52,21 @@ class TagWriteJournalTest {
         }
     }
 
+    @Test
+    fun aVerifiedWriteKeepsItsIdentityEvenWithoutADecision() = runBlocking<Unit> {
+        val opened = UserDatabase.open(context, name)
+        try {
+            val journal = TagWriteJournal(opened)
+            val id = journal.prepare(backup("history.mp3"), change("history.mp3").copy(decisionId = null))
+            assertThat(journal.streamed(id)).isTrue()
+            assertThat(journal.verified(id, 190L, 23L, 42L)).isTrue()
+
+            assertThat(opened.user().identitiesHoldingData()).containsExactly(7L)
+        } finally {
+            opened.close()
+        }
+    }
+
     private fun backup(file: String) = TagBackupEntity(
         identityId = 7, volumeName = "external_primary", relativePath = "Music/", displayName = file,
         createdAt = 1, tagsPath = "tags-$file.json", tagsHash = ByteArray(32), coverPath = null,

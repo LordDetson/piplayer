@@ -11,6 +11,7 @@ import io.github.lorddetson.piplayer.tagging.TagTarget
 import io.github.lorddetson.piplayer.tagging.TaggerClient
 import io.github.lorddetson.piplayer.tagging.TaggerResult
 import io.github.lorddetson.piplayer.userdata.AppliedChangeEntity
+import io.github.lorddetson.piplayer.userdata.TagApplyItem
 import io.github.lorddetson.piplayer.userdata.TagBackupEntity
 import io.github.lorddetson.piplayer.userdata.TagWriteJournal
 import java.io.ByteArrayOutputStream
@@ -64,16 +65,24 @@ internal class TagWriteSession(
         val original = undoable(id, target) ?: return null
         val record = decodeRecord(original.diff) ?: return null
         var conflicts = emptySet<String>()
-        val queued = prepare(target, undoOf = id) { report ->
+        val queued = prepare(target, undoOf = id, item = null) { report ->
             TagDiff.undo(report.properties, record.changes).also { conflicts = it.conflicts }
         }
         return TagUndo(queued, conflicts)
     }
 
     suspend fun prepare(target: TagWriteTarget, diff: (TagReport) -> TagDiff): QueuedTagWrite =
-        prepare(target, undoOf = null, diff)
+        prepare(target, undoOf = null, item = null, diff)
 
-    private suspend fun prepare(target: TagWriteTarget, undoOf: Long?, diff: (TagReport) -> TagDiff): QueuedTagWrite = withContext(Dispatchers.IO) {
+    suspend fun prepareForApply(target: TagWriteTarget, item: TagApplyItem, diff: (TagReport) -> TagDiff): QueuedTagWrite =
+        prepare(target, undoOf = null, item, diff)
+
+    private suspend fun prepare(
+        target: TagWriteTarget,
+        undoOf: Long?,
+        item: TagApplyItem?,
+        diff: (TagReport) -> TagDiff,
+    ): QueuedTagWrite = withContext(Dispatchers.IO) {
         val result = preparation.prepare(target.taggerTarget, { openForRead(target.uri) }, target.displayName, target.contentKey, diff)
         if (result is PreparationFailure) return@withContext QueuedTagWrite.Skipped(result)
         val copy = result as PreparedTagCopy
@@ -99,9 +108,11 @@ internal class TagWriteSession(
                 tagHash = tagHash(copy.after), diff = encodeRecord(copy, undoOf), createdAt = at,
             )
             val id = withContext(NonCancellable) {
-                journal.prepare(backup, entry).also { journaled = true }
+                val written = if (item == null) journal.prepare(backup, entry) else journal.prepareForApply(backup, entry, item)
+                journaled = written != null
+                written
             }
-            QueuedTagWrite.Ready(id)
+            if (id == null) QueuedTagWrite.Skipped(PreparationFailure.QUEUE_CHANGED) else QueuedTagWrite.Ready(id)
         } catch (_: IOException) {
             QueuedTagWrite.Skipped(PreparationFailure.UNVERIFIED)
         } finally {

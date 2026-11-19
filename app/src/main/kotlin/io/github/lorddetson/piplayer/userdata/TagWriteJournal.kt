@@ -4,16 +4,34 @@ import androidx.room3.Dao
 import androidx.room3.Insert
 import androidx.room3.Query
 import androidx.room3.withWriteTransaction
+import io.github.lorddetson.piplayer.library.identity.Hex
 
 /** Records the verified working copy and its snapshot together before the original can be opened for writing. */
 internal class TagWriteJournal(private val database: UserDatabase) {
     private val dao get() = database.tagWrites()
 
     suspend fun prepare(backup: TagBackupEntity, change: AppliedChangeEntity): Long = database.withWriteTransaction {
+        insert(backup, change)
+    }
+
+    suspend fun prepareForApply(backup: TagBackupEntity, change: AppliedChangeEntity, item: TagApplyItem): Long? =
+        database.withWriteTransaction {
+            require(change.decisionId == item.decisionId && Hex.text(change.expectedContentKey) == item.contentKey &&
+                change.volumeName == item.volumeName && change.relativePath == item.relativePath && change.displayName == item.displayName)
+            val queue = database.tagApplyQueue()
+            if (item.writeId != null || item.result != "queued" || queue.item(item.planId, item.fileId) != item) {
+                return@withWriteTransaction null
+            }
+            val id = insert(backup, change)
+            check(queue.attachWrite(item.planId, item.fileId, id) == 1)
+            id
+        }
+
+    private suspend fun insert(backup: TagBackupEntity, change: AppliedChangeEntity): Long {
         require(change.id == 0L && backup.id == 0L && change.backupId == 0L && change.state == "pending")
         require(change.identityId == backup.identityId && change.volumeName == backup.volumeName &&
             change.relativePath == backup.relativePath && change.displayName == backup.displayName)
-        dao.insertChange(change.copy(backupId = dao.insertBackup(backup)))
+        return dao.insertChange(change.copy(backupId = dao.insertBackup(backup)))
     }
 
     suspend fun entry(id: Long): AppliedChangeEntity? = dao.entry(id)
@@ -30,6 +48,7 @@ internal class TagWriteJournal(private val database: UserDatabase) {
             }
             if (dao.markVerified(id, size, mtime, at) != 1) return@withWriteTransaction false
             if (undoOf != null) check(dao.markUndone(undoOf, at) == 1)
+            database.tagApplyQueue().markWritten(id)
             true
         }
     suspend fun failed(id: Long): Boolean = dao.markFailed(id) == 1
