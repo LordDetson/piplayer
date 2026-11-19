@@ -4,6 +4,7 @@ import android.content.ContentUris
 import android.content.ContentValues
 import android.provider.MediaStore
 import androidx.activity.ComponentActivity
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.hasScrollAction
@@ -14,7 +15,8 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
-import androidx.compose.ui.test.performTextReplacement
+import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.text.AnnotatedString
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.github.lorddetson.piplayer.R
 import io.github.lorddetson.piplayer.TestFiles
@@ -82,9 +84,14 @@ class ManualTagEncodingTest {
         withTrack("playback/tagged-44100-stereo.mp3", original) { id, checkBytes ->
             compose.setContent { PiPlayerTheme { ManualTagEditorScreen(id, onBack = {}) } }
             compose.waitUntilExactlyOneExists(hasTestTag("manual-tag-TITLE"), timeoutMillis = 10_000)
-            compose.onNodeWithTag("manual-tag-TITLE").performTextReplacement(title)
+            // Set text without opening the keyboard, which can move the genre field out of the lazy list.
+            compose.onNodeWithTag("manual-tag-TITLE").performSemanticsAction(SemanticsActions.SetText) {
+                assertThat(it(AnnotatedString(title))).isTrue()
+            }
             compose.onNode(hasScrollAction()).performScrollToNode(hasTestTag("manual-tag-GENRE"))
-            compose.onNodeWithTag("manual-tag-GENRE").performTextReplacement(genre)
+            compose.onNodeWithTag("manual-tag-GENRE").performSemanticsAction(SemanticsActions.SetText) {
+                assertThat(it(AnnotatedString(genre))).isTrue()
+            }
             compose.onNodeWithText(app.getString(R.string.manual_tag_review)).performClick()
             compose.onNodeWithTag("manual-tag-save-in-player").performClick()
             compose.waitUntilExactlyOneExists(hasText(app.getString(R.string.manual_tag_saved_in_player)), timeoutMillis = 10_000)
