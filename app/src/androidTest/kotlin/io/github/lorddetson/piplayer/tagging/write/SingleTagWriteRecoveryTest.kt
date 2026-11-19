@@ -79,7 +79,8 @@ class SingleTagWriteRecoveryTest {
             ))
             val writer = BatchTagWriter(context, LibraryAccess.of(library), user, client, staging)
             val plan = requireNotNull(writer.manualPlan(file.id))
-            playbackTagWriteGate.reservePlayback(current = uri.toString(), next = null)
+            val playbackUri = ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, ContentUris.parseId(uri))
+            playbackTagWriteGate.reservePlayback(current = playbackUri.toString(), next = null)
             val writing = async { writer.applyManual(plan, mapOf("TITLE" to listOf(title))) }
             val pending = try {
                 withTimeout(10_000) {

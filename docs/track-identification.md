@@ -2357,6 +2357,9 @@ tests, and a high-band error rate within the threshold of §11.4.
 
 ### 11.3 Manual checklist (M4b, repeated in M5)
 
+For M4b, use the [milestone acceptance checklist](m4b-acceptance.md) on API 30 and 36, with a virtual SD card for the
+removable-storage check. The following coverage applies to the M5 release.
+
 System consent dialogs are not automated: they differ by API level and manufacturer and make UI Automator scripts
 brittle. They follow a written checklist on API 30, 33, 35 and 36 and on a device with an SD card: one write request
 for a selection; files in `Download/` and on the SD-card root; canceling a dialog (the result stays in PiPlayer, no

@@ -362,9 +362,10 @@ Size: L (about 8 weeks).
   implementation follows in v1.x (TI §7.2 to §7.4).
 - History and undo, the manual tag editor, deferred writes for the file that is playing, optional media management
   access.
-- Done when the TI §11 tag-diff and tag round-trip tests pass on API 30, 33, 35 and 36, and a 500-file apply
+- Done when the TI §11 tag-diff and tag round-trip tests pass on API 30 and 36, and a 500-file apply
   resumes correctly after its process is killed. The write pipeline is tested automatically on app-private
-  fixtures; consent dialogs follow a written manual checklist on API 30, 33, 35 and 36.
+  fixtures. Consent dialogs follow a written manual checklist on API 30 and 36, with a virtual SD card for
+  the removable-storage check.
 
 ### M5 Polish and first release
 

@@ -8,8 +8,6 @@ and [Track Identification §11](track-identification.md#11-acceptance-criteria-a
 | API | Device | Test storage | Coverage |
 |---|---|---|---|
 | 30 | Medium_Phone AVD | Internal storage and virtual SD card | Automated and consent checks |
-| 33 | No configured AVD | | Pending |
-| 35 | No configured AVD | | Pending |
 | 36 | Pixel_8 AVD | Internal storage | Automated and consent checks |
 
 ## Automated checks
@@ -44,7 +42,11 @@ applying a change. Run the following on each API in the test matrix. Use the vir
    Reopen the app and note the verified count before pressing Resume. Check that a fresh dialog covers only the
    remaining files. Approve it and verify that all 500 reach the verified state. Reread tags and compare the audio hashes
    on samples from the beginning, middle and end. Record both process IDs and both dialog counts.
-5. On API 31 and later, if optional media management access is enabled for the build, check `MediaStore.canManageMedia()`
+5. Play a shell-owned library track and start a manual tag write on that track. After the first system consent,
+   verify that PiPlayer waits for playback and the original is unchanged. Force-stop PiPlayer, reopen Fix and resume
+   the interrupted write. Verify that Android requests consent again for this file. Approve and reread the tags
+   after the player releases it. Confirm that the audio hash matches.
+6. On API 31 and later, if optional media management access is enabled for the build, check `MediaStore.canManageMedia()`
    before and after granting it. Repeat a write request and the interruption procedure. Record whether the platform
    shows a dialog and whether a new request still needs the Activity. Repeat after revoking access.
 
@@ -56,7 +58,7 @@ Approve a batch from the Activity and confirm the `dataSync` service is in the f
 Verify that the service stops at the timeout, the app process survives, the count of completed files is preserved,
 and tapping the recovery notification opens Fix. Restore the original setting before resuming the batch.
 
-## Results recorded on 19 November 2026
+## Recorded results
 
 - API 30, real MediaStore consent: approved writes from `Download/` and from the root of the virtual SD card. The new
   title was read back and the audio hash matched on both files.
@@ -67,6 +69,10 @@ and tapping the recovery notification opens Fix. Restore the original setting be
   title and preserved the audio hash. After force-stop and relaunch, a subsequent edit showed a new system dialog.
 - API 36, manual ID3v1 preview on a shell-owned MP3: the editor reported that the title exceeded ID3v1 capacity. After
   consent, ID3v2 held the new title, ID3v1 held the old title, both tags held the new album, and the audio hash matched.
+- API 30, single-write recovery on 20 November: a shell-owned MP3 waited for playback after consent. PiPlayer was
+  force-stopped at PID 5217. PID 5821 showed the interrupted write in Fix and requested new consent for the same file.
+  Denying it preserved every byte. Allowing it and choosing Write tags now applied the requested title, preserved the
+  audio hash and returned the player to its paused state.
 - API 36, library refresh: the library showed the new title before the MediaStore observer. A simulated failure
   between database transactions left a pending refresh. Reopening the user database and reading the verified file
   updated the library with the file bytes unchanged. An older tag pass with matching size and modification time
@@ -81,4 +87,4 @@ and tapping the recovery notification opens Fix. Restore the original setting be
   force-stopped while the service was active. A new process recovered 178 verified writes, requested access to exactly
   322 files and completed all 500. MediaStore and the journal both confirmed 500 writes. Files 0001, 0250 and 0500 had
   the new title and unchanged audio hashes.
-- API 33 and API 35 are pending for both the automated and consent checks. Optional media management access is pending.
+- Optional media management access is below the cut line.
