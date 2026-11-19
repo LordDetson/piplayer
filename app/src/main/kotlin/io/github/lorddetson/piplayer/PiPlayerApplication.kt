@@ -15,6 +15,8 @@ import io.github.lorddetson.piplayer.net.AndroidConnectivity
 import io.github.lorddetson.piplayer.net.UserAgent
 import io.github.lorddetson.piplayer.notifications.BatchNotifier
 import io.github.lorddetson.piplayer.notifications.TagWriteNotifications
+import io.github.lorddetson.piplayer.tagging.write.BatchTagApply
+import io.github.lorddetson.piplayer.userdata.TagApplyQueue
 import io.github.lorddetson.piplayer.settings.DataStoreOnlineGate
 import io.github.lorddetson.piplayer.settings.IdentificationSettings
 import io.github.lorddetson.piplayer.settings.SettingsFiles
@@ -57,6 +59,10 @@ class PiPlayerApplication : Application() {
     internal val batchTagWriter by lazy {
         ProcessRole.current(this).requireMain("The batch tag writer")
         BatchTagWriter(this)
+    }
+    internal val batchTagApply by lazy {
+        ProcessRole.current(this).requireMain("The foreground batch apply")
+        BatchTagApply(this)
     }
 
     /**
@@ -116,8 +122,10 @@ class PiPlayerApplication : Application() {
                 runCatching { kotlinx.coroutines.runBlocking { io.github.lorddetson.piplayer.identification.batch.BatchResume.resume(app) } }
                 runCatching {
                     kotlinx.coroutines.runBlocking {
-                        val interrupted = TagWriteJournal(UserData.database(app)).interrupted()
-                        TagWriteNotifications.showRecovery(app, interrupted.isNotEmpty())
+                        val userDatabase = UserData.database(app)
+                        val interrupted = TagWriteJournal(userDatabase).interrupted()
+                        TagWriteNotifications.showRecovery(app, interrupted.any { it.batchUuid == null })
+                        TagWriteNotifications.showBatchRecovery(app, TagApplyQueue(userDatabase).hasStartedWorkRemaining())
                     }
                 }
             }

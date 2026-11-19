@@ -5,6 +5,11 @@ import io.github.lorddetson.piplayer.settings.TagWritingOptions
 import io.github.lorddetson.piplayer.tagging.TagReport
 import io.github.lorddetson.piplayer.userdata.TagApplyItem
 import io.github.lorddetson.piplayer.userdata.TagApplyQueue
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
@@ -23,13 +28,26 @@ internal class TagApplyWork(
 ) {
     private val writing = Mutex()
 
-    suspend fun applyWhenAvailable(group: TagApplyGroup, onWaiting: (Set<String>) -> Unit = {}) {
+    suspend fun applyWhenAvailable(group: TagApplyGroup, stop: Deferred<Unit>? = null, onWaiting: (Set<String>) -> Unit = {}) {
+        val shouldContinue = { stop?.isCompleted != true }
         try {
-            while (true) {
-                val blocked = apply(group, consent = true)
-                if (blocked.isEmpty()) return
+            while (shouldContinue()) {
+                val blocked = apply(group, consent = true, shouldContinue = shouldContinue)
+                if (blocked.isEmpty() || !shouldContinue()) return
                 onWaiting(blocked)
-                checkNotNull(playback).awaitAnyWritable(blocked)
+                val gate = checkNotNull(playback)
+                if (stop == null) {
+                    gate.awaitAnyWritable(blocked)
+                } else {
+                    coroutineScope {
+                        val writable = async(start = CoroutineStart.UNDISPATCHED) { gate.awaitAnyWritable(blocked) }
+                        try {
+                            select { writable.onAwait {}; stop.onAwait {} }
+                        } finally {
+                            writable.cancel()
+                        }
+                    }
+                }
             }
         } finally {
             onWaiting(emptySet())
@@ -49,10 +67,11 @@ internal class TagApplyWork(
     }
 
     /** Only the URIs in the approved group can be opened for writing, even if the library changed meanwhile. */
-    suspend fun apply(group: TagApplyGroup, consent: Boolean): Set<String> = writing.withLock {
+    suspend fun apply(group: TagApplyGroup, consent: Boolean, shouldContinue: () -> Boolean = { true }): Set<String> = writing.withLock {
         if (!consent || group.files.isEmpty()) return@withLock emptySet()
         val blocked = HashSet<String>()
         for (item in queue.remaining(group.planId)) {
+            if (!shouldContinue()) break
             val approved = group.files[item.fileId] ?: continue
             val file = resolve(item)?.takeIf { it.uri == approved } ?: continue
             val uri = file.uri.toString()

@@ -455,6 +455,7 @@
         <item quantity="other">%1$d songs are still being read</item>
     </plurals>
     <string name="batch_tag_write_open">Write tags to files</string>
+    <string name="batch_tag_write_resume">Continue writing tags</string>
     <string name="batch_tag_write_title">File tags</string>
     <string name="batch_tag_write_empty">No audio files are available to write.</string>
     <string name="batch_tag_write_counts">%1$d written · %2$d remaining · %3$d skipped · %4$d failed</string>
@@ -463,6 +464,8 @@
     <string name="batch_tag_write_error">Could not apply the file tags. You can try again.</string>
     <string name="batch_tag_write_cancelled">File access was cancelled. Your review decisions are saved in PiPlayer.</string>
     <string name="batch_tag_write_waiting">Waiting for playback to release the remaining files.</string>
+    <string name="batch_tag_write_progress">Writing file tags</string>
+    <string name="batch_tag_write_paused">Tag writing paused. Request file access to continue.</string>
     <string name="tag_write_now">Write tags now</string>
     <string name="batch_tag_undo_counts">%1$d files written · %2$d undone</string>
     <string name="batch_tag_undo_conflict">%1$s: kept edits from another app (%2$s).</string>

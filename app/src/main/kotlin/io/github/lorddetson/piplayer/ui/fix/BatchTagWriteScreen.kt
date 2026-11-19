@@ -1,6 +1,7 @@
 package io.github.lorddetson.piplayer.ui.fix
 
 import android.app.Activity
+import android.content.Context
 import android.util.Log
 import androidx.activity.compose.LocalActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -36,6 +37,7 @@ import androidx.lifecycle.viewmodel.compose.LocalViewModelStoreOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.lorddetson.piplayer.PiPlayerApplication
 import io.github.lorddetson.piplayer.R
+import io.github.lorddetson.piplayer.tagging.write.BatchTagApply
 import io.github.lorddetson.piplayer.tagging.write.BatchTagUndoGroup
 import io.github.lorddetson.piplayer.tagging.write.BatchTagWriter
 import io.github.lorddetson.piplayer.tagging.write.TagApplyGroup
@@ -43,6 +45,7 @@ import io.github.lorddetson.piplayer.tagging.write.TagUndoOutcome
 import io.github.lorddetson.piplayer.tagging.write.TagWriteHistoryEntry
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
@@ -86,14 +89,21 @@ internal fun BatchTagUndoSummary(
     }
 }
 
-private class BatchTagWriteModel(private val batch: String, private val writer: BatchTagWriter) : ViewModel() {
+private class BatchTagWriteModel(
+    private val batch: String,
+    private val writer: BatchTagWriter,
+    private val batchApply: BatchTagApply,
+) : ViewModel() {
     private val mutableState = MutableStateFlow<BatchWriteState>(BatchWriteState.Loading)
     val state = mutableState.asStateFlow()
     private var awaitingConsent: Pair<BatchWriteState.Ready, FileTagAction>? = null
     private val undoOutcomes = LinkedHashMap<Long, Pair<String, TagUndoOutcome>>()
 
     init {
-        refresh()
+        viewModelScope.launch {
+            read()
+            batchApply.current(batch)?.let { follow(it) }
+        }
     }
 
     fun refresh() {
@@ -118,15 +128,15 @@ private class BatchTagWriteModel(private val batch: String, private val writer: 
         outcome == TagUndoOutcome.Failed || outcome == TagUndoOutcome.Unavailable
     }
 
-    fun requestConsent(launch: (IntentSenderRequest) -> Unit) {
-        request(FileTagAction.WRITE, launch)
+    fun requestConsent(activity: Context, launch: (IntentSenderRequest) -> Unit) {
+        request(activity, FileTagAction.WRITE, launch)
     }
 
-    fun requestUndoConsent(launch: (IntentSenderRequest) -> Unit) {
-        request(FileTagAction.UNDO, launch)
+    fun requestUndoConsent(activity: Context, launch: (IntentSenderRequest) -> Unit) {
+        request(activity, FileTagAction.UNDO, launch)
     }
 
-    private fun request(action: FileTagAction, launch: (IntentSenderRequest) -> Unit) {
+    private fun request(activity: Context, action: FileTagAction, launch: (IntentSenderRequest) -> Unit) {
         val shown = mutableState.value as? BatchWriteState.Ready ?: return
         val hasFiles = when (action) {
             FileTagAction.WRITE -> shown.group.files.isNotEmpty()
@@ -143,7 +153,7 @@ private class BatchTagWriteModel(private val batch: String, private val writer: 
                     }
                 }
                 if (sender == null) {
-                    apply(shown, action)
+                    apply(activity, shown, action)
                 } else {
                     awaitingConsent = shown to action
                     launch(IntentSenderRequest.Builder(sender).build())
@@ -158,11 +168,11 @@ private class BatchTagWriteModel(private val batch: String, private val writer: 
         }
     }
 
-    fun consentResult(granted: Boolean) {
+    fun consentResult(activity: Context, granted: Boolean) {
         val (shown, action) = awaitingConsent ?: return
         awaitingConsent = null
         if (granted) {
-            viewModelScope.launch { apply(shown, action) }
+            viewModelScope.launch { apply(activity, shown, action) }
         } else {
             mutableState.value = shown.copy(message = when (action) {
                 FileTagAction.WRITE -> R.string.batch_tag_write_cancelled
@@ -171,10 +181,13 @@ private class BatchTagWriteModel(private val batch: String, private val writer: 
         }
     }
 
-    private suspend fun apply(shown: BatchWriteState.Ready, action: FileTagAction) {
+    private suspend fun apply(activity: Context, shown: BatchWriteState.Ready, action: FileTagAction) {
         try {
             when (action) {
-                FileTagAction.WRITE -> writer.applyWhenAvailable(shown.group, ::showPlaybackWait)
+                FileTagAction.WRITE -> {
+                    follow(batchApply.start(activity, shown.group))
+                    return
+                }
                 FileTagAction.UNDO -> {
                     val results = writer.undo(shown.undo, ::showPlaybackWait)
                     for (file in shown.undo.files) {
@@ -189,6 +202,24 @@ private class BatchTagWriteModel(private val batch: String, private val writer: 
             Log.w(TAG, "Could not write tags", error)
             read(errorMessage(action))
         }
+    }
+
+    private suspend fun follow(run: BatchTagApply.Run) {
+        val ready = mutableState.value as? BatchWriteState.Ready
+        if (ready != null) mutableState.value = ready.copy(busy = true, message = null)
+        val outcome = coroutineScope {
+            val waiting = launch { run.waitingForPlayback.collect(::showPlaybackWait) }
+            try {
+                run.outcome.await()
+            } finally {
+                waiting.cancel()
+            }
+        }
+        read(when (outcome) {
+            BatchTagApply.Outcome.FINISHED -> null
+            BatchTagApply.Outcome.PAUSED -> R.string.batch_tag_write_paused
+            BatchTagApply.Outcome.FAILED -> R.string.batch_tag_write_error
+        })
     }
 
     private fun showPlaybackWait(waiting: Boolean) {
@@ -223,16 +254,19 @@ private class BatchTagWriteModel(private val batch: String, private val writer: 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun BatchTagWriteScreen(batchUuid: String, onBack: () -> Unit) {
-    val app = LocalContext.current.applicationContext as PiPlayerApplication
+    val context = LocalContext.current
+    val activity = LocalActivity.current
+    val launchContext = activity ?: context
+    val app = context.applicationContext as PiPlayerApplication
     // The Activity owns the grant and the apply continues when the user opens Now Playing.
-    val activityOwner = LocalActivity.current as? ViewModelStoreOwner
+    val activityOwner = activity as? ViewModelStoreOwner
     val owner = activityOwner ?: checkNotNull(LocalViewModelStoreOwner.current)
     val model = viewModel(viewModelStoreOwner = owner, key = "batch-tag-write-$batchUuid") {
-        BatchTagWriteModel(batchUuid, app.batchTagWriter)
+        BatchTagWriteModel(batchUuid, app.batchTagWriter, app.batchTagApply)
     }
     val state by model.state.collectAsStateWithLifecycle()
     val consent = rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
-        model.consentResult(result.resultCode == Activity.RESULT_OK)
+        model.consentResult(launchContext, result.resultCode == Activity.RESULT_OK)
     }
     Scaffold(topBar = {
         TopAppBar(
@@ -265,7 +299,7 @@ internal fun BatchTagWriteScreen(batchUuid: String, onBack: () -> Unit) {
                         LinearProgressIndicator(Modifier.fillMaxWidth())
                     } else if (shown.group.files.isNotEmpty()) {
                         Text(stringResource(R.string.batch_tag_write_explanation, shown.group.files.size))
-                        Button(onClick = { model.requestConsent { consent.launch(it) } }) {
+                        Button(onClick = { model.requestConsent(launchContext) { consent.launch(it) } }) {
                             Text(stringResource(R.string.batch_tag_write_start))
                         }
                     } else if ((shown.results["queued"] ?: 0) > 0) {
@@ -275,7 +309,7 @@ internal fun BatchTagWriteScreen(batchUuid: String, onBack: () -> Unit) {
                     BatchTagUndoSummary(
                         shown.history, shown.undo.files.size, shown.busy, model.recentConflicts(),
                     ) {
-                        model.requestUndoConsent { consent.launch(it) }
+                        model.requestUndoConsent(launchContext) { consent.launch(it) }
                     }
                     val incomplete = model.incompleteUndos()
                     if (incomplete > 0) {

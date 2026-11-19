@@ -26,6 +26,7 @@ import io.github.lorddetson.piplayer.userdata.UserData
 import io.github.lorddetson.piplayer.userdata.UserDatabase
 import java.io.File
 import java.io.FileNotFoundException
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -121,14 +122,18 @@ internal class BatchTagWriter(
 
     suspend fun apply(group: TagApplyGroup) = work.apply(group, consent = true)
 
-    suspend fun applyWhenAvailable(group: TagApplyGroup, onWaiting: (Boolean) -> Unit) {
+    suspend fun applyWhenAvailable(group: TagApplyGroup, stop: Deferred<Unit>? = null, onWaiting: (Boolean) -> Unit) {
         val operation = Any()
-        work.applyWhenAvailable(group) { blocked ->
+        work.applyWhenAvailable(group, stop) { blocked ->
             val fileIds = group.files.filterValues { it.toString() in blocked }.keys
             updateWaiting(operation, fileIds)
             onWaiting(fileIds.isNotEmpty())
         }
     }
+
+    suspend fun markApplyStarted(planId: String) = queue.markStarted(planId)
+
+    suspend fun hasStartedApplyRemaining(): Boolean = queue.hasStartedWorkRemaining()
 
     private fun updateWaiting(operation: Any, files: Set<Long>) {
         waitingWrites.update { previous ->

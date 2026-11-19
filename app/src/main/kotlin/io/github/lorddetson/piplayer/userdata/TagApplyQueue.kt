@@ -58,6 +58,12 @@ internal class TagApplyQueue(private val database: UserDatabase) {
     suspend fun remaining(planId: String): List<TagApplyItem> = dao.remaining(planId)
 
     suspend fun results(planId: String): Map<String, Int> = dao.counts(planId).associate { it.result to it.count }
+
+    suspend fun markStarted(planId: String) = dao.markStarted(planId)
+
+    suspend fun hasStartedWorkRemaining(): Boolean = dao.startedPlansRemaining().isNotEmpty()
+
+    suspend fun startedPlansRemaining(): Set<String> = dao.startedPlansRemaining().toSet()
 }
 
 data class TagApplyCount(val result: String, val count: Int)
@@ -90,6 +96,16 @@ interface TagApplyDao {
             "ON CONFLICT(plan_id) DO UPDATE SET written = written + 1",
     )
     suspend fun incrementWritten(planId: String)
+
+    @Query("INSERT OR IGNORE INTO tag_apply_progress (plan_id, written) VALUES (:planId, 0)")
+    suspend fun markStarted(planId: String)
+
+    @Query(
+        "SELECT DISTINCT item.plan_id FROM tag_apply_item AS item LEFT JOIN tag_apply_progress AS progress " +
+            "ON item.plan_id = progress.plan_id WHERE item.result = 'queued' " +
+            "AND (progress.plan_id IS NOT NULL OR item.write_id IS NOT NULL)",
+    )
+    suspend fun startedPlansRemaining(): List<String>
 
     @Query("UPDATE tag_apply_item SET result = :result WHERE plan_id = :planId AND file_id = :fileId AND result = 'queued'")
     suspend fun finish(planId: String, fileId: Long, result: String): Int

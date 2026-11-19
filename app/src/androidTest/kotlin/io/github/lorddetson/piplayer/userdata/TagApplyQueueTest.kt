@@ -40,6 +40,28 @@ class TagApplyQueueTest {
     }
 
     @Test
+    fun recoveryOnlyIncludesAnApprovedPlanWithFilesRemaining() = runBlocking<Unit> {
+        val approved = item(1)
+        val unapproved = item(2).copy(planId = "unapproved")
+        withDatabase { database ->
+            val queue = TagApplyQueue(database)
+            queue.save(listOf(approved))
+            queue.save(listOf(unapproved))
+            assertThat(queue.hasStartedWorkRemaining()).isFalse()
+            queue.markStarted(approved.planId)
+        }
+        withDatabase { database ->
+            val queue = TagApplyQueue(database)
+            assertThat(queue.hasStartedWorkRemaining()).isTrue()
+            assertThat(queue.finish(approved, "written")).isTrue()
+            queue.markStarted(approved.planId)
+            assertThat(queue.results(approved.planId)).isEqualTo(mapOf("written" to 1))
+            assertThat(queue.hasStartedWorkRemaining()).isFalse()
+            assertThat(queue.remaining(unapproved.planId)).containsExactly(unapproved)
+        }
+    }
+
+    @Test
     fun theJournalCheckpointsPreparationAndVerificationWithThePlanItem() = runBlocking<Unit> {
         val item = item(12L)
         val journalId = withDatabase { database ->

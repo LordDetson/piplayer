@@ -20,6 +20,10 @@ import io.github.lorddetson.piplayer.ui.BottomBarTags
 import io.github.lorddetson.piplayer.ui.GrantAudioPermission
 import io.github.lorddetson.piplayer.ui.library.LibraryTags
 import io.github.lorddetson.piplayer.ui.search.SearchTags
+import io.github.lorddetson.piplayer.userdata.TagApplyItem
+import io.github.lorddetson.piplayer.userdata.TagApplyQueue
+import io.github.lorddetson.piplayer.userdata.UserData
+import java.util.UUID
 import kotlinx.coroutines.runBlocking
 import org.junit.Rule
 import org.junit.Test
@@ -119,5 +123,30 @@ class FixTabTest {
         tap(hasText(text(R.string.batch_tag_write_open)))
         waitFor(hasText(text(R.string.batch_tag_write_title)))
         waitFor(hasText(text(R.string.batch_tag_write_empty)))
+    }
+
+    @Test
+    fun anInterruptedTagApplyNeedsAttentionInFix() {
+        val uuid = UUID.randomUUID().toString()
+        val context = TestFiles.targetContext
+        val user = UserData.database(context)
+        runBlocking {
+            Library.read(context) { database ->
+                runBlocking { database.batches().save(BatchEntity(uuid, 1000, BatchEntity.SOURCE_SELECTION, BatchEntity.STATUS_DONE)) }
+            }
+            val queue = TagApplyQueue(user)
+            queue.save(listOf(TagApplyItem(uuid, 1, "00".repeat(32), 1, "external_primary", "Music/", "test.mp3")))
+            queue.markStarted(uuid)
+        }
+        try {
+            tap(hasTestTag(BottomBarTags.FIX))
+            val attention = hasTestTag(FixTags.NEEDS_ATTENTION) and hasText(text(R.string.tag_recovery_notification_title))
+            waitFor(attention)
+            compose.onNode(attention).assertIsDisplayed()
+            tap(hasText(text(R.string.batch_tag_write_resume)))
+            waitFor(hasText(text(R.string.batch_tag_write_title)))
+        } finally {
+            runBlocking { user.tagApplyQueue().deleteQueued(uuid, 1) }
+        }
     }
 }

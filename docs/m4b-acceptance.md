@@ -21,6 +21,7 @@ and [Track Identification §11](track-identification.md#11-acceptance-criteria-a
 | Prepare and verify the copy, record the write before streaming, verify the original, and keep the journal for undo | `TagWriteSessionTest` and `TagWriteJournalTest` |
 | Reopen the journal with a deferred single-file write, require consent and verify the final file | `SingleTagWriteRecoveryTest` |
 | Resume a batch with the verified files excluded from the next write request | `BatchTagRecoveryTest` and the 500-file procedure below |
+| Run the approved selection as a private `dataSync` service and retain recoverable work after stopping | `BatchTagApplyServiceTest`, `TagApplyQueueTest` and the foreground-service procedure below |
 | Protect the current and next tracks, and return to the saved position after Write now | `TagWriteGateTest` and `PlaybackQueueTest` |
 
 Record the revision and results for each API at acceptance. The instrumented pipeline fixtures use test-controlled
@@ -45,6 +46,14 @@ applying a change. Run the following on each API in the test matrix. Use the vir
    before and after granting it. Repeat a write request and the interruption procedure. Record whether the platform
    shows a dialog and whether a new request still needs the Activity. Repeat after revoking access.
 
+## Foreground-service timeout
+
+On an isolated API 35 or later emulator, save the current `activity_manager/data_sync_fgs_timeout_duration` value and
+set a short test timeout with `adb shell device_config put activity_manager data_sync_fgs_timeout_duration 6500`.
+Approve a batch from the Activity and confirm the `dataSync` service is in the foreground before pressing Home.
+Verify that the service stops at the timeout, the app process survives, the count of completed files is preserved,
+and tapping the recovery notification opens Fix. Restore the original setting before resuming the batch.
+
 ## Results recorded on 19 November 2026
 
 - API 30, real MediaStore consent: approved writes from `Download/` and from the root of the virtual SD card. The new
@@ -55,6 +64,11 @@ applying a change. Run the following on each API in the test matrix. Use the vir
 - API 36, one MP3 owned by `com.android.shell`: Deny preserved the file and the pending manual edit. Allow wrote the
   title and preserved the audio hash. After force-stop and relaunch, a subsequent edit showed a new system dialog.
 - API 36, 500 app-owned test files after journal compaction: a new process found 72 verified entries and completed the
-  remaining 428. The test used write access from ownership. The API 36 system dialog for resuming a 500-file selection
-  remains open.
+  remaining 428. The test used write access from ownership.
+- API 36, 500 MP3 files owned by `com.android.shell` on the foreground service: the initial dialog covered all 500.
+  Android timed out the service after Home. The same PiPlayer process remained alive, the UI showed 104 written and 396
+  remaining, and the recovery notification opened Fix. After restoring the default timeout, apply resumed. The app was
+  force-stopped while the service was active. A new process recovered 178 verified writes, requested access to exactly
+  322 files and completed all 500. MediaStore and the journal both confirmed 500 writes. Files 0001, 0250 and 0500 had
+  the new title and unchanged audio hashes.
 - API 33 and API 35 are pending for both the automated and consent checks. Optional media management access is pending.

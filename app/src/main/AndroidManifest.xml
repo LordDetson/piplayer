@@ -9,6 +9,7 @@
     <!-- The playback service runs in the foreground while it plays (WAKE_LOCK comes with Media3). -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <!-- The notification of a batch going on, and the one that opens the Fix tab (TI §8); asked for before the first batch. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- The song list reads music from the platform's media index (docs/playback.md §2.2). -->
@@ -85,6 +86,11 @@
         <receiver
             android:name=".notifications.BatchActionReceiver"
             android:exported="false" />
+
+        <service
+            android:name=".tagging.write.BatchTagApplyService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
 
         <!-- Reads tags with TagLib in a process of its own, so that a malformed file cannot stop playback (docs/library.md §4). -->
         <service

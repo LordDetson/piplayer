@@ -19,6 +19,7 @@ import io.github.lorddetson.piplayer.userdata.TagWriteJournal
 import io.github.lorddetson.piplayer.userdata.UserDatabase
 import java.io.File
 import java.io.IOException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
@@ -401,6 +402,19 @@ class TagWriteSessionTest {
 
             playback.reservePlayback(target.uri.toString(), null)
             work.apply(group, consent = true)
+            assertThat(original.readBytes()).isEqualTo(originalBytes)
+            assertThat(queue.remaining(item.planId)).containsExactly(item, unavailable)
+
+            val stop = CompletableDeferred<Unit>()
+            val waiting = CompletableDeferred<Unit>()
+            val paused = async {
+                work.applyWhenAvailable(group, stop) { blocked ->
+                    if (blocked.isNotEmpty()) waiting.complete(Unit)
+                }
+            }
+            withTimeout(10_000) { waiting.await() }
+            stop.complete(Unit)
+            withTimeout(10_000) { paused.await() }
             assertThat(original.readBytes()).isEqualTo(originalBytes)
             assertThat(queue.remaining(item.planId)).containsExactly(item, unavailable)
 

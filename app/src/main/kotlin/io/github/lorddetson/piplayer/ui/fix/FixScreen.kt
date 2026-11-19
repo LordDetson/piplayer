@@ -63,6 +63,7 @@ import io.github.lorddetson.piplayer.library.db.BatchEntity
 import io.github.lorddetson.piplayer.library.db.LibraryAccess
 import io.github.lorddetson.piplayer.notifications.BatchUserActions
 import io.github.lorddetson.piplayer.tagging.write.TagWriteRecovery
+import io.github.lorddetson.piplayer.userdata.TagApplyQueue
 import io.github.lorddetson.piplayer.userdata.UserData
 import java.text.DateFormat
 import java.util.Date
@@ -103,6 +104,7 @@ class FixViewModel(application: Application) : AndroidViewModel(application) {
     private val mutableBatches = MutableStateFlow<List<BatchEntity>?>(null)
     private val mutableCards = MutableStateFlow<Map<String, List<BatchCard>>>(emptyMap())
     private val mutableRecoveries = MutableStateFlow<List<TagWriteRecovery>>(emptyList())
+    private val mutableBatchWrites = MutableStateFlow<Set<String>>(emptySet())
 
     /** The batches, oldest first; null until the first read. */
     val batches: StateFlow<List<BatchEntity>?> = mutableBatches.asStateFlow()
@@ -110,6 +112,7 @@ class FixViewModel(application: Application) : AndroidViewModel(application) {
     /** The album cards of each batch in review, by the batch's UUID. */
     val cards: StateFlow<Map<String, List<BatchCard>>> = mutableCards.asStateFlow()
     internal val recoveries = mutableRecoveries.asStateFlow()
+    internal val batchWrites = mutableBatchWrites.asStateFlow()
 
     fun onStart() {
         val app = getApplication<Application>()
@@ -131,6 +134,9 @@ class FixViewModel(application: Application) : AndroidViewModel(application) {
             // The cards of the batches that are still in review: a batch the read finished has none to show.
             val reviewing = batches.filter { it.status == BatchEntity.STATUS_REVIEW }.mapTo(HashSet()) { it.uuid }
             mutableCards.value = views.filter { it.batch.uuid in reviewing }.associate { it.batch.uuid to it.cards }
+            mutableBatchWrites.value = withContext(Dispatchers.IO) {
+                TagApplyQueue(UserData.database(app)).startedPlansRemaining()
+            }
             mutableRecoveries.value = withContext(Dispatchers.IO) {
                 try {
                     (app as? PiPlayerApplication)?.batchTagWriter?.recoverableWrites().orEmpty()
@@ -189,6 +195,7 @@ fun FixScreen(
     val batches by model.batches.collectAsStateWithLifecycle()
     val cards by model.cards.collectAsStateWithLifecycle()
     val recoveries by model.recoveries.collectAsStateWithLifecycle()
+    val batchWrites by model.batchWrites.collectAsStateWithLifecycle()
     Scaffold(
         topBar = {
             TopAppBar(title = { Text(stringResource(R.string.fix_title), modifier = Modifier.semantics { heading() }) })
@@ -196,13 +203,15 @@ fun FixScreen(
         modifier = modifier,
     ) { padding ->
         Column(Modifier.padding(padding).fillMaxSize()) {
-            NeedsAttention(batches, hasRecoveries = onOpenHistory != null && recoveries.isNotEmpty())
+            val hasFileRecoveries = onOpenHistory != null && recoveries.isNotEmpty()
+            val hasBatchRecoveries = onOpenWrite != null && batches.orEmpty().any { it.uuid in batchWrites }
+            NeedsAttention(batches, hasRecoveries = hasFileRecoveries || hasBatchRecoveries)
             Counters(batches)
             when (batches) {
                 null -> Loading()
                 else -> BatchQueue(
                     batches.orEmpty(), cards, onOpenReview, model::pause, model::resume, model::stop, onOpenWrite,
-                    recoveries, onOpenHistory,
+                    recoveries, batchWrites, onOpenHistory,
                 )
             }
         }
@@ -216,13 +225,11 @@ private fun NeedsAttention(batches: List<BatchEntity>?, hasRecoveries: Boolean) 
     ListItem(
         headlineContent = { Text(stringResource(R.string.fix_needs_attention)) },
         supportingContent = {
-            Text(
-                when {
-                    waiting > 0 -> pluralStringResource(R.plurals.fix_review_waiting, waiting, waiting)
-                    hasRecoveries -> stringResource(R.string.tag_recovery_notification_title)
-                    else -> stringResource(R.string.fix_needs_attention_none)
-                },
-            )
+            Column {
+                if (waiting > 0) Text(pluralStringResource(R.plurals.fix_review_waiting, waiting, waiting))
+                if (hasRecoveries) Text(stringResource(R.string.tag_recovery_notification_title))
+                if (waiting == 0 && !hasRecoveries) Text(stringResource(R.string.fix_needs_attention_none))
+            }
         },
         modifier = Modifier.testTag(FixTags.NEEDS_ATTENTION),
     )
@@ -274,6 +281,7 @@ private fun BatchQueue(
     onStop: (String) -> Unit,
     onOpenWrite: ((String) -> Unit)?,
     recoveries: List<TagWriteRecovery>,
+    batchWrites: Set<String>,
     onOpenHistory: ((Long) -> Unit)?,
 ) {
     if (batches.isEmpty() && (recoveries.isEmpty() || onOpenHistory == null)) {
@@ -314,7 +322,7 @@ private fun BatchQueue(
             },
         ) { row ->
             when (row) {
-                is FixRow.Batch -> BatchRow(row.batch, onPause, onResume, onStop, onOpenWrite)
+                is FixRow.Batch -> BatchRow(row.batch, onPause, onResume, onStop, onOpenWrite, row.batch.uuid in batchWrites)
                 is FixRow.Card -> BatchCardRow(row.batchUuid, row.card, onOpenReview)
             }
         }
@@ -329,6 +337,7 @@ private fun BatchRow(
     onResume: (String) -> Unit,
     onStop: (String) -> Unit,
     onOpenWrite: ((String) -> Unit)?,
+    hasRemainingWrites: Boolean,
 ) {
     val started = stringResource(R.string.fix_started, startedText(batch.createdAt))
     val eta = if (batch.status == BatchEntity.STATUS_PROCESSING) stringResource(R.string.fix_eta_not_measured) else null
@@ -340,7 +349,7 @@ private fun BatchRow(
                 Text(listOfNotNull(started, eta).joinToString(" · "), modifier = Modifier.testTag(FixTags.ETA))
                 if (batch.status == BatchEntity.STATUS_DONE && onOpenWrite != null) {
                     TextButton(onClick = { onOpenWrite(batch.uuid) }) {
-                        Text(stringResource(R.string.batch_tag_write_open))
+                        Text(stringResource(if (hasRemainingWrites) R.string.batch_tag_write_resume else R.string.batch_tag_write_open))
                     }
                 }
             }
