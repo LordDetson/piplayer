@@ -10,6 +10,8 @@ import io.github.lorddetson.piplayer.library.values.DecidedField
 import io.github.lorddetson.piplayer.library.values.DecisionContent
 import io.github.lorddetson.piplayer.library.values.DecisionKind
 import io.github.lorddetson.piplayer.settings.ProtectedField
+import io.github.lorddetson.piplayer.tagging.write.TagChange
+import io.github.lorddetson.piplayer.tagging.write.TagWriteRecord
 import io.github.lorddetson.piplayer.userdata.DecisionFixtures.details
 import java.io.File
 import java.nio.ByteBuffer
@@ -21,8 +23,8 @@ import org.junit.Test
 import org.junit.runner.RunWith
 
 /**
- * The size budget of `user.db` (TI §10.2; §11.2 M3 "Size budget of user.db"): generated data at the volumes of the
- * estimate stays under 16 MB minus the reserve for the tables of M4b, measured on the file after a checkpoint. The rows
+ * The size budget of `user.db` (TI §10.2; §11.2): generated data at the volumes of the
+ * estimate stays under 16 MB including one year of tag writes, measured on the file after a checkpoint. The rows
  * are made by the codecs the repository stores with, so their sizes are those of real decisions: every field but the
  * cover ticked, titles of about 18 characters and artists of about 12. Half of the decisions are made on files without
  * tags, whose references all fit the mask, and half on files whose tags differ from the decided values in 8 parts, which
@@ -57,18 +59,68 @@ class UserDatabaseSizeTest {
     fun twentyThousandIdentifiedTracksStayWithinTheBudget() = runBlocking<Unit> {
         context.deleteDatabase(name)
         val database = UserDatabase.open(context, name)
-        try {
+        val (baseline, total) = try {
             fill(database)
-            // Outside a transaction, which a checkpoint cannot run in.
-            database.useWriterConnection { connection -> connection.usePrepared("PRAGMA wal_checkpoint(TRUNCATE)") { it.step() } }
+            val beforeWrites = checkpointSize(database)
+            fillWrites(database)
+            beforeWrites to checkpointSize(database)
         } finally {
             database.close()
         }
-        val file = context.getDatabasePath(name)
-        val size = file.length() + File(file.path + "-wal").length()
-        Log.i(TAG, "user.db with $TRACKS identified tracks: $size bytes")
+        Log.i(TAG, "user.db: $baseline bytes before writes, ${total - baseline} for $WRITTEN_FILES tag writes, $total total")
 
-        assertThat(size).describedAs("user.db bytes").isLessThan(BUDGET_BYTES - RESERVE_BYTES)
+        assertThat(total).describedAs("user.db bytes with %s tag writes (baseline %s)", WRITTEN_FILES, baseline).isLessThan(BUDGET_BYTES)
+    }
+
+    private suspend fun checkpointSize(database: UserDatabase): Long {
+        database.useWriterConnection { connection -> connection.usePrepared("PRAGMA wal_checkpoint(TRUNCATE)") { it.step() } }
+        val file = context.getDatabasePath(name)
+        return file.length() + File(file.path + "-wal").length()
+    }
+
+    private suspend fun fillWrites(database: UserDatabase) {
+        val journal = TagWriteJournal(database)
+        val queue = TagApplyQueue(database)
+        val tracks = database.identities().identities().take(WRITTEN_FILES)
+        for (batch in tracks.chunked(500)) {
+            val uuid = bytes(16)
+            val plan = requireNotNull(Hex.mbidText(uuid))
+            val items = batch.map { track ->
+                TagApplyItem(
+                    plan, track.id, Hex.text(track.contentKey), track.id,
+                    requireNotNull(track.hintVolumeName), requireNotNull(track.hintRelativePath), requireNotNull(track.hintDisplayName),
+                )
+            }
+            queue.save(items)
+            for ((track, item) in batch.zip(items)) {
+                val size = requireNotNull(track.hintSize)
+                val at = track.createdAt + 10
+                val copyPath = "tag-write-${random.nextLong().toULong()}"
+                val backup = TagBackupEntity(
+                    identityId = track.id, volumeName = item.volumeName, relativePath = item.relativePath, displayName = item.displayName,
+                    createdAt = at, tagsPath = "snapshots/$copyPath.json", tagsHash = bytes(32), coverPath = null, coverHash = null,
+                    id3Version = 3,
+                )
+                val fields = mapOf(
+                    "TITLE" to TagChange(listOf(words(3)), listOf(words(3))),
+                    "ARTIST" to TagChange(listOf(words(2)), listOf(words(2))),
+                    "ALBUM" to TagChange(listOf(words(3)), listOf(words(3))),
+                    "TRACKNUMBER" to TagChange(listOf("1"), listOf("3")),
+                )
+                val record = TagWriteRecord(bytes(32), 80, track.id + 55_000, fields, markedTagHash = true)
+                val change = AppliedChangeEntity(
+                    identityId = track.id, decisionId = track.id, batchUuid = uuid, backupId = 0,
+                    volumeName = item.volumeName, relativePath = item.relativePath, displayName = item.displayName, state = "pending",
+                    copyPath = "$copyPath.copy", copySize = size, copySha256 = bytes(32), expectedContentKey = track.contentKey,
+                    tagHash = bytes(32), diff = record.encode(), createdAt = at,
+                )
+                val id = checkNotNull(journal.prepareForApply(backup, change, item))
+                check(journal.beginStreaming(id))
+                check(journal.streamed(id))
+                check(journal.verified(id, size, at, at + 1))
+            }
+            assertThat(queue.results(plan)).isEqualTo(mapOf("written" to items.size))
+        }
     }
 
     private suspend fun fill(database: UserDatabase) {
@@ -214,8 +266,7 @@ class UserDatabaseSizeTest {
         /** The parts a second location's values differ in. */
         val SECOND_LOCATION_PARTS = listOf(DecidedField.TITLE, DecidedField.ARTIST, DecidedField.ALBUM, DecidedField.TRACK_NUMBER)
 
-        /** TI §10.2: under 16 MB, and 1.5 MB of it kept for the write journal and tag backups of M4b. */
+        const val WRITTEN_FILES = 5_000
         const val BUDGET_BYTES = 16_000_000L
-        const val RESERVE_BYTES = 1_500_000L
     }
 }

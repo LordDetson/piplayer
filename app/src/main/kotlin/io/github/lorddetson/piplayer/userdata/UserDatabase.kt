@@ -90,7 +90,7 @@ interface UserDao {
             "UNION SELECT identity_id FROM play_stats WHERE play_count > 0 " +
             "UNION SELECT identity_id FROM playlist_entry WHERE identity_id IS NOT NULL " +
             "UNION SELECT identity_id FROM decision UNION SELECT identity_id FROM file_state " +
-            "UNION SELECT identity_id FROM applied_change",
+            "UNION SELECT identity_id FROM applied_change UNION SELECT identity_id FROM tag_write_archive_ref",
     )
     suspend fun identitiesHoldingData(): List<Long>
 }
@@ -99,6 +99,16 @@ interface UserDao {
 class RulesCounterMigration : AutoMigrationSpec {
     override suspend fun onPostMigrate(connection: SQLiteConnection) {
         connection.prepare("UPDATE user_meta SET rules_counter = change_counter").use { it.step() }
+    }
+}
+
+class CompletedTagApplyMigration : AutoMigrationSpec {
+    override suspend fun onPostMigrate(connection: SQLiteConnection) {
+        connection.prepare(
+            "INSERT INTO tag_apply_progress (plan_id, written) " +
+                "SELECT plan_id, COUNT(*) FROM tag_apply_item WHERE result = 'written' GROUP BY plan_id",
+        ).use { it.step() }
+        connection.prepare("DELETE FROM tag_apply_item WHERE result = 'written'").use { it.step() }
     }
 }
 
@@ -113,13 +123,15 @@ class RulesCounterMigration : AutoMigrationSpec {
         PlayEventEntity::class, PlayStatsEntity::class, PlaylistEntity::class, PlaylistEntryEntity::class,
         DecisionEntity::class, ReleaseChoiceEntity::class, TrackMetadataEntity::class, FileStateEntity::class,
         SavedCoverEntity::class, ListenEventEntity::class, TagBackupEntity::class, AppliedChangeEntity::class, TagApplyItem::class,
+        TagApplyProgress::class, TagWriteArchivePage::class, TagWriteArchiveRef::class, TagWriteArchiveBatch::class,
     ],
-    version = 8,
+    version = 9,
     exportSchema = true,
     // Version 2 adds the track identities (docs/library.md §8.1), version 3 the own covers (§13.2), version 4 favorites,
     // album members, plays and the rules counter (§15.1), version 5 playlists (§16.1), version 6 the decisions of
     // identification and their values (TI §10.2) and the listening outcomes, with play events keyed by their start
-    // without row IDs (§15.7), version 7 the tag-write journal and snapshots (TI §10.2), and version 8 the apply queue.
+    // without row IDs (§15.7), version 7 the tag-write journal and snapshots (TI §10.2), version 8 the apply queue,
+    // and version 9 the compacted journal and apply progress.
     autoMigrations = [
         AutoMigration(from = 1, to = 2),
         AutoMigration(from = 2, to = 3),
@@ -128,6 +140,7 @@ class RulesCounterMigration : AutoMigrationSpec {
         AutoMigration(from = 5, to = 6),
         AutoMigration(from = 6, to = 7),
         AutoMigration(from = 7, to = 8),
+        AutoMigration(from = 8, to = 9, spec = CompletedTagApplyMigration::class),
     ],
 )
 abstract class UserDatabase : RoomDatabase() {
@@ -155,6 +168,8 @@ abstract class UserDatabase : RoomDatabase() {
 
     /** Selected files waiting for a write or new consent (TI §7.2, §8). */
     abstract fun tagApplyQueue(): TagApplyDao
+
+    abstract fun tagWriteArchive(): TagWriteArchiveDao
 
     companion object {
         const val NAME = "user.db"

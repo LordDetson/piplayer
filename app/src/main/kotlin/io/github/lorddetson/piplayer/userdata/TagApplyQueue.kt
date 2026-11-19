@@ -5,7 +5,9 @@ import androidx.room3.Dao
 import androidx.room3.Entity
 import androidx.room3.Index
 import androidx.room3.Insert
+import androidx.room3.PrimaryKey
 import androidx.room3.Query
+import androidx.room3.withWriteTransaction
 
 /** A selected decision at the point the user starts applying a batch. Write permission is never persisted here. */
 @Entity(tableName = "tag_apply_item", primaryKeys = ["plan_id", "file_id"], indices = [Index(value = ["write_id"], unique = true)])
@@ -21,6 +23,12 @@ data class TagApplyItem(
     val result: String = "queued",
 )
 
+@Entity(tableName = "tag_apply_progress")
+data class TagApplyProgress(
+    @PrimaryKey @ColumnInfo(name = "plan_id") val planId: String,
+    val written: Int,
+)
+
 internal class TagApplyQueue(private val database: UserDatabase) {
     private val dao get() = database.tagApplyQueue()
 
@@ -32,7 +40,19 @@ internal class TagApplyQueue(private val database: UserDatabase) {
 
     suspend fun finish(item: TagApplyItem, result: String): Boolean {
         require(result in setOf("written", "skipped", "failed"))
+        if (result == "written") return database.withWriteTransaction { complete(item) }
         return dao.finish(item.planId, item.fileId, result) == 1
+    }
+
+    /** Called inside the transaction that verifies the journal entry. */
+    suspend fun recordVerifiedWrite(writeId: Long) {
+        dao.queuedForWrite(writeId)?.let { check(complete(it)) }
+    }
+
+    private suspend fun complete(item: TagApplyItem): Boolean {
+        if (dao.deleteQueued(item.planId, item.fileId) != 1) return false
+        dao.incrementWritten(item.planId)
+        return true
     }
 
     suspend fun remaining(planId: String): List<TagApplyItem> = dao.remaining(planId)
@@ -59,12 +79,26 @@ interface TagApplyDao {
     )
     suspend fun attachWrite(planId: String, fileId: Long, writeId: Long): Int
 
-    @Query("UPDATE tag_apply_item SET result = 'written' WHERE write_id = :writeId AND result = 'queued'")
-    suspend fun markWritten(writeId: Long): Int
+    @Query("SELECT * FROM tag_apply_item WHERE write_id = :writeId AND result = 'queued'")
+    suspend fun queuedForWrite(writeId: Long): TagApplyItem?
+
+    @Query("DELETE FROM tag_apply_item WHERE plan_id = :planId AND file_id = :fileId AND result = 'queued'")
+    suspend fun deleteQueued(planId: String, fileId: Long): Int
+
+    @Query(
+        "INSERT INTO tag_apply_progress (plan_id, written) VALUES (:planId, 1) " +
+            "ON CONFLICT(plan_id) DO UPDATE SET written = written + 1",
+    )
+    suspend fun incrementWritten(planId: String)
 
     @Query("UPDATE tag_apply_item SET result = :result WHERE plan_id = :planId AND file_id = :fileId AND result = 'queued'")
     suspend fun finish(planId: String, fileId: Long, result: String): Int
 
-    @Query("SELECT result, COUNT(*) AS count FROM tag_apply_item WHERE plan_id = :planId GROUP BY result")
+    @Query(
+        "SELECT result, SUM(count) AS count FROM (" +
+            "SELECT result, COUNT(*) AS count FROM tag_apply_item WHERE plan_id = :planId GROUP BY result " +
+            "UNION ALL SELECT 'written' AS result, written AS count FROM tag_apply_progress WHERE plan_id = :planId" +
+            ") GROUP BY result",
+    )
     suspend fun counts(planId: String): List<TagApplyCount>
 }

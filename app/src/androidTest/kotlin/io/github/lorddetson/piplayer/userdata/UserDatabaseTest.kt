@@ -65,9 +65,37 @@ class UserDatabaseTest {
 
     @Test
     fun freshDatabaseHasWriteHistoryAndBackups() = runBlocking<Unit> {
-        assertThat(rows(database, "PRAGMA user_version")).containsExactly(listOf("8"))
-        assertThat(rows(database, "SELECT name FROM sqlite_master WHERE name IN ('applied_change', 'tag_apply_item', 'tag_backup') ORDER BY name"))
-            .containsExactly(listOf("applied_change"), listOf("tag_apply_item"), listOf("tag_backup"))
+        assertThat(rows(database, "PRAGMA user_version")).containsExactly(listOf("9"))
+        assertThat(rows(database, "SELECT name FROM sqlite_master WHERE name IN ('applied_change', 'tag_apply_item', " +
+            "'tag_apply_progress', 'tag_backup', 'tag_write_archive') ORDER BY name"))
+            .containsExactly(
+                listOf("applied_change"), listOf("tag_apply_item"), listOf("tag_apply_progress"), listOf("tag_backup"),
+                listOf("tag_write_archive"),
+            )
+    }
+
+    @Test
+    fun versionEightCompactsCompletedApplyRowsAndKeepsInterruptedWork() = runBlocking<Unit> {
+        migrations.createDatabase(8).use { connection ->
+            connection.prepare(
+                "INSERT INTO tag_apply_item " +
+                    "(plan_id,file_id,content_key,decision_id,volume_name,relative_path,display_name,write_id,result) VALUES " +
+                    "('batch',1,'key',11,'external_primary','Music/','first.mp3',31,'written')," +
+                    "('batch',2,'key',12,'external_primary','Music/','second.mp3',32,'queued')," +
+                    "('batch',3,'key',13,'external_primary','Music/','third.mp3',33,'written')",
+            ).use { it.step() }
+        }
+        migrations.runMigrationsAndValidate(9).close()
+
+        val opened = UserDatabase.open(context, file.name)
+        try {
+            val queue = TagApplyQueue(opened)
+            assertThat(queue.results("batch")).isEqualTo(mapOf("written" to 2, "queued" to 1))
+            assertThat(queue.remaining("batch").single().writeId).isEqualTo(32L)
+            assertThat(rows(opened, "SELECT file_id FROM tag_apply_item")).containsExactly(listOf("2"))
+        } finally {
+            opened.close()
+        }
     }
 
     @Test

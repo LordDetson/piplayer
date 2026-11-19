@@ -70,6 +70,7 @@ class TagApplyQueueTest {
             assertThat(journal.verified(journalId, 100, 4, 8)).isTrue()
             assertThat(queue.remaining(item.planId)).isEmpty()
             assertThat(queue.results(item.planId)).isEqualTo(mapOf("written" to 1))
+            assertThat(database.tagApplyQueue().item(item.planId, item.fileId)).isNull()
         }
     }
 

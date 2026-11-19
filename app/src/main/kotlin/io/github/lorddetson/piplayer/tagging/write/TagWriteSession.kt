@@ -14,19 +14,15 @@ import io.github.lorddetson.piplayer.userdata.AppliedChangeEntity
 import io.github.lorddetson.piplayer.userdata.TagApplyItem
 import io.github.lorddetson.piplayer.userdata.TagBackupEntity
 import io.github.lorddetson.piplayer.userdata.TagWriteJournal
-import java.io.ByteArrayOutputStream
 import java.io.DataInputStream
 import java.io.File
 import java.io.IOException
 import java.security.MessageDigest
-import java.util.zip.GZIPInputStream
-import java.util.zip.GZIPOutputStream
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
 internal data class TagWriteTarget(
@@ -81,13 +77,13 @@ internal class TagWriteSession(
 
     suspend fun undoableForBatch(batchUuid: ByteArray): List<AppliedChangeEntity> = withContext(Dispatchers.IO) {
         journal.forBatch(batchUuid).filter { entry ->
-            entry.undoneAt == null && decodeRecord(entry.diff)?.let { it.undoOf == null } == true
+            entry.undoneAt == null && TagWriteRecord.decode(entry.diff)?.let { it.undoOf == null } == true
         }
     }
 
     private fun history(entries: List<AppliedChangeEntity>): List<TagWriteHistoryEntry> =
         entries.mapNotNull { entry ->
-            val record = decodeRecord(entry.diff) ?: return@mapNotNull null
+            val record = TagWriteRecord.decode(entry.diff) ?: return@mapNotNull null
             TagWriteHistoryEntry(
                 entry.id, entry.displayName, entry.verifiedAt ?: entry.createdAt, entry.undoneAt,
                 record.undoOf, record.changes, record.conflicts,
@@ -96,10 +92,10 @@ internal class TagWriteSession(
 
     suspend fun prepareUndo(id: Long, target: TagWriteTarget): TagUndo? = writing.withLock {
         val original = undoable(id, target) ?: return@withLock null
-        val record = decodeRecord(original.diff) ?: return@withLock null
+        val record = TagWriteRecord.decode(original.diff) ?: return@withLock null
         for (pending in journal.resumableForTrack(target.identityId)) {
             if (!pending.matches(target)) continue
-            val reversal = decodeRecord(pending.diff) ?: continue
+            val reversal = TagWriteRecord.decode(pending.diff) ?: continue
             if (reversal.undoOf == id) return@withLock TagUndo(QueuedTagWrite.Ready(pending.id), reversal.conflicts)
         }
         var conflicts = emptySet<String>()
@@ -143,7 +139,12 @@ internal class TagWriteSession(
                 backupId = 0, volumeName = target.volume, relativePath = target.relativePath,
                 displayName = target.displayName, state = "pending", copyPath = copy.file.name,
                 copySize = copy.file.length(), copySha256 = copy.sha256, expectedContentKey = Hex.bytes(target.contentKey),
-                tagHash = copy.tagHash, diff = encodeRecord(copy, undoOf), createdAt = at,
+                tagHash = copy.tagHash,
+                diff = TagWriteRecord(
+                    copy.originalSha256, copy.originalDevice, copy.originalInode, copy.diff.changes, undoOf, copy.diff.conflicts,
+                    markedTagHash = true,
+                ).encode(),
+                createdAt = at,
             )
             val id = withContext(NonCancellable) {
                 val written = if (item == null) journal.prepare(backup, entry) else journal.prepareForApply(backup, entry, item)
@@ -170,7 +171,7 @@ internal class TagWriteSession(
             val copy = File(copies, entry.copyPath)
             try {
                 if (copy.canonicalFile.parentFile != copies.canonicalFile) return@withContext WriteBackResult.INVALID_COPY
-                val record = decodeRecord(entry.diff) ?: return@withContext WriteBackResult.INVALID_COPY
+                val record = TagWriteRecord.decode(entry.diff) ?: return@withContext WriteBackResult.INVALID_COPY
                 if (record.undoOf != null && undoable(record.undoOf, target) == null) {
                     return@withContext WriteBackResult.JOURNAL_CHANGED
                 }
@@ -206,7 +207,7 @@ internal class TagWriteSession(
         }
     }
 
-    private fun sourceCanBeReplaced(target: TagWriteTarget, record: WriteRecord, copy: File, recovering: Boolean): Boolean {
+    private fun sourceCanBeReplaced(target: TagWriteTarget, record: TagWriteRecord, copy: File, recovering: Boolean): Boolean {
         val first = openForRead(target.uri)
         val unchanged = ParcelFileDescriptor.AutoCloseInputStream(first).use { input ->
             if (!stat(first).sameFile(record)) return false
@@ -225,7 +226,7 @@ internal class TagWriteSession(
         }
     }
 
-    private suspend fun verifyOriginal(target: TagWriteTarget, entry: AppliedChangeEntity, record: WriteRecord): Stamp? {
+    private suspend fun verifyOriginal(target: TagWriteTarget, entry: AppliedChangeEntity, record: TagWriteRecord): Stamp? {
         val descriptor = openForRead(target.uri)
         return ParcelFileDescriptor.AutoCloseInputStream(descriptor).use { input ->
             val info = stat(descriptor)
@@ -257,7 +258,7 @@ internal class TagWriteSession(
         throw IOException(error)
     }
 
-    private fun StructStat.sameFile(record: WriteRecord): Boolean =
+    private fun StructStat.sameFile(record: TagWriteRecord): Boolean =
         st_dev == record.originalDevice && st_ino == record.originalInode
 
     private fun AppliedChangeEntity.matches(target: TagWriteTarget): Boolean =
@@ -266,25 +267,6 @@ internal class TagWriteSession(
 
     private suspend fun undoable(id: Long, target: TagWriteTarget): AppliedChangeEntity? =
         journal.entry(id)?.takeIf { it.state == "verified" && it.undoneAt == null && it.matches(target) }
-
-    private fun encodeRecord(copy: PreparedTagCopy, undoOf: Long?): ByteArray {
-        val bytes = ByteArrayOutputStream()
-        GZIPOutputStream(bytes).bufferedWriter().use {
-            val record = WriteRecord(
-                copy.originalSha256, copy.originalDevice, copy.originalInode, copy.diff.changes, undoOf, copy.diff.conflicts, markedTagHash = true,
-            )
-            it.write(Json.encodeToString(record))
-        }
-        return bytes.toByteArray()
-    }
-
-    private fun decodeRecord(bytes: ByteArray): WriteRecord? = try {
-        GZIPInputStream(bytes.inputStream()).bufferedReader().use { Json.decodeFromString(it.readText()) }
-    } catch (_: IOException) {
-        null
-    } catch (_: IllegalArgumentException) {
-        null
-    }
 
     private fun isPrefix(original: DataInputStream, expected: DataInputStream, size: Long): Boolean {
         val observedBytes = ByteArray(DEFAULT_BUFFER_SIZE)
@@ -300,14 +282,4 @@ internal class TagWriteSession(
         return original.read() == -1
     }
 
-    @Serializable
-    private data class WriteRecord(
-        val originalSha256: ByteArray,
-        val originalDevice: Long,
-        val originalInode: Long,
-        val changes: Map<String, TagChange>,
-        val undoOf: Long? = null,
-        val conflicts: Set<String> = emptySet(),
-        val markedTagHash: Boolean = false,
-    )
 }
