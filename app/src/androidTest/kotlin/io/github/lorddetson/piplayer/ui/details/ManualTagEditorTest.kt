@@ -1,6 +1,7 @@
 package io.github.lorddetson.piplayer.ui.details
 
 import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -8,6 +9,8 @@ import androidx.compose.ui.test.performTextReplacement
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.github.lorddetson.piplayer.R
 import io.github.lorddetson.piplayer.TestFiles
+import io.github.lorddetson.piplayer.tagging.write.TagChange
+import io.github.lorddetson.piplayer.tagging.write.TagFileFormat
 import io.github.lorddetson.piplayer.ui.theme.PiPlayerTheme
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.Rule
@@ -18,6 +21,22 @@ import org.junit.runner.RunWith
 class ManualTagEditorTest {
     @get:Rule
     val compose = createComposeRule()
+
+    @Test
+    fun previewsTheExactOldAndNewValuesAndWarnsBeforeWritingWav() {
+        val changes = mapOf("TITLE" to TagChange(listOf("Original title"), listOf("Edited title")))
+        val requests = mutableListOf<Unit>()
+        compose.setContent {
+            PiPlayerTheme {
+                ManualTagPreview(changes, TagFileFormat.WAV, busy = false, onBack = {}) { requests += Unit }
+            }
+        }
+        val context = TestFiles.targetContext
+        compose.onNodeWithText(context.getString(R.string.tag_history_transition, "Original title", "Edited title")).assertIsDisplayed()
+        compose.onNodeWithText(context.getString(R.string.manual_tag_wav_notice)).assertIsDisplayed()
+        compose.onNodeWithText(context.getString(R.string.manual_tag_write)).performClick()
+        compose.runOnIdle { assertThat(requests).hasSize(1) }
+    }
 
     @Test
     fun submitsOnlyEditedTagsAndDefaultsToKeepingExistingGenreAndComment() {

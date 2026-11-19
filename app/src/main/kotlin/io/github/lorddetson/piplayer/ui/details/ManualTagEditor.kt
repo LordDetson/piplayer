@@ -2,6 +2,7 @@ package io.github.lorddetson.piplayer.ui.details
 
 import android.app.Activity
 import android.util.Log
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -23,6 +24,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -45,6 +47,9 @@ import io.github.lorddetson.piplayer.PiPlayerApplication
 import io.github.lorddetson.piplayer.R
 import io.github.lorddetson.piplayer.tagging.write.BatchTagWriter
 import io.github.lorddetson.piplayer.tagging.write.ManualTagPlan
+import io.github.lorddetson.piplayer.tagging.write.TagChange
+import io.github.lorddetson.piplayer.tagging.write.TagDiff
+import io.github.lorddetson.piplayer.tagging.write.TagFileFormat
 import io.github.lorddetson.piplayer.tagging.write.WriteBackResult
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -53,12 +58,16 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-private data class EditorState(val plan: ManualTagPlan? = null, val busy: Boolean = true, val message: Int? = null)
+private data class EditorState(
+    val plan: ManualTagPlan? = null,
+    val preview: Map<String, TagChange>? = null,
+    val busy: Boolean = true,
+    val message: Int? = null,
+)
 
 private data class EditorSubmission(
     val plan: ManualTagPlan,
     val changes: Map<String, List<String>>,
-    val fillEmptyOnly: Set<String>,
 )
 
 private class ManualTagEditorModel(private val fileId: Long, private val writer: BatchTagWriter) : ViewModel() {
@@ -70,16 +79,28 @@ private class ManualTagEditorModel(private val fileId: Long, private val writer:
         viewModelScope.launch { reload() }
     }
 
-    fun submit(
-        changes: Map<String, List<String>>,
-        fillEmptyOnly: Set<String>,
-        launch: (IntentSenderRequest) -> Unit,
-    ) {
+    fun preview(changes: Map<String, List<String>>, fillEmptyOnly: Set<String>) {
         val current = mutableState.value
         val plan = current.plan ?: return
-        if (current.busy || changes.isEmpty()) return
+        if (current.busy) return
+        val diff = TagDiff.between(plan.properties, changes, fillEmptyOnly)
+        if (diff.changes.isNotEmpty()) mutableState.value = current.copy(preview = diff.changes, message = null)
+    }
+
+    fun closePreview(): Boolean {
+        val current = mutableState.value
+        if (current.preview == null) return false
+        if (!current.busy) mutableState.value = current.copy(preview = null, message = null)
+        return true
+    }
+
+    fun submit(launch: (IntentSenderRequest) -> Unit) {
+        val current = mutableState.value
+        val plan = current.plan ?: return
+        val diff = current.preview ?: return
+        if (current.busy) return
         mutableState.value = current.copy(busy = true, message = null)
-        val submission = EditorSubmission(plan, changes, fillEmptyOnly)
+        val submission = EditorSubmission(plan, diff.mapValues { it.value.after })
         viewModelScope.launch {
             try {
                 val sender = withContext(Dispatchers.IO) { writer.request(plan) }
@@ -107,8 +128,9 @@ private class ManualTagEditorModel(private val fileId: Long, private val writer:
 
     private suspend fun apply(submission: EditorSubmission) {
         try {
-            when (writer.applyManual(submission.plan, submission.changes, submission.fillEmptyOnly)) {
+            when (writer.applyManual(submission.plan, submission.changes)) {
                 WriteBackResult.VERIFIED -> reload(R.string.manual_tag_written)
+                WriteBackResult.SOURCE_CHANGED -> finish(R.string.manual_tag_changed)
                 else -> finish(R.string.manual_tag_failed)
             }
         } catch (error: CancellationException) {
@@ -149,11 +171,14 @@ internal fun ManualTagEditorScreen(fileId: Long, onBack: () -> Unit) {
     val consent = rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
         model.consentResult(result.resultCode == Activity.RESULT_OK)
     }
+    BackHandler(enabled = state.preview != null) { model.closePreview() }
     Scaffold(topBar = {
         TopAppBar(
             title = { Text(stringResource(R.string.manual_tag_open)) },
             navigationIcon = {
-                IconButton(onClick = onBack) { Icon(painterResource(R.drawable.ic_back), stringResource(R.string.library_back)) }
+                IconButton(onClick = { if (!model.closePreview()) onBack() }) {
+                    Icon(painterResource(R.drawable.ic_back), stringResource(R.string.library_back))
+                }
             },
         )
     }) { padding ->
@@ -162,8 +187,16 @@ internal fun ManualTagEditorScreen(fileId: Long, onBack: () -> Unit) {
             if (shown.busy) LinearProgressIndicator(Modifier.fillMaxWidth())
             shown.message?.let { Text(stringResource(it), Modifier.padding(16.dp)) }
             shown.plan?.let { plan ->
-                ManualTagForm(plan.properties, modifier = Modifier.weight(1f), busy = shown.busy) { changes, fillEmptyOnly ->
-                    model.submit(changes, fillEmptyOnly) { consent.launch(it) }
+                val draft = remember(plan.properties) { ManualTagDraft() }
+                if (shown.preview == null) {
+                    ManualTagForm(
+                        plan.properties, modifier = Modifier.weight(1f), busy = shown.busy,
+                        draft = draft, actionLabel = R.string.manual_tag_review, onSubmit = model::preview,
+                    )
+                } else {
+                    ManualTagPreview(
+                        shown.preview, plan.format, shown.busy, onBack = { model.closePreview() },
+                    ) { model.submit { consent.launch(it) } }
                 }
             }
         }
@@ -187,19 +220,56 @@ private val mainFields = listOf(
 )
 private val keepExisting = setOf("GENRE", "COMMENT")
 
+internal class ManualTagDraft {
+    val edits = mutableStateMapOf<String, String>()
+    var fillOnly by mutableStateOf(keepExisting)
+}
+
+@Composable
+internal fun ManualTagPreview(
+    changes: Map<String, TagChange>,
+    format: TagFileFormat,
+    busy: Boolean,
+    onBack: () -> Unit,
+    onWrite: () -> Unit,
+) {
+    val empty = stringResource(R.string.tag_history_empty_value)
+    Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            items(changes.entries.toList(), key = { it.key }) { (key, change) ->
+                val label = mainFields.firstOrNull { it.key == key }?.label
+                Column {
+                    Text(label?.let { stringResource(it) } ?: key)
+                    Text(stringResource(
+                        R.string.tag_history_transition,
+                        change.before.joinToString().ifEmpty { empty },
+                        change.after.joinToString().ifEmpty { empty },
+                    ))
+                }
+            }
+        }
+        if (format == TagFileFormat.WAV) Text(stringResource(R.string.manual_tag_wav_notice))
+        Text(stringResource(R.string.manual_tag_access))
+        Button(onClick = onWrite, enabled = !busy) { Text(stringResource(R.string.manual_tag_write)) }
+        TextButton(onClick = onBack, enabled = !busy) { Text(stringResource(R.string.manual_tag_continue_editing)) }
+    }
+}
+
 @Composable
 internal fun ManualTagForm(
     initial: Map<String, List<String>>,
     modifier: Modifier = Modifier,
     busy: Boolean = false,
+    draft: ManualTagDraft = remember(initial) { ManualTagDraft() },
+    actionLabel: Int = R.string.manual_tag_write,
     onSubmit: (Map<String, List<String>>, Set<String>) -> Unit,
 ) {
     val fields = remember(initial) {
         val known = mainFields.mapTo(HashSet()) { it.key }
         mainFields + initial.keys.filter { it !in known }.sorted().map { key -> ManualField(key, multiple = initial.getValue(key).size > 1) }
     }
-    val edits = remember(initial) { mutableStateMapOf<String, String>() }
-    var fillOnly by remember(initial) { mutableStateOf(keepExisting) }
+    val edits = draft.edits
+    val fillOnly = draft.fillOnly
     val canWrite = edits.any { (key, value) ->
         value != initial[key].orEmpty().joinToString("\n") && (key !in fillOnly || initial[key].orEmpty().all(String::isEmpty))
     }
@@ -221,7 +291,7 @@ internal fun ManualTagForm(
                     if (key in keepExisting) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Checkbox(checked = key in fillOnly, onCheckedChange = { checked ->
-                                fillOnly = if (checked) fillOnly + key else fillOnly - key
+                                draft.fillOnly = if (checked) fillOnly + key else fillOnly - key
                             }, enabled = !busy)
                             Text(stringResource(R.string.manual_tag_fill_empty, label))
                         }
@@ -239,6 +309,6 @@ internal fun ManualTagForm(
                 }
             }
             onSubmit(changes, fillOnly)
-        }) { Text(stringResource(R.string.manual_tag_write)) }
+        }) { Text(stringResource(actionLabel)) }
     }
 }

@@ -494,6 +494,11 @@
     <string name="tag_history_deferred">Файл используется при воспроизведении. Повторите откат позже.</string>
     <string name="manual_tag_open">Редактировать теги</string>
     <string name="manual_tag_write">Записать теги</string>
+    <string name="manual_tag_wav_notice">Android не индексирует теги WAV. Другие приложения могут продолжить показывать имя файла.</string>
+    <string name="manual_tag_review">Проверить изменения</string>
+    <string name="manual_tag_access">Android может запросить разрешение на изменение этого файла.</string>
+    <string name="manual_tag_continue_editing">Продолжить редактирование</string>
+    <string name="manual_tag_changed">Теги изменились во время редактирования. Откройте редактор заново, чтобы проверить текущие значения.</string>
     <string name="manual_tag_comment">Комментарий</string>
     <string name="manual_tag_lyrics">Текст песни</string>
     <string name="manual_tag_fill_empty">Заполнять только пустое поле (%1$s)</string>

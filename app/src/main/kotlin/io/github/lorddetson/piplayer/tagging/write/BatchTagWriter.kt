@@ -29,7 +29,12 @@ internal data class TagUndoPlan(val identityId: Long, val changeId: Long, val ur
 
 internal data class BatchTagUndoGroup(val batchUuid: String, val files: List<TagUndoPlan>)
 
-internal data class ManualTagPlan(val fileId: Long, val target: TagWriteTarget, val properties: Map<String, List<String>>)
+internal data class ManualTagPlan(
+    val fileId: Long,
+    val target: TagWriteTarget,
+    val properties: Map<String, List<String>>,
+    val format: TagFileFormat,
+)
 
 internal sealed interface TagUndoOutcome {
     data class Restored(val conflicts: Set<String>) : TagUndoOutcome
@@ -107,10 +112,11 @@ internal class BatchTagWriter(
         val report = openRead(target.uri).use { descriptor ->
             (tagger.read(target.taggerTarget, descriptor, target.displayName) as? TaggerResult.Replied)?.value?.report
         } ?: return@withContext null
-        if (report.error != null || report.content?.key != target.contentKey || report.writeFormat() == TagFileFormat.UNSUPPORTED) {
+        val format = report.writeFormat()
+        if (report.error != null || report.content?.key != target.contentKey || format == TagFileFormat.UNSUPPORTED) {
             return@withContext null
         }
-        ManualTagPlan(fileId, target, report.properties)
+        ManualTagPlan(fileId, target, report.properties, format)
     }
 
     fun request(plan: ManualTagPlan): IntentSender? = access.requestAccess(listOf(plan.target.uri))
@@ -120,11 +126,19 @@ internal class BatchTagWriter(
         changes: Map<String, List<String>>,
         fillEmptyOnly: Set<String> = emptySet(),
     ): WriteBackResult? {
+        val intended = TagDiff.between(plan.properties, changes, fillEmptyOnly).changes
+        if (intended.isEmpty()) return null
         val target = plans.manualTarget(plan.fileId) ?: return null
         if (target.uri != plan.target.uri || target.identityId != plan.target.identityId || target.contentKey != plan.target.contentKey) return null
         val lease = playbackTagWriteGate.tryWrite(target.uri.toString()) ?: return null
         return lease.use {
-            val queued = session.prepare(target) { report -> TagDiff.between(report.properties, changes, fillEmptyOnly) }
+            var changed = false
+            val queued = session.prepare(target) { report ->
+                changed = intended.any { (key, change) -> report.properties[key].orEmpty() != change.before }
+                if (changed) TagDiff(report.properties, emptyMap())
+                else TagDiff.between(report.properties, intended.mapValues { (_, change) -> change.after })
+            }
+            if (changed) return@use WriteBackResult.SOURCE_CHANGED
             val ready = queued as? QueuedTagWrite.Ready ?: return@use null
             session.write(ready.id, target, consent = true)
         }

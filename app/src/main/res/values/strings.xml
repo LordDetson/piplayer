@@ -485,6 +485,11 @@
     <string name="tag_history_deferred">Playback is using this file. Try again when it is clear of playback.</string>
     <string name="manual_tag_open">Edit tags</string>
     <string name="manual_tag_write">Write tags</string>
+    <string name="manual_tag_wav_notice">Android does not index WAV tags. Other apps may still show the file name.</string>
+    <string name="manual_tag_review">Review changes</string>
+    <string name="manual_tag_access">Android may ask for permission to update this file.</string>
+    <string name="manual_tag_continue_editing">Continue editing</string>
+    <string name="manual_tag_changed">Tags changed while you were editing. Reopen the editor to review the current values.</string>
     <string name="manual_tag_comment">Comment</string>
     <string name="manual_tag_lyrics">Lyrics</string>
     <string name="manual_tag_fill_empty">Fill only if empty (%1$s)</string>

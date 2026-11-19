@@ -205,6 +205,8 @@ class TagApplyPlansTest {
             val edited = report()
             assertThat(edited.properties).isEqualTo(before.properties + ("COMMENT" to comment))
             assertThat(edited.content?.key).isEqualTo(key)
+            assertThat(writer.applyManual(manual, mapOf("COMMENT" to listOf("Stale preview")))).isEqualTo(WriteBackResult.SOURCE_CHANGED)
+            assertThat(report().properties).isEqualTo(edited.properties)
         } finally {
             client.close()
             resolver.delete(uri, null, null)
