@@ -17,6 +17,7 @@ import io.github.lorddetson.piplayer.ProcessRole
 import io.github.lorddetson.piplayer.covers.Covers
 import io.github.lorddetson.piplayer.library.db.LibraryAccess
 import io.github.lorddetson.piplayer.library.db.LibraryDatabase
+import io.github.lorddetson.piplayer.library.db.SongRow
 import io.github.lorddetson.piplayer.library.db.StoredPlace
 import io.github.lorddetson.piplayer.library.identity.FingerprintStep
 import io.github.lorddetson.piplayer.library.identity.IdentityAttacher
@@ -339,6 +340,15 @@ object Library {
         val library = opened(context.applicationContext)
         library.sync.request()
         library.pass?.runAgain()
+    }
+
+    /** A verified file write has already updated the database. Refresh the same surfaces as the tag pass. */
+    internal fun verifiedTagsStored(context: Context, rows: List<SongRow>) {
+        val library = opened(context.applicationContext)
+        SongList.applyInPlace(rows)
+        val files = rows.map { it.fileId }
+        library.mirror.requestFiles(files)
+        library.decisions.requestRead(files, emptyList())
     }
 
     /** Has the tag pass read every file again, those it could not read too. Lists keep what they show meanwhile. */

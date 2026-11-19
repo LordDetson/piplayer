@@ -1,5 +1,7 @@
 package io.github.lorddetson.piplayer.library.tagpass
 
+import android.content.ContentUris
+import android.provider.MediaStore
 import androidx.room3.withWriteTransaction
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.github.lorddetson.piplayer.TestFiles
@@ -8,6 +10,7 @@ import io.github.lorddetson.piplayer.library.FakeMediaIndex.Companion.PRIMARY
 import io.github.lorddetson.piplayer.library.FakeMediaIndex.Companion.row
 import io.github.lorddetson.piplayer.library.FakeRules
 import io.github.lorddetson.piplayer.library.db.LibraryDatabase
+import io.github.lorddetson.piplayer.library.db.LibraryAccess
 import io.github.lorddetson.piplayer.library.db.SongRow
 import io.github.lorddetson.piplayer.library.lists.MissingReasons
 import io.github.lorddetson.piplayer.library.rules.FolderRule
@@ -18,11 +21,20 @@ import io.github.lorddetson.piplayer.library.values.LegacyEncodings
 import io.github.lorddetson.piplayer.library.values.LegacyText
 import io.github.lorddetson.piplayer.nativelib.taglib.TagReadError
 import io.github.lorddetson.piplayer.tagging.TagReport
+import io.github.lorddetson.piplayer.tagging.TagTarget
+import io.github.lorddetson.piplayer.tagging.write.Stamp
+import io.github.lorddetson.piplayer.tagging.write.TagWriteLibrary
+import io.github.lorddetson.piplayer.tagging.write.TagWriteTarget
+import io.github.lorddetson.piplayer.tagging.write.VerifiedTagRead
+import io.github.lorddetson.piplayer.userdata.TagWriteJournal
+import io.github.lorddetson.piplayer.userdata.UserDatabase
 import java.nio.charset.Charset
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.time.Duration.Companion.milliseconds
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.After
@@ -130,6 +142,34 @@ class TagPassTest {
         stored.clear()
         pass.run()
         assertThat(stored).isEmpty()
+    }
+
+    @Test
+    fun aReadAlreadyInFlightCannotReplaceVerifiedTagsWithTheSameMediaStoreStamp() = runBlocking<Unit> {
+        library(1)
+        val file = dao.files().single()
+        val readStarted = CompletableDeferred<Unit>()
+        val finishRead = CompletableDeferred<Unit>()
+        reader.before = {
+            readStarted.complete(Unit)
+            finishRead.await()
+        }
+        reader.answers[file.mediaStoreId] = tagged("TITLE" to "Old tags")
+        val reading = async { pass().run() }
+        readStarted.await()
+        val user = UserDatabase.open(context, name = null)
+        try {
+            val uri = ContentUris.withAppendedId(MediaStore.Audio.Media.getContentUri(file.volumeName), file.mediaStoreId)
+            val target = TagWriteTarget(uri, TagTarget.LibraryFile(file.id), 1, null, null, file.volumeName,
+                file.relativePath, file.displayName, "01".repeat(32))
+            val written = VerifiedTagRead(Stamp(file.size, file.mtime * 1_000), tagged("TITLE" to "Written tags").report)
+            TagWriteLibrary(context, LibraryAccess.of(database), TagWriteJournal(user)) {}.store(1, target, written)
+        } finally {
+            finishRead.complete(Unit)
+            user.close()
+        }
+        reading.await()
+        assertThat(display(1).title).isEqualTo("Written tags")
     }
 
     @Test

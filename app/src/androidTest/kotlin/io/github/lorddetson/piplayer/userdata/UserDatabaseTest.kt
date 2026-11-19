@@ -65,13 +65,34 @@ class UserDatabaseTest {
 
     @Test
     fun freshDatabaseHasWriteHistoryAndBackups() = runBlocking<Unit> {
-        assertThat(rows(database, "PRAGMA user_version")).containsExactly(listOf("9"))
+        assertThat(rows(database, "PRAGMA user_version")).containsExactly(listOf("10"))
         assertThat(rows(database, "SELECT name FROM sqlite_master WHERE name IN ('applied_change', 'tag_apply_item', " +
-            "'tag_apply_progress', 'tag_backup', 'tag_write_archive') ORDER BY name"))
+            "'tag_apply_progress', 'tag_backup', 'tag_write_archive', 'tag_write_refresh') ORDER BY name"))
             .containsExactly(
                 listOf("applied_change"), listOf("tag_apply_item"), listOf("tag_apply_progress"), listOf("tag_backup"),
-                listOf("tag_write_archive"),
+                listOf("tag_write_archive"), listOf("tag_write_refresh"),
             )
+    }
+
+    @Test
+    fun versionNineKeepsTheWriteJournalAndAddsAnEmptyLibraryRefreshQueue() = runBlocking<Unit> {
+        migrations.createDatabase(9).use { connection ->
+            connection.prepare(
+                "INSERT INTO applied_change (id, identity_id, backup_id, volume_name, relative_path, display_name, " +
+                    "state, copy_path, copy_size, copy_sha256, expected_content_key, tag_hash, diff, created_at) " +
+                    "VALUES (42, 1, 2, 'external_primary', 'Music/', 'track.mp3', 'verified', '', 1, x'01', x'02', x'03', x'04', 1)",
+            ).use { it.step() }
+        }
+        migrations.runMigrationsAndValidate(10).close()
+
+        val opened = UserDatabase.open(context, file.name)
+        try {
+            val journal = TagWriteJournal(opened)
+            assertThat(journal.entry(42)?.state).isEqualTo("verified")
+            assertThat(journal.pendingLibraryRefresh()).isEmpty()
+        } finally {
+            opened.close()
+        }
     }
 
     @Test

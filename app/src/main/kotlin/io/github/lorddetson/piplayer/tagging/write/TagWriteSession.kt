@@ -5,6 +5,7 @@ import android.os.ParcelFileDescriptor
 import android.system.ErrnoException
 import android.system.Os
 import android.system.StructStat
+import android.util.Log
 import io.github.lorddetson.piplayer.library.identity.Hex
 import io.github.lorddetson.piplayer.library.values.DecisionContent
 import io.github.lorddetson.piplayer.library.values.TrackTags
@@ -24,6 +25,7 @@ import java.io.DataInputStream
 import java.io.File
 import java.io.IOException
 import java.security.MessageDigest
+import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.sync.Mutex
@@ -42,6 +44,8 @@ internal data class TagWriteTarget(
     val displayName: String,
     val contentKey: String,
 )
+
+internal data class VerifiedTagRead(val stamp: Stamp, val report: TagReport)
 
 internal sealed interface QueuedTagWrite {
     data class Ready(val id: Long) : QueuedTagWrite
@@ -69,6 +73,7 @@ internal class TagWriteSession(
     private val access: TagWriteAccess,
     private val openForRead: (Uri) -> ParcelFileDescriptor,
     availableBytes: (File) -> Long,
+    private val onLibraryWrite: (suspend (Long, TagWriteTarget, VerifiedTagRead) -> Unit)? = null,
 ) {
     private val copies = File(directory, "copies")
     private val snapshots = File(directory, "snapshots")
@@ -267,12 +272,15 @@ internal class TagWriteSession(
                     return@withContext WriteBackResult.JOURNAL_CHANGED
                 }
                 var recovering = entry.state != "pending"
+                var verifiedRead: VerifiedTagRead? = null
+                val refreshLibrary = onLibraryWrite != null && target.taggerTarget is TagTarget.LibraryFile
                 TagWriteBack(
                     journal = object : TagWriteBack.Journal {
                         override suspend fun streamed() = journal.streamed(id)
                         override suspend fun verified(stamp: Stamp) =
                             journal.verified(
                                 id, stamp.size, stamp.modifiedMs, System.currentTimeMillis(), record.undoOf, record.writtenPartHashes,
+                                refreshLibrary = refreshLibrary,
                             )
                         override suspend fun failed() = journal.failed(id)
                     },
@@ -285,9 +293,20 @@ internal class TagWriteSession(
                             output.fd.sync()
                         }
                     },
-                    verify = { verifyOriginal(target, entry, record) },
+                    verify = { verifyOriginal(target, entry, record).also { verifiedRead = it }?.stamp },
                 ).run(copy, entry.copySize, entry.copySha256, consent).also { result ->
-                    if (result == WriteBackResult.VERIFIED) access.onVerified(target.uri)
+                    if (result == WriteBackResult.VERIFIED) {
+                        if (refreshLibrary) {
+                            try {
+                                checkNotNull(onLibraryWrite).invoke(id, target, checkNotNull(verifiedRead))
+                            } catch (error: CancellationException) {
+                                throw error
+                            } catch (error: Exception) {
+                                Log.w("TagWriteSession", "The verified write is waiting for a library refresh", error)
+                            }
+                        }
+                        access.onVerified(target.uri)
+                    }
                 }
             } catch (_: SourceChanged) {
                 WriteBackResult.SOURCE_CHANGED
@@ -321,7 +340,7 @@ internal class TagWriteSession(
         }
     }
 
-    private suspend fun verifyOriginal(target: TagWriteTarget, entry: AppliedChangeEntity, record: TagWriteRecord): Stamp? {
+    private suspend fun verifyOriginal(target: TagWriteTarget, entry: AppliedChangeEntity, record: TagWriteRecord): VerifiedTagRead? {
         val descriptor = openForRead(target.uri)
         return ParcelFileDescriptor.AutoCloseInputStream(descriptor).use { input ->
             val info = stat(descriptor)
@@ -336,12 +355,28 @@ internal class TagWriteSession(
             ) {
                 return null
             }
-            val observed = stat(descriptor)
-            if (!observed.sameFile(record) || observed.st_size != info.st_size ||
-                observed.st_mtim.tv_sec != info.st_mtim.tv_sec || observed.st_mtim.tv_nsec != info.st_mtim.tv_nsec
-            ) return null
-            Stamp(info.st_size, info.st_mtim.tv_sec * 1_000 + info.st_mtim.tv_nsec / 1_000_000)
+            verifiedRead(descriptor, info, report)
         }
+    }
+
+    /** Recovery only reads the current file. It does not need the old write grant or rewrite its bytes. */
+    suspend fun readForLibrary(target: TagWriteTarget): VerifiedTagRead? = withContext(Dispatchers.IO) {
+        openForRead(target.uri).use { descriptor ->
+            val info = stat(descriptor)
+            val result = tagger.read(target.taggerTarget, descriptor, target.displayName, markLegacy = true, background = true)
+            val report = (result as? TaggerResult.Replied)?.value?.report ?: return@use null
+            if (report.error != null || report.content?.key != target.contentKey) return@use null
+            verifiedRead(descriptor, info, report)
+        }
+    }
+
+    private fun verifiedRead(descriptor: ParcelFileDescriptor, before: StructStat, report: TagReport): VerifiedTagRead? {
+        val after = stat(descriptor)
+        if (after.st_dev != before.st_dev || after.st_ino != before.st_ino || after.st_size != before.st_size ||
+            after.st_mtim.tv_sec != before.st_mtim.tv_sec || after.st_mtim.tv_nsec != before.st_mtim.tv_nsec
+        ) return null
+        val stamp = Stamp(after.st_size, after.st_mtim.tv_sec * 1_000 + after.st_mtim.tv_nsec / 1_000_000)
+        return VerifiedTagRead(stamp, report)
     }
 
     private class SourceChanged : IOException()

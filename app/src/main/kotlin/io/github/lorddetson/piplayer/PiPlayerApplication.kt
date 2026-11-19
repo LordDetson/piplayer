@@ -58,7 +58,7 @@ class PiPlayerApplication : Application() {
 
     internal val batchTagWriter by lazy {
         ProcessRole.current(this).requireMain("The batch tag writer")
-        BatchTagWriter(this)
+        BatchTagWriter(this, onLibraryTagsStored = { rows -> Library.verifiedTagsStored(this, rows) })
     }
     internal val batchTagApply by lazy {
         ProcessRole.current(this).requireMain("The foreground batch apply")
@@ -123,9 +123,14 @@ class PiPlayerApplication : Application() {
                 runCatching {
                     kotlinx.coroutines.runBlocking {
                         val userDatabase = UserData.database(app)
-                        val interrupted = TagWriteJournal(userDatabase).interrupted()
+                        val journal = TagWriteJournal(userDatabase)
+                        val interrupted = journal.interrupted()
                         TagWriteNotifications.showRecovery(app, interrupted.any { it.batchUuid == null })
                         TagWriteNotifications.showBatchRecovery(app, TagApplyQueue(userDatabase).hasStartedWorkRemaining())
+                        if (Library.mayRead(app) && journal.pendingLibraryRefresh().isNotEmpty()) {
+                            Library.awaitReady(app, timeoutMs = 10_000)
+                            app.batchTagWriter.refreshVerifiedLibrary()
+                        }
                     }
                 }
             }

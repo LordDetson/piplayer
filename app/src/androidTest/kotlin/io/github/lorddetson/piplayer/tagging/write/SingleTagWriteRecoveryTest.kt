@@ -20,6 +20,7 @@ import io.github.lorddetson.piplayer.userdata.TagWriteJournal
 import io.github.lorddetson.piplayer.userdata.TrackIdentityEntity
 import io.github.lorddetson.piplayer.userdata.UserDatabase
 import java.io.File
+import java.io.IOException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
@@ -32,7 +33,12 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class SingleTagWriteRecoveryTest {
     @Test
-    fun aManualWriteWaitingForPlaybackKeepsItsPreparedCopyAfterRestart() = runBlocking<Unit> {
+    fun aManualWriteWaitingForPlaybackKeepsItsPreparedCopyAfterRestart() = verifyWrite(simulateLibraryFailure = false)
+
+    @Test
+    fun aVerifiedWriteRefreshesTheLibraryAfterReopeningWithoutAnotherWrite() = verifyWrite(simulateLibraryFailure = true)
+
+    private fun verifyWrite(simulateLibraryFailure: Boolean) = runBlocking<Unit> {
         val context = TestFiles.targetContext
         val resolver = context.contentResolver
         val run = "piplayer-manual-recovery-${System.nanoTime()}"
@@ -98,7 +104,15 @@ class SingleTagWriteRecoveryTest {
             user = UserDatabase.open(context, userDbName)
             assertThat(TagWriteJournal(user).interrupted().map { it.id }).containsExactly(pending.id)
             assertThat(report().properties).isEqualTo(before.properties)
-            val restarted = BatchTagWriter(context, LibraryAccess.of(library), user, client, staging)
+            val libraryAccess = object : LibraryAccess {
+                override fun <T> use(block: (LibraryDatabase) -> T): T {
+                    if (simulateLibraryFailure && runBlocking { TagWriteJournal(user).pendingLibraryRefresh().isNotEmpty() }) {
+                        throw IOException("Library transaction interrupted after verification")
+                    }
+                    return block(library)
+                }
+            }
+            val restarted = BatchTagWriter(context, libraryAccess, user, client, staging)
             val recovery = restarted.recoverableWrites(identity).single()
             assertThat(recovery.id).isEqualTo(pending.id)
             assertThat(recovery.target.uri).isEqualTo(uri)
@@ -109,6 +123,18 @@ class SingleTagWriteRecoveryTest {
             assertThat(report().properties["TITLE"]).containsExactly(title)
             assertThat(report().content?.key).isEqualTo(key)
             assertThat(restarted.recoverableWrites(identity)).isEmpty()
+            if (simulateLibraryFailure) {
+                assertThat(library.library().songRowsOf(listOf(file.id)).single().title).isNotEqualTo(title)
+                assertThat(TagWriteJournal(user).pendingLibraryRefresh()).containsExactly(pending.id)
+                val bytes = checkNotNull(resolver.openInputStream(uri)).use { sha256(it) }
+                user.close()
+                user = UserDatabase.open(context, userDbName)
+                BatchTagWriter(context, LibraryAccess.of(library), user, client, staging).refreshVerifiedLibrary()
+                assertThat(checkNotNull(resolver.openInputStream(uri)).use { sha256(it) }).isEqualTo(bytes)
+            }
+            assertThat(library.library().songRowsOf(listOf(file.id)).single().title)
+                .describedAs("library title before the MediaStore observer runs").isEqualTo(title)
+            assertThat(TagWriteJournal(user).pendingLibraryRefresh()).isEmpty()
             assertThat(copy.exists()).isFalse()
         } finally {
             client.close()

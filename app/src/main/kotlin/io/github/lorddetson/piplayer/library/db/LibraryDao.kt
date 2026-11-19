@@ -235,7 +235,7 @@ interface LibraryDao {
      */
     @Query(
         "SELECT f.id AS fileId, f.media_store_id AS mediaStoreId, f.volume_name AS volume, f.display_name AS displayName, " +
-            "f.size, f.mtime FROM audio_file f LEFT JOIN track_display d ON d.file_id = f.id " +
+            "f.size, f.mtime, f.tag_pass_at AS tagPassAt FROM audio_file f LEFT JOIN track_display d ON d.file_id = f.id " +
             "WHERE (f.reader_version IS NULL OR f.reader_version < :readerVersion) AND f.unsafe_count < :unsafeCount " +
             "AND f.folder_rule != 2 " +
             "ORDER BY (f.is_ringtone OR f.is_notification OR f.is_alarm OR f.recording), d.title_sort, f.id",
@@ -243,8 +243,11 @@ interface LibraryDao {
     suspend fun unreadFiles(readerVersion: Int, unsafeCount: Int): List<PassFile>
 
     /** The current size and modification time and place of [fileIds]. */
-    @Query("SELECT id, size, mtime, volume_name AS volume, relative_path AS relativePath, duration_ms AS durationMs, duration_source AS durationSource FROM audio_file WHERE id IN (:fileIds)")
+    @Query("SELECT id, size, mtime, volume_name AS volume, relative_path AS relativePath, duration_ms AS durationMs, duration_source AS durationSource, tag_pass_at AS tagPassAt FROM audio_file WHERE id IN (:fileIds)")
     suspend fun fileStates(fileIds: List<Long>): List<FileState>
+
+    @Query("UPDATE audio_file SET size = :size, mtime = :mtime WHERE id = :fileId")
+    suspend fun setVerifiedWriteStamp(fileId: Long, size: Long, mtime: Long)
 
     /** The content key of a file a read has just measured, and what is stored of its length (docs/library.md §7.1). */
     @Query("UPDATE audio_file SET content_key = :key, duration_ms = :durationMs, duration_source = :source WHERE id = :fileId")
@@ -756,6 +759,7 @@ data class FileState(
     val relativePath: String,
     val durationMs: Long?,
     val durationSource: String?,
+    val tagPassAt: Long? = null,
 )
 
 /** A file the tag pass could not read, by the size and modification time it kept its failure for. */

@@ -20,6 +20,7 @@ and [Track Identification §11](track-identification.md#11-acceptance-criteria-a
 | Write and reread MP3, FLAC, M4A, Ogg Vorbis, Opus and WAV while preserving the audio content key | Native `TagWriterRoundTripTest`, `TagWriterId3v1Test` and `TagWriterCoverTest` |
 | Identify the changed fields that keep their existing ID3v1 values | `ManualTagEditorTest` and `TagWriterId3v1Test`, including a comparison against the bytes after writing |
 | Prepare and verify the copy, record the write before streaming, verify the original, and keep the journal for undo | `TagWriteSessionTest` and `TagWriteJournalTest` |
+| Update the library immediately and recover when its transaction is interrupted after journal verification | `SingleTagWriteRecoveryTest`, `TagPassTest` and `UserDatabaseTest` |
 | Reopen the journal with a deferred single-file write, require consent and verify the final file | `SingleTagWriteRecoveryTest` |
 | Resume a batch with the verified files excluded from the next write request | `BatchTagRecoveryTest` and the 500-file procedure below |
 | Run the approved selection as a private `dataSync` service and retain recoverable work after stopping | `BatchTagApplyServiceTest`, `TagApplyQueueTest` and the foreground-service procedure below |
@@ -66,6 +67,12 @@ and tapping the recovery notification opens Fix. Restore the original setting be
   title and preserved the audio hash. After force-stop and relaunch, a subsequent edit showed a new system dialog.
 - API 36, manual ID3v1 preview on a shell-owned MP3: the editor reported that the title exceeded ID3v1 capacity. After
   consent, ID3v2 held the new title, ID3v1 held the old title, both tags held the new album, and the audio hash matched.
+- API 36, library refresh: the library showed the new title before the MediaStore observer. A simulated failure
+  between database transactions left a pending refresh. Reopening the user database and reading the verified file
+  updated the library with the file bytes unchanged. An older tag pass with matching size and modification time
+  could not replace the new library tags.
+- API 30, schema v10 and app-owned fixtures: the v9 migration passed. After stopping PiPlayer during a 500-file write,
+  the next process found 72 verified writes and completed the remaining 428. This test used ownership for file access.
 - API 36, 500 app-owned test files after journal compaction: a new process found 72 verified entries and completed the
   remaining 428. The test used write access from ownership.
 - API 36, 500 MP3 files owned by `com.android.shell` on the foreground service: the initial dialog covered all 500.

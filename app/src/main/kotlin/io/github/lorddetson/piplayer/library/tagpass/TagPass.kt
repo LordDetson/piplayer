@@ -2,17 +2,12 @@ package io.github.lorddetson.piplayer.library.tagpass
 
 import android.util.Log
 import androidx.room3.withWriteTransaction
-import io.github.lorddetson.piplayer.identification.text.TextNormalizer
 import io.github.lorddetson.piplayer.library.db.FileState
 import io.github.lorddetson.piplayer.library.db.LibraryDao
 import io.github.lorddetson.piplayer.library.db.LibraryDatabase
 import io.github.lorddetson.piplayer.library.db.SongRow
-import io.github.lorddetson.piplayer.library.db.TrackArtistEntity
-import io.github.lorddetson.piplayer.library.db.TrackEntity
-import io.github.lorddetson.piplayer.library.db.TrackGenreEntity
 import io.github.lorddetson.piplayer.library.sync.LibrarySync
 import io.github.lorddetson.piplayer.library.sync.TrackDisplayWriter
-import io.github.lorddetson.piplayer.library.values.AlbumKey
 import io.github.lorddetson.piplayer.library.values.LegacyEncoding
 import io.github.lorddetson.piplayer.library.values.LegacyText
 import io.github.lorddetson.piplayer.library.values.TextForms
@@ -40,6 +35,7 @@ data class PassFile(
     val displayName: String,
     val size: Long,
     val mtime: Long,
+    val tagPassAt: Long? = null,
 )
 
 /** What a read gave. */
@@ -92,6 +88,7 @@ class TagPass(
 ) {
     private val dao: LibraryDao = database.library()
     private val displays = TrackDisplayWriter(database)
+    private val storage = TagPassStorage(dao)
 
     /** Files that failed in this process in a way a later process may get past; only a change of the file brings them back here. */
     private val failedHere = ConcurrentHashMap.newKeySet<Triple<Long, Long, Long>>()
@@ -140,7 +137,7 @@ class TagPass(
                     flush()
                     delay(crashBackoff)
                 }
-                val item = Pending(file, answer, if (answer is PassRead.Replied) parse(answer.report) else null)
+                val item = Pending(file, answer, if (answer is PassRead.Replied) storage.parse(answer.report, cyrillicLanguage, choice) else null)
                 if (pending.isEmpty()) oldest = TimeSource.Monotonic.markNow()
                 pending += item
                 pendingBytes += item.parsed?.rawTags?.length ?: 0
@@ -206,7 +203,7 @@ class TagPass(
                             continue
                         }
                         if (decoded.encoding == row.tagEncoding) continue
-                        storeTrack(row.fileId, tags, rawJson, row.trackKey, row.volume, row.relativePath)
+                        storage.storeTrack(row.fileId, tags, rawJson, row.trackKey, row.volume, row.relativePath)
                         dao.setTagEncoding(row.fileId, decoded.encoding)
                         changed += row.fileId
                     }
@@ -225,19 +222,7 @@ class TagPass(
     /** The files that failed in this process get another try in the next run. */
     fun forgetFailures() = failedHere.clear()
 
-    private class Pending(val file: PassFile, val answer: PassRead, val parsed: ParsedRead?)
-
-    private class ParsedRead(val report: TagReport, val tags: TrackTags, val encoding: String?, val rawTags: String)
-
-    /** Null for a reply that holds no tags. */
-    private fun parse(report: TagReport): ParsedRead? {
-        if (report.error != null) return null
-        val decoded = LegacyText.decode(report.properties, cyrillicLanguage(), choice)
-        // As read, marks included, so that a change of the legacy encoding can decode them again without a read.
-        val raw = report.properties.mapValues { (_, values) -> values.filter { it.length <= MAX_RAW_VALUE_CHARS } }
-            .filterValues { it.isNotEmpty() }
-        return ParsedRead(report, TrackTags.from(decoded.properties), decoded.encoding, Json.encodeToString(raw))
-    }
+    private class Pending(val file: PassFile, val answer: PassRead, val parsed: TagPassStorage.ParsedRead?)
 
     /**
      * One transaction per batch, while no sync runs. A file the sync changed since it was read keeps nothing of the read.
@@ -249,7 +234,9 @@ class TagPass(
         val rows = sync.exclusive {
             val states = dao.fileStates(items.map { it.file.fileId }).associateBy { it.id }
             val current = items.filter { item ->
-                states[item.file.fileId]?.let { it.size == item.file.size && it.mtime == item.file.mtime } == true
+                states[item.file.fileId]?.let {
+                    it.size == item.file.size && it.mtime == item.file.mtime && it.tagPassAt == item.file.tagPassAt
+                } == true
             }
             val read = current.filter { it.parsed != null }.map { it.file.fileId }
             // Every failure, also one tried again in a later process, gives the file the reasons of its index values (§17.1).
@@ -257,7 +244,7 @@ class TagPass(
             database.withWriteTransaction {
                 for (item in current) {
                     if (item.parsed != null) {
-                        store(item.file.fileId, item.parsed, states.getValue(item.file.fileId))
+                        storage.store(item.file.fileId, item.parsed, states.getValue(item.file.fileId), readerVersion)
                     } else {
                         fail(item, states)
                     }
@@ -277,7 +264,7 @@ class TagPass(
         when (val answer = item.answer) {
             is PassRead.Replied -> {
                 // A file TagLib does not know still has a key, and maybe a length to walk.
-                storeContent(fileId, answer.report, states.getValue(fileId))
+                storage.storeContent(fileId, answer.report, states.getValue(fileId))
                 when (answer.report.error) {
                     // The device's fault, such as a full disk: not the file's.
                     TagReadError.IO_ERROR -> dao.markFailed(fileId, OPEN_ERROR, readerVersion = null)
@@ -294,85 +281,6 @@ class TagPass(
         }
     }
 
-    private suspend fun store(fileId: Long, parsed: ParsedRead, state: FileState) {
-        val report = parsed.report
-        val trackKey = report.content?.let { "${it.key}:$TRACK_START_MS" }
-        storeTrack(fileId, parsed.tags, parsed.rawTags, trackKey, state.volume, state.relativePath)
-        val cover = report.pictures.firstOrNull { it.pictureType == FRONT_COVER } ?: report.pictures.firstOrNull()
-        dao.markRead(
-            fileId,
-            at = System.currentTimeMillis(),
-            readerVersion = readerVersion,
-            format = report.container,
-            codec = report.codec,
-            sampleRate = report.audio?.sampleRate?.takeIf { it > 0 },
-            bitDepth = report.bitDepth,
-            channels = report.audio?.channels?.takeIf { it > 0 },
-            bitrate = report.audio?.bitrateKbps?.takeIf { it > 0 },
-            tagEncoding = parsed.encoding,
-            coverPresent = cover != null,
-            coverBytes = cover?.sizeBytes?.toLong(),
-            tagLengthMs = report.audio?.lengthMs?.takeIf { it > 0 }?.toLong(),
-        )
-        storeContent(fileId, report, state)
-    }
-
-    /** The track of a read file, with its album, artists and genres, built anew from [tags]. */
-    private suspend fun storeTrack(
-        fileId: Long,
-        tags: TrackTags,
-        rawTags: String?,
-        trackKey: String?,
-        volume: String,
-        relativePath: String,
-    ) {
-        val ids = listOf(fileId)
-        dao.deleteTrackArtists(ids)
-        dao.deleteTrackGenres(ids)
-        dao.deleteTracks(ids)
-        val albumId = AlbumKey.of(tags, volume, relativePath)?.let { key ->
-            dao.addAlbum(key, tags.album.orEmpty(), tags.albumArtist, tags.releaseMbid, tags.compilation)
-            // The newest spelling: a file tagged again keeps its key, but not its old name.
-            dao.updateAlbum(key, tags.album.orEmpty(), tags.albumArtist, tags.compilation)
-            dao.albumId(key)
-        }
-        val trackId = dao.addTrack(TrackEntity.of(fileId, tags, rawTags, albumId).copy(trackKey = trackKey))
-        val credits = artists(trackId, ROLE_ARTIST, tags.artists, tags.artistMbids, tags.artistSort) +
-            artists(trackId, ROLE_ALBUM_ARTIST, tags.albumArtists, tags.albumArtistMbids, tags.albumArtistSort) +
-            artists(trackId, ROLE_COMPOSER, tags.composers, emptyList(), sort = null)
-        if (credits.isNotEmpty()) dao.addTrackArtists(credits)
-        val genres = tags.genres.map { name ->
-            val key = keyOf(name)
-            dao.addGenre(key, name)
-            TrackGenreEntity(trackId, dao.genreId(key))
-        }.distinct()
-        if (genres.isNotEmpty()) dao.addTrackGenres(genres)
-    }
-
-    private suspend fun storeContent(fileId: Long, report: TagReport, state: FileState) {
-        val content = report.content ?: return
-        val previous = state.durationSource?.let { StoredDuration(state.durationMs, it) }
-        val stored = StoredDuration.afterRead(content.duration, previous)
-        dao.setContent(fileId, content.key, stored.ms, stored.source)
-    }
-
-    /** The IDs of MusicBrainz go with the names only when each name has one; [sort] only with a single name. */
-    private suspend fun artists(
-        trackId: Long,
-        role: Int,
-        names: List<String>,
-        mbids: List<String>,
-        sort: String?,
-    ): List<TrackArtistEntity> = names.mapIndexed { position, name ->
-        val mbid = mbids.getOrNull(position).takeIf { mbids.size == names.size }
-        val key = mbid?.let { "mbid:$it" } ?: keyOf(name)
-        dao.addArtist(key, name, sort.takeIf { names.size == 1 }, mbid)
-        dao.updateArtist(key, name, sort.takeIf { names.size == 1 })
-        TrackArtistEntity(trackId, dao.artistId(key), role, position)
-    }
-
-    private fun keyOf(name: String) = TextNormalizer.normalize(name).ifEmpty { name.lowercase() }
-
     private suspend fun removeOrphans() = sync.exclusive {
         database.withWriteTransaction {
             dao.deleteAlbumsWithoutTracks()
@@ -387,9 +295,6 @@ class TagPass(
         /** A change that makes old reads worth redoing raises this. */
         const val READER_VERSION = 2
 
-        /** The part of a track key after the content key: where the track starts, 0 until CUE sheets arrive (TI §10). */
-        private const val TRACK_START_MS = 0
-
         const val BATCH_SIZE = 200
         private const val MAX_BATCH_BYTES = 1024 * 1024
         private val MAX_BATCH_AGE = 1.seconds
@@ -397,8 +302,6 @@ class TagPass(
         /** Android gives up on a process that crashes twice within a minute (docs/library.md §4.3). */
         val CRASH_BACKOFF = 60.seconds
 
-        /** Longer values, such as lyrics, stay out of the database for now. */
-        private const val MAX_RAW_VALUE_CHARS = 16 * 1024
         private const val CHUNK = 500
 
         private const val UNSUPPORTED = "unsupported"
@@ -406,7 +309,6 @@ class TagPass(
         private const val OPEN_ERROR = "open"
         private const val CRASH = "crash"
         private const val UNSAFE = "unsafe"
-        private const val FRONT_COVER = "Front Cover"
 
         const val ROLE_ARTIST = 0
         const val ROLE_ALBUM_ARTIST = 1

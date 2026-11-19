@@ -124,14 +124,15 @@ class CompletedTagApplyMigration : AutoMigrationSpec {
         DecisionEntity::class, ReleaseChoiceEntity::class, TrackMetadataEntity::class, FileStateEntity::class,
         SavedCoverEntity::class, ListenEventEntity::class, TagBackupEntity::class, AppliedChangeEntity::class, TagApplyItem::class,
         TagApplyProgress::class, TagWriteArchivePage::class, TagWriteArchiveRef::class, TagWriteArchiveBatch::class,
+        TagWriteRefresh::class,
     ],
-    version = 9,
+    version = 10,
     exportSchema = true,
     // Version 2 adds the track identities (docs/library.md §8.1), version 3 the own covers (§13.2), version 4 favorites,
     // album members, plays and the rules counter (§15.1), version 5 playlists (§16.1), version 6 the decisions of
     // identification and their values (TI §10.2) and the listening outcomes, with play events keyed by their start
     // without row IDs (§15.7), version 7 the tag-write journal and snapshots (TI §10.2), version 8 the apply queue,
-    // and version 9 the compacted journal and apply progress.
+    // version 9 the compacted journal and apply progress, and version 10 the separate library transaction's queue.
     autoMigrations = [
         AutoMigration(from = 1, to = 2),
         AutoMigration(from = 2, to = 3),
@@ -141,6 +142,7 @@ class CompletedTagApplyMigration : AutoMigrationSpec {
         AutoMigration(from = 6, to = 7),
         AutoMigration(from = 7, to = 8),
         AutoMigration(from = 8, to = 9, spec = CompletedTagApplyMigration::class),
+        AutoMigration(from = 9, to = 10),
     ],
 )
 abstract class UserDatabase : RoomDatabase() {

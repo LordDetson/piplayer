@@ -50,11 +50,17 @@ internal class TagWriteJournal(private val database: UserDatabase) {
         (dao.forTrack(identityId) + archive.forIdentities(listOf(identityId))).distinctBy { it.id }.sortedByDescending { it.id }
     suspend fun forBatch(batchUuid: ByteArray): List<AppliedChangeEntity> =
         (dao.forBatch(batchUuid) + archive.forBatch(batchUuid)).distinctBy { it.id }.sortedByDescending { it.id }
+
+    suspend fun pendingLibraryRefresh(): List<Long> = dao.pendingLibraryRefresh()
+
+    suspend fun libraryRefreshed(id: Long) = dao.libraryRefreshed(id)
+
     suspend fun beginStreaming(id: Long): Boolean = dao.markStreaming(id) == 1
     suspend fun streamed(id: Long): Boolean = dao.markStreamed(id) == 1
     suspend fun verified(
         id: Long, size: Long, mtime: Long, at: Long, undoOf: Long? = null,
         writtenPartHashes: Map<Int, Int> = emptyMap(),
+        refreshLibrary: Boolean = false,
     ): Boolean =
         database.withWriteTransaction {
             if (undoOf != null && entry(undoOf)?.let { it.state == "verified" && it.undoneAt == null } != true) {
@@ -69,6 +75,7 @@ internal class TagWriteJournal(private val database: UserDatabase) {
                 dao.saveVerifiedReferences(id, record.withVerifiedReferences(winners, entry.decisionId, writtenPartHashes).encode())
             }
             queue.recordVerifiedWrite(id)
+            if (refreshLibrary) dao.addLibraryRefresh(TagWriteRefresh(id))
             archive.compactPage()
             true
         }
@@ -77,6 +84,15 @@ internal class TagWriteJournal(private val database: UserDatabase) {
 
 @Dao
 interface TagWriteDao {
+    @Insert
+    suspend fun addLibraryRefresh(refresh: TagWriteRefresh)
+
+    @Query("SELECT change_id FROM tag_write_refresh ORDER BY change_id")
+    suspend fun pendingLibraryRefresh(): List<Long>
+
+    @Query("DELETE FROM tag_write_refresh WHERE change_id = :id")
+    suspend fun libraryRefreshed(id: Long)
+
     @Insert
     suspend fun insertBackup(backup: TagBackupEntity): Long
 

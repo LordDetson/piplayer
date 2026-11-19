@@ -5,8 +5,10 @@ import android.content.IntentSender
 import android.net.Uri
 import android.os.ParcelFileDescriptor
 import android.os.storage.StorageManager
+import android.util.Log
 import io.github.lorddetson.piplayer.covers.Covers
 import io.github.lorddetson.piplayer.library.db.LibraryAccess
+import io.github.lorddetson.piplayer.library.db.SongRow
 import io.github.lorddetson.piplayer.library.identity.Hex
 import io.github.lorddetson.piplayer.nativelib.taglib.Id3v1WritePolicy
 import io.github.lorddetson.piplayer.notifications.TagWriteNotifications
@@ -27,6 +29,7 @@ import io.github.lorddetson.piplayer.userdata.UserDatabase
 import java.io.File
 import java.io.FileNotFoundException
 import java.util.Base64
+import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -83,6 +86,7 @@ internal class BatchTagWriter(
     database: UserDatabase = UserData.database(context),
     private val tagger: TaggerClient = Tagger.client(context),
     staging: File = File(context.applicationContext.noBackupFilesDir, "tag-writes"),
+    onLibraryTagsStored: (List<SongRow>) -> Unit = {},
     loadCover: suspend (Long, TagCoverPreset) -> TagArtwork? =
         { id, preset -> Covers.saved(context).file(id)?.let { encodeFrontCover(it, preset) } },
 ) {
@@ -96,6 +100,7 @@ internal class BatchTagWriter(
     private val activeSingles = HashSet<Long>()
     private val access = MediaStoreWriteAccess(app)
     private val journal = TagWriteJournal(database)
+    private val libraryRefresh = TagWriteLibrary(app, library, journal, onLibraryTagsStored)
     private val session = TagWriteSession(
         directory = staging,
         tagger = tagger,
@@ -106,6 +111,7 @@ internal class BatchTagWriter(
             val storage = app.getSystemService(StorageManager::class.java)
             storage?.getAllocatableBytes(storage.getUuidForPath(path)) ?: path.usableSpace
         },
+        onLibraryWrite = libraryRefresh::store,
     )
     private val work = TagApplyWork(
         queue, session,
@@ -113,6 +119,24 @@ internal class BatchTagWriter(
         playback = playbackTagWriteGate,
         diff = plans::diff,
     )
+
+    suspend fun refreshVerifiedLibrary() = withContext(Dispatchers.IO) {
+        for (id in journal.pendingLibraryRefresh()) {
+            try {
+                val entry = journal.entry(id) ?: continue
+                val target = plans.target(entry) ?: continue
+                playbackTagWriteGate.beginRead(target.uri.toString()).use {
+                    val read = session.readForLibrary(target) ?: return@use
+                    libraryRefresh.store(id, target, read)
+                    access.onVerified(target.uri)
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                Log.w("BatchTagWriter", "Could not refresh the library for a verified write", error)
+            }
+        }
+    }
 
     suspend fun nextGroup(batchUuid: String): TagApplyGroup = planning.withLock {
         if (queue.results(batchUuid).isEmpty()) queue.save(plans.forBatch(batchUuid))

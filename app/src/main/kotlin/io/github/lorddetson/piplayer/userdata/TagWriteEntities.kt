@@ -51,3 +51,7 @@ data class AppliedChangeEntity(
     @ColumnInfo(name = "verified_at") val verifiedAt: Long? = null,
     @ColumnInfo(name = "undone_at") val undoneAt: Long? = null,
 )
+
+/** A verified file whose tags still need to be copied into the separate library database. */
+@Entity(tableName = "tag_write_refresh")
+data class TagWriteRefresh(@PrimaryKey @ColumnInfo(name = "change_id") val changeId: Long)
