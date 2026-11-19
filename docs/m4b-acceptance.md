@@ -48,9 +48,9 @@ applying a change. Run the following on each API in the test matrix. Use the vir
    verify that PiPlayer waits for playback and the original is unchanged. Force-stop PiPlayer, reopen Fix and resume
    the interrupted write. Verify that Android requests consent again for this file. Approve and reread the tags
    after the player releases it. Confirm that the audio hash matches.
-6. On API 31 and later, if optional media management access is enabled for the build, check `MediaStore.canManageMedia()`
-   before and after granting it. Repeat a write request and the interruption procedure. Record whether the platform
-   shows a dialog and whether a new request still needs the Activity. Repeat after revoking access.
+6. On API 36, use a test app with the normal audio permission and optional media management access. Check
+   `MediaStore.canManageMedia()` before and after enabling the option in Settings. Request a write to an audio file
+   owned by another app in each state and record whether Android displays a confirmation dialog.
 
 ## Foreground-service timeout
 
@@ -102,4 +102,9 @@ and tapping the recovery notification opens Fix. Restore the original setting be
   force-stopped while the service was active. A new process recovered 178 verified writes, requested access to exactly
   322 files and completed all 500. MediaStore and the journal both confirmed 500 writes. Files 0001, 0250 and 0500 had
   the new title and unchanged audio hashes.
-- Optional media management access is below the cut line.
+- API 36, optional media management access: a targetSdk 36 test app with `READ_MEDIA_AUDIO` changed
+  `MediaStore.canManageMedia()` from false to true through Android Settings. A write request to the same
+  shell-owned MP3 displayed the confirmation dialog in both states. Deny returned no write grant in either
+  state. PiPlayer keeps the standard audio permissions and requires consent for writes to files owned by other
+  apps. Android documents the additional [media location permission](https://developer.android.com/reference/android/Manifest.permission#MANAGE_MEDIA)
+  needed to skip the write dialog. API 30 uses the regular write request because media management was added in API 31.

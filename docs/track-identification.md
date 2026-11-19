@@ -1429,7 +1429,6 @@ how far it got.
 | Read the library | `READ_MEDIA_AUDIO` (API 33+) / `READ_EXTERNAL_STORAGE` (≤ 32) + MediaStore | 1.0 |
 | Every interactive write and every user-started batch write, including files in `Download/` and on the SD-card root | `MediaStore.createWriteRequest` for the selection: one per apply where the platform accepts the whole selection, otherwise as few as possible (§8); write while the Activity is alive, or start the foreground service with an Intent whose `ClipData` holds the URIs and whose flags are `FLAG_GRANT_READ_URI_PERMISSION` and `FLAG_GRANT_WRITE_URI_PERMISSION` | 1.0 (M4b) |
 | Apply interrupted by process death | the grant is gone; the remaining files and every write left `pending` or `streamed` (§7.2 step 9) wait for a new consent from the UI | 1.0 (M4b) |
-| Power users (API 31+) | optional `MANAGE_MEDIA` ("no confirmation dialogs"): the write request is still made but granted without a dialog (manifest below); whether an interrupted batch can then resume without the UI is checked in M4b | 1.0 (M4b, below the cut line) |
 | Background / library-wide batch writes without a consent per apply | user-picked music folder(s) via `ACTION_OPEN_DOCUMENT_TREE` + persistable grant; health check, re-grant UI and write status per folder | v1.x |
 | `.lrc` and `.cue` files, cover images and playlists next to the music (`READ_MEDIA_AUDIO` does not cover them) | the same folder grant | v1.x |
 | Files in `Download/` or SD-card root (cannot be tree-granted on 11+) | stay on `createWriteRequest`, also after v1.x | 1.0 |
@@ -1443,10 +1442,10 @@ how far it got.
 - Files opened from another app (§1): a `content://media` URI is used directly, a document URI is mapped with
   `MediaStore.getMediaUri()`, and any other URI is matched by content key once the file is in the library. Tags can
   be written only after such a match (or, v1.x, in a granted folder).
-- Manifest (draft, fixed in M4b): `READ_MEDIA_AUDIO`; `READ_EXTERNAL_STORAGE` with `maxSdkVersion="32"`;
-  `MANAGE_MEDIA`. Whether `MANAGE_MEDIA` takes effect on API 33+ with `READ_MEDIA_AUDIO` alone or needs
-  `READ_EXTERNAL_STORAGE` without the `maxSdkVersion` limit, and whether `ACCESS_MEDIA_LOCATION` must be declared or
-  granted, is checked with `MediaStore.canManageMedia()` on API 31, 33, 35 and 36 in M4b.
+- The library uses `READ_MEDIA_AUDIO` and `READ_EXTERNAL_STORAGE` with `maxSdkVersion="32"`. In the
+  [M4b permission check](m4b-acceptance.md#recorded-results) on API 36, enabling `MANAGE_MEDIA` with the
+  audio permission set made `MediaStore.canManageMedia()` true, while Android still asked for write consent.
+  PiPlayer keeps the standard consent flow with its audio permissions.
 
 ### 7.4 minSdk 30 now, 26 later
 
@@ -1464,7 +1463,7 @@ how far it got.
   `READ_EXTERNAL_STORAGE` with `maxSdkVersion="32"` (§7.3), and add API 26 and 29 emulators to the instrumented test
   matrix.
 - Other API-level differences stay behind small wrappers too: media read permission (`READ_MEDIA_AUDIO` on 33+),
-  notification permission (33+), `MANAGE_MEDIA` (31+), dynamic color (31+).
+  notification permission (33+), dynamic color (31+).
 
 ### 7.5 Per-format tag rules
 
@@ -2363,9 +2362,8 @@ removable-storage check. The following coverage applies to the M5 release.
 System consent dialogs are not automated: they differ by API level and manufacturer and make UI Automator scripts
 brittle. They follow a written checklist on API 30, 33, 35 and 36 and on a device with an SD card: one write request
 for a selection; files in `Download/` and on the SD-card root; canceling a dialog (the result stays in PiPlayer, no
-error); a new consent after the process was killed during apply; the explanation shown before the system dialogs; the
-optional media management access on API 31+, with `MediaStore.canManageMedia()` checked on API 31, 33, 35 and 36. The
-trash dialog joins the checklist in v1.x.
+error); a new consent after the process was killed during apply; the explanation shown before the system dialogs.
+The trash dialog joins the checklist in v1.x.
 
 ### 11.4 Corpus check
 

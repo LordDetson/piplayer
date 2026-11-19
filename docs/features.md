@@ -202,8 +202,6 @@ soon after 1.0, `later` is planned without a date. The items listed under Cut li
 - Fix tab: review queue, needs-attention list, counters and ETA. `M4a`
 - Optional tag writing with partial updates, verification, backup and undo that survives restarts, through
   MediaStore write requests with one consent per apply (TI §7.2 to §7.4). `M4b`
-- Optional media management access on Android 12+, so applying a batch skips the confirmation dialog
-  (TI §7.3). `M4b`
 - Manual tag editor for one file on the same pipeline, with or without writing to the file. `M4b`
 - Change history per file and per batch, with revert. `M4b`
 - Folder grants for background tag writing, with a health check, re-grant and write-access status per folder
@@ -360,8 +358,9 @@ Size: L (about 8 weeks).
 - Tag writing through MediaStore write requests (one consent per apply); if the process dies during apply, the
   batch resumes after a new consent from the UI. The write-access interface exists from day one; its folder-grant
   implementation follows in v1.x (TI §7.2 to §7.4).
-- History and undo, the manual tag editor, deferred writes for the file that is playing, optional media management
-  access.
+- History and undo, the manual tag editor and deferred writes for the file that is playing.
+- Optional media management access was evaluated on API 36. The write dialog still appears with the normal audio
+  permission, so PiPlayer keeps the standard MediaStore consent flow (TI §7.3).
 - Done when the TI §11 tag-diff and tag round-trip tests pass on API 30 and 36, and a 500-file apply
   resumes correctly after its process is killed. The write pipeline is tested automatically on app-private
   fixtures. Consent dialogs follow a written manual checklist on API 30 and 36, with a virtual SD card for
@@ -392,7 +391,7 @@ Size: M (about 6 weeks, plus at least 14 days of closed testing).
 If 1.0 slips, these move to v1.x and the release goes ahead: M3U8 import and export; smart lists beyond Favorites
 and Recently played; cover picker sources other than release and embedded images; image from the device; tablet
 and foldable layouts; device-transfer re-attachment by content key; batch change history beyond per-file revert;
-the basic platform equalizer; optional media management access. Background (folder-grant) tag writing is already
+the basic platform equalizer. Background (folder-grant) tag writing is already
 planned for v1.x.
 
 ### After 1.0
