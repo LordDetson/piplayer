@@ -462,4 +462,17 @@
     <string name="batch_tag_write_start">Continue to file access</string>
     <string name="batch_tag_write_error">Could not apply the file tags. You can try again.</string>
     <string name="batch_tag_write_cancelled">File access was cancelled. Your review decisions are saved in PiPlayer.</string>
+    <string name="tag_history_open">Tag history</string>
+    <string name="tag_history_empty">No file tag changes have been recorded.</string>
+    <string name="tag_history_transition">%1$s → %2$s</string>
+    <string name="tag_history_conflicts">Kept edits from another app (%1$s).</string>
+    <string name="tag_history_empty_value">Empty</string>
+    <string name="tag_history_undo">Undo tag change</string>
+    <string name="tag_history_undone">Undone</string>
+    <string name="tag_history_error">Could not load the tag history.</string>
+    <string name="tag_history_undo_error">Could not undo the tag change.</string>
+    <string name="tag_history_unavailable">The file is unavailable for undo.</string>
+    <string name="tag_history_cancelled">Undo was cancelled.</string>
+    <string name="tag_history_no_change">There are no tags to restore.</string>
+    <string name="tag_history_deferred">Playback is using this file. Try again when it is clear of playback.</string>
 </resources>

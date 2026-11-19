@@ -38,6 +38,7 @@ import io.github.lorddetson.piplayer.ui.songs.SongMenu
 import io.github.lorddetson.piplayer.ui.songs.TrackMenuItems
 import io.github.lorddetson.piplayer.ui.songs.TrackMenuPlace
 import io.github.lorddetson.piplayer.ui.details.TrackDetailsScreen
+import io.github.lorddetson.piplayer.ui.details.TagHistoryScreen
 import io.github.lorddetson.piplayer.ui.identification.IdentifyTarget
 import io.github.lorddetson.piplayer.ui.identification.LocalIdentify
 import io.github.lorddetson.piplayer.ui.details.BadgeHost
@@ -180,6 +181,9 @@ data object QueueRoute : NavKey
  */
 @Serializable
 data class TrackDetailsRoute(val fileId: Long? = null, val uri: String? = null) : NavKey
+
+@Serializable
+data class TagHistoryRoute(val identityId: Long) : NavKey
 
 /**
  * The review of a song of the library by its file ID, or of a file opened from another app by its URI (TI §6, review
@@ -404,8 +408,9 @@ fun PiPlayerApp(viewModel: PlayerViewModel = viewModel()) {
                     )
                 }
                 entry<TrackDetailsRoute>(metadata = FROM_THE_SIDE) { route ->
-                    TrackDetailsScreen(route.fileId, route.uri, snackbar, onBack = { close() })
+                    TrackDetailsScreen(route.fileId, route.uri, snackbar, onBack = { close() }, onTagHistory = { open(TagHistoryRoute(it)) })
                 }
+                entry<TagHistoryRoute>(metadata = FROM_THE_SIDE) { route -> TagHistoryScreen(route.identityId, onBack = { close() }) }
                 entry<IdentifyRoute>(metadata = FROM_THE_SIDE) { route ->
                     ReviewScreen(route.fileId, route.uri, onBack = { close() }, batchUuid = route.batchUuid)
                 }

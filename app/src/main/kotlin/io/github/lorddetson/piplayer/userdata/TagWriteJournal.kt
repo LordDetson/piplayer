@@ -37,6 +37,7 @@ internal class TagWriteJournal(private val database: UserDatabase) {
     suspend fun entry(id: Long): AppliedChangeEntity? = dao.entry(id)
     suspend fun backup(id: Long): TagBackupEntity? = dao.backup(id)
     suspend fun interrupted(): List<AppliedChangeEntity> = dao.interrupted()
+    suspend fun resumableForTrack(identityId: Long): List<AppliedChangeEntity> = dao.resumableForTrack(identityId)
     suspend fun observedWrites(identityIds: Collection<Long>): Map<Long, List<AppliedChangeEntity>> =
         identityIds.distinct().chunked(500).flatMap { dao.observedWrites(it) }.groupBy { it.identityId }
     suspend fun forTrack(identityId: Long): List<AppliedChangeEntity> = dao.forTrack(identityId)
@@ -72,6 +73,9 @@ interface TagWriteDao {
 
     @Query("SELECT * FROM applied_change WHERE state IN ('pending', 'streaming', 'streamed') ORDER BY id")
     suspend fun interrupted(): List<AppliedChangeEntity>
+
+    @Query("SELECT * FROM applied_change WHERE identity_id = :identityId AND state IN ('pending', 'streaming', 'streamed', 'failed') ORDER BY id DESC")
+    suspend fun resumableForTrack(identityId: Long): List<AppliedChangeEntity>
 
     @Query("SELECT * FROM applied_change WHERE identity_id IN (:identityIds) AND state IN ('pending', 'streaming', 'streamed', 'verified')")
     suspend fun observedWrites(identityIds: List<Long>): List<AppliedChangeEntity>

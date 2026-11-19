@@ -10,6 +10,7 @@ import io.github.lorddetson.piplayer.library.values.DecisionKind
 import io.github.lorddetson.piplayer.library.values.DecisionResolver
 import io.github.lorddetson.piplayer.tagging.TagReport
 import io.github.lorddetson.piplayer.tagging.TagTarget
+import io.github.lorddetson.piplayer.userdata.AppliedChangeEntity
 import io.github.lorddetson.piplayer.userdata.BatchDecisionTrackRow
 import io.github.lorddetson.piplayer.userdata.Decisions
 import io.github.lorddetson.piplayer.userdata.TagApplyItem
@@ -43,12 +44,30 @@ internal class TagApplyPlans(private val library: LibraryAccess, private val use
         if (!decision.batchUuid.contentEquals(uuid) || (decision.undoneAt != null && item.writeId == null)) return null
         val identity = user.identities().identity(decision.identityId) ?: return null
         if (identity.startMs != 0L || Hex.text(identity.contentKey) != item.contentKey) return null
+        return targetAt(Place(item.volumeName, item.relativePath, item.displayName), identity.id, decision.id, uuid, item.contentKey)
+    }
 
+    suspend fun target(entry: AppliedChangeEntity): TagWriteTarget? {
+        val identity = user.identities().identity(entry.identityId) ?: return null
+        if (identity.startMs != 0L || !identity.contentKey.contentEquals(entry.expectedContentKey)) return null
+        return targetAt(
+            Place(entry.volumeName, entry.relativePath, entry.displayName), identity.id, entry.decisionId,
+            entry.batchUuid, Hex.text(entry.expectedContentKey),
+        )
+    }
+
+    private suspend fun targetAt(
+        place: Place,
+        identity: Long,
+        decision: Long?,
+        batch: ByteArray?,
+        key: String,
+    ): TagWriteTarget? {
         val file = withContext(Dispatchers.IO) {
             library.use { database ->
                 runBlocking {
                     val dao = database.library()
-                    val atPlace = dao.foundFilesAt(item.volumeName, item.relativePath, item.displayName).singleOrNull()
+                    val atPlace = dao.foundFilesAt(place.volume, place.relativePath, place.displayName).singleOrNull()
                     atPlace?.let { dao.file(it.fileId) }
                 }
             }
@@ -56,8 +75,8 @@ internal class TagApplyPlans(private val library: LibraryAccess, private val use
         if (file.mediaStoreId <= 0) return null
         val uri = ContentUris.withAppendedId(MediaStore.Audio.Media.getContentUri(file.volumeName), file.mediaStoreId)
         return TagWriteTarget(
-            uri, TagTarget.LibraryFile(file.id), identity.id, decision.id, uuid,
-            file.volumeName, file.relativePath, file.displayName, item.contentKey,
+            uri, TagTarget.LibraryFile(file.id), identity, decision, batch,
+            file.volumeName, file.relativePath, file.displayName, key,
         )
     }
 

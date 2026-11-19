@@ -166,6 +166,7 @@ class TagWriteSessionTest {
 
             val undo = requireNotNull(session.prepareUndo(queued.id, target))
             assertThat(undo.conflicts).containsExactly("TITLE")
+            assertThat(session.prepareUndo(queued.id, target)).isEqualTo(undo)
             val reversal = undo.queued as QueuedTagWrite.Ready
             assertThat(session.write(reversal.id, target, consent = true)).isEqualTo(WriteBackResult.VERIFIED)
 
@@ -175,6 +176,13 @@ class TagWriteSessionTest {
             assertThat(journal.entry(queued.id)?.undoneAt).isNotNull()
             assertThat(journal.forTrack(target.identityId).map { it.id }).containsExactly(reversal.id, queued.id)
             assertThat(session.prepareUndo(queued.id, target)).isNull()
+
+            val history = session.historyForTrack(target.identityId)
+            assertThat(history.map { it.id }).containsExactly(reversal.id, queued.id)
+            assertThat(history[0].undoOf).isEqualTo(queued.id)
+            assertThat(history[0].changes["ALBUM"]?.after).isEqualTo(before.properties["ALBUM"].orEmpty())
+            assertThat(history[0].conflicts).containsExactly("TITLE")
+            assertThat(history[1].undoneAt).isNotNull()
         } finally {
             db.close()
         }

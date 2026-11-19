@@ -48,6 +48,16 @@ internal sealed interface QueuedTagWrite {
 
 internal data class TagUndo(val queued: QueuedTagWrite, val conflicts: Set<String>)
 
+internal data class TagWriteHistoryEntry(
+    val id: Long,
+    val displayName: String,
+    val at: Long,
+    val undoneAt: Long?,
+    val undoOf: Long?,
+    val changes: Map<String, TagChange>,
+    val conflicts: Set<String>,
+)
+
 internal class TagWriteSession(
     private val directory: File,
     private val tagger: TaggerClient,
@@ -61,14 +71,29 @@ internal class TagWriteSession(
     private val preparation = TagWritePreparation(copies, tagger, availableBytes)
     private val writing = Mutex()
 
-    suspend fun prepareUndo(id: Long, target: TagWriteTarget): TagUndo? {
-        val original = undoable(id, target) ?: return null
-        val record = decodeRecord(original.diff) ?: return null
+    suspend fun historyForTrack(identityId: Long): List<TagWriteHistoryEntry> = withContext(Dispatchers.IO) {
+        journal.forTrack(identityId).mapNotNull { entry ->
+            val record = decodeRecord(entry.diff) ?: return@mapNotNull null
+            TagWriteHistoryEntry(
+                entry.id, entry.displayName, entry.verifiedAt ?: entry.createdAt, entry.undoneAt,
+                record.undoOf, record.changes, record.conflicts,
+            )
+        }
+    }
+
+    suspend fun prepareUndo(id: Long, target: TagWriteTarget): TagUndo? = writing.withLock {
+        val original = undoable(id, target) ?: return@withLock null
+        val record = decodeRecord(original.diff) ?: return@withLock null
+        for (pending in journal.resumableForTrack(target.identityId)) {
+            if (!pending.matches(target)) continue
+            val reversal = decodeRecord(pending.diff) ?: continue
+            if (reversal.undoOf == id) return@withLock TagUndo(QueuedTagWrite.Ready(pending.id), reversal.conflicts)
+        }
         var conflicts = emptySet<String>()
         val queued = prepare(target, undoOf = id, item = null) { report ->
             TagDiff.undo(report.properties, record.changes).also { conflicts = it.conflicts }
         }
-        return TagUndo(queued, conflicts)
+        TagUndo(queued, conflicts)
     }
 
     suspend fun prepare(target: TagWriteTarget, diff: (TagReport) -> TagDiff): QueuedTagWrite =

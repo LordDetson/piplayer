@@ -178,6 +178,15 @@ class TagApplyPlansTest {
             assertThat(after.properties).isEqualTo(before.properties + ("TITLE" to listOf(title)))
             assertThat(after.content?.key).isEqualTo(key)
             assertThat(writer.results(batchUuid)).isEqualTo(mapOf("written" to 1))
+
+            val written = writer.historyForTrack(identity).single()
+            val plan = requireNotNull(writer.undoPlan(identity, written.id))
+            assertThat(plan.uri).isEqualTo(uri)
+            assertThat(writer.applyUndo(plan)).isEqualTo(TagUndoOutcome.Restored(emptySet()))
+            val restored = report()
+            assertThat(restored.properties).isEqualTo(before.properties)
+            assertThat(restored.content?.key).isEqualTo(key)
+            assertThat(writer.historyForTrack(identity).last().undoneAt).isNotNull()
         } finally {
             client.close()
             resolver.delete(uri, null, null)

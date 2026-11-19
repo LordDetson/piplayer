@@ -471,4 +471,17 @@
     <string name="batch_tag_write_start">Перейти к запросу доступа</string>
     <string name="batch_tag_write_error">Не удалось записать теги. Можно попробовать снова.</string>
     <string name="batch_tag_write_cancelled">Запрос доступа отменён. Решения по распознаванию сохранены в PiPlayer.</string>
+    <string name="tag_history_open">История тегов</string>
+    <string name="tag_history_empty">Изменений тегов в файле пока нет.</string>
+    <string name="tag_history_transition">%1$s → %2$s</string>
+    <string name="tag_history_conflicts">Сохранены правки из другого приложения (%1$s).</string>
+    <string name="tag_history_empty_value">Пусто</string>
+    <string name="tag_history_undo">Отменить запись тегов</string>
+    <string name="tag_history_undone">Запись отменена</string>
+    <string name="tag_history_error">Не удалось загрузить историю тегов.</string>
+    <string name="tag_history_undo_error">Не удалось отменить изменение тегов.</string>
+    <string name="tag_history_unavailable">Файл недоступен для отката.</string>
+    <string name="tag_history_cancelled">Откат отменён.</string>
+    <string name="tag_history_no_change">Нет тегов, которые можно восстановить.</string>
+    <string name="tag_history_deferred">Файл используется при воспроизведении. Повторите откат позже.</string>
 </resources>

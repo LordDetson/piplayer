@@ -184,7 +184,13 @@ class TrackDetailsViewModel(application: Application, private val fileId: Long?,
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun TrackDetailsScreen(fileId: Long?, uri: String?, snackbar: SnackbarHostState, onBack: () -> Unit) {
+fun TrackDetailsScreen(
+    fileId: Long?,
+    uri: String?,
+    snackbar: SnackbarHostState,
+    onBack: () -> Unit,
+    onTagHistory: ((Long) -> Unit)? = null,
+) {
     val app = LocalContext.current.applicationContext as Application
     val model = viewModel(key = "details ${fileId ?: uri}") { TrackDetailsViewModel(app, fileId, uri) }
     val state by model.state.collectAsStateWithLifecycle()
@@ -195,7 +201,13 @@ fun TrackDetailsScreen(fileId: Long?, uri: String?, snackbar: SnackbarHostState,
                 navigationIcon = {
                     IconButton(onClick = onBack) { Icon(painterResource(R.drawable.ic_back), stringResource(R.string.library_back)) }
                 },
-                actions = { io.github.lorddetson.piplayer.ui.identification.IdentifyAction(fileId, uri) },
+                actions = {
+                    io.github.lorddetson.piplayer.ui.identification.IdentifyAction(fileId, uri)
+                    val identityId = (state as? DetailsState.Found)?.details?.target?.identityId
+                    if (identityId != null && onTagHistory != null) {
+                        TextButton(onClick = { onTagHistory(identityId) }) { Text(stringResource(R.string.tag_history_open)) }
+                    }
+                },
             )
         },
         snackbarHost = { SnackbarHost(snackbar) },
