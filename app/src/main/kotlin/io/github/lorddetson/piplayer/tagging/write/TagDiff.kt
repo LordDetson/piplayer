@@ -1,5 +1,6 @@
 package io.github.lorddetson.piplayer.tagging.write
 
+import io.github.lorddetson.piplayer.tagging.TagArtwork
 import java.text.Normalizer
 import kotlinx.serialization.Serializable
 
@@ -10,6 +11,7 @@ internal data class TagDiff(
     val properties: Map<String, List<String>>,
     val changes: Map<String, TagChange>,
     val conflicts: Set<String> = emptySet(),
+    val frontCovers: List<TagArtwork>? = null,
 ) {
     companion object {
         fun between(

@@ -473,6 +473,8 @@
     <string name="tag_history_open">Tag history</string>
     <string name="tag_history_empty">No file tag changes have been recorded.</string>
     <string name="tag_history_transition">%1$s → %2$s</string>
+    <string name="tag_history_front_cover">Front cover</string>
+    <string name="tag_history_cover_count">Front covers %1$d → %2$d</string>
     <string name="tag_history_conflicts">Kept edits from another app (%1$s).</string>
     <string name="tag_history_empty_value">Empty</string>
     <string name="tag_history_undo">Undo tag change</string>

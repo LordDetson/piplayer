@@ -4,6 +4,8 @@ import android.net.Uri
 import android.os.ParcelFileDescriptor
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.github.lorddetson.piplayer.TestFiles
+import io.github.lorddetson.piplayer.fakes.Fixtures
+import io.github.lorddetson.piplayer.tagging.TagArtwork
 import io.github.lorddetson.piplayer.tagging.TagReadGuard
 import io.github.lorddetson.piplayer.tagging.TagTarget
 import io.github.lorddetson.piplayer.tagging.TaggerResult
@@ -81,6 +83,54 @@ class TagWriteSessionTest {
             assertThat(TagWriteJournal(reopened).interrupted()).isEmpty()
         } finally {
             reopened.close()
+        }
+    }
+
+    @Test
+    fun aCoverOnlyWriteCanBeVerifiedAndUndoneFromItsSnapshot() = runBlocking<Unit> {
+        TestFiles.assets.open("playback/cover-back-then-front.mp3").use { source ->
+            original.outputStream().use { source.copyTo(it) }
+        }
+        val target = target()
+        val before = read(target)
+        val replacement = Fixtures.bytes("caa/front-250.jpg")
+        val artwork = TagArtwork.of("image/jpeg", "", replacement)
+        val database = UserDatabase.open(context, databaseName)
+        try {
+            val writer = session(database)
+            val selected = writer.prepare(target) { report -> TagDiff(report.properties, emptyMap(), frontCovers = listOf(artwork)) }
+            assertThat(selected).isInstanceOf(QueuedTagWrite.Ready::class.java)
+            val written = selected as QueuedTagWrite.Ready
+            assertThat(writer.write(written.id, target, consent = true)).isEqualTo(WriteBackResult.VERIFIED)
+
+            val after = read(target)
+            assertThat(after.content?.key).isEqualTo(target.contentKey)
+            assertThat(after.properties).isEqualTo(before.properties)
+            assertThat(after.pictures.single { it.pictureType == "Front Cover" }.sizeBytes).isEqualTo(replacement.size)
+            assertThat(after.pictures.single { it.pictureType == "Back Cover" }).isEqualTo(before.pictures.single { it.pictureType == "Back Cover" })
+
+            val undo = requireNotNull(writer.prepareUndo(written.id, target))
+            val reversal = undo.queued as QueuedTagWrite.Ready
+            assertThat(writer.write(reversal.id, target, consent = false)).isEqualTo(WriteBackResult.NEEDS_CONSENT)
+            assertThat(writer.write(reversal.id, target, consent = true)).isEqualTo(WriteBackResult.VERIFIED)
+            assertThat(read(target).pictures).isEqualTo(before.pictures)
+            assertThat(read(target).content?.key).isEqualTo(target.contentKey)
+
+            val second = writer.prepare(target) { report ->
+                TagDiff(report.properties, emptyMap(), frontCovers = listOf(artwork))
+            } as QueuedTagWrite.Ready
+            assertThat(writer.write(second.id, target, consent = true)).isEqualTo(WriteBackResult.VERIFIED)
+            val external = artwork.copy(description = "Edited elsewhere")
+            ParcelFileDescriptor.open(original, ParcelFileDescriptor.MODE_READ_WRITE).use {
+                assertThat(client.writeWorkingCopy(target.taggerTarget, it, emptyMap(), frontCovers = listOf(external)))
+                    .isEqualTo(TaggerResult.Replied(true))
+            }
+            val conflict = requireNotNull(writer.prepareUndo(second.id, target))
+            assertThat(conflict.queued).isEqualTo(QueuedTagWrite.Skipped(PreparationFailure.NO_CHANGES))
+            assertThat(conflict.conflicts).containsExactly(FRONT_COVER)
+            assertThat(read(target).pictures.single { it.pictureType == FRONT_COVER }.description).isEqualTo("Edited elsewhere")
+        } finally {
+            database.close()
         }
     }
 

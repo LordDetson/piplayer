@@ -11,6 +11,7 @@ import io.github.lorddetson.piplayer.library.FakeMediaIndex
 import io.github.lorddetson.piplayer.library.FakeMediaIndex.Companion.row
 import io.github.lorddetson.piplayer.library.db.LibraryDatabase
 import io.github.lorddetson.piplayer.library.sync.LibrarySync
+import io.github.lorddetson.piplayer.nativelib.taglib.Id3v1WritePolicy
 import io.github.lorddetson.piplayer.nativelib.taglib.TagReadError
 import io.github.lorddetson.piplayer.nativelib.taglib.TagReader
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.LONG_FIXTURE
@@ -97,6 +98,23 @@ class TaggerClientTest {
         assertThat(updated.value.report.properties)
             .isEqualTo(original.value.report.properties + ("TITLE" to listOf(title)))
         assertThat(countOf(target)).isZero()
+    }
+
+    @Test
+    fun theTaggerAppliesTheExplicitLegacyTagPolicy() = runBlocking<Unit> {
+        val file = TestFiles.copy("tagging/legacy-id3v1.mp3")
+        val writer = client()
+        val before = file.readBytes()
+        val originalKey = (writer.readFile(file, target) as TaggerResult.Replied).value.report.content?.key
+        assertThat(originalKey).isNotNull()
+
+        ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_WRITE).use { fd ->
+            assertThat(writer.writeWorkingCopy(target, fd, emptyMap(), Id3v1WritePolicy.REMOVE))
+                .isEqualTo(TaggerResult.Replied(true))
+        }
+
+        assertThat(file.readBytes().contentEquals(before.copyOf(before.size - 128))).isTrue()
+        assertThat((writer.readFile(file, target) as TaggerResult.Replied).value.report.content?.key).isEqualTo(originalKey)
     }
 
     @Test

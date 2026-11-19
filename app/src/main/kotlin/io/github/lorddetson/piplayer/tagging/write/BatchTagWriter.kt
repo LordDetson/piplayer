@@ -5,8 +5,11 @@ import android.content.IntentSender
 import android.net.Uri
 import android.os.ParcelFileDescriptor
 import android.os.storage.StorageManager
+import io.github.lorddetson.piplayer.covers.Covers
 import io.github.lorddetson.piplayer.library.db.LibraryAccess
 import io.github.lorddetson.piplayer.library.identity.Hex
+import io.github.lorddetson.piplayer.tagging.TagArtwork
+import io.github.lorddetson.piplayer.tagging.fingerprints
 import io.github.lorddetson.piplayer.tagging.Tagger
 import io.github.lorddetson.piplayer.tagging.TaggerClient
 import io.github.lorddetson.piplayer.tagging.TaggerResult
@@ -39,7 +42,8 @@ internal data class ManualTagPlan(
 internal data class ReviewTagPlan(
     val file: ManualTagPlan,
     val decisionIds: Set<Long>,
-    val changes: Map<String, List<String>>,
+    val selection: TagFileSelection,
+    val expectedCovers: List<String>?,
 )
 
 internal sealed interface TagUndoOutcome {
@@ -56,10 +60,11 @@ internal class BatchTagWriter(
     database: UserDatabase = UserData.database(context),
     private val tagger: TaggerClient = Tagger.client(context),
     staging: File = File(context.applicationContext.noBackupFilesDir, "tag-writes"),
+    loadCover: suspend (Long) -> TagArtwork? = { id -> Covers.saved(context).file(id)?.let { encodeFrontCover(it) } },
 ) {
     private val app = context.applicationContext
     private val queue = TagApplyQueue(database)
-    private val plans = TagApplyPlans(library, database)
+    private val plans = TagApplyPlans(library, database, loadCover)
     private val planning = Mutex()
     private val waitingWrites = MutableStateFlow<Map<String, Set<Long>>>(emptyMap())
     val waitingByBatch = waitingWrites.asStateFlow()
@@ -130,9 +135,24 @@ internal class BatchTagWriter(
     suspend fun reviewPlan(fileId: Long, decisionId: Long, editId: Long?): ReviewTagPlan? {
         val file = manualPlan(fileId) ?: return null
         val ids = setOfNotNull(decisionId, editId)
-        val changes = reviewChanges(file, ids) ?: return null
-        if (TagDiff.between(file.properties, changes).changes.isEmpty()) return null
-        return ReviewTagPlan(file.copy(target = file.target.copy(decisionId = editId ?: decisionId)), ids, changes)
+        val values = plans.reviewValues(file.target.identityId, ids) ?: return null
+        val selected = plans.selection(values) ?: return null
+        val diff = selected.diff(file.format, file.properties)
+        val oldCovers = if (diff.frontCovers != null) readFrontCovers(file) ?: return null else null
+        val stillToWrite = diff.frontCovers.takeUnless { it == oldCovers }
+        if (diff.changes.isEmpty() && stillToWrite == null) return null
+        return ReviewTagPlan(
+            file.copy(target = file.target.copy(decisionId = editId ?: decisionId)), ids,
+            selected.copy(frontCovers = stillToWrite), oldCovers?.fingerprints().takeIf { stillToWrite != null },
+        )
+    }
+
+    private suspend fun readFrontCovers(file: ManualTagPlan): List<TagArtwork>? = withContext(Dispatchers.IO) {
+        openRead(file.target.uri).use { descriptor ->
+            val read = tagger.read(file.target.taggerTarget, descriptor, file.target.displayName, frontCoverData = true) as? TaggerResult.Replied
+            val report = read?.value?.report ?: return@use null
+            report.frontCovers.takeIf { report.content?.key == file.target.contentKey && report.error == null }
+        }
     }
 
     suspend fun applyReview(plan: ReviewTagPlan, onWaiting: (Boolean) -> Unit): WriteBackResult? {
@@ -142,8 +162,12 @@ internal class BatchTagWriter(
                 val lease = playbackTagWriteGate.tryWrite(uri)
                 if (lease != null) return lease.use {
                     onWaiting(false)
-                    if (reviewChanges(plan.file, plan.decisionIds) != plan.changes) WriteBackResult.SOURCE_CHANGED
-                    else applySelection(plan.file, plan.changes, emptySet())
+                    if (plans.reviewValues(plan.file.target.identityId, plan.decisionIds) != plan.selection.values) {
+                        WriteBackResult.SOURCE_CHANGED
+                    } else {
+                        val diff = plan.selection.diff(plan.file.format, plan.file.properties)
+                        applySelection(plan.file, diff.changes.mapValues { it.value.after }, emptySet(), diff.frontCovers, plan.expectedCovers)
+                    }
                 }
                 onWaiting(true)
                 playbackTagWriteGate.awaitAnyWritable(setOf(uri))
@@ -152,9 +176,6 @@ internal class BatchTagWriter(
             onWaiting(false)
         }
     }
-
-    private suspend fun reviewChanges(file: ManualTagPlan, ids: Set<Long>): Map<String, List<String>>? =
-        plans.reviewValues(file.target.identityId, ids)?.let { projectTags(file.format, file.properties, it).properties }
 
     suspend fun applyManual(
         plan: ManualTagPlan,
@@ -169,18 +190,21 @@ internal class BatchTagWriter(
         plan: ManualTagPlan,
         changes: Map<String, List<String>>,
         fillEmptyOnly: Set<String>,
+        frontCovers: List<TagArtwork>? = null,
+        expectedCovers: List<String>? = null,
     ): WriteBackResult? {
         if (plan.format == TagFileFormat.UNSUPPORTED) return null
         val intended = TagDiff.between(plan.properties, changes, fillEmptyOnly).changes
-        if (intended.isEmpty()) return null
+        if (intended.isEmpty() && frontCovers == null) return null
         val live = plans.manualTarget(plan.fileId) ?: return null
         val target = plan.target
         if (live != target.copy(decisionId = null)) return null
         var changed = false
-        val queued = session.prepare(target) { report ->
-            changed = intended.any { (key, change) -> report.properties[key].orEmpty() != change.before }
+        val queued = session.prepare(target, inspectFrontCovers = expectedCovers != null) { report ->
+            changed = intended.any { (key, change) -> report.properties[key].orEmpty() != change.before } ||
+                (expectedCovers != null && report.frontCovers?.fingerprints() != expectedCovers)
             if (changed) TagDiff(report.properties, emptyMap())
-            else TagDiff.between(report.properties, intended.mapValues { (_, change) -> change.after })
+            else TagDiff.between(report.properties, intended.mapValues { (_, change) -> change.after }).copy(frontCovers = frontCovers)
         }
         if (changed) return WriteBackResult.SOURCE_CHANGED
         val ready = queued as? QueuedTagWrite.Ready ?: return null

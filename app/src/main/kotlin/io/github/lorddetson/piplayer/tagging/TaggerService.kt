@@ -8,6 +8,7 @@ import android.os.Process
 import io.github.lorddetson.piplayer.ProcessRole
 import io.github.lorddetson.piplayer.nativelib.taglib.Pictures
 import io.github.lorddetson.piplayer.nativelib.taglib.TagReader
+import io.github.lorddetson.piplayer.nativelib.taglib.TagReadResult
 import io.github.lorddetson.piplayer.nativelib.taglib.TagWriter
 import io.github.lorddetson.piplayer.tagging.contentkey.ByteSource
 import io.github.lorddetson.piplayer.tagging.contentkey.ContentMeasure
@@ -23,12 +24,14 @@ class TaggerService : Service() {
     private val binder = object : ITagger.Stub() {
         override fun pid(): Int = Process.myPid()
 
-        override fun read(file: ParcelFileDescriptor, fileName: String?, markLegacy: Boolean): TaggerReply = file.use {
-            val read = TagReader.read(it.fd, fileName, Pictures.SIZES, markLegacy)
+        override fun read(file: ParcelFileDescriptor, fileName: String?, markLegacy: Boolean, frontCoverData: Boolean): TaggerReply = file.use {
+            val read = TagReader.read(it.fd, fileName, if (frontCoverData) Pictures.WRITE_FRONT else Pictures.SIZES, markLegacy)
             val source = FdByteSource(it.fileDescriptor)
             val content = ContentMeasure.of(source, read) { TagReader.mpegLayout(it.fd) }
             val version = if (content?.token == KeyFormat.MP3.token) id3Version(source) else null
-            val report = TagReport.of(read).copy(content = content, id3Version = version)
+            val frontCovers = (read as? TagReadResult.Success)?.pictures?.takeIf { frontCoverData && it.all { picture -> picture.data != null } }
+                ?.map { picture -> TagArtwork.of(picture.mimeType, picture.description, checkNotNull(picture.data)) }
+            val report = TagReport.of(read).copy(content = content, id3Version = version, frontCovers = frontCovers)
             TaggerReply(TagReplies.pack(report, TaggerClient.spillDir(this@TaggerService)))
         }
 
@@ -45,7 +48,10 @@ class TaggerService : Service() {
         override fun writeWorkingCopy(file: ParcelFileDescriptor, changes: ParcelFileDescriptor): Boolean =
             file.use { audio ->
                 ParcelFileDescriptor.AutoCloseInputStream(changes).bufferedReader().use { reader ->
-                    lowPriority { TagWriter.write(audio.fd, Json.decodeFromString(reader.readText())) }
+                    lowPriority {
+                        val edits = Json.decodeFromString<TagFileEdits>(reader.readText())
+                        TagWriter.write(audio.fd, edits.properties, edits.id3v1Policy, edits.frontCovers?.map(TagArtwork::picture))
+                    }
                 }
             }
 

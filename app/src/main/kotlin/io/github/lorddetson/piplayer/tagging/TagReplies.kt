@@ -61,6 +61,7 @@ object TagReplies {
     private fun strings(report: TagReport): Sequence<String> =
         report.properties.asSequence().flatMap { (key, values) -> sequenceOf(key) + values } +
             report.pictures.asSequence().flatMap { sequenceOf(it.pictureType, it.mimeType, it.description) } +
+            report.frontCovers.orEmpty().asSequence().flatMap { sequenceOf(it.mimeType, it.description, it.image) } +
             sequenceOf(report.container, report.codec).filterNotNull()
 
     /** The length of [text] in UTF-8, as encodeToByteArray gives it (an unpaired surrogate becomes U+FFFD). */

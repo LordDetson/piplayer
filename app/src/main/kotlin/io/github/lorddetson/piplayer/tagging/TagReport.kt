@@ -9,7 +9,7 @@ import kotlinx.serialization.Serializable
 
 /**
  * What `:tagger` found in a file, as it crosses to the main process (docs/library.md §4.2): TagLib's property map, the
- * audio properties and a summary of each embedded picture, never its bytes; or why TagLib could not read the file.
+ * audio properties and a summary of its embedded pictures; or why TagLib could not read the file.
  */
 @Serializable
 data class TagReport(
@@ -23,6 +23,8 @@ data class TagReport(
     val content: Content? = null,
     /** The major version of a leading ID3v2 header in an MP3. */
     val id3Version: Int? = null,
+    /** Front pictures read for a write. Null when omitted or any front image could not be read in full. */
+    val frontCovers: List<TagArtwork>? = null,
 ) {
 
     /** The content key in hex, its format token and how far the file's header settles its length (TI §3.1). */

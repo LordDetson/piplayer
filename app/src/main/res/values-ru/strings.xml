@@ -482,6 +482,8 @@
     <string name="tag_history_open">История тегов</string>
     <string name="tag_history_empty">Изменений тегов в файле пока нет.</string>
     <string name="tag_history_transition">%1$s → %2$s</string>
+    <string name="tag_history_front_cover">Лицевая обложка</string>
+    <string name="tag_history_cover_count">Лицевые обложки %1$d → %2$d</string>
     <string name="tag_history_conflicts">Сохранены правки из другого приложения (%1$s).</string>
     <string name="tag_history_empty_value">Пусто</string>
     <string name="tag_history_undo">Отменить запись тегов</string>

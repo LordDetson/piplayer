@@ -114,8 +114,8 @@
     <string name="review_cover_loading">Загрузка обложки</string>
     <string name="review_cover_failed">Обложку не удалось загрузить.</string>
     <string name="review_apply">Применить</string>
-    <string name="review_also_write">Записать текстовые теги и в файл</string>
-    <string name="review_file_write_unavailable">В этом файле нет выбранных текстовых тегов, которые можно обновить.</string>
+    <string name="review_also_write">Записать теги и в файл</string>
+    <string name="review_file_write_unavailable">В этом файле нет выбранных тегов или обложек, которые можно обновить.</string>
     <string name="review_file_write_waiting">Запись начнётся, когда плеер освободит этот файл.</string>
     <string name="review_file_write_changed">Файл или выбранные теги изменились до записи. Проверьте текущие значения.</string>
     <string name="review_file_write_failed">Результат сохранён в PiPlayer. Подтвердить обновление файла не удалось.</string>

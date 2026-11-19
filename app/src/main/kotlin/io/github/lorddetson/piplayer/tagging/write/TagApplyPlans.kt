@@ -10,6 +10,7 @@ import io.github.lorddetson.piplayer.library.identity.Place
 import io.github.lorddetson.piplayer.library.values.DecidedField
 import io.github.lorddetson.piplayer.library.values.DecisionKind
 import io.github.lorddetson.piplayer.library.values.DecisionResolver
+import io.github.lorddetson.piplayer.tagging.TagArtwork
 import io.github.lorddetson.piplayer.tagging.TagReport
 import io.github.lorddetson.piplayer.tagging.TagTarget
 import io.github.lorddetson.piplayer.userdata.AppliedChangeEntity
@@ -21,7 +22,19 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 
-internal class TagApplyPlans(private val library: LibraryAccess, private val user: UserDatabase) {
+internal data class TagFileSelection(val values: Map<DecidedField, String?>, val frontCovers: List<TagArtwork>?) {
+    fun diff(format: TagFileFormat, properties: Map<String, List<String>>): TagDiff {
+        val projected = projectTags(format, properties, values)
+        return TagDiff.between(properties, projected.properties)
+            .copy(frontCovers = frontCovers.takeUnless { format == TagFileFormat.UNSUPPORTED })
+    }
+}
+
+internal class TagApplyPlans(
+    private val library: LibraryAccess,
+    private val user: UserDatabase,
+    private val loadCover: suspend (Long) -> TagArtwork? = { null },
+) {
     suspend fun diff(item: TagApplyItem): ((TagReport) -> TagDiff)? {
         val uuid = Hex.mbidBytes(item.planId) ?: return null
         val selected = user.decisions().decision(item.decisionId) ?: return null
@@ -33,11 +46,15 @@ internal class TagApplyPlans(private val library: LibraryAccess, private val use
         }.mapTo(HashSet()) { it.row.id }
         val desired = DecisionResolver.resolve(stored.map { it.values })
             .filterValues { it.decisionId in approved }.mapValues { it.value.value }
-        if (desired.isEmpty()) return null
-        return { report ->
-            val projection = projectTags(report.writeFormat(), report.properties, desired)
-            TagDiff.between(report.properties, projection.properties)
-        }
+        val selection = selection(desired) ?: return null
+        return { report -> selection.diff(report.writeFormat(), report.properties) }
+    }
+
+    suspend fun selection(values: Map<DecidedField, String?>): TagFileSelection? {
+        if (values.isEmpty()) return null
+        val coverId = values[DecidedField.COVER]
+        val cover = if (coverId != null) loadCover(coverId.toLongOrNull() ?: return null) ?: return null else null
+        return TagFileSelection(values, cover?.let(::listOf))
     }
 
     suspend fun target(item: TagApplyItem): TagWriteTarget? {

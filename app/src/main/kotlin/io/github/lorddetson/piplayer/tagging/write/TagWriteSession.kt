@@ -6,10 +6,12 @@ import android.system.ErrnoException
 import android.system.Os
 import android.system.StructStat
 import io.github.lorddetson.piplayer.library.identity.Hex
+import io.github.lorddetson.piplayer.tagging.TagArtwork
 import io.github.lorddetson.piplayer.tagging.TagReport
 import io.github.lorddetson.piplayer.tagging.TagTarget
 import io.github.lorddetson.piplayer.tagging.TaggerClient
 import io.github.lorddetson.piplayer.tagging.TaggerResult
+import io.github.lorddetson.piplayer.tagging.fingerprints
 import io.github.lorddetson.piplayer.userdata.AppliedChangeEntity
 import io.github.lorddetson.piplayer.userdata.TagApplyItem
 import io.github.lorddetson.piplayer.userdata.TagBackupEntity
@@ -52,6 +54,7 @@ internal data class TagWriteHistoryEntry(
     val undoOf: Long?,
     val changes: Map<String, TagChange>,
     val conflicts: Set<String>,
+    val coverChange: TagChange? = null,
 )
 
 internal class TagWriteSession(
@@ -86,7 +89,7 @@ internal class TagWriteSession(
             val record = TagWriteRecord.decode(entry.diff) ?: return@mapNotNull null
             TagWriteHistoryEntry(
                 entry.id, entry.displayName, entry.verifiedAt ?: entry.createdAt, entry.undoneAt,
-                record.undoOf, record.changes, record.conflicts,
+                record.undoOf, record.changes, record.conflicts, record.coverChange,
             )
         }
 
@@ -98,29 +101,41 @@ internal class TagWriteSession(
             val reversal = TagWriteRecord.decode(pending.diff) ?: continue
             if (reversal.undoOf == id) return@withLock TagUndo(QueuedTagWrite.Ready(pending.id), reversal.conflicts)
         }
+        val coverChange = record.coverChange
+        val savedCovers = if (coverChange != null) readCoverSnapshot(journal.backup(original.backupId)) else null
         var conflicts = emptySet<String>()
-        val queued = prepare(target, undoOf = id, item = null) { report ->
-            TagDiff.undo(report.properties, record.changes).also { conflicts = it.conflicts }
+        val queued = prepare(target, undoOf = id, item = null, inspectFrontCovers = coverChange != null) { report ->
+            var selected = TagDiff.undo(report.properties, record.changes)
+            if (coverChange != null) {
+                selected = if (savedCovers != null && savedCovers.fingerprints() == coverChange.before &&
+                    report.frontCovers?.fingerprints() == coverChange.after
+                ) selected.copy(frontCovers = savedCovers) else selected.copy(conflicts = selected.conflicts + FRONT_COVER)
+            }
+            selected.also { conflicts = it.conflicts }
         }
         TagUndo(queued, conflicts)
     }
 
-    suspend fun prepare(target: TagWriteTarget, diff: (TagReport) -> TagDiff): QueuedTagWrite =
-        prepare(target, undoOf = null, item = null, diff)
+    suspend fun prepare(target: TagWriteTarget, inspectFrontCovers: Boolean = false, diff: (TagReport) -> TagDiff): QueuedTagWrite =
+        prepare(target, undoOf = null, item = null, inspectFrontCovers, diff)
 
     suspend fun prepareForApply(target: TagWriteTarget, item: TagApplyItem, diff: (TagReport) -> TagDiff): QueuedTagWrite =
-        prepare(target, undoOf = null, item, diff)
+        prepare(target, undoOf = null, item, diff = diff)
 
     private suspend fun prepare(
         target: TagWriteTarget,
         undoOf: Long?,
         item: TagApplyItem?,
+        inspectFrontCovers: Boolean = false,
         diff: (TagReport) -> TagDiff,
     ): QueuedTagWrite = withContext(Dispatchers.IO) {
-        val result = preparation.prepare(target.taggerTarget, { openForRead(target.uri) }, target.displayName, target.contentKey, diff)
+        val result = preparation.prepare(
+            target.taggerTarget, { openForRead(target.uri) }, target.displayName, target.contentKey, inspectFrontCovers, diff,
+        )
         if (result is PreparationFailure) return@withContext QueuedTagWrite.Skipped(result)
         val copy = result as PreparedTagCopy
         val snapshot = File(snapshots, copy.file.nameWithoutExtension + ".json")
+        val artworkSnapshot = copy.coverChange?.let { File(snapshots, copy.file.nameWithoutExtension + "-covers.json") }
         var journaled = false
         try {
             if (!snapshots.isDirectory && !snapshots.mkdirs()) throw IOException("Could not create the tag snapshot directory")
@@ -128,11 +143,16 @@ internal class TagWriteSession(
                 it.write(Json.encodeToString(copy.before.properties).toByteArray())
                 it.fd.sync()
             }
+            artworkSnapshot?.outputStream()?.use {
+                it.write(Json.encodeToString(checkNotNull(copy.before.frontCovers)).encodeToByteArray())
+                it.fd.sync()
+            }
             val at = System.currentTimeMillis()
             val backup = TagBackupEntity(
                 identityId = target.identityId, volumeName = target.volume, relativePath = target.relativePath,
                 displayName = target.displayName, createdAt = at, tagsPath = "snapshots/${snapshot.name}",
-                tagsHash = sha256(snapshot), coverPath = null, coverHash = null, id3Version = copy.before.id3Version,
+                tagsHash = sha256(snapshot), coverPath = artworkSnapshot?.let { "snapshots/${it.name}" },
+                coverHash = artworkSnapshot?.let(::sha256), id3Version = copy.before.id3Version,
             )
             val entry = AppliedChangeEntity(
                 identityId = target.identityId, decisionId = target.decisionId, batchUuid = target.batchUuid,
@@ -143,6 +163,7 @@ internal class TagWriteSession(
                 diff = TagWriteRecord(
                     copy.originalSha256, copy.originalDevice, copy.originalInode, copy.diff.changes, undoOf, copy.diff.conflicts,
                     markedTagHash = true,
+                    coverChange = copy.coverChange,
                 ).encode(),
                 createdAt = at,
             )
@@ -157,8 +178,23 @@ internal class TagWriteSession(
         } finally {
             if (!journaled) {
                 snapshot.delete()
+                artworkSnapshot?.delete()
                 copy.file.delete()
             }
+        }
+    }
+
+    private suspend fun readCoverSnapshot(backup: TagBackupEntity?): List<TagArtwork>? = withContext(Dispatchers.IO) {
+        val path = backup?.coverPath ?: return@withContext null
+        val hash = backup.coverHash ?: return@withContext null
+        try {
+            val file = File(directory, path).canonicalFile
+            if (file.parentFile != snapshots.canonicalFile || !MessageDigest.isEqual(hash, sha256(file))) return@withContext null
+            Json.decodeFromString<List<TagArtwork>>(file.readText())
+        } catch (_: IOException) {
+            null
+        } catch (_: IllegalArgumentException) {
+            null
         }
     }
 
@@ -283,3 +319,5 @@ internal class TagWriteSession(
     }
 
 }
+
+internal const val FRONT_COVER = "Front Cover"

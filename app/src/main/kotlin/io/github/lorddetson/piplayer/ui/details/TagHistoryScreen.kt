@@ -38,6 +38,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.lorddetson.piplayer.PiPlayerApplication
 import io.github.lorddetson.piplayer.R
 import io.github.lorddetson.piplayer.tagging.write.BatchTagWriter
+import io.github.lorddetson.piplayer.tagging.write.FRONT_COVER
 import io.github.lorddetson.piplayer.tagging.write.TagUndoOutcome
 import io.github.lorddetson.piplayer.tagging.write.TagUndoPlan
 import io.github.lorddetson.piplayer.tagging.write.TagWriteHistoryEntry
@@ -199,8 +200,13 @@ internal fun TagHistoryContent(
                         ))
                     }
                 }
+                entry.coverChange?.let { change ->
+                    Text(stringResource(R.string.tag_history_cover_count, change.before.size, change.after.size))
+                }
                 if (entry.conflicts.isNotEmpty()) {
-                    Text(stringResource(R.string.tag_history_conflicts, entry.conflicts.sorted().joinToString()))
+                    val cover = stringResource(R.string.tag_history_front_cover)
+                    val fields = entry.conflicts.sorted().joinToString { if (it == FRONT_COVER) cover else it }
+                    Text(stringResource(R.string.tag_history_conflicts, fields))
                 }
                 if (entry.undoneAt != null) {
                     Text(stringResource(R.string.tag_history_undone), style = MaterialTheme.typography.labelMedium)

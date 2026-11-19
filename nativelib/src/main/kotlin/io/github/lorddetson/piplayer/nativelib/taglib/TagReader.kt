@@ -46,6 +46,9 @@ enum class Pictures {
 
     /** The pictures with their bytes. */
     DATA,
+
+    /** Front pictures of the tag the writer edits. Oversized pictures carry their size without bytes. */
+    WRITE_FRONT,
 }
 
 /**

@@ -16,6 +16,7 @@ internal data class TagWriteRecord(
     val undoOf: Long? = null,
     val conflicts: Set<String> = emptySet(),
     val markedTagHash: Boolean = false,
+    val coverChange: TagChange? = null,
 ) {
     fun encode(): ByteArray {
         val bytes = ByteArrayOutputStream()

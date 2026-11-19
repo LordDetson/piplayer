@@ -127,8 +127,8 @@
     <string name="review_cover_loading">Loading the cover</string>
     <string name="review_cover_failed">The cover could not be loaded.</string>
     <string name="review_apply">Apply</string>
-    <string name="review_also_write">Also write text tags to file</string>
-    <string name="review_file_write_unavailable">No selected text tags can be updated in this file.</string>
+    <string name="review_also_write">Also write tags to file</string>
+    <string name="review_file_write_unavailable">No selected tags or covers can be updated in this file.</string>
     <string name="review_file_write_waiting">File write is waiting for playback to release this track.</string>
     <string name="review_file_write_changed">The file or the selected tags changed before writing. Review the latest values.</string>
     <string name="review_file_write_failed">The result was saved in PiPlayer. The file update could not be verified.</string>

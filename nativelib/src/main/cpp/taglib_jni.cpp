@@ -59,6 +59,7 @@ namespace {
 // Picture modes, the ordinals of Pictures in TagReader.kt.
 constexpr jint PICTURES_SIZES = 1;
 constexpr jint PICTURES_DATA = 2;
+constexpr jint PICTURES_WRITE_FRONT = 3;
 
 // Status codes shared with TagReader.kt.
 constexpr jint OK = 0;
@@ -172,13 +173,31 @@ bool sendProperties(JNIEnv *env, jobject sink, const TagLib::PropertyMap &proper
   return true;
 }
 
-/** Sends each picture with its bytes, or with its size only unless [withData]. */
-bool sendPictures(JNIEnv *env, jobject sink, TagLib::FileRef &file, bool withData) {
-  for (const auto &picture : file.complexProperties("PICTURE")) {
+/** Sends picture sizes, display pictures or the writer's exact front pictures. */
+bool sendPictures(JNIEnv *env, jobject sink, TagLib::FileRef &file, jint mode) {
+  const bool writing = mode == PICTURES_WRITE_FRONT;
+  TagLib::List<TagLib::VariantMap> pictures;
+  if (writing) {
+    if (auto *mpeg = dynamic_cast<TagLib::MPEG::File *>(file.file())) {
+      if (mpeg->hasID3v2Tag()) pictures = mpeg->ID3v2Tag()->complexProperties("PICTURE");
+    } else if (auto *wav = dynamic_cast<TagLib::RIFF::WAV::File *>(file.file())) {
+      if (wav->hasID3v2Tag()) pictures = wav->ID3v2Tag()->complexProperties("PICTURE");
+    } else {
+      pictures = file.complexProperties("PICTURE");
+    }
+  } else {
+    pictures = file.complexProperties("PICTURE");
+  }
+  const bool mp4 = dynamic_cast<TagLib::MP4::File *>(file.file()) != nullptr;
+  bool first = true;
+  for (const auto &picture : pictures) {
+    const bool front = mp4 ? first : picture.value("pictureType").toString() == "Front Cover";
+    first = false;
+    if (writing && !front) continue;
     TagLib::ByteVector data = picture.value("data").toByteVector();
     jbyteArray jData = nullptr;
-    if (withData) {
-      if (data.size() > MAX_PICTURE_BYTES) continue;
+    if (mode == PICTURES_DATA && data.size() > MAX_PICTURE_BYTES) continue;
+    if (mode != PICTURES_SIZES && data.size() <= MAX_PICTURE_BYTES) {
       jData = env->NewByteArray(static_cast<jsize>(data.size()));
       if (jData == nullptr) return false;
       env->SetByteArrayRegion(jData, 0, static_cast<jsize>(data.size()), reinterpret_cast<const jbyte *>(data.data()));
@@ -455,8 +474,8 @@ jint read(JNIEnv *env, jclass, jint fd, jstring jFileName, jint pictures, jboole
                           audio->channels());
       if (env->ExceptionCheck()) return NATIVE_ERROR;
     }
-    if ((pictures == PICTURES_SIZES || pictures == PICTURES_DATA) &&
-        !sendPictures(env, sink, file, pictures == PICTURES_DATA)) {
+    if ((pictures == PICTURES_SIZES || pictures == PICTURES_DATA || pictures == PICTURES_WRITE_FRONT) &&
+        !sendPictures(env, sink, file, pictures)) {
       return NATIVE_ERROR;
     }
     return stream.error() != 0 ? IO_ERROR : OK;

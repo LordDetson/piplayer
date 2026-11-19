@@ -6,6 +6,7 @@ import android.net.Uri
 import android.provider.MediaStore
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.github.lorddetson.piplayer.TestFiles
+import io.github.lorddetson.piplayer.fakes.Fixtures
 import io.github.lorddetson.piplayer.library.FakeMediaIndex
 import io.github.lorddetson.piplayer.library.FakeMediaIndex.Companion.row
 import io.github.lorddetson.piplayer.library.FakeRules
@@ -172,7 +173,10 @@ class TagApplyPlansTest {
             val title = "Written through MediaStore"
             user.decisions().addMetadata(listOf(TrackMetadataEntity(id, DecidedField.TITLE.code, title.toByteArray())))
 
-            val writer = BatchTagWriter(context, LibraryAccess.of(library), user, client, staging)
+            check(staging.mkdirs())
+            val coverFile = File(staging, "source.jpg").apply { writeBytes(Fixtures.bytes("caa/front-250.jpg")) }
+            val cover = requireNotNull(encodeFrontCover(coverFile))
+            val writer = BatchTagWriter(context, LibraryAccess.of(library), user, client, staging) { id -> cover.takeIf { id == 10L } }
             val group = writer.nextGroup(batchUuid)
             assertThat(group.files.values).containsExactly(uri)
             writer.apply(group)
@@ -223,6 +227,16 @@ class TagApplyPlansTest {
             assertThat(report().properties).isEqualTo(edited.properties + ("TITLE" to listOf(recognizedTitle)))
             assertThat(report().content?.key).isEqualTo(key)
             assertThat(writer.historyForTrack(identity).first().changes.keys).containsExactly("TITLE")
+
+            val coverDecision = user.decisions().add(DecisionEntity(
+                identityId = identity, kind = DecisionKind.EDIT.code,
+                fields = DecisionCodec.bits(setOf(ProtectedField.COVER)), createdAt = 4,
+            ))
+            user.decisions().addMetadata(listOf(TrackMetadataEntity(coverDecision, DecidedField.COVER.code, "10".toByteArray())))
+            val coverReview = requireNotNull(writer.reviewPlan(file.id, coverDecision, null))
+            assertThat(writer.applyReview(coverReview) {}).isEqualTo(WriteBackResult.VERIFIED)
+            assertThat(report().pictures.single { it.pictureType == "Front Cover" }.sizeBytes).isEqualTo(cover.bytes().size)
+            assertThat(writer.historyForTrack(identity).first().coverChange?.after).hasSize(1)
         } finally {
             client.close()
             resolver.delete(uri, null, null)

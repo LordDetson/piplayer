@@ -38,7 +38,7 @@ internal object TagWriteArchiveCodec {
             actualSize.takeUnless { it == entry.copySize }, entry.actualMtime?.minus(entry.createdAt),
             entry.createdAt, entry.verifiedAt?.minus(entry.createdAt), entry.undoneAt,
             StoredDiff(diff.changes.mapValues { (_, change) -> listOf(change.before, change.after) },
-                diff.undoOf, diff.conflicts, diff.markedTagHash),
+                diff.undoOf, diff.conflicts, diff.markedTagHash, diff.coverChange),
             StoredBackup(backup.id, backup.createdAt - entry.createdAt, backup.tagsPath, backup.tagsHash.base64(),
                 backup.coverPath, backup.coverHash?.base64(), backup.id3Version),
         )
@@ -57,7 +57,7 @@ internal object TagWriteArchiveCodec {
                 backupId = backup.id, volumeName = record.volume, relativePath = record.path, displayName = record.name,
                 state = "verified", copyPath = "", copySize = record.size, copySha256 = byteArrayOf(),
                 expectedContentKey = record.key.binary(), tagHash = record.tagHash.binary(),
-                diff = TagWriteRecord(byteArrayOf(), 0, 0, changes, diff.undoOf, diff.conflicts, diff.markedTagHash).encode(),
+                diff = TagWriteRecord(byteArrayOf(), 0, 0, changes, diff.undoOf, diff.conflicts, diff.markedTagHash, diff.coverChange).encode(),
                 actualSize = record.actualSize ?: record.size, actualMtime = record.mtimeDelta?.plus(record.createdAt),
                 createdAt = record.createdAt, verifiedAt = record.verifiedDelta?.plus(record.createdAt), undoneAt = record.undoneAt,
             ),
@@ -101,6 +101,7 @@ internal object TagWriteArchiveCodec {
         val undoOf: Long? = null,
         val conflicts: Set<String> = emptySet(),
         val markedTagHash: Boolean = true,
+        val coverChange: TagChange? = null,
     )
 
     @Serializable

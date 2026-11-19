@@ -6,6 +6,7 @@ import io.github.lorddetson.piplayer.tagging.TagReport
 import io.github.lorddetson.piplayer.tagging.TagTarget
 import io.github.lorddetson.piplayer.tagging.TaggerClient
 import io.github.lorddetson.piplayer.tagging.TaggerResult
+import io.github.lorddetson.piplayer.tagging.fingerprints
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
@@ -26,6 +27,7 @@ internal class PreparedTagCopy(
     val originalSha256: ByteArray,
     val originalDevice: Long,
     val originalInode: Long,
+    val coverChange: TagChange?,
 ) : PreparationResult
 
 internal class TagWritePreparation(
@@ -39,6 +41,7 @@ internal class TagWritePreparation(
         openSource: () -> ParcelFileDescriptor,
         fileName: String,
         expectedKey: String,
+        inspectFrontCovers: Boolean = false,
         diff: (TagReport) -> TagDiff,
     ): PreparationResult = withContext(Dispatchers.IO) {
         var temporary: File? = null
@@ -56,18 +59,28 @@ internal class TagWritePreparation(
                     if (copy.outputStream().use { input.copyTo(it) } != size) return@withContext PreparationFailure.UNVERIFIED
                 }
             }
-            val before = read(working, target, fileName) ?: return@withContext PreparationFailure.UNVERIFIED
+            var before = read(working, target, fileName, frontCoverData = inspectFrontCovers)
+                ?: return@withContext PreparationFailure.UNVERIFIED
             if (before.content?.key != expectedKey) return@withContext PreparationFailure.CONTENT_CHANGED
             val selected = diff(before)
-            if (selected.changes.isEmpty()) return@withContext PreparationFailure.NO_CHANGES
+            if (selected.frontCovers != null && !inspectFrontCovers) {
+                before = read(working, target, fileName, frontCoverData = true) ?: return@withContext PreparationFailure.UNVERIFIED
+            }
+            val frontCovers = if (selected.frontCovers != null) {
+                val existing = before.frontCovers ?: return@withContext PreparationFailure.UNVERIFIED
+                selected.frontCovers.takeUnless { it == existing }
+            } else null
+            if (selected.changes.isEmpty() && frontCovers == null) return@withContext PreparationFailure.NO_CHANGES
             val originalSha256 = sha256(working)
 
             val written = ParcelFileDescriptor.open(working, ParcelFileDescriptor.MODE_READ_WRITE).use { descriptor ->
-                tagger.writeWorkingCopy(target, descriptor, selected.changes.mapValues { (_, change) -> change.after })
+                tagger.writeWorkingCopy(target, descriptor, selected.changes.mapValues { (_, change) -> change.after }, frontCovers = frontCovers)
             }
             if (written != TaggerResult.Replied(true)) return@withContext PreparationFailure.UNVERIFIED
-            val after = read(working, target, fileName) ?: return@withContext PreparationFailure.UNVERIFIED
-            if (after.content?.key != expectedKey || after.properties != selected.properties) {
+            val after = read(working, target, fileName, frontCoverData = frontCovers != null) ?: return@withContext PreparationFailure.UNVERIFIED
+            if (after.content?.key != expectedKey || after.properties != selected.properties ||
+                (frontCovers != null && after.frontCovers != frontCovers)
+            ) {
                 return@withContext PreparationFailure.UNVERIFIED
             }
             // The tag pass keeps legacy bytes marked, so its snapshot has to match this form of the properties.
@@ -77,6 +90,7 @@ internal class TagWritePreparation(
             PreparedTagCopy(
                 working, before, after, selected, tagPropertiesHash(marked.properties), sha256(working), originalSha256,
                 originalStat.st_dev, originalStat.st_ino,
+                frontCovers?.let { TagChange(checkNotNull(before.frontCovers).fingerprints(), it.fingerprints()) },
             ).also { verified = true }
         } catch (_: IOException) {
             PreparationFailure.UNVERIFIED
@@ -92,9 +106,16 @@ internal class TagWritePreparation(
         throw IOException(error)
     }
 
-    private suspend fun read(copy: File, target: TagTarget, fileName: String, markLegacy: Boolean = false): TagReport? =
+    private suspend fun read(
+        copy: File,
+        target: TagTarget,
+        fileName: String,
+        markLegacy: Boolean = false,
+        frontCoverData: Boolean = false,
+    ): TagReport? =
         ParcelFileDescriptor.open(copy, ParcelFileDescriptor.MODE_READ_ONLY).use { descriptor ->
-            (tagger.read(target, descriptor, fileName, markLegacy = markLegacy, background = true) as? TaggerResult.Replied)
+            (tagger.read(target, descriptor, fileName, markLegacy = markLegacy, background = true, frontCoverData = frontCoverData)
+                as? TaggerResult.Replied)
                 ?.value?.report?.takeIf { it.error == null }
         }
 }

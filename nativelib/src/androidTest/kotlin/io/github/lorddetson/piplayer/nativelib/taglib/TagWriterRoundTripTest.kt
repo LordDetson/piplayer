@@ -3,6 +3,7 @@ package io.github.lorddetson.piplayer.nativelib.taglib
 import android.os.ParcelFileDescriptor
 import io.github.lorddetson.piplayer.nativelib.TestFiles
 import java.io.File
+import java.util.Base64
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -52,5 +53,29 @@ class TagWriterRoundTripTest(private val fixture: String) {
             assertThat(String(bytes.copyOfRange(bytes.size - 128, bytes.size - 125), Charsets.US_ASCII))
                 .isNotEqualTo("TAG")
         }
+    }
+
+    @Test
+    fun writesTheFrontCoverWithoutChangingTextOrOtherPictures() {
+        val file = TestFiles.copy("tags/$fixture")
+        val before = read(file)
+        val png = Base64.getDecoder().decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jQioAAAAASUVORK5CYII=")
+        val replacement = Picture(png, png.size, "image/png", "Front Cover", "")
+
+        ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_WRITE).use {
+            assertThat(TagWriter.write(it.fd, emptyMap(), frontCovers = listOf(replacement))).isTrue()
+        }
+
+        val after = read(file)
+        val mp4 = fixture.endsWith(".m4a")
+        val front = if (mp4) after.pictures.first() else after.pictures.single { it.pictureType == "Front Cover" }
+        assertThat(front.data).isEqualTo(png)
+        assertThat(front.mimeType).isEqualTo("image/png")
+        val otherPictures: (List<Picture>) -> List<Picture> = { pictures ->
+            if (mp4) pictures.drop(1) else pictures.filter { it.pictureType != "Front Cover" }
+        }
+        assertThat(otherPictures(after.pictures)).usingRecursiveComparison().isEqualTo(otherPictures(before.pictures))
+        assertThat(after.properties).isEqualTo(before.properties)
+        assertThat(after.audio).isEqualTo(before.audio)
     }
 }

@@ -11,6 +11,7 @@ class TagWriteArchiveCodecTest {
         ByteArray(32) { it.toByte() }, 42, 65,
         mapOf("TITLE" to TagChange(listOf("Before"), listOf("After")), "COMMENT" to TagChange(emptyList(), listOf("New"))),
         undoOf = 12, conflicts = setOf("ALBUM"), markedTagHash = true,
+        coverChange = TagChange(listOf("old-front-hash"), listOf("new-front-hash")),
     )
     private val entry = AppliedChangeEntity(
         id = 16, identityId = 6, decisionId = 10, batchUuid = ByteArray(16) { 1 }, backupId = 14,
@@ -36,6 +37,7 @@ class TagWriteArchiveCodecTest {
         assertThat(restored.entry.copySha256).isEmpty()
         val restoredDiff = requireNotNull(TagWriteRecord.decode(restored.entry.diff))
         assertThat(restoredDiff.changes).isEqualTo(diff.changes)
+        assertThat(restoredDiff.coverChange).isEqualTo(diff.coverChange)
         assertThat(restoredDiff.conflicts).containsExactly("ALBUM")
         assertThat(restoredDiff.undoOf).isEqualTo(12L)
         assertThat(restoredDiff.markedTagHash).isTrue()

@@ -33,9 +33,35 @@ class TagWriterId3v1Test {
         assertThat(id3v1Title(file)).isEqualTo(oldTitle)
     }
 
-    private fun writeTitle(file: File, title: String) {
+    @Test
+    fun leaveUntouchedPreservesTheWholeLegacyTagWhileWritingId3v2() {
+        val file = TestFiles.copy("tags/id3v1.mp3")
+        val oldLegacyTag = file.readBytes().takeLast(128)
+
+        writeTitle(file, "Updated title", Id3v1WritePolicy.LEAVE_UNTOUCHED)
+
+        assertThat(file.readBytes().takeLast(128)).isEqualTo(oldLegacyTag)
+        TestFiles.open(file).use {
+            val tags = TagReader.read(it.fd, "id3v1.mp3") as TagReadResult.Success
+            assertThat(tags.properties["TITLE"]).containsExactly("Updated title")
+        }
+    }
+
+    @Test
+    fun removalWithNoTextChangesStripsOnlyTheLegacyTag() {
+        val file = TestFiles.copy("tags/id3v1.mp3")
+        val audio = file.readBytes().dropLast(128).toByteArray()
+
         ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_WRITE).use {
-            assertThat(TagWriter.write(it.fd, mapOf("TITLE" to listOf(title)))).isTrue()
+            assertThat(TagWriter.write(it.fd, emptyMap(), Id3v1WritePolicy.REMOVE)).isTrue()
+        }
+
+        assertThat(file.readBytes()).isEqualTo(audio)
+    }
+
+    private fun writeTitle(file: File, title: String, policy: Id3v1WritePolicy = Id3v1WritePolicy.UPDATE_IF_PRESENT) {
+        ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_WRITE).use {
+            assertThat(TagWriter.write(it.fd, mapOf("TITLE" to listOf(title)), policy)).isTrue()
         }
     }
 
