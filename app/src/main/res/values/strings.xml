@@ -454,4 +454,12 @@
         <item quantity="one">%1$d song is still being read</item>
         <item quantity="other">%1$d songs are still being read</item>
     </plurals>
+    <string name="batch_tag_write_open">Write tags to files</string>
+    <string name="batch_tag_write_title">File tags</string>
+    <string name="batch_tag_write_empty">No audio files are available to write.</string>
+    <string name="batch_tag_write_counts">%1$d written · %2$d remaining · %3$d skipped · %4$d failed</string>
+    <string name="batch_tag_write_explanation">Android may ask for permission to update tags in %1$d audio files.</string>
+    <string name="batch_tag_write_start">Continue to file access</string>
+    <string name="batch_tag_write_error">Could not apply the file tags. You can try again.</string>
+    <string name="batch_tag_write_cancelled">File access was cancelled. Your review decisions are saved in PiPlayer.</string>
 </resources>

@@ -5,6 +5,8 @@ import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DataSource
+import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.MediaSource
@@ -12,6 +14,9 @@ import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import androidx.media3.extractor.DefaultExtractorsFactory
 import androidx.media3.extractor.ExtractorsFactory
 import androidx.media3.extractor.mp3.Mp3Extractor
+import io.github.lorddetson.piplayer.tagging.write.playbackTagWriteGate
+import java.io.Closeable
+import java.io.InterruptedIOException
 
 /** The ExoPlayer of the playback service (docs/playback.md §1.2, §1.3); tests replace only its audio output. */
 @OptIn(UnstableApi::class)
@@ -38,8 +43,10 @@ object PlaybackPlayer {
      * Every item is a local file, so each goes straight to a progressive source: the default factory would first work
      * out the kind of stream of each of up to 20 000 items on the main thread (docs/playback.md §2.3).
      */
-    internal fun mediaSources(context: Context): MediaSource.Factory =
-        ProgressiveMediaSource.Factory(DefaultDataSource.Factory(context), extractors())
+    internal fun mediaSources(context: Context): MediaSource.Factory {
+        val upstream = DefaultDataSource.Factory(context)
+        return ProgressiveMediaSource.Factory({ PlaybackTagDataSource(upstream.createDataSource()) }, extractors())
+    }
 
     /**
      * Raw AAC seeks by its average frame size and raw AMR in one mode by the size of its first frame; both need the
@@ -49,4 +56,35 @@ object PlaybackPlayer {
     internal fun extractors(): ExtractorsFactory = DefaultExtractorsFactory()
         .setConstantBitrateSeekingEnabled(true)
         .setMp3ExtractorFlags(Mp3Extractor.FLAG_ENABLE_INDEX_SEEKING)
+}
+
+@OptIn(UnstableApi::class)
+private class PlaybackTagDataSource(private val upstream: DataSource) : DataSource by upstream {
+    private var reading: Closeable? = null
+
+    override fun open(dataSpec: DataSpec): Long {
+        val lease = try {
+            playbackTagWriteGate.beginRead(dataSpec.uri.toString())
+        } catch (error: InterruptedException) {
+            Thread.currentThread().interrupt()
+            throw InterruptedIOException("Interrupted while waiting for a file tag write").apply { initCause(error) }
+        }
+        reading = lease
+        return try {
+            upstream.open(dataSpec)
+        } catch (error: Exception) {
+            lease.close()
+            reading = null
+            throw error
+        }
+    }
+
+    override fun close() {
+        try {
+            upstream.close()
+        } finally {
+            reading?.close()
+            reading = null
+        }
+    }
 }

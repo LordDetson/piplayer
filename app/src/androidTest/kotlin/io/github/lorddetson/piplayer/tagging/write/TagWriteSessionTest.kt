@@ -192,7 +192,8 @@ class TagWriteSessionTest {
             )
             val unavailable = item.copy(fileId = 2, displayName = "missing.mp3")
             queue.save(listOf(item, unavailable))
-            val work = TagApplyWork(queue, session(database), target = { target.takeIf { _ -> it.fileId == item.fileId } }) {
+            val playback = TagWriteGate()
+            val work = TagApplyWork(queue, session(database), target = { target.takeIf { _ -> it.fileId == item.fileId } }, playback = playback) {
                 { report -> TagDiff.between(report.properties, mapOf("TITLE" to listOf("One approved file"))) }
             }
             val originalBytes = original.readBytes()
@@ -203,6 +204,12 @@ class TagWriteSessionTest {
             assertThat(original.readBytes()).isEqualTo(originalBytes)
             assertThat(queue.remaining(item.planId)).containsExactly(item, unavailable)
 
+            playback.reservePlayback(target.uri.toString(), null)
+            work.apply(group, consent = true)
+            assertThat(original.readBytes()).isEqualTo(originalBytes)
+            assertThat(queue.remaining(item.planId)).containsExactly(item, unavailable)
+
+            playback.reservePlayback(null, null)
             work.apply(group, consent = true)
             assertThat(read(target).properties["TITLE"]).containsExactly("One approved file")
             assertThat(queue.remaining(item.planId)).containsExactly(unavailable)

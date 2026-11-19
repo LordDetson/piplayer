@@ -18,6 +18,7 @@ import io.github.lorddetson.piplayer.playback.PlaybackTesting.onMain
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.stopAndRelease
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.tap
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.waitUntil
+import io.github.lorddetson.piplayer.tagging.write.playbackTagWriteGate
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
@@ -60,6 +61,23 @@ class PlaybackQueueTest {
         }
         assertThat(onMain { controller.mediaMetadata.title.toString() }).isEqualTo("Alpha")
         controller.waitUntil("Bravo follows", timeout = 10.seconds) { isPlaying && currentMediaItem?.mediaId == "2" }
+    }
+
+    @Test
+    fun playbackReservesTheCurrentAndNextUrisForTagWrites() {
+        val first = SongSourceRule.song(1, "Alpha", PlaybackTesting.LONG_FIXTURE)
+        val next = SongSourceRule.song(2, "Bravo")
+        songs.songs = listOf(first, next)
+
+        controller.tap(QueueRequest(startSongId = 1, startRow = 0), first.title)
+        controller.waitUntil("Alpha plays before Bravo") { isPlaying && currentMediaItem?.mediaId == "1" && mediaItemCount == 2 }
+
+        assertThat(playbackTagWriteGate.tryWrite(first.uri)).isNull()
+        assertThat(playbackTagWriteGate.tryWrite(next.uri)).isNull()
+        onMain { controller.stop() }
+        eventually("the next URI is free after playback stops") {
+            playbackTagWriteGate.tryWrite(next.uri)?.use { true } ?: false
+        }
     }
 
     @Test

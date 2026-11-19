@@ -17,6 +17,7 @@ import io.github.lorddetson.piplayer.notifications.BatchNotifier
 import io.github.lorddetson.piplayer.settings.DataStoreOnlineGate
 import io.github.lorddetson.piplayer.settings.IdentificationSettings
 import io.github.lorddetson.piplayer.settings.SettingsFiles
+import io.github.lorddetson.piplayer.tagging.write.BatchTagWriter
 import kotlin.concurrent.thread
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -49,6 +50,11 @@ private object PassGateActivities : Application.ActivityLifecycleCallbacks {
 class PiPlayerApplication : Application() {
 
     val crashReports: CrashReports by lazy { CrashReports.forApp(this) }
+
+    internal val batchTagWriter by lazy {
+        ProcessRole.current(this).requireMain("The batch tag writer")
+        BatchTagWriter(this)
+    }
 
     /**
      * The identification network services of the main process (TI §8, §9), or the ones a test installed. Their online

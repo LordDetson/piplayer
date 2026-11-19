@@ -26,6 +26,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -160,7 +161,11 @@ class FixViewModel(application: Application) : AndroidViewModel(application) {
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun FixScreen(modifier: Modifier = Modifier, onOpenReview: (fileId: Long, batchUuid: String) -> Unit = { _, _ -> }) {
+fun FixScreen(
+    modifier: Modifier = Modifier,
+    onOpenReview: (fileId: Long, batchUuid: String) -> Unit = { _, _ -> },
+    onOpenWrite: ((batchUuid: String) -> Unit)? = null,
+) {
     val app = LocalContext.current.applicationContext as Application
     val model = viewModel { FixViewModel(app) }
     LifecycleStartEffect(model) {
@@ -180,7 +185,7 @@ fun FixScreen(modifier: Modifier = Modifier, onOpenReview: (fileId: Long, batchU
             Counters(batches)
             when (batches) {
                 null -> Loading()
-                else -> BatchQueue(batches.orEmpty(), cards, onOpenReview, model::pause, model::resume, model::stop)
+                else -> BatchQueue(batches.orEmpty(), cards, onOpenReview, model::pause, model::resume, model::stop, onOpenWrite)
             }
         }
     }
@@ -249,6 +254,7 @@ private fun BatchQueue(
     onPause: (String) -> Unit,
     onResume: (String) -> Unit,
     onStop: (String) -> Unit,
+    onOpenWrite: ((String) -> Unit)?,
 ) {
     if (batches.isEmpty()) {
         Text(
@@ -277,7 +283,7 @@ private fun BatchQueue(
             },
         ) { row ->
             when (row) {
-                is FixRow.Batch -> BatchRow(row.batch, onPause, onResume, onStop)
+                is FixRow.Batch -> BatchRow(row.batch, onPause, onResume, onStop, onOpenWrite)
                 is FixRow.Card -> BatchCardRow(row.batchUuid, row.card, onOpenReview)
             }
         }
@@ -291,6 +297,7 @@ private fun BatchRow(
     onPause: (String) -> Unit,
     onResume: (String) -> Unit,
     onStop: (String) -> Unit,
+    onOpenWrite: ((String) -> Unit)?,
 ) {
     val started = stringResource(R.string.fix_started, startedText(batch.createdAt))
     val eta = if (batch.status == BatchEntity.STATUS_PROCESSING) stringResource(R.string.fix_eta_not_measured) else null
@@ -298,7 +305,14 @@ private fun BatchRow(
     ListItem(
         headlineContent = { Text(stringResource(sourceLabel(batch.source)), maxLines = 1, overflow = TextOverflow.Ellipsis) },
         supportingContent = {
-            Text(listOfNotNull(started, eta).joinToString(" · "), modifier = Modifier.testTag(FixTags.ETA))
+            Column {
+                Text(listOfNotNull(started, eta).joinToString(" · "), modifier = Modifier.testTag(FixTags.ETA))
+                if (batch.status == BatchEntity.STATUS_DONE && onOpenWrite != null) {
+                    TextButton(onClick = { onOpenWrite(batch.uuid) }) {
+                        Text(stringResource(R.string.batch_tag_write_open))
+                    }
+                }
+            }
         },
         leadingContent = { Box(Modifier.size(12.dp).background(statusColor(batch.status), CircleShape)) },
         trailingContent = {

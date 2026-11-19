@@ -21,6 +21,7 @@ import io.github.lorddetson.piplayer.ui.library.LibraryHost
 import io.github.lorddetson.piplayer.ui.library.LibraryScreen
 import io.github.lorddetson.piplayer.ui.fix.BatchActions
 import io.github.lorddetson.piplayer.ui.fix.FixScreen
+import io.github.lorddetson.piplayer.ui.fix.BatchTagWriteScreen
 import io.github.lorddetson.piplayer.ui.fix.rememberBatchActions
 import io.github.lorddetson.piplayer.ui.notifications.BatchNotificationExplanation
 import io.github.lorddetson.piplayer.ui.notifications.rememberBatchNotificationPrompt
@@ -186,6 +187,9 @@ data class TrackDetailsRoute(val fileId: Long? = null, val uri: String? = null) 
  */
 @Serializable
 data class IdentifyRoute(val fileId: Long? = null, val uri: String? = null, val batchUuid: String? = null) : NavKey
+
+@Serializable
+data class BatchTagWriteRoute(val batchUuid: String) : NavKey
 
 /** The Library folders screen (docs/library.md §3.6). */
 @Serializable
@@ -362,7 +366,13 @@ fun PiPlayerApp(viewModel: PlayerViewModel = viewModel()) {
                 }
                 entry<SearchRoute> { SearchScreen(host) }
                 entry<FixRoute> {
-                    FixScreen(onOpenReview = { fileId, batchUuid -> open(IdentifyRoute(fileId = fileId, batchUuid = batchUuid)) })
+                    FixScreen(
+                        onOpenReview = { fileId, batchUuid -> open(IdentifyRoute(fileId = fileId, batchUuid = batchUuid)) },
+                        onOpenWrite = { batchUuid -> open(BatchTagWriteRoute(batchUuid)) },
+                    )
+                }
+                entry<BatchTagWriteRoute>(metadata = FROM_THE_SIDE) { route ->
+                    BatchTagWriteScreen(route.batchUuid, onBack = { close() })
                 }
                 entry<AlbumRoute>(metadata = FROM_THE_SIDE) { route -> AlbumPage(route.key, host, onBack = { close() }) }
                 entry<ArtistRoute>(metadata = FROM_THE_SIDE) { route -> ArtistPage(route.key, host, onBack = { close() }) }

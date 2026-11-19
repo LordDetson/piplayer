@@ -32,6 +32,7 @@ import io.github.lorddetson.piplayer.R
 import io.github.lorddetson.piplayer.covers.Covers
 import io.github.lorddetson.piplayer.library.Library
 import io.github.lorddetson.piplayer.library.songs.SongList
+import io.github.lorddetson.piplayer.tagging.write.playbackTagWriteGate
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.MainScope
@@ -80,6 +81,18 @@ class PlaybackService : MediaLibraryService() {
                 .apply { setSmallIcon(R.drawable.ic_notification) },
         )
         val player = PlaybackPlayer.builder(this).build()
+        player.addListener(object : Player.Listener {
+            override fun onEvents(player: Player, events: Player.Events) {
+                if (player.playbackState == Player.STATE_IDLE || player.playbackState == Player.STATE_ENDED) {
+                    playbackTagWriteGate.reservePlayback(null, null)
+                    return
+                }
+                val current = player.currentMediaItem?.localConfiguration?.uri
+                val nextIndex = player.nextMediaItemIndex
+                val next = if (nextIndex in 0 until player.mediaItemCount) player.getMediaItemAt(nextIndex).localConfiguration?.uri else null
+                playbackTagWriteGate.reservePlayback(current?.toString(), next?.toString())
+            }
+        })
         // Debug builds journal the audio path; release builds do nothing here (§8.3).
         AudioJournal.attach(this, player)
         // Before the session's own listener, so that a skipped song's error never reaches the controllers (§2.4).
@@ -258,6 +271,7 @@ class PlaybackService : MediaLibraryService() {
             session.release()
             player.release()
         }
+        playbackTagWriteGate.reservePlayback(null, null)
         session = null
         callback?.release()
         callback = null

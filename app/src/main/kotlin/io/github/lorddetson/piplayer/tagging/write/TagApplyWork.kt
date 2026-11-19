@@ -13,6 +13,7 @@ internal class TagApplyWork(
     private val queue: TagApplyQueue,
     private val session: TagWriteSession,
     private val target: suspend (TagApplyItem) -> TagWriteTarget?,
+    private val playback: TagWriteGate? = null,
     private val diff: suspend (TagApplyItem) -> ((TagReport) -> TagDiff)?,
 ) {
     private val writing = Mutex()
@@ -35,9 +36,14 @@ internal class TagApplyWork(
         for (item in queue.remaining(group.planId)) {
             val approved = group.files[item.fileId] ?: continue
             val file = resolve(item)?.takeIf { it.uri == approved } ?: continue
-            val id = item.writeId ?: prepare(item, file) ?: continue
-            when (session.write(id, file, consent = true)) {
-                WriteBackResult.VERIFIED, WriteBackResult.JOURNAL_CHANGED -> Unit
+            val lease = playback?.tryWrite(file.uri.toString())
+            if (playback != null && lease == null) continue
+            val result = lease.use {
+                val id = item.writeId ?: prepare(item, file)
+                id?.let { session.write(it, file, consent = true) }
+            }
+            when (result) {
+                null, WriteBackResult.VERIFIED, WriteBackResult.JOURNAL_CHANGED -> Unit
                 WriteBackResult.NEEDS_CONSENT, WriteBackResult.INTERRUPTED -> return@withLock
                 WriteBackResult.INVALID_COPY, WriteBackResult.FAILED, WriteBackResult.SOURCE_CHANGED -> queue.finish(item, "failed")
             }

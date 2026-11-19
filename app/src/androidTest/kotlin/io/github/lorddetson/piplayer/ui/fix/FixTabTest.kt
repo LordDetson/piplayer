@@ -106,4 +106,18 @@ class FixTabTest {
         tap(hasTestTag(BottomBarTags.LIBRARY))
         waitFor(hasTestTag(LibraryTags.TABS))
     }
+
+    @Test
+    fun aCompletedBatchOpensTheFileTagScreen() {
+        val uuid = "a1c3bbda-a5d3-42ac-b433-428aa9fed33d"
+        Library.read(TestFiles.targetContext) { database ->
+            runBlocking {
+                database.batches().save(BatchEntity(uuid, 1000, BatchEntity.SOURCE_SELECTION, BatchEntity.STATUS_DONE))
+            }
+        }
+        tap(hasTestTag(BottomBarTags.FIX))
+        tap(hasText(text(R.string.batch_tag_write_open)))
+        waitFor(hasText(text(R.string.batch_tag_write_title)))
+        waitFor(hasText(text(R.string.batch_tag_write_empty)))
+    }
 }
