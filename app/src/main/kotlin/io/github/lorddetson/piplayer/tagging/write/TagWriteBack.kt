@@ -2,13 +2,16 @@ package io.github.lorddetson.piplayer.tagging.write
 
 import java.io.File
 import java.io.IOException
+import java.io.InputStream
 import java.security.MessageDigest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 internal data class Stamp(val size: Long, val modifiedMs: Long)
 
-internal enum class WriteBackResult { NEEDS_CONSENT, INVALID_COPY, VERIFIED, FAILED, JOURNAL_CHANGED }
+internal enum class WriteBackResult {
+    NEEDS_CONSENT, INVALID_COPY, VERIFIED, FAILED, JOURNAL_CHANGED, SOURCE_CHANGED, INTERRUPTED,
+}
 
 internal class TagWriteBack(
     private val journal: Journal,
@@ -45,15 +48,15 @@ internal class TagWriteBack(
     }
 }
 
-internal fun sha256(file: File): ByteArray {
+internal fun sha256(file: File): ByteArray = file.inputStream().use(::sha256)
+
+internal fun sha256(input: InputStream): ByteArray {
     val digest = MessageDigest.getInstance("SHA-256")
-    file.inputStream().use { input ->
-        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
-        while (true) {
-            val read = input.read(buffer)
-            if (read < 0) break
-            digest.update(buffer, 0, read)
-        }
+    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+    while (true) {
+        val read = input.read(buffer)
+        if (read < 0) break
+        digest.update(buffer, 0, read)
     }
     return digest.digest()
 }

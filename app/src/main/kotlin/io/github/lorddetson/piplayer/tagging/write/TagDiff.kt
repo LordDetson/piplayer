@@ -1,7 +1,9 @@
 package io.github.lorddetson.piplayer.tagging.write
 
 import java.text.Normalizer
+import kotlinx.serialization.Serializable
 
+@Serializable
 internal data class TagChange(val before: List<String>, val after: List<String>)
 
 internal data class TagDiff(

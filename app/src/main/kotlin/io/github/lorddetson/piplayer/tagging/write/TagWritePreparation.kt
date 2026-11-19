@@ -1,6 +1,7 @@
 package io.github.lorddetson.piplayer.tagging.write
 
 import android.os.ParcelFileDescriptor
+import android.system.Os
 import io.github.lorddetson.piplayer.tagging.TagReport
 import io.github.lorddetson.piplayer.tagging.TagTarget
 import io.github.lorddetson.piplayer.tagging.TaggerClient
@@ -21,6 +22,9 @@ internal class PreparedTagCopy(
     val after: TagReport,
     val diff: TagDiff,
     val sha256: ByteArray,
+    val originalSha256: ByteArray,
+    val originalDevice: Long,
+    val originalInode: Long,
 ) : PreparationResult
 
 internal class TagWritePreparation(
@@ -41,6 +45,7 @@ internal class TagWritePreparation(
         try {
             if (!directory.isDirectory && !directory.mkdirs()) return@withContext PreparationFailure.UNVERIFIED
             val original = openSource()
+            val originalStat = original.useStat()
             val working = ParcelFileDescriptor.AutoCloseInputStream(original).use { input ->
                 val size = original.statSize
                 if (size <= 0) return@withContext PreparationFailure.UNVERIFIED
@@ -54,6 +59,7 @@ internal class TagWritePreparation(
             if (before.content?.key != expectedKey) return@withContext PreparationFailure.CONTENT_CHANGED
             val selected = diff(before)
             if (selected.changes.isEmpty()) return@withContext PreparationFailure.NO_CHANGES
+            val originalSha256 = sha256(working)
 
             val written = ParcelFileDescriptor.open(working, ParcelFileDescriptor.MODE_READ_WRITE).use { descriptor ->
                 tagger.writeWorkingCopy(target, descriptor, selected.changes.mapValues { (_, change) -> change.after })
@@ -64,12 +70,22 @@ internal class TagWritePreparation(
                 return@withContext PreparationFailure.UNVERIFIED
             }
             FileOutputStream(working, true).use { it.fd.sync() }
-            PreparedTagCopy(working, before, after, selected, sha256(working)).also { verified = true }
+            PreparedTagCopy(
+                working, before, after, selected, sha256(working), originalSha256,
+                originalStat.st_dev, originalStat.st_ino,
+            ).also { verified = true }
         } catch (_: IOException) {
             PreparationFailure.UNVERIFIED
         } finally {
             if (!verified) temporary?.delete()
         }
+    }
+
+    private fun ParcelFileDescriptor.useStat() = try {
+        Os.fstat(fileDescriptor)
+    } catch (error: android.system.ErrnoException) {
+        close()
+        throw IOException(error)
     }
 
     private suspend fun read(copy: File, target: TagTarget, fileName: String): TagReport? =

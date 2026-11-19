@@ -19,8 +19,20 @@ internal class TagWriteJournal(private val database: UserDatabase) {
     suspend fun entry(id: Long): AppliedChangeEntity? = dao.entry(id)
     suspend fun backup(id: Long): TagBackupEntity? = dao.backup(id)
     suspend fun interrupted(): List<AppliedChangeEntity> = dao.interrupted()
+    suspend fun forTrack(identityId: Long): List<AppliedChangeEntity> = dao.forTrack(identityId)
+    suspend fun forBatch(batchUuid: ByteArray): List<AppliedChangeEntity> = dao.forBatch(batchUuid)
+    suspend fun beginStreaming(id: Long): Boolean = dao.markStreaming(id) == 1
     suspend fun streamed(id: Long): Boolean = dao.markStreamed(id) == 1
-    suspend fun verified(id: Long, size: Long, mtime: Long, at: Long): Boolean = dao.markVerified(id, size, mtime, at) == 1
+    suspend fun verified(id: Long, size: Long, mtime: Long, at: Long, undoOf: Long? = null): Boolean =
+        database.withWriteTransaction {
+            if (undoOf != null && dao.entry(undoOf)?.let { it.state == "verified" && it.undoneAt == null } != true) {
+                return@withWriteTransaction false
+            }
+            if (dao.markVerified(id, size, mtime, at) != 1) return@withWriteTransaction false
+            if (undoOf != null) check(dao.markUndone(undoOf, at) == 1)
+            true
+        }
+    suspend fun failed(id: Long): Boolean = dao.markFailed(id) == 1
 }
 
 @Dao
@@ -37,10 +49,22 @@ interface TagWriteDao {
     @Query("SELECT * FROM tag_backup WHERE id = :id")
     suspend fun backup(id: Long): TagBackupEntity?
 
-    @Query("SELECT * FROM applied_change WHERE state IN ('pending', 'streamed') ORDER BY id")
+    @Query("SELECT * FROM applied_change WHERE state IN ('pending', 'streaming', 'streamed') ORDER BY id")
     suspend fun interrupted(): List<AppliedChangeEntity>
 
-    @Query("UPDATE applied_change SET state = 'streamed' WHERE id = :id AND state IN ('pending', 'streamed')")
+    @Query("SELECT * FROM applied_change WHERE identity_id = :identityId AND state = 'verified' ORDER BY id DESC")
+    suspend fun forTrack(identityId: Long): List<AppliedChangeEntity>
+
+    @Query("SELECT * FROM applied_change WHERE batch_uuid = :batchUuid AND state = 'verified' ORDER BY id DESC")
+    suspend fun forBatch(batchUuid: ByteArray): List<AppliedChangeEntity>
+
+    @Query("UPDATE applied_change SET undone_at = :at WHERE id = :id AND state = 'verified' AND undone_at IS NULL")
+    suspend fun markUndone(id: Long, at: Long): Int
+
+    @Query("UPDATE applied_change SET state = 'streaming' WHERE id = :id AND state IN ('pending', 'streaming', 'streamed', 'failed')")
+    suspend fun markStreaming(id: Long): Int
+
+    @Query("UPDATE applied_change SET state = 'streamed' WHERE id = :id AND state IN ('pending', 'streaming', 'streamed')")
     suspend fun markStreamed(id: Long): Int
 
     @Query(
@@ -48,4 +72,7 @@ interface TagWriteDao {
             "verified_at = :at WHERE id = :id AND state = 'streamed'",
     )
     suspend fun markVerified(id: Long, size: Long, mtime: Long, at: Long): Int
+
+    @Query("UPDATE applied_change SET state = 'failed' WHERE id = :id AND state IN ('pending', 'streamed')")
+    suspend fun markFailed(id: Long): Int
 }
