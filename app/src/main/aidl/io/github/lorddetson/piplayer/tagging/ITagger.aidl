@@ -20,4 +20,7 @@ interface ITagger {
      * more than 2 s before it (docs/library.md §7).
      */
     long walkDuration(in ParcelFileDescriptor file, long flacEndOf);
+
+    /** Applies the JSON property changes to a private working copy. The service closes both descriptors. */
+    boolean writeWorkingCopy(in ParcelFileDescriptor file, in ParcelFileDescriptor changes);
 }

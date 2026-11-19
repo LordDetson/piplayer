@@ -111,20 +111,21 @@ class RulesCounterMigration : AutoMigrationSpec {
         AlbumCoverEntity::class, FavoriteEntity::class, FavoriteAlbumEntity::class, AlbumMemberEntity::class,
         PlayEventEntity::class, PlayStatsEntity::class, PlaylistEntity::class, PlaylistEntryEntity::class,
         DecisionEntity::class, ReleaseChoiceEntity::class, TrackMetadataEntity::class, FileStateEntity::class,
-        SavedCoverEntity::class, ListenEventEntity::class,
+        SavedCoverEntity::class, ListenEventEntity::class, TagBackupEntity::class, AppliedChangeEntity::class,
     ],
-    version = 6,
+    version = 7,
     exportSchema = true,
     // Version 2 adds the track identities (docs/library.md §8.1), version 3 the own covers (§13.2), version 4 favorites,
     // album members, plays and the rules counter (§15.1), version 5 playlists (§16.1), version 6 the decisions of
     // identification and their values (TI §10.2) and the listening outcomes, with play events keyed by their start
-    // without row IDs (§15.7).
+    // without row IDs (§15.7), and version 7 the tag-write journal and snapshots (TI §10.2).
     autoMigrations = [
         AutoMigration(from = 1, to = 2),
         AutoMigration(from = 2, to = 3),
         AutoMigration(from = 3, to = 4, spec = RulesCounterMigration::class),
         AutoMigration(from = 4, to = 5),
         AutoMigration(from = 5, to = 6),
+        AutoMigration(from = 6, to = 7),
     ],
 )
 abstract class UserDatabase : RoomDatabase() {
@@ -146,6 +147,9 @@ abstract class UserDatabase : RoomDatabase() {
 
     /** The outcome of every listening (docs/library.md §15.7). */
     abstract fun listens(): ListenDao
+
+    /** The journal that survives interrupted writes (TI §7.2). */
+    abstract fun tagWrites(): TagWriteDao
 
     companion object {
         const val NAME = "user.db"

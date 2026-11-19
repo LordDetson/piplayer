@@ -2,6 +2,7 @@ package io.github.lorddetson.piplayer.tagging
 
 import android.content.ComponentName
 import android.os.Parcel
+import android.os.ParcelFileDescriptor
 import android.os.Process
 import androidx.media3.session.MediaController
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -77,6 +78,26 @@ class TaggerClientTest {
     private val target = TagTarget.Outside("test://tagger/one", size = 1, mtimeMs = 1)
 
     private fun countOf(target: TagTarget) = runBlocking { counts.count(target) }
+
+    @Test
+    fun writesTheWorkingCopyInTheTaggerProcessAndKeepsTheAudioKey() = runBlocking<Unit> {
+        val file = tagged
+        val session = client()
+        val original = session.readFile(file, target) as TaggerResult.Replied
+        val title = "New title"
+
+        ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_WRITE).use { fd ->
+            assertThat(session.writeWorkingCopy(target, fd, mapOf("TITLE" to listOf(title))))
+                .isEqualTo(TaggerResult.Replied(true))
+        }
+
+        val updated = session.readFile(file, target) as TaggerResult.Replied
+        assertThat(original.value.report.content).isNotNull()
+        assertThat(updated.value.report.content?.key).isEqualTo(original.value.report.content?.key)
+        assertThat(updated.value.report.properties)
+            .isEqualTo(original.value.report.properties + ("TITLE" to listOf(title)))
+        assertThat(countOf(target)).isZero()
+    }
 
     @Test
     fun theServiceRunsInTheTaggerProcessAndIsNotExported() {

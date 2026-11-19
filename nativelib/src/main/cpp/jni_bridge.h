@@ -7,6 +7,9 @@ namespace piplayer {
 /** Registers the TagReader natives and caches the TagSink callbacks; returns false on failure. */
 bool registerTagReader(JNIEnv *env);
 
+/** Registers the native tag writer for working copies. */
+bool registerTagWriter(JNIEnv *env);
+
 /** Registers the native that finds the audio of MPEG files; returns false on failure. */
 bool registerMpegLayout(JNIEnv *env);
 

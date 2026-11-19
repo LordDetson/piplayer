@@ -8,9 +8,11 @@ import android.os.Process
 import io.github.lorddetson.piplayer.ProcessRole
 import io.github.lorddetson.piplayer.nativelib.taglib.Pictures
 import io.github.lorddetson.piplayer.nativelib.taglib.TagReader
+import io.github.lorddetson.piplayer.nativelib.taglib.TagWriter
 import io.github.lorddetson.piplayer.tagging.contentkey.ContentMeasure
 import io.github.lorddetson.piplayer.tagging.contentkey.FdByteSource
 import io.github.lorddetson.piplayer.tagging.contentkey.FrameWalk
+import kotlinx.serialization.json.Json
 
 /** The tag reader of the `:tagger` process: native calls only, no database, no DataStore (docs/library.md §4.1). */
 class TaggerService : Service() {
@@ -34,6 +36,13 @@ class TaggerService : Service() {
                 } ?: -1
             }
         }
+
+        override fun writeWorkingCopy(file: ParcelFileDescriptor, changes: ParcelFileDescriptor): Boolean =
+            file.use { audio ->
+                ParcelFileDescriptor.AutoCloseInputStream(changes).bufferedReader().use { reader ->
+                    lowPriority { TagWriter.write(audio.fd, Json.decodeFromString(reader.readText())) }
+                }
+            }
 
         /** A walk reads a whole file: it yields to the music (docs/library.md §7). */
         private inline fun <T> lowPriority(block: () -> T): T {

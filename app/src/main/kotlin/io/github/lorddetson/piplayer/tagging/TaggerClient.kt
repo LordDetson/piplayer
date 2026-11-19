@@ -25,6 +25,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import kotlinx.serialization.json.Json
 
 /** A reply of `:tagger`; [viaFile] tells whether it crossed through a file (docs/library.md §4.2). */
 data class TagRead(val report: TagReport, val viaFile: Boolean)
@@ -92,6 +93,25 @@ class TaggerClient(
         guard.run(target, kill, background) {
             val reply = reaching { tagger.read(file, fileName, markLegacy) }
             TagRead(TagReplies.unpack(reply.body, spillDir), viaFile = reply.body is TagReplyBody.InFile)
+        }
+    }
+
+    /** Runs a write under the same crash and timeout guard as reads. Audio and tag values travel by descriptor. */
+    suspend fun writeWorkingCopy(
+        target: TagTarget,
+        file: ParcelFileDescriptor,
+        changes: Map<String, List<String>>,
+    ): TaggerResult<Boolean> = call(target) { tagger, kill ->
+        guard.run(target, kill, background = true) {
+            val edits = File.createTempFile("changes-", ".json", spillDir.apply { mkdirs() })
+            try {
+                edits.writeText(Json.encodeToString(changes))
+                ParcelFileDescriptor.open(edits, ParcelFileDescriptor.MODE_READ_ONLY).use { descriptor ->
+                    reaching { tagger.writeWorkingCopy(file, descriptor) }
+                }
+            } finally {
+                edits.delete()
+            }
         }
     }
 

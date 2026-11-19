@@ -4,6 +4,7 @@
 -keep class io.github.lorddetson.piplayer.nativelib.chromaprint.ChromaprintSession { native <methods>; }
 -keep class io.github.lorddetson.piplayer.nativelib.resample.Resampler { native <methods>; }
 -keep class io.github.lorddetson.piplayer.nativelib.taglib.TagReader { native <methods>; }
+-keep class io.github.lorddetson.piplayer.nativelib.taglib.TagWriter { native <methods>; }
 
 # Native code calls these back by name through JNI.
 -keep class io.github.lorddetson.piplayer.nativelib.taglib.TagSink { *; }

@@ -25,7 +25,7 @@ extern "C" JNIEXPORT jint JNI_OnLoad(JavaVM *vm, void *) {
   // Installed once, before any thread uses TagLib: the listener pointer is global and not atomic.
   TagLib::setDebugListener(&debugListener);
   if (!piplayer::registerTagReader(env) || !piplayer::registerMpegLayout(env) || !piplayer::registerChromaprint(env) ||
-      !piplayer::registerResampler(env)) {
+      !piplayer::registerResampler(env) || !piplayer::registerTagWriter(env)) {
     return JNI_ERR;
   }
   return JNI_VERSION_1_6;

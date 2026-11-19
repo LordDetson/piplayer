@@ -64,6 +64,30 @@ class UserDatabaseTest {
     private suspend fun execute(db: UserDatabase, sql: String) = db.useWriterConnection { c -> c.usePrepared(sql) { it.step() } }
 
     @Test
+    fun freshDatabaseHasWriteHistoryAndBackups() = runBlocking<Unit> {
+        assertThat(rows(database, "PRAGMA user_version")).containsExactly(listOf("7"))
+        assertThat(rows(database, "SELECT name FROM sqlite_master WHERE name IN ('applied_change', 'tag_backup') ORDER BY name"))
+            .containsExactly(listOf("applied_change"), listOf("tag_backup"))
+    }
+
+    @Test
+    fun versionSixMigratesWithoutChangingExistingUserState() = runBlocking<Unit> {
+        migrations.createDatabase(6).use { connection ->
+            connection.prepare("INSERT INTO user_meta (id, change_counter) VALUES (1, 37)").use { it.step() }
+        }
+        migrations.runMigrationsAndValidate(7).close()
+
+        val opened = UserDatabase.open(context, file.name)
+        try {
+            assertThat(rows(opened, "SELECT change_counter FROM user_meta WHERE id=1")).containsExactly(listOf("37"))
+            assertThat(rows(opened, "SELECT id FROM applied_change")).isEmpty()
+            assertThat(rows(opened, "SELECT id FROM tag_backup")).isEmpty()
+        } finally {
+            opened.close()
+        }
+    }
+
+    @Test
     fun versionOneIsCreatedAsItsExportedSchemaSays() = runBlocking<Unit> {
         // Fails when the entities and the committed app/schemas/.../1.json disagree.
         migrations.createDatabase(1).close()
