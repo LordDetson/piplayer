@@ -446,8 +446,8 @@ fun PiPlayerApp(viewModel: PlayerViewModel = viewModel()) {
                 entry<NowPlayingRoute> {
                     Box(Modifier.fillMaxSize()) {
                         val writer = (appContext as PiPlayerApplication).batchTagWriter
-                        val waiting by writer.waitingByBatch.collectAsStateWithLifecycle()
-                        val pendingFileId = currentSongId?.takeIf { id -> waiting.values.any { id in it } }
+                        val waiting by writer.waitingFiles.collectAsStateWithLifecycle(initialValue = emptySet())
+                        val pendingFileId = currentSongId?.takeIf { it in waiting }
                         val links = playingLinks
                         val scope = rememberCoroutineScope()
                         // The keys are read again at the tap: the tag pass may have changed them since the song began.

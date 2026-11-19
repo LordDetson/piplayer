@@ -2,6 +2,7 @@ package io.github.lorddetson.piplayer.ui.details
 
 import android.app.Activity
 import android.util.Log
+import androidx.activity.compose.LocalActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -23,6 +24,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
@@ -32,8 +34,10 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelStoreOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
+import androidx.lifecycle.viewmodel.compose.LocalViewModelStoreOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.lorddetson.piplayer.PiPlayerApplication
 import io.github.lorddetson.piplayer.R
@@ -64,8 +68,11 @@ private class TagHistoryModel(private val identityId: Long, private val writer: 
     val state = mutableState.asStateFlow()
     private var awaitingConsent: TagUndoPlan? = null
 
-    init {
-        viewModelScope.launch { reload() }
+    fun refreshIfIdle() {
+        val shown = mutableState.value
+        if (shown.busy) return
+        mutableState.value = shown.copy(busy = true)
+        viewModelScope.launch { reload(shown.notice) }
     }
 
     fun undo(changeId: Long, launch: (IntentSenderRequest) -> Unit) {
@@ -105,13 +112,16 @@ private class TagHistoryModel(private val identityId: Long, private val writer: 
 
     private suspend fun apply(plan: TagUndoPlan) {
         val notice = try {
-            when (val result = writer.applyUndo(plan)) {
+            val result = writer.applyUndo(plan) { waiting ->
+                val message = if (waiting) HistoryNotice(R.string.tag_history_waiting_for_playback) else null
+                mutableState.value = mutableState.value.copy(notice = message)
+            }
+            when (result) {
                 is TagUndoOutcome.Restored -> if (result.conflicts.isEmpty()) HistoryNotice(R.string.tag_history_undone) else null
                 is TagUndoOutcome.NoChange -> {
                     if (result.conflicts.isEmpty()) HistoryNotice(R.string.tag_history_no_change)
                     else HistoryNotice(R.string.tag_history_conflicts, result.conflicts)
                 }
-                TagUndoOutcome.Deferred -> HistoryNotice(R.string.tag_history_deferred)
                 TagUndoOutcome.Unavailable -> HistoryNotice(R.string.tag_history_unavailable)
                 TagUndoOutcome.Failed -> HistoryNotice(R.string.tag_history_undo_error)
             }
@@ -144,8 +154,13 @@ private class TagHistoryModel(private val identityId: Long, private val writer: 
 @Composable
 internal fun TagHistoryScreen(identityId: Long, onBack: () -> Unit) {
     val app = LocalContext.current.applicationContext as PiPlayerApplication
-    val model = viewModel(key = "tag-history-$identityId") { TagHistoryModel(identityId, app.batchTagWriter) }
+    val activityOwner = LocalActivity.current as? ViewModelStoreOwner
+    val owner = activityOwner ?: checkNotNull(LocalViewModelStoreOwner.current)
+    val model = viewModel(viewModelStoreOwner = owner, key = "tag-history-$identityId") {
+        TagHistoryModel(identityId, app.batchTagWriter)
+    }
     val state by model.state.collectAsStateWithLifecycle()
+    LaunchedEffect(model) { model.refreshIfIdle() }
     val consent = rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
         model.consentResult(result.resultCode == Activity.RESULT_OK)
     }

@@ -3,6 +3,7 @@ package io.github.lorddetson.piplayer.ui.details
 import android.app.Activity
 import android.util.Log
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.LocalActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -27,6 +28,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -40,8 +42,10 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelStoreOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
+import androidx.lifecycle.viewmodel.compose.LocalViewModelStoreOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.lorddetson.piplayer.PiPlayerApplication
 import io.github.lorddetson.piplayer.R
@@ -69,6 +73,7 @@ private data class EditorState(
     val busy: Boolean = true,
     val message: Int? = null,
     val savedEdit: Long? = null,
+    val waitingForPlayback: Boolean = false,
 )
 
 private data class EditorSubmission(
@@ -87,6 +92,14 @@ private class ManualTagEditorModel(
 
     init {
         viewModelScope.launch { reload() }
+    }
+
+    fun refreshIfIdle() {
+        val current = mutableState.value
+        if (!current.busy && current.preview == null) {
+            mutableState.value = current.copy(busy = true)
+            viewModelScope.launch { reload(current.message, current.savedEdit) }
+        }
     }
 
     fun preview(changes: Map<String, List<String>>, fillEmptyOnly: Set<String>) {
@@ -186,7 +199,13 @@ private class ManualTagEditorModel(
 
     private suspend fun apply(submission: EditorSubmission) {
         try {
-            when (writer.applyManual(submission.plan, submission.changes)) {
+            val result = writer.applyManual(submission.plan, submission.changes) { waiting ->
+                mutableState.value = mutableState.value.copy(
+                    waitingForPlayback = waiting,
+                    message = R.string.manual_tag_waiting_for_playback.takeIf { waiting },
+                )
+            }
+            when (result) {
                 WriteBackResult.VERIFIED -> reload(R.string.manual_tag_written)
                 WriteBackResult.SOURCE_CHANGED -> finish(R.string.manual_tag_changed)
                 else -> finish(R.string.manual_tag_failed)
@@ -226,19 +245,22 @@ private class ManualTagEditorModel(
 @Composable
 internal fun ManualTagEditorScreen(fileId: Long, onBack: () -> Unit) {
     val app = LocalContext.current.applicationContext as PiPlayerApplication
-    val model = viewModel(key = "manual-tag-editor-$fileId") {
+    val activityOwner = LocalActivity.current as? ViewModelStoreOwner
+    val owner = activityOwner ?: checkNotNull(LocalViewModelStoreOwner.current)
+    val model = viewModel(viewModelStoreOwner = owner, key = "manual-tag-editor-$fileId") {
         ManualTagEditorModel(fileId, app.batchTagWriter, ReviewDecisions.of(app))
     }
     val state by model.state.collectAsStateWithLifecycle()
+    LaunchedEffect(model) { model.refreshIfIdle() }
     val consent = rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
         model.consentResult(result.resultCode == Activity.RESULT_OK)
     }
-    BackHandler(enabled = state.preview != null) { model.closePreview() }
+    BackHandler(enabled = state.preview != null && !state.waitingForPlayback) { model.closePreview() }
     Scaffold(topBar = {
         TopAppBar(
             title = { Text(stringResource(R.string.manual_tag_open)) },
             navigationIcon = {
-                IconButton(onClick = { if (!model.closePreview()) onBack() }) {
+                IconButton(onClick = { if (state.waitingForPlayback || !model.closePreview()) onBack() }) {
                     Icon(painterResource(R.drawable.ic_back), stringResource(R.string.library_back))
                 }
             },

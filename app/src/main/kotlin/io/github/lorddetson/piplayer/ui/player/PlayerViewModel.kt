@@ -60,7 +60,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
         if (writingPlaybackTags?.isActive == true) return
         val player = mutablePlayer.value ?: return
         val writer = getApplication<PiPlayerApplication>().batchTagWriter
-        if (writer.waitingByBatch.value.values.none { fileId in it }) return
+        if (!writer.isWaitingForPlayback(fileId)) return
         writingPlaybackTags = viewModelScope.launch {
             writeTagsWithPlaybackPaused(player, mediaId) { writer.awaitPlaybackWrite(fileId) }
         }

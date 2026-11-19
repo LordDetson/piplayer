@@ -34,6 +34,7 @@ import io.github.lorddetson.piplayer.userdata.TrackIdentityEntity
 import io.github.lorddetson.piplayer.userdata.TrackMetadataEntity
 import io.github.lorddetson.piplayer.userdata.UserDatabase
 import java.io.File
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
@@ -193,7 +194,24 @@ class TagApplyPlansTest {
             assertThat(writer.nextUndoGroup("8c75e446-88a5-4477-ba6a-a41109585caf").files).isEmpty()
             val batchUndo = writer.nextUndoGroup(batchUuid)
             assertThat(batchUndo.files).containsExactly(plan)
-            assertThat(writer.undo(batchUndo)).isEqualTo(mapOf(written.id to TagUndoOutcome.Restored(emptySet())))
+            playbackTagWriteGate.reservePlayback(current = uri.toString(), next = null)
+            try {
+                val undo = async { writer.undo(batchUndo) }
+                withTimeout(10_000) {
+                    while (undo.isActive && !writer.isWaitingForPlayback(file.id)) delay(10)
+                }
+                assertThat(writer.isWaitingForPlayback(file.id)).isTrue()
+                assertThat(report().properties["TITLE"]).containsExactly(title)
+                val finished = async(start = CoroutineStart.UNDISPATCHED) { writer.awaitPlaybackWrite(file.id) }
+                assertThat(finished.isActive).isTrue()
+                playbackTagWriteGate.reservePlayback(current = null, next = null)
+                assertThat(withTimeout(10_000) { undo.await() })
+                    .isEqualTo(mapOf(written.id to TagUndoOutcome.Restored(emptySet())))
+                withTimeout(10_000) { finished.await() }
+                assertThat(writer.isWaitingForPlayback(file.id)).isFalse()
+            } finally {
+                playbackTagWriteGate.reservePlayback(current = null, next = null)
+            }
             assertThat(writer.nextUndoGroup(batchUuid).files).isEmpty()
             val restored = report()
             assertThat(restored.properties).isEqualTo(before.properties)
@@ -237,6 +255,44 @@ class TagApplyPlansTest {
             assertThat(writer.applyReview(coverReview) {}).isEqualTo(WriteBackResult.VERIFIED)
             assertThat(report().pictures.single { it.pictureType == "Front Cover" }.sizeBytes).isEqualTo(cover.bytes().size)
             assertThat(writer.historyForTrack(identity).first().coverChange?.after).hasSize(1)
+
+            val pending = requireNotNull(writer.manualPlan(file.id))
+            val delayedComment = listOf("Written after leaving the playback queue")
+            playbackTagWriteGate.reservePlayback(current = null, next = uri.toString())
+            try {
+                val write = async(start = CoroutineStart.UNDISPATCHED) {
+                    writer.applyManual(pending, mapOf("COMMENT" to delayedComment))
+                }
+                assertThat(write.isActive).isTrue()
+                assertThat(writer.isWaitingForPlayback(file.id)).isTrue()
+                assertThat(report().properties["COMMENT"]).isEqualTo(comment)
+                val finishedWriting = async(start = CoroutineStart.UNDISPATCHED) { writer.awaitPlaybackWrite(file.id) }
+                assertThat(finishedWriting.isActive).isTrue()
+                playbackTagWriteGate.reservePlayback(current = null, next = null)
+                assertThat(withTimeout(10_000) { write.await() }).isEqualTo(WriteBackResult.VERIFIED)
+                withTimeout(10_000) { finishedWriting.await() }
+                assertThat(writer.isWaitingForPlayback(file.id)).isFalse()
+                assertThat(report().properties["COMMENT"]).isEqualTo(delayedComment)
+            } finally {
+                playbackTagWriteGate.reservePlayback(current = null, next = null)
+            }
+
+            val manualWrite = writer.historyForTrack(identity).first()
+            val singleUndo = requireNotNull(writer.undoPlan(identity, manualWrite.id))
+            playbackTagWriteGate.reservePlayback(current = null, next = uri.toString())
+            try {
+                val undo = async { writer.applyUndo(singleUndo) }
+                withTimeout(10_000) {
+                    while (undo.isActive && !writer.isWaitingForPlayback(file.id)) delay(10)
+                }
+                assertThat(writer.isWaitingForPlayback(file.id)).isTrue()
+                assertThat(report().properties["COMMENT"]).isEqualTo(delayedComment)
+                playbackTagWriteGate.reservePlayback(current = null, next = null)
+                assertThat(withTimeout(10_000) { undo.await() }).isEqualTo(TagUndoOutcome.Restored(emptySet()))
+                assertThat(report().properties["COMMENT"]).isEqualTo(comment)
+            } finally {
+                playbackTagWriteGate.reservePlayback(current = null, next = null)
+            }
         } finally {
             client.close()
             resolver.delete(uri, null, null)

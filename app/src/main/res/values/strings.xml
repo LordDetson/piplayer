@@ -499,7 +499,7 @@
     <string name="tag_history_unavailable">The file is unavailable for undo.</string>
     <string name="tag_history_cancelled">Undo was cancelled.</string>
     <string name="tag_history_no_change">There are no tags to restore.</string>
-    <string name="tag_history_deferred">Playback is using this file. Try again when it is clear of playback.</string>
+    <string name="tag_history_waiting_for_playback">Undo will continue when playback releases this file.</string>
     <string name="manual_tag_open">Edit tags</string>
     <string name="manual_tag_write">Write tags</string>
     <string name="manual_tag_save_in_player">Save in PiPlayer</string>
@@ -515,6 +515,7 @@
     <string name="manual_tag_lyrics">Lyrics</string>
     <string name="manual_tag_fill_empty">Fill only if empty (%1$s)</string>
     <string name="manual_tag_written">File tags updated.</string>
+    <string name="manual_tag_waiting_for_playback">Waiting for playback to release this file.</string>
     <string name="manual_tag_unavailable">This file is unavailable for tag editing.</string>
     <string name="manual_tag_cancelled">File access was cancelled.</string>
     <string name="manual_tag_failed">Could not write the tags. Your edits are still here.</string>

@@ -13,6 +13,7 @@ import io.github.lorddetson.piplayer.settings.TagWritingOptions
 import io.github.lorddetson.piplayer.settings.TagWritingSettings
 import io.github.lorddetson.piplayer.tagging.TagArtwork
 import io.github.lorddetson.piplayer.tagging.TagReport
+import io.github.lorddetson.piplayer.tagging.TagTarget
 import io.github.lorddetson.piplayer.tagging.fingerprints
 import io.github.lorddetson.piplayer.tagging.Tagger
 import io.github.lorddetson.piplayer.tagging.TaggerClient
@@ -25,8 +26,9 @@ import java.io.File
 import java.io.FileNotFoundException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -59,7 +61,6 @@ internal data class ReviewTagPlan(
 internal sealed interface TagUndoOutcome {
     data class Restored(val conflicts: Set<String>) : TagUndoOutcome
     data class NoChange(val conflicts: Set<String>) : TagUndoOutcome
-    data object Deferred : TagUndoOutcome
     data object Unavailable : TagUndoOutcome
     data object Failed : TagUndoOutcome
 }
@@ -78,8 +79,8 @@ internal class BatchTagWriter(
     private val queue = TagApplyQueue(database)
     private val plans = TagApplyPlans(library, database, loadCover)
     private val planning = Mutex()
-    private val waitingWrites = MutableStateFlow<Map<String, Set<Long>>>(emptyMap())
-    val waitingByBatch = waitingWrites.asStateFlow()
+    private val waitingWrites = MutableStateFlow<Map<Any, Set<Long>>>(emptyMap())
+    val waitingFiles = waitingWrites.map { waiting -> waiting.values.flatten().toSet() }.distinctUntilChanged()
     private val access = MediaStoreWriteAccess(app)
     private val journal = TagWriteJournal(database)
     private val session = TagWriteSession(
@@ -110,18 +111,25 @@ internal class BatchTagWriter(
     suspend fun apply(group: TagApplyGroup) = work.apply(group, consent = true)
 
     suspend fun applyWhenAvailable(group: TagApplyGroup, onWaiting: (Boolean) -> Unit) {
+        val operation = Any()
         work.applyWhenAvailable(group) { blocked ->
             val fileIds = group.files.filterValues { it.toString() in blocked }.keys
-            waitingWrites.update { previous ->
-                if (fileIds.isEmpty()) previous - group.planId else previous + (group.planId to fileIds)
-            }
+            updateWaiting(operation, fileIds)
             onWaiting(fileIds.isNotEmpty())
         }
     }
 
-    suspend fun awaitPlaybackWrite(fileId: Long) {
-        waitingByBatch.first { batches -> batches.values.none { fileId in it } }
+    private fun updateWaiting(operation: Any, files: Set<Long>) {
+        waitingWrites.update { previous ->
+            if (files.isEmpty()) previous - operation else previous + (operation to files)
+        }
     }
+
+    suspend fun awaitPlaybackWrite(fileId: Long) {
+        waitingFiles.first { fileId !in it }
+    }
+
+    fun isWaitingForPlayback(fileId: Long): Boolean = waitingWrites.value.values.any { fileId in it }
 
     suspend fun results(batchUuid: String): Map<String, Int> = queue.results(batchUuid)
 
@@ -168,28 +176,17 @@ internal class BatchTagWriter(
     }
 
     suspend fun applyReview(plan: ReviewTagPlan, onWaiting: (Boolean) -> Unit): WriteBackResult? {
-        val uri = plan.file.target.uri.toString()
-        try {
-            while (true) {
-                val lease = playbackTagWriteGate.tryWrite(uri)
-                if (lease != null) return lease.use {
-                    onWaiting(false)
-                    if (plans.reviewValues(plan.file.target.identityId, plan.decisionIds) != plan.selection.values) {
-                        WriteBackResult.SOURCE_CHANGED
-                    } else {
-                        val file = plan.file
-                        val diff = plan.selection.diff(file.format, file.properties, file.withoutRemovedId3v1)
-                        applySelection(
-                            file, diff.changes.mapValues { it.value.after }, emptySet(), diff.frontCovers,
-                            plan.expectedCovers, preserveAcceptedId3v1Values = true,
-                        )
-                    }
-                }
-                onWaiting(true)
-                playbackTagWriteGate.awaitAnyWritable(setOf(uri))
+        val file = plan.file
+        return writeWhenAvailable(file, onWaiting) {
+            if (plans.reviewValues(file.target.identityId, plan.decisionIds) != plan.selection.values) {
+                WriteBackResult.SOURCE_CHANGED
+            } else {
+                val diff = plan.selection.diff(file.format, file.properties, file.withoutRemovedId3v1)
+                applySelection(
+                    file, diff.changes.mapValues { it.value.after }, emptySet(), diff.frontCovers,
+                    plan.expectedCovers, preserveAcceptedId3v1Values = true,
+                )
             }
-        } finally {
-            onWaiting(false)
         }
     }
 
@@ -197,9 +194,31 @@ internal class BatchTagWriter(
         plan: ManualTagPlan,
         changes: Map<String, List<String>>,
         fillEmptyOnly: Set<String> = emptySet(),
-    ): WriteBackResult? {
-        val lease = playbackTagWriteGate.tryWrite(plan.target.uri.toString()) ?: return null
-        return lease.use { applySelection(plan, changes, fillEmptyOnly) }
+        onWaiting: (Boolean) -> Unit = {},
+    ): WriteBackResult? = writeWhenAvailable(plan, onWaiting) { applySelection(plan, changes, fillEmptyOnly) }
+
+    private suspend fun <T> writeWhenAvailable(plan: ManualTagPlan, onWaiting: (Boolean) -> Unit, write: suspend () -> T): T {
+        val operation = Any()
+        val uri = plan.target.uri.toString()
+        val affected = setOf(plan.fileId)
+        var waiting = false
+        try {
+            while (true) {
+                val lease = playbackTagWriteGate.tryWrite(uri)
+                if (lease != null) return lease.use { write() }
+                if (!waiting) {
+                    waiting = true
+                    updateWaiting(operation, affected)
+                    onWaiting(true)
+                }
+                playbackTagWriteGate.awaitAnyWritable(setOf(uri))
+            }
+        } finally {
+            if (waiting) {
+                updateWaiting(operation, emptySet())
+                onWaiting(false)
+            }
+        }
     }
 
     private suspend fun applySelection(
@@ -254,33 +273,67 @@ internal class BatchTagWriter(
 
     fun request(group: BatchTagUndoGroup): IntentSender? = access.requestAccess(group.files.map(TagUndoPlan::uri))
 
-    suspend fun undo(group: BatchTagUndoGroup): Map<Long, TagUndoOutcome> {
+    suspend fun undo(group: BatchTagUndoGroup, onWaiting: (Boolean) -> Unit = {}): Map<Long, TagUndoOutcome> {
         val uuid = Hex.mbidBytes(group.batchUuid) ?: return emptyMap()
         val eligible = session.undoableForBatch(uuid).mapTo(HashSet()) { it.id }
-        return group.files.associate { plan ->
-            plan.changeId to if (plan.changeId in eligible) applyUndo(plan) else TagUndoOutcome.Unavailable
-        }
+        val (accepted, unavailable) = group.files.partition { it.changeId in eligible }
+        return undoWhenAvailable(accepted, onWaiting) + unavailable.associate { it.changeId to TagUndoOutcome.Unavailable }
     }
 
     fun request(plan: TagUndoPlan): IntentSender? = access.requestAccess(listOf(plan.uri))
 
-    suspend fun applyUndo(plan: TagUndoPlan): TagUndoOutcome {
-        val target = undoTarget(plan.identityId, plan.changeId)?.takeIf { it.uri == plan.uri } ?: return TagUndoOutcome.Unavailable
-        val lease = playbackTagWriteGate.tryWrite(target.uri.toString()) ?: return TagUndoOutcome.Deferred
-        return lease.use {
-            val undo = session.prepareUndo(plan.changeId, target) ?: return@use TagUndoOutcome.Unavailable
-            when (val queued = undo.queued) {
-                is QueuedTagWrite.Ready -> {
-                    if (session.write(queued.id, target, consent = true) == WriteBackResult.VERIFIED) {
-                        TagUndoOutcome.Restored(undo.conflicts)
+    suspend fun applyUndo(plan: TagUndoPlan, onWaiting: (Boolean) -> Unit = {}): TagUndoOutcome =
+        undoWhenAvailable(listOf(plan), onWaiting).getValue(plan.changeId)
+
+    private suspend fun undoWhenAvailable(plans: List<TagUndoPlan>, onWaiting: (Boolean) -> Unit): Map<Long, TagUndoOutcome> {
+        val operation = Any()
+        val pending = plans.toMutableList()
+        val results = mutableMapOf<Long, TagUndoOutcome>()
+        try {
+            while (pending.isNotEmpty()) {
+                val blockedFiles = mutableSetOf<Long>()
+                val blockedUris = mutableSetOf<String>()
+                val remaining = pending.iterator()
+                while (remaining.hasNext()) {
+                    val plan = remaining.next()
+                    val target = undoTarget(plan.identityId, plan.changeId)?.takeIf { it.uri == plan.uri }
+                    val file = target?.taggerTarget as? TagTarget.LibraryFile
+                    if (target == null || file == null) {
+                        results[plan.changeId] = TagUndoOutcome.Unavailable
                     } else {
-                        TagUndoOutcome.Failed
+                        val uri = target.uri.toString()
+                        val lease = playbackTagWriteGate.tryWrite(uri)
+                        if (lease == null) {
+                            blockedFiles += file.fileId
+                            blockedUris += uri
+                            continue
+                        }
+                        results[plan.changeId] = lease.use { undoWithAccess(plan.changeId, target) }
                     }
+                    remaining.remove()
                 }
-                is QueuedTagWrite.Skipped -> {
-                    if (queued.reason == PreparationFailure.NO_CHANGES) TagUndoOutcome.NoChange(undo.conflicts)
-                    else TagUndoOutcome.Failed
-                }
+                if (blockedUris.isEmpty()) break
+                updateWaiting(operation, blockedFiles)
+                onWaiting(true)
+                playbackTagWriteGate.awaitAnyWritable(blockedUris)
+            }
+            return results
+        } finally {
+            updateWaiting(operation, emptySet())
+            onWaiting(false)
+        }
+    }
+
+    private suspend fun undoWithAccess(changeId: Long, target: TagWriteTarget): TagUndoOutcome {
+        val undo = session.prepareUndo(changeId, target) ?: return TagUndoOutcome.Unavailable
+        return when (val queued = undo.queued) {
+            is QueuedTagWrite.Ready -> {
+                if (session.write(queued.id, target, consent = true) == WriteBackResult.VERIFIED) TagUndoOutcome.Restored(undo.conflicts)
+                else TagUndoOutcome.Failed
+            }
+            is QueuedTagWrite.Skipped -> {
+                if (queued.reason == PreparationFailure.NO_CHANGES) TagUndoOutcome.NoChange(undo.conflicts)
+                else TagUndoOutcome.Failed
             }
         }
     }

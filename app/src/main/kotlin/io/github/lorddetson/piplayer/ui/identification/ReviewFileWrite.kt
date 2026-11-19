@@ -2,12 +2,13 @@ package io.github.lorddetson.piplayer.ui.identification
 
 import android.util.Log
 import androidx.activity.result.IntentSenderRequest
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
 import io.github.lorddetson.piplayer.R
 import io.github.lorddetson.piplayer.tagging.write.BatchTagWriter
 import io.github.lorddetson.piplayer.tagging.write.ReviewTagPlan
 import io.github.lorddetson.piplayer.tagging.write.WriteBackResult
 import kotlin.coroutines.cancellation.CancellationException
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -17,8 +18,7 @@ import kotlinx.coroutines.withContext
 internal class ReviewFileWrite(
     private val fileId: Long,
     private val writer: BatchTagWriter,
-    private val scope: CoroutineScope,
-) {
+) : ViewModel() {
     data class State(val decisionId: Long? = null, val busy: Boolean = false, val message: Int? = null)
 
     private val mutable = MutableStateFlow(State())
@@ -28,7 +28,7 @@ internal class ReviewFileWrite(
     fun start(action: LastAction, launch: (IntentSenderRequest) -> Unit) {
         if (mutable.value.busy) return
         mutable.value = State(decisionId = action.decisionId, busy = true)
-        scope.launch {
+        viewModelScope.launch {
             runWrite {
                 val plan = writer.reviewPlan(fileId, action.decisionId, action.editId)
                 if (plan == null) {
@@ -49,7 +49,7 @@ internal class ReviewFileWrite(
     fun consentResult(granted: Boolean) {
         val plan = awaitingConsent ?: return
         awaitingConsent = null
-        if (granted) scope.launch { runWrite { apply(plan) } }
+        if (granted) viewModelScope.launch { runWrite { apply(plan) } }
         else show(R.string.manual_tag_cancelled)
     }
 

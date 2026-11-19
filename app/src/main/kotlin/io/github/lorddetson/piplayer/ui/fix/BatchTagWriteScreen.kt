@@ -115,7 +115,7 @@ private class BatchTagWriteModel(private val batch: String, private val writer: 
     }
 
     fun incompleteUndos(): Int = undoOutcomes.values.count { (_, outcome) ->
-        outcome == TagUndoOutcome.Deferred || outcome == TagUndoOutcome.Failed || outcome == TagUndoOutcome.Unavailable
+        outcome == TagUndoOutcome.Failed || outcome == TagUndoOutcome.Unavailable
     }
 
     fun requestConsent(launch: (IntentSenderRequest) -> Unit) {
@@ -174,12 +174,9 @@ private class BatchTagWriteModel(private val batch: String, private val writer: 
     private suspend fun apply(shown: BatchWriteState.Ready, action: FileTagAction) {
         try {
             when (action) {
-                FileTagAction.WRITE -> writer.applyWhenAvailable(shown.group) { waiting ->
-                    val state = mutableState.value as? BatchWriteState.Ready ?: return@applyWhenAvailable
-                    mutableState.value = state.copy(waitingForPlayback = waiting)
-                }
+                FileTagAction.WRITE -> writer.applyWhenAvailable(shown.group, ::showPlaybackWait)
                 FileTagAction.UNDO -> {
-                    val results = writer.undo(shown.undo)
+                    val results = writer.undo(shown.undo, ::showPlaybackWait)
                     for (file in shown.undo.files) {
                         results[file.changeId]?.let { undoOutcomes[file.changeId] = file.displayName to it }
                     }
@@ -192,6 +189,11 @@ private class BatchTagWriteModel(private val batch: String, private val writer: 
             Log.w(TAG, "Could not write tags", error)
             read(errorMessage(action))
         }
+    }
+
+    private fun showPlaybackWait(waiting: Boolean) {
+        val state = mutableState.value as? BatchWriteState.Ready ?: return
+        mutableState.value = state.copy(waitingForPlayback = waiting)
     }
 
     private suspend fun read(message: Int? = null) {

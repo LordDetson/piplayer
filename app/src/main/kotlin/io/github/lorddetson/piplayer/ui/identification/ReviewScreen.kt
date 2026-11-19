@@ -3,6 +3,7 @@ package io.github.lorddetson.piplayer.ui.identification
 import android.app.Application
 import android.app.Activity
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.LocalActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import android.graphics.BitmapFactory
@@ -71,8 +72,10 @@ import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.ViewModelStoreOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
+import androidx.lifecycle.viewmodel.compose.LocalViewModelStoreOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.lorddetson.piplayer.R
 import io.github.lorddetson.piplayer.PiPlayerApplication
@@ -133,9 +136,6 @@ object ReviewTags {
 class ReviewViewModel(application: Application, file: FileRef, batchUuid: String? = null) :
     AndroidViewModel(application) {
     val review = ReviewModel(file, AppReviewBackend(application, batchUuid), viewModelScope).also { it.start() }
-    internal val fileWrite = if (file is FileRef.Library && batchUuid == null) {
-        ReviewFileWrite(file.fileId, (application as PiPlayerApplication).batchTagWriter, viewModelScope)
-    } else null
 }
 
 /**
@@ -149,7 +149,13 @@ fun ReviewScreen(fileId: Long?, uri: String?, onBack: () -> Unit, batchUuid: Str
     val app = LocalContext.current.applicationContext as Application
     val file = fileId?.let { FileRef.Library(it) } ?: FileRef.Opened(uri.orEmpty())
     val model = viewModel(key = "review ${fileId ?: uri} ${batchUuid.orEmpty()}") { ReviewViewModel(app, file, batchUuid) }
-    val writer = model.fileWrite
+    val writer = if (fileId != null && batchUuid == null) {
+        val activityOwner = LocalActivity.current as? ViewModelStoreOwner
+        val owner = activityOwner ?: checkNotNull(LocalViewModelStoreOwner.current)
+        viewModel(viewModelStoreOwner = owner, key = "review-file-write-$fileId") {
+            ReviewFileWrite(fileId, (app as PiPlayerApplication).batchTagWriter)
+        }
+    } else null
     val consent = rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) {
         writer?.consentResult(it.resultCode == Activity.RESULT_OK)
     }
