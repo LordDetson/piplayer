@@ -95,6 +95,7 @@ import io.github.lorddetson.piplayer.ui.player.QueueScreen
 import io.github.lorddetson.piplayer.ui.player.QueueTarget
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -121,6 +122,7 @@ import androidx.navigation3.runtime.NavKey
 import androidx.navigation3.runtime.entryProvider
 import androidx.navigation3.runtime.rememberNavBackStack
 import androidx.navigation3.ui.NavDisplay
+import io.github.lorddetson.piplayer.PiPlayerApplication
 import io.github.lorddetson.piplayer.R
 import io.github.lorddetson.piplayer.crash.CrashReports
 import io.github.lorddetson.piplayer.ui.crash.CrashPrompt
@@ -443,6 +445,9 @@ fun PiPlayerApp(viewModel: PlayerViewModel = viewModel()) {
                 }
                 entry<NowPlayingRoute> {
                     Box(Modifier.fillMaxSize()) {
+                        val writer = (appContext as PiPlayerApplication).batchTagWriter
+                        val waiting by writer.waitingByBatch.collectAsStateWithLifecycle()
+                        val pendingFileId = currentSongId?.takeIf { id -> waiting.values.any { id in it } }
                         val links = playingLinks
                         val scope = rememberCoroutineScope()
                         // The keys are read again at the tap: the tag pass may have changed them since the song began.
@@ -470,6 +475,15 @@ fun PiPlayerApp(viewModel: PlayerViewModel = viewModel()) {
                             },
                             more = currentMediaId?.let { mediaId ->
                                 { closeMenu ->
+                                    if (pendingFileId != null) {
+                                        DropdownMenuItem(
+                                            text = { Text(stringResource(R.string.tag_write_now)) },
+                                            onClick = {
+                                                closeMenu()
+                                                viewModel.writeTagsNow(mediaId, pendingFileId)
+                                            },
+                                        )
+                                    }
                                     val song = currentSongId?.let { Song(id = it, uri = mediaId, title = "", artist = null, album = null, durationMs = null) }
                                     TrackMenuItems(song, TrackMenuPlace.NOW_PLAYING, menu, closeMenu, openedUri = mediaId.takeIf { song == null })
                                 }

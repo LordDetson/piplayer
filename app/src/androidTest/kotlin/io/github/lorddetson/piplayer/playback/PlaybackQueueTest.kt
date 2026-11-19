@@ -23,6 +23,10 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.time.Duration.Companion.seconds
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.After
 import org.junit.Before
@@ -78,6 +82,35 @@ class PlaybackQueueTest {
         eventually("the next URI is free after playback stops") {
             playbackTagWriteGate.tryWrite(next.uri)?.use { true } ?: false
         }
+    }
+
+    @Test
+    fun writingTagsNowStopsPlaybackAndResumesTheSamePosition() {
+        val first = SongSourceRule.song(1, "Alpha", PlaybackTesting.LONG_FIXTURE)
+        val next = SongSourceRule.song(2, "Bravo")
+        songs.songs = listOf(first, next)
+        controller.tap(QueueRequest(startSongId = 1, startRow = 0), first.title)
+        controller.waitUntil("Alpha plays before Bravo") { isPlaying && currentMediaItem?.mediaId == "1" && mediaItemCount == 2 }
+        onMain { controller.seekTo(1_500) }
+        controller.waitUntil("Alpha is playing at the chosen position") { isPlaying && currentPosition >= 1_500 }
+        val before = onMain { controller.currentPosition }
+        var wrote = false
+
+        runBlocking {
+            withContext(Dispatchers.Main) {
+                writeTagsWithPlaybackPaused(controller, "1") {
+                    assertThat(controller.playbackState).isEqualTo(Player.STATE_IDLE)
+                    assertThat(controller.playWhenReady).isFalse()
+                    withTimeout(8_000) { playbackTagWriteGate.awaitAnyWritable(setOf(first.uri)) }
+                    requireNotNull(playbackTagWriteGate.tryWrite(first.uri)).use { wrote = true }
+                }
+            }
+        }
+
+        assertThat(wrote).isTrue()
+        controller.waitUntil("Alpha resumes near the old position") { isPlaying && currentMediaItem?.mediaId == "1" }
+        assertThat(onMain { controller.currentPosition }).isBetween(before - 100, before + 1_000)
+        assertThat(onMain { controller.mediaItemCount }).isEqualTo(2)
     }
 
     @Test

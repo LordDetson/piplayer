@@ -14,7 +14,11 @@ import io.github.lorddetson.piplayer.userdata.TagWriteJournal
 import io.github.lorddetson.piplayer.userdata.UserDatabase
 import java.io.File
 import java.io.IOException
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.After
 import org.junit.Test
@@ -217,8 +221,16 @@ class TagWriteSessionTest {
             assertThat(original.readBytes()).isEqualTo(originalBytes)
             assertThat(queue.remaining(item.planId)).containsExactly(item, unavailable)
 
-            playback.reservePlayback(null, null)
-            work.apply(group, consent = true)
+            val resumed = async(start = CoroutineStart.UNDISPATCHED) { work.applyWhenAvailable(group) }
+            try {
+                delay(100)
+                assertThat(resumed.isActive).isTrue()
+                assertThat(original.readBytes()).isEqualTo(originalBytes)
+                playback.reservePlayback(null, null)
+                withTimeout(10_000) { resumed.await() }
+            } finally {
+                resumed.cancel()
+            }
             assertThat(read(target).properties["TITLE"]).containsExactly("One approved file")
             assertThat(queue.remaining(item.planId)).containsExactly(unavailable)
             assertThat(queue.results(item.planId)).isEqualTo(mapOf("written" to 1, "queued" to 1))

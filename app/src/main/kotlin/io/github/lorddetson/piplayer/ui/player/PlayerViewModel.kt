@@ -16,6 +16,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionError
 import androidx.media3.session.SessionResult
+import io.github.lorddetson.piplayer.PiPlayerApplication
 import io.github.lorddetson.piplayer.R
 import io.github.lorddetson.piplayer.covers.CoverRequest
 import io.github.lorddetson.piplayer.covers.Covers as AppCovers
@@ -26,6 +27,7 @@ import io.github.lorddetson.piplayer.playback.PlaybackConnection
 import io.github.lorddetson.piplayer.playback.PlaybackExtras
 import io.github.lorddetson.piplayer.playback.PlaybackSessionCallback
 import io.github.lorddetson.piplayer.playback.QueueRequest
+import io.github.lorddetson.piplayer.playback.writeTagsWithPlaybackPaused
 import io.github.lorddetson.piplayer.library.lists.SongQuery
 import io.github.lorddetson.piplayer.library.lists.SongSort
 import io.github.lorddetson.piplayer.settings.ListName
@@ -49,9 +51,20 @@ import kotlinx.coroutines.withContext
 class PlayerViewModel(application: Application) : AndroidViewModel(application) {
 
     private val mutablePlayer = MutableStateFlow<Player?>(null)
+    private var writingPlaybackTags: Job? = null
 
     /** The controller, null until it connects. */
     val player: StateFlow<Player?> = mutablePlayer.asStateFlow()
+
+    internal fun writeTagsNow(mediaId: String, fileId: Long) {
+        if (writingPlaybackTags?.isActive == true) return
+        val player = mutablePlayer.value ?: return
+        val writer = getApplication<PiPlayerApplication>().batchTagWriter
+        if (writer.waitingByBatch.value.values.none { fileId in it }) return
+        writingPlaybackTags = viewModelScope.launch {
+            writeTagsWithPlaybackPaused(player, mediaId) { writer.awaitPlaybackWrite(fileId) }
+        }
+    }
 
     private val mutableCover = MutableStateFlow<ImageBitmap?>(null)
 

@@ -6,6 +6,7 @@ import android.net.Uri
 import android.os.ParcelFileDescriptor
 import android.os.storage.StorageManager
 import io.github.lorddetson.piplayer.library.db.LibraryAccess
+import io.github.lorddetson.piplayer.library.identity.Hex
 import io.github.lorddetson.piplayer.tagging.Tagger
 import io.github.lorddetson.piplayer.tagging.TaggerClient
 import io.github.lorddetson.piplayer.tagging.TaggerResult
@@ -16,11 +17,17 @@ import io.github.lorddetson.piplayer.userdata.UserDatabase
 import java.io.File
 import java.io.FileNotFoundException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
-internal data class TagUndoPlan(val identityId: Long, val changeId: Long, val uri: Uri)
+internal data class TagUndoPlan(val identityId: Long, val changeId: Long, val uri: Uri, val displayName: String)
+
+internal data class BatchTagUndoGroup(val batchUuid: String, val files: List<TagUndoPlan>)
 
 internal data class ManualTagPlan(val fileId: Long, val target: TagWriteTarget, val properties: Map<String, List<String>>)
 
@@ -43,6 +50,8 @@ internal class BatchTagWriter(
     private val queue = TagApplyQueue(database)
     private val plans = TagApplyPlans(library, database)
     private val planning = Mutex()
+    private val waitingWrites = MutableStateFlow<Map<String, Set<Long>>>(emptyMap())
+    val waitingByBatch = waitingWrites.asStateFlow()
     private val access = MediaStoreWriteAccess(app)
     private val journal = TagWriteJournal(database)
     private val session = TagWriteSession(
@@ -72,9 +81,26 @@ internal class BatchTagWriter(
 
     suspend fun apply(group: TagApplyGroup) = work.apply(group, consent = true)
 
+    suspend fun applyWhenAvailable(group: TagApplyGroup, onWaiting: (Boolean) -> Unit) {
+        work.applyWhenAvailable(group) { blocked ->
+            val fileIds = group.files.filterValues { it.toString() in blocked }.keys
+            waitingWrites.update { previous ->
+                if (fileIds.isEmpty()) previous - group.planId else previous + (group.planId to fileIds)
+            }
+            onWaiting(fileIds.isNotEmpty())
+        }
+    }
+
+    suspend fun awaitPlaybackWrite(fileId: Long) {
+        waitingByBatch.first { batches -> batches.values.none { fileId in it } }
+    }
+
     suspend fun results(batchUuid: String): Map<String, Int> = queue.results(batchUuid)
 
     suspend fun historyForTrack(identityId: Long): List<TagWriteHistoryEntry> = session.historyForTrack(identityId)
+
+    suspend fun historyForBatch(batchUuid: String): List<TagWriteHistoryEntry> =
+        Hex.mbidBytes(batchUuid)?.let { session.historyForBatch(it) }.orEmpty()
 
     suspend fun manualPlan(fileId: Long): ManualTagPlan? = withContext(Dispatchers.IO) {
         val target = plans.manualTarget(fileId) ?: return@withContext null
@@ -108,7 +134,30 @@ internal class BatchTagWriter(
         app.contentResolver.openFileDescriptor(uri, "r") ?: throw FileNotFoundException(uri.toString())
 
     suspend fun undoPlan(identityId: Long, changeId: Long): TagUndoPlan? =
-        undoTarget(identityId, changeId)?.let { TagUndoPlan(identityId, changeId, it.uri) }
+        undoTarget(identityId, changeId)?.let { TagUndoPlan(identityId, changeId, it.uri, it.displayName) }
+
+    suspend fun nextUndoGroup(batchUuid: String, tried: Set<Long> = emptySet()): BatchTagUndoGroup {
+        val uuid = Hex.mbidBytes(batchUuid) ?: return BatchTagUndoGroup(batchUuid, emptyList())
+        val files = ArrayList<TagUndoPlan>()
+        val seen = HashSet<Uri>()
+        for (entry in session.undoableForBatch(uuid)) {
+            if (entry.id in tried) continue
+            val target = plans.target(entry) ?: continue
+            if (seen.add(target.uri)) files += TagUndoPlan(entry.identityId, entry.id, target.uri, target.displayName)
+            if (files.size == MEDIASTORE_WRITE_REQUEST_LIMIT) break
+        }
+        return BatchTagUndoGroup(batchUuid, files)
+    }
+
+    fun request(group: BatchTagUndoGroup): IntentSender? = access.requestAccess(group.files.map(TagUndoPlan::uri))
+
+    suspend fun undo(group: BatchTagUndoGroup): Map<Long, TagUndoOutcome> {
+        val uuid = Hex.mbidBytes(group.batchUuid) ?: return emptyMap()
+        val eligible = session.undoableForBatch(uuid).mapTo(HashSet()) { it.id }
+        return group.files.associate { plan ->
+            plan.changeId to if (plan.changeId in eligible) applyUndo(plan) else TagUndoOutcome.Unavailable
+        }
+    }
 
     fun request(plan: TagUndoPlan): IntentSender? = access.requestAccess(listOf(plan.uri))
 

@@ -462,6 +462,14 @@
     <string name="batch_tag_write_start">Continue to file access</string>
     <string name="batch_tag_write_error">Could not apply the file tags. You can try again.</string>
     <string name="batch_tag_write_cancelled">File access was cancelled. Your review decisions are saved in PiPlayer.</string>
+    <string name="batch_tag_write_waiting">Waiting for playback to release the remaining files.</string>
+    <string name="tag_write_now">Write tags now</string>
+    <string name="batch_tag_undo_counts">%1$d files written · %2$d undone</string>
+    <string name="batch_tag_undo_conflict">%1$s: kept edits from another app (%2$s).</string>
+    <string name="batch_tag_undo_explanation">Android may ask for permission to restore tags in %1$d files.</string>
+    <string name="batch_tag_undo_start">Undo written tags</string>
+    <string name="batch_tag_undo_cancelled">Tag undo was cancelled.</string>
+    <string name="batch_tag_undo_incomplete">%1$d files could not be restored. Some may still be playing.</string>
     <string name="tag_history_open">Tag history</string>
     <string name="tag_history_empty">No file tag changes have been recorded.</string>
     <string name="tag_history_transition">%1$s → %2$s</string>

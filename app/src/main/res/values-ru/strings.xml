@@ -471,6 +471,14 @@
     <string name="batch_tag_write_start">Перейти к запросу доступа</string>
     <string name="batch_tag_write_error">Не удалось записать теги. Можно попробовать снова.</string>
     <string name="batch_tag_write_cancelled">Запрос доступа отменён. Решения по распознаванию сохранены в PiPlayer.</string>
+    <string name="batch_tag_write_waiting">Ожидаем, пока плеер освободит оставшиеся файлы.</string>
+    <string name="tag_write_now">Записать теги сейчас</string>
+    <string name="batch_tag_undo_counts">Файлов записано %1$d · отменено %2$d</string>
+    <string name="batch_tag_undo_conflict">%1$s: сохранены изменения другого приложения (%2$s).</string>
+    <string name="batch_tag_undo_explanation">Android может запросить разрешение на восстановление тегов в %1$d файлах.</string>
+    <string name="batch_tag_undo_start">Отменить запись тегов</string>
+    <string name="batch_tag_undo_cancelled">Откат записи тегов отменён.</string>
+    <string name="batch_tag_undo_incomplete">Не удалось восстановить теги в %1$d файлах. Некоторые из них могут воспроизводиться.</string>
     <string name="tag_history_open">История тегов</string>
     <string name="tag_history_empty">Изменений тегов в файле пока нет.</string>
     <string name="tag_history_transition">%1$s → %2$s</string>

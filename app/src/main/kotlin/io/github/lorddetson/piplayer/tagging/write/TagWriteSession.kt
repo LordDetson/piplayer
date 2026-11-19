@@ -72,14 +72,27 @@ internal class TagWriteSession(
     private val writing = Mutex()
 
     suspend fun historyForTrack(identityId: Long): List<TagWriteHistoryEntry> = withContext(Dispatchers.IO) {
-        journal.forTrack(identityId).mapNotNull { entry ->
+        history(journal.forTrack(identityId))
+    }
+
+    suspend fun historyForBatch(batchUuid: ByteArray): List<TagWriteHistoryEntry> = withContext(Dispatchers.IO) {
+        history(journal.forBatch(batchUuid))
+    }
+
+    suspend fun undoableForBatch(batchUuid: ByteArray): List<AppliedChangeEntity> = withContext(Dispatchers.IO) {
+        journal.forBatch(batchUuid).filter { entry ->
+            entry.undoneAt == null && decodeRecord(entry.diff)?.let { it.undoOf == null } == true
+        }
+    }
+
+    private fun history(entries: List<AppliedChangeEntity>): List<TagWriteHistoryEntry> =
+        entries.mapNotNull { entry ->
             val record = decodeRecord(entry.diff) ?: return@mapNotNull null
             TagWriteHistoryEntry(
                 entry.id, entry.displayName, entry.verifiedAt ?: entry.createdAt, entry.undoneAt,
                 record.undoOf, record.changes, record.conflicts,
             )
         }
-    }
 
     suspend fun prepareUndo(id: Long, target: TagWriteTarget): TagUndo? = writing.withLock {
         val original = undoable(id, target) ?: return@withLock null
