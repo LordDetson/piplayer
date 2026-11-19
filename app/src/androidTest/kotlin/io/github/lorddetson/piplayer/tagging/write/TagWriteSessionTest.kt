@@ -5,6 +5,7 @@ import android.os.ParcelFileDescriptor
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.github.lorddetson.piplayer.TestFiles
 import io.github.lorddetson.piplayer.fakes.Fixtures
+import io.github.lorddetson.piplayer.nativelib.taglib.Id3v1WritePolicy
 import io.github.lorddetson.piplayer.tagging.TagArtwork
 import io.github.lorddetson.piplayer.tagging.TagReadGuard
 import io.github.lorddetson.piplayer.tagging.TagTarget
@@ -135,6 +136,123 @@ class TagWriteSessionTest {
     }
 
     @Test
+    fun anId3v1OnlyRemovalRequiresConsentAndUndoRestoresTheExactFile() = runBlocking<Unit> {
+        loadLegacyFixture()
+        val before = original.readBytes()
+        val target = target()
+        val database = UserDatabase.open(context, databaseName)
+        try {
+            val writer = session(database)
+            val queued = writer.prepare(target, id3v1Policy = Id3v1WritePolicy.REMOVE) {
+                TagDiff(it.properties, emptyMap())
+            }
+            assertThat(queued).isInstanceOf(QueuedTagWrite.Ready::class.java)
+            val written = queued as QueuedTagWrite.Ready
+            assertThat(writer.write(written.id, target, consent = false)).isEqualTo(WriteBackResult.NEEDS_CONSENT)
+            assertThat(original.readBytes()).isEqualTo(before)
+            assertThat(writer.write(written.id, target, consent = true)).isEqualTo(WriteBackResult.VERIFIED)
+            assertThat(original.readBytes()).isEqualTo(before.copyOf(before.size - 128))
+            assertThat(read(target).content?.key).isEqualTo(target.contentKey)
+            assertThat(writer.historyForTrack(target.identityId).single().legacyId3Change)
+                .isEqualTo(LegacyId3Change(java.util.Base64.getEncoder().encodeToString(before.takeLast(128).toByteArray()), null))
+
+            val undo = requireNotNull(writer.prepareUndo(written.id, target))
+            assertThat(undo.conflicts).isEmpty()
+            assertThat(undo.queued).isInstanceOf(QueuedTagWrite.Ready::class.java)
+            val reversal = undo.queued as QueuedTagWrite.Ready
+            assertThat(writer.write(reversal.id, target, consent = false)).isEqualTo(WriteBackResult.NEEDS_CONSENT)
+            assertThat(original.readBytes()).isEqualTo(before.copyOf(before.size - 128))
+            assertThat(writer.write(reversal.id, target, consent = true)).isEqualTo(WriteBackResult.VERIFIED)
+            assertThat(original.readBytes()).isEqualTo(before)
+        } finally {
+            database.close()
+        }
+    }
+
+    @Test
+    fun updatingAFieldFromId3v1CanRestoreTheOriginalFallbackWithoutAddingAnId3v2Value() = runBlocking<Unit> {
+        loadLegacyFixture()
+        val initialBytes = original.readBytes()
+        val target = target()
+        val before = read(target)
+        val database = UserDatabase.open(context, databaseName)
+        try {
+            val writer = session(database)
+            val written = writer.prepare(target) {
+                TagDiff.between(it.properties, mapOf("TITLE" to listOf("Fits ID3v1")))
+            } as QueuedTagWrite.Ready
+            assertThat(writer.write(written.id, target, consent = true)).isEqualTo(WriteBackResult.VERIFIED)
+            assertThat(original.readBytes().takeLast(128)).isNotEqualTo(initialBytes.takeLast(128))
+
+            val undo = requireNotNull(writer.prepareUndo(written.id, target))
+            assertThat(undo.conflicts).isEmpty()
+            assertThat(writer.write((undo.queued as QueuedTagWrite.Ready).id, target, consent = true))
+                .isEqualTo(WriteBackResult.VERIFIED)
+            assertThat(original.readBytes().takeLast(128)).isEqualTo(initialBytes.takeLast(128))
+            assertThat(read(target).properties).isEqualTo(before.properties)
+            val after = TestFiles.open(original).use {
+                (client.read(target.taggerTarget, it, original.name, legacyId3Data = true) as TaggerResult.Replied).value.report
+            }
+            assertThat(after.legacyId3?.otherProperties).doesNotContainKey("TITLE")
+        } finally {
+            database.close()
+        }
+    }
+
+    @Test
+    fun undoRestoresTheExactTextOfAnExistingId3v2FrameAlongsideId3v1() = runBlocking<Unit> {
+        loadLegacyFixture()
+        val target = target()
+        val decomposed = "Beyonce\u0301"
+        ParcelFileDescriptor.open(original, ParcelFileDescriptor.MODE_READ_WRITE).use {
+            assertThat(client.writeWorkingCopy(
+                target.taggerTarget, it, mapOf("TITLE" to listOf(decomposed)), Id3v1WritePolicy.LEAVE_UNTOUCHED,
+            )).isEqualTo(TaggerResult.Replied(true))
+        }
+        assertThat(read(target).properties["TITLE"]).containsExactly(decomposed)
+        val database = UserDatabase.open(context, databaseName)
+        try {
+            val writer = session(database)
+            val written = queued(writer, target)
+            assertThat(writer.write(written.id, target, consent = true)).isEqualTo(WriteBackResult.VERIFIED)
+            val undo = requireNotNull(writer.prepareUndo(written.id, target))
+            assertThat(undo.queued).isInstanceOf(QueuedTagWrite.Ready::class.java)
+            assertThat(writer.write((undo.queued as QueuedTagWrite.Ready).id, target, consent = true)).isEqualTo(WriteBackResult.VERIFIED)
+            assertThat(read(target).properties["TITLE"]).containsExactly(decomposed)
+        } finally {
+            database.close()
+        }
+    }
+
+    @Test
+    fun undoKeepsExternallyEditedId3v1ButCanRestoreTheId3v2Field() = runBlocking<Unit> {
+        loadLegacyFixture()
+        val target = target()
+        val database = UserDatabase.open(context, databaseName)
+        try {
+            val writer = session(database)
+            val written = writer.prepare(target) {
+                TagDiff.between(it.properties, mapOf("TITLE" to listOf("Fits ID3v1")))
+            } as QueuedTagWrite.Ready
+            assertThat(writer.write(written.id, target, consent = true)).isEqualTo(WriteBackResult.VERIFIED)
+            val external = original.readBytes().takeLast(128).toByteArray().also { tag -> tag[3] = 'X'.code.toByte() }
+            ParcelFileDescriptor.open(original, ParcelFileDescriptor.MODE_READ_WRITE).use {
+                assertThat(client.writeWorkingCopy(target.taggerTarget, it, emptyMap(), restoreId3v1 = external))
+                    .isEqualTo(TaggerResult.Replied(true))
+            }
+
+            val undo = requireNotNull(writer.prepareUndo(written.id, target))
+            assertThat(undo.conflicts).containsExactly(LEGACY_ID3V1)
+            val reversal = undo.queued as QueuedTagWrite.Ready
+            assertThat(writer.write(reversal.id, target, consent = true)).isEqualTo(WriteBackResult.VERIFIED)
+            assertThat(original.readBytes().takeLast(128).toByteArray()).isEqualTo(external)
+            assertThat(read(target).properties["TITLE"]).containsExactly("Xits ID3v1")
+        } finally {
+            database.close()
+        }
+    }
+
+    @Test
     fun anInterruptedStreamCanBeRecoveredFromItsVerifiedPrefix() = runBlocking<Unit> {
         val target = target()
         val db = UserDatabase.open(context, databaseName)
@@ -255,7 +373,7 @@ class TagWriteSessionTest {
             val unavailable = item.copy(fileId = 2, displayName = "missing.mp3")
             queue.save(listOf(item, unavailable))
             val playback = TagWriteGate()
-            val work = TagApplyWork(queue, session(database), target = { target.takeIf { _ -> it.fileId == item.fileId } }, playback = playback) {
+            val work = TagApplyWork(queue, session(database), target = { target.takeIf { _ -> it.fileId == item.fileId } }, playback = playback) { _, _ ->
                 { report -> TagDiff.between(report.properties, mapOf("TITLE" to listOf("One approved file"))) }
             }
             val originalBytes = original.readBytes()
@@ -291,9 +409,7 @@ class TagWriteSessionTest {
 
     @Test
     fun theJournalUsesTheTagPassHashForAFileWithLegacyTags() = runBlocking<Unit> {
-        TestFiles.assets.open("tagging/legacy-id3v1.mp3").use { source ->
-            original.outputStream().use { source.copyTo(it) }
-        }
+        loadLegacyFixture()
         val target = target()
         val database = UserDatabase.open(context, databaseName)
         try {
@@ -309,6 +425,12 @@ class TagWriteSessionTest {
             assertThat(TagWriteJournal(database).entry(prepared.id)?.tagHash).isEqualTo(tagPropertiesHash(raw))
         } finally {
             database.close()
+        }
+    }
+
+    private fun loadLegacyFixture() {
+        TestFiles.assets.open("tagging/legacy-id3v1.mp3").use { source ->
+            original.outputStream().use { source.copyTo(it) }
         }
     }
 

@@ -19,6 +19,7 @@ import io.github.lorddetson.piplayer.nativelib.taglib.Id3v1WritePolicy
 import io.github.lorddetson.piplayer.tagging.contentkey.DurationCheck
 import io.github.lorddetson.piplayer.tagging.contentkey.DurationPlan
 import java.io.File
+import java.util.Base64
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.CompletableDeferred
@@ -91,9 +92,10 @@ class TaggerClient(
         markLegacy: Boolean = false,
         background: Boolean = false,
         frontCoverData: Boolean = false,
+        legacyId3Data: Boolean = false,
     ): TaggerResult<TagRead> = call(target) { tagger, kill ->
         guard.run(target, kill, background) {
-            val reply = reaching { tagger.read(file, fileName, markLegacy, frontCoverData) }
+            val reply = reaching { tagger.read(file, fileName, markLegacy, frontCoverData, legacyId3Data) }
             TagRead(TagReplies.unpack(reply.body, spillDir), viaFile = reply.body is TagReplyBody.InFile)
         }
     }
@@ -105,11 +107,13 @@ class TaggerClient(
         changes: Map<String, List<String>>,
         id3v1Policy: Id3v1WritePolicy = Id3v1WritePolicy.UPDATE_IF_PRESENT,
         frontCovers: List<TagArtwork>? = null,
+        restoreId3v1: ByteArray? = null,
     ): TaggerResult<Boolean> = call(target) { tagger, kill ->
         guard.run(target, kill, background = true) {
             val edits = File.createTempFile("changes-", ".json", spillDir.apply { mkdirs() })
             try {
-                edits.writeText(Json.encodeToString(TagFileEdits(changes, id3v1Policy, frontCovers)))
+                val legacy = restoreId3v1?.let { Base64.getEncoder().encodeToString(it) }
+                edits.writeText(Json.encodeToString(TagFileEdits(changes, id3v1Policy, frontCovers, legacy)))
                 ParcelFileDescriptor.open(edits, ParcelFileDescriptor.MODE_READ_ONLY).use { descriptor ->
                     reaching { tagger.writeWorkingCopy(file, descriptor) }
                 }

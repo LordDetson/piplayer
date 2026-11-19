@@ -24,6 +24,7 @@ import io.github.lorddetson.piplayer.tagging.TaggerTesting.HANG
 import io.github.lorddetson.piplayer.tagging.TaggerTesting.readFile
 import io.github.lorddetson.piplayer.tagging.TaggerTesting.report
 import java.io.File
+import java.util.Base64
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 import kotlin.time.TimeSource
@@ -98,6 +99,31 @@ class TaggerClientTest {
         assertThat(updated.value.report.properties)
             .isEqualTo(original.value.report.properties + ("TITLE" to listOf(title)))
         assertThat(countOf(target)).isZero()
+    }
+
+    @Test
+    fun canReadAndRestoreTheLegacyTagThroughTheTaggerProcess() = runBlocking<Unit> {
+        val file = TestFiles.copy("tagging/legacy-id3v1.mp3")
+        val before = file.readBytes()
+        val writer = client()
+        val report = TestFiles.open(file).use {
+            (writer.read(target, it, file.name, legacyId3Data = true) as TaggerResult.Replied).value.report
+        }
+        assertThat(report.legacyId3).isNotNull()
+        val legacy = requireNotNull(report.legacyId3)
+        assertThat(legacy.otherProperties).isEmpty()
+        val raw = Base64.getDecoder().decode(legacy.rawTag)
+        assertThat(raw.contentEquals(before.copyOfRange(before.size - 128, before.size))).isTrue()
+
+        ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_WRITE).use { fd ->
+            assertThat(writer.writeWorkingCopy(target, fd, emptyMap(), Id3v1WritePolicy.REMOVE))
+                .isEqualTo(TaggerResult.Replied(true))
+        }
+        ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_WRITE).use { fd ->
+            assertThat(writer.writeWorkingCopy(target, fd, emptyMap(), restoreId3v1 = raw))
+                .isEqualTo(TaggerResult.Replied(true))
+        }
+        assertThat(file.readBytes().contentEquals(before)).isTrue()
     }
 
     @Test

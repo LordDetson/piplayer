@@ -28,6 +28,7 @@ namespace {
 
 enum class Id3v1Policy { Update = 0, Remove = 1, Leave = 2 };
 using PictureList = TagLib::List<TagLib::VariantMap>;
+constexpr jsize ID3V1_SIZE = 128;
 
 TagLib::String fromJava(JNIEnv *env, jstring value) {
   const jsize size = env->GetStringLength(value);
@@ -133,10 +134,9 @@ void updateId3v1Text(TagLib::ByteVector &tag, const TagLib::String &value, size_
 
 bool updateExistingId3v1(TagLib::MPEG::File *file, const TagLib::PropertyMap &changes) {
   // Edit only the bytes of selected fields. Re-rendering the frame can change the padding or the old comment.
-  constexpr int size = 128;
-  file->seek(-size, TagLib::File::End);
-  auto tag = file->readBlock(size);
-  if (tag.size() != size || !tag.startsWith(TagLib::ByteVector::fromCString("TAG"))) return false;
+  file->seek(-ID3V1_SIZE, TagLib::File::End);
+  auto tag = file->readBlock(ID3V1_SIZE);
+  if (tag.size() != ID3V1_SIZE || !tag.startsWith(TagLib::ByteVector::fromCString("TAG"))) return false;
   const auto before = tag;
   for (const auto &[key, values] : changes) {
     if (values.size() > 1) continue;
@@ -158,17 +158,26 @@ bool updateExistingId3v1(TagLib::MPEG::File *file, const TagLib::PropertyMap &ch
     }
   }
   if (tag != before) {
-    file->seek(-size, TagLib::File::End);
+    file->seek(-ID3V1_SIZE, TagLib::File::End);
     file->writeBlock(tag);
   }
   return true;
 }
 
-bool save(TagLib::File *file, const TagLib::PropertyMap &changes, Id3v1Policy policy, const PictureList *fronts) {
+bool restoreId3v1Tag(TagLib::MPEG::File *file, const TagLib::ByteVector &tag) {
+  if (tag.isEmpty()) return !file->hasID3v1Tag() || file->strip(TagLib::MPEG::File::ID3v1);
+  file->seek(file->hasID3v1Tag() ? -ID3V1_SIZE : 0, TagLib::File::End);
+  file->writeBlock(tag);
+  return true;
+}
+
+bool save(TagLib::File *file, const TagLib::PropertyMap &changes, Id3v1Policy policy, const PictureList *fronts,
+          const TagLib::ByteVector *restoredId3v1) {
   const bool writePrimary = !changes.isEmpty() || fronts != nullptr;
   if (auto *mpeg = dynamic_cast<TagLib::MPEG::File *>(file)) {
-    if (policy == Id3v1Policy::Remove && mpeg->hasID3v1Tag() && !mpeg->strip(TagLib::MPEG::File::ID3v1)) return false;
-    if (!writePrimary) return true;
+    if (!restoredId3v1 && policy == Id3v1Policy::Remove &&
+        mpeg->hasID3v1Tag() && !mpeg->strip(TagLib::MPEG::File::ID3v1)) return false;
+    if (!writePrimary) return !restoredId3v1 || restoreId3v1Tag(mpeg, *restoredId3v1);
     const bool hasId3 = mpeg->hasID3v2Tag();
     auto *tag = mpeg->ID3v2Tag(true);
     const auto version = versionOf(tag, hasId3);
@@ -176,8 +185,10 @@ bool save(TagLib::File *file, const TagLib::PropertyMap &changes, Id3v1Policy po
     if (fronts && !replaceFrontCovers(tag, *fronts)) return false;
     if (!mpeg->save(TagLib::MPEG::File::ID3v2, TagLib::File::StripNone, version,
                     TagLib::File::DoNotDuplicate)) return false;
+    if (restoredId3v1) return restoreId3v1Tag(mpeg, *restoredId3v1);
     return policy != Id3v1Policy::Update || !mpeg->hasID3v1Tag() || updateExistingId3v1(mpeg, changes);
   }
+  if (restoredId3v1) return false;
   if (!writePrimary) return true;
   if (auto *wav = dynamic_cast<TagLib::RIFF::WAV::File *>(file)) {
     auto *tag = wav->ID3v2Tag();
@@ -204,7 +215,8 @@ bool save(TagLib::File *file, const TagLib::PropertyMap &changes, Id3v1Policy po
 }
 
 jboolean write(JNIEnv *env, jclass, jint fd, jobjectArray keys, jobjectArray values, jint id3v1Policy,
-               jobjectArray pictureMimes, jobjectArray pictureDescriptions, jobjectArray pictureBytes) {
+               jobjectArray pictureMimes, jobjectArray pictureDescriptions, jobjectArray pictureBytes,
+               jbyteArray restoreId3v1) {
   struct stat info {};
   const int flags = fcntl(fd, F_GETFL);
   if (flags < 0 || (flags & O_ACCMODE) != O_RDWR || fstat(fd, &info) != 0 ||
@@ -219,13 +231,24 @@ jboolean write(JNIEnv *env, jclass, jint fd, jobjectArray keys, jobjectArray val
     if (!readChanges(env, keys, values, changes)) return JNI_FALSE;
     PictureList fronts;
     if (pictureBytes && !readFrontCovers(env, pictureMimes, pictureDescriptions, pictureBytes, fronts)) return JNI_FALSE;
-    if (changes.isEmpty() && !pictureBytes && policy != Id3v1Policy::Remove) return JNI_TRUE;
+    TagLib::ByteVector legacy;
+    if (restoreId3v1) {
+      const auto size = env->GetArrayLength(restoreId3v1);
+      if (size != 0 && size != ID3V1_SIZE) return JNI_FALSE;
+      if (size == ID3V1_SIZE) {
+        legacy.resize(size);
+        env->GetByteArrayRegion(restoreId3v1, 0, size, reinterpret_cast<jbyte *>(legacy.data()));
+        if (env->ExceptionCheck() || !legacy.startsWith(TagLib::ByteVector::fromCString("TAG"))) return JNI_FALSE;
+      }
+    }
+    if (changes.isEmpty() && !pictureBytes && !restoreId3v1 && policy != Id3v1Policy::Remove) return JNI_TRUE;
     // FileStream opens its own descriptor. It never closes or moves the caller's descriptor.
     const auto path = "/proc/self/fd/" + std::to_string(fd);
     TagLib::FileStream stream(path.c_str());
     if (!stream.isOpen() || stream.readOnly()) return JNI_FALSE;
     TagLib::FileRef file(&stream, false);
-    return !file.isNull() && save(file.file(), changes, policy, pictureBytes ? &fronts : nullptr) ? JNI_TRUE : JNI_FALSE;
+    return !file.isNull() && save(file.file(), changes, policy, pictureBytes ? &fronts : nullptr, restoreId3v1 ? &legacy : nullptr)
+               ? JNI_TRUE : JNI_FALSE;
   } catch (...) {
     return JNI_FALSE;
   }
@@ -237,7 +260,7 @@ bool registerTagWriter(JNIEnv *env) {
   const auto writer = env->FindClass("io/github/lorddetson/piplayer/nativelib/taglib/TagWriter");
   if (writer == nullptr) return false;
   static const JNINativeMethod methods[] = {
-      {"nativeWrite", "(I[Ljava/lang/String;[[Ljava/lang/String;I[Ljava/lang/String;[Ljava/lang/String;[[B)Z",
+      {"nativeWrite", "(I[Ljava/lang/String;[[Ljava/lang/String;I[Ljava/lang/String;[Ljava/lang/String;[[B[B)Z",
        reinterpret_cast<void *>(write)},
   };
   return env->RegisterNatives(writer, methods, 1) == JNI_OK;

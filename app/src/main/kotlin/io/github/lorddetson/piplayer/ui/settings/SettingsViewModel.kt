@@ -11,11 +11,15 @@ import io.github.lorddetson.piplayer.identification.provider.ProviderStatus
 import io.github.lorddetson.piplayer.library.Library
 import io.github.lorddetson.piplayer.library.values.LegacyEncoding
 import io.github.lorddetson.piplayer.library.values.LegacyEncodings
+import io.github.lorddetson.piplayer.nativelib.taglib.Id3v1WritePolicy
 import io.github.lorddetson.piplayer.settings.AppearanceSettings
 import io.github.lorddetson.piplayer.settings.HiddenFiles
 import io.github.lorddetson.piplayer.settings.LibrarySettings
 import io.github.lorddetson.piplayer.settings.ProtectedField
+import io.github.lorddetson.piplayer.settings.TagWritingOptions
+import io.github.lorddetson.piplayer.settings.TagWritingSettings
 import io.github.lorddetson.piplayer.settings.ThemeMode
+import io.github.lorddetson.piplayer.tagging.write.TagCoverPreset
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
@@ -37,6 +41,18 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
 
     private val appearance = AppearanceSettings(application)
     private val library = LibrarySettings(application)
+    private val tagWriting = TagWritingSettings(application)
+
+    internal val tagWritingOptions: StateFlow<TagWritingOptions> =
+        tagWriting.options.stateIn(viewModelScope, SharingStarted.Eagerly, TagWritingOptions())
+
+    internal fun setId3v1Policy(policy: Id3v1WritePolicy) {
+        viewModelScope.launch { tagWriting.setId3v1(policy) }
+    }
+
+    internal fun setCoverPreset(preset: TagCoverPreset) {
+        viewModelScope.launch { tagWriting.setCover(preset) }
+    }
 
     val theme: StateFlow<ThemeMode> = appearance.theme.stateIn(viewModelScope, SharingStarted.Eagerly, appearance.readTheme())
 

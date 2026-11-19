@@ -74,6 +74,9 @@ constexpr unsigned int MAX_PICTURE_BYTES = 64u * 1024 * 1024;
 
 jclass stringClass = nullptr;
 jmethodID sinkProperty = nullptr;
+jmethodID sinkOtherProperty = nullptr;
+jmethodID sinkId3v2Property = nullptr;
+jmethodID sinkId3v1 = nullptr;
 jmethodID sinkAudio = nullptr;
 jmethodID sinkPicture = nullptr;
 jmethodID sinkContainer = nullptr;
@@ -152,7 +155,7 @@ jstring toJava(JNIEnv *env, const TagLib::String &value) {
  * Calls back into the sink. Every JNI result is checked before the next call: once Java has thrown (for example
  * OutOfMemoryError), no further JNI call is allowed, so the function returns false and leaves the exception pending.
  */
-bool sendProperties(JNIEnv *env, jobject sink, const TagLib::PropertyMap &properties) {
+bool sendProperties(JNIEnv *env, jobject sink, const TagLib::PropertyMap &properties, jmethodID property) {
   for (const auto &[key, values] : properties) {
     jstring jKey = toJava(env, key);
     if (jKey == nullptr) return false;
@@ -165,7 +168,7 @@ bool sendProperties(JNIEnv *env, jobject sink, const TagLib::PropertyMap &proper
       env->SetObjectArrayElement(jValues, index++, jValue);
       env->DeleteLocalRef(jValue);
     }
-    env->CallVoidMethod(sink, sinkProperty, jKey, jValues);
+    env->CallVoidMethod(sink, property, jKey, jValues);
     env->DeleteLocalRef(jKey);
     env->DeleteLocalRef(jValues);
     if (env->ExceptionCheck()) return false;
@@ -398,6 +401,29 @@ TagLib::PropertyMap propertiesOf(TagLib::FileRef &ref) {
   return properties;
 }
 
+bool sendMpegTagDetails(JNIEnv *env, jobject sink, TagLib::File *file) {
+  auto *mpeg = dynamic_cast<TagLib::MPEG::File *>(file);
+  if (mpeg == nullptr) return true;
+  TagLib::PropertyMap primary;
+  if (mpeg->hasID3v2Tag()) primary = mpeg->ID3v2Tag()->properties();
+  if (!sendProperties(env, sink, primary, sinkId3v2Property)) return false;
+  if (!mpeg->hasID3v1Tag()) return true;
+  constexpr jsize size = 128;
+  mpeg->seek(-size, TagLib::File::End);
+  const auto tag = mpeg->readBlock(size);
+  if (tag.size() != size || !tag.startsWith(TagLib::ByteVector::fromCString("TAG"))) return false;
+  auto bytes = env->NewByteArray(size);
+  if (bytes == nullptr) return false;
+  env->SetByteArrayRegion(bytes, 0, size, reinterpret_cast<const jbyte *>(tag.data()));
+  if (env->ExceptionCheck()) return false;
+  env->CallVoidMethod(sink, sinkId3v1, bytes);
+  env->DeleteLocalRef(bytes);
+  if (env->ExceptionCheck()) return false;
+
+  fillMissing(primary, mpeg->APETag());
+  return sendProperties(env, sink, primary, sinkOtherProperty);
+}
+
 bool hasMpegExtension(const std::string &fileName) {
   std::string::size_type dot = fileName.rfind('.');
   if (dot == std::string::npos) return false;
@@ -439,7 +465,8 @@ void runTestHooks(int fd) {
 }
 #endif
 
-jint read(JNIEnv *env, jclass, jint fd, jstring jFileName, jint pictures, jboolean markLegacy, jobject sink) {
+jint read(JNIEnv *env, jclass, jint fd, jstring jFileName, jint pictures, jboolean markLegacy,
+          jboolean legacyId3Data, jobject sink) {
   if (fd < 0) return INVALID_FD;
   struct stat info {};
   if (fstat(fd, &info) != 0) return INVALID_FD;
@@ -468,7 +495,8 @@ jint read(JNIEnv *env, jclass, jint fd, jstring jFileName, jint pictures, jboole
 
     if (!sendContainer(env, sink, file.file())) return NATIVE_ERROR;
     if (!sendTechnical(env, sink, file.file())) return NATIVE_ERROR;
-    if (!sendProperties(env, sink, propertiesOf(file))) return NATIVE_ERROR;
+    if (!sendProperties(env, sink, propertiesOf(file), sinkProperty)) return NATIVE_ERROR;
+    if (legacyId3Data && !sendMpegTagDetails(env, sink, file.file())) return NATIVE_ERROR;
     if (const TagLib::AudioProperties *audio = file.audioProperties()) {
       env->CallVoidMethod(sink, sinkAudio, audio->lengthInMilliseconds(), audio->bitrate(), audio->sampleRate(),
                           audio->channels());
@@ -493,17 +521,22 @@ bool registerTagReader(JNIEnv *env) {
   if (reader == nullptr || sink == nullptr || string == nullptr) return false;
   stringClass = static_cast<jclass>(env->NewGlobalRef(string));
   sinkProperty = env->GetMethodID(sink, "property", "(Ljava/lang/String;[Ljava/lang/String;)V");
+  sinkOtherProperty = env->GetMethodID(sink, "otherProperty", "(Ljava/lang/String;[Ljava/lang/String;)V");
+  sinkId3v2Property = env->GetMethodID(sink, "id3v2Property", "(Ljava/lang/String;[Ljava/lang/String;)V");
+  sinkId3v1 = env->GetMethodID(sink, "id3v1", "([B)V");
   sinkAudio = env->GetMethodID(sink, "audio", "(IIII)V");
   sinkPicture = env->GetMethodID(sink, "picture", "([BILjava/lang/String;Ljava/lang/String;Ljava/lang/String;)V");
   sinkContainer = env->GetMethodID(sink, "container", "(Ljava/lang/String;)V");
   sinkTechnical = env->GetMethodID(sink, "technical", "(Ljava/lang/String;I)V");
-  if (sinkProperty == nullptr || sinkAudio == nullptr || sinkPicture == nullptr || sinkContainer == nullptr ||
+  if (sinkProperty == nullptr || sinkOtherProperty == nullptr || sinkId3v2Property == nullptr ||
+      sinkId3v1 == nullptr || sinkAudio == nullptr ||
+      sinkPicture == nullptr || sinkContainer == nullptr ||
       sinkTechnical == nullptr) {
     return false;
   }
 
   static const JNINativeMethod methods[] = {
-      {"nativeRead", "(ILjava/lang/String;IZLio/github/lorddetson/piplayer/nativelib/taglib/TagSink;)I",
+      {"nativeRead", "(ILjava/lang/String;IZZLio/github/lorddetson/piplayer/nativelib/taglib/TagSink;)I",
        reinterpret_cast<void *>(read)},
   };
   return env->RegisterNatives(reader, methods, 1) == JNI_OK;

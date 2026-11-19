@@ -12,6 +12,7 @@ internal data class TagDiff(
     val changes: Map<String, TagChange>,
     val conflicts: Set<String> = emptySet(),
     val frontCovers: List<TagArtwork>? = null,
+    val restoreId3v1: String? = null,
 ) {
     companion object {
         fun between(
@@ -19,11 +20,16 @@ internal data class TagDiff(
             desired: Map<String, List<String>>,
             fillEmptyOnly: Set<String> = emptySet(),
         ): TagDiff {
+            val normalized = desired.filterNot { (key, _) ->
+                key in fillEmptyOnly && current[key].orEmpty().any { it.isNotEmpty() }
+            }.mapValues { (_, values) -> values.map { Normalizer.normalize(it, Normalizer.Form.NFC) } }
+            return exact(current, normalized)
+        }
+
+        fun exact(current: Map<String, List<String>>, desired: Map<String, List<String>>): TagDiff {
             val changes = buildMap {
-                for ((key, values) in desired) {
+                for ((key, after) in desired) {
                     val before = current[key].orEmpty()
-                    if (key in fillEmptyOnly && before.any { it.isNotEmpty() }) continue
-                    val after = values.map { Normalizer.normalize(it, Normalizer.Form.NFC) }
                     if (before != after) put(key, TagChange(before, after))
                 }
             }

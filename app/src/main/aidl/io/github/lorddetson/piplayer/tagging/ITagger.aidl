@@ -10,9 +10,9 @@ interface ITagger {
 
     /**
      * Reads the tags of [file], which the service closes; [fileName] helps TagLib pick the format. [markLegacy] leaves the
-     * bytes of text in a legacy encoding for the caller to decode (TI §3.6). A write can request the front-cover bytes.
+     * bytes of text in a legacy encoding for the caller to decode (TI §3.6). A write can request front covers or ID3v1 data.
      */
-    TaggerReply read(in ParcelFileDescriptor file, @nullable String fileName, boolean markLegacy, boolean frontCoverData);
+    TaggerReply read(in ParcelFileDescriptor file, @nullable String fileName, boolean markLegacy, boolean frontCoverData, boolean legacyId3Data);
 
     /**
      * Measures the length of [file], which the service closes, in milliseconds, without decoding it; -1 when it cannot.

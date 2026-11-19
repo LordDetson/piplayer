@@ -18,6 +18,7 @@ object TagWriter {
         changes: Map<String, List<String>>,
         id3v1Policy: Id3v1WritePolicy = Id3v1WritePolicy.UPDATE_IF_PRESENT,
         frontCovers: List<Picture>? = null,
+        restoreId3v1: ByteArray? = null,
     ): Boolean {
         check(TagReader.anyProcess || Application.getProcessName().endsWith(":tagger")) {
             "TagWriter writes only in the :tagger process"
@@ -28,6 +29,7 @@ object TagWriter {
             fd, entries.map { it.key }.toTypedArray(), entries.map { it.value.toTypedArray() }.toTypedArray(),
             id3v1Policy.nativeCode,
             frontCovers?.map { it.mimeType }?.toTypedArray(), frontCovers?.map { it.description }?.toTypedArray(), pictureBytes,
+            restoreId3v1,
         )
     }
 
@@ -40,5 +42,6 @@ object TagWriter {
         pictureMimes: Array<String>?,
         pictureDescriptions: Array<String>?,
         pictureBytes: Array<ByteArray>?,
+        restoreId3v1: ByteArray?,
     ): Boolean
 }

@@ -48,6 +48,48 @@ class TagWriterId3v1Test {
     }
 
     @Test
+    fun reportingId3v1SeparatesItsExactBytesFromTheOtherTags() {
+        val file = TestFiles.copy("tags/id3v1.mp3")
+        val before = file.readBytes()
+        TestFiles.open(file).use {
+            val report = TagReader.read(it.fd, file.name, legacyId3Data = true) as TagReadResult.Success
+            val legacy = report.legacyId3Tag
+            assertThat(legacy).isNotNull()
+            assertThat(requireNotNull(legacy).bytes.contentEquals(before.copyOfRange(before.size - 128, before.size))).isTrue()
+            assertThat(legacy.otherProperties).isEmpty()
+            assertThat(report.properties["TITLE"]).containsExactly("Paper Lanterns")
+        }
+
+        writeTitle(file, "Modern title", Id3v1WritePolicy.LEAVE_UNTOUCHED)
+        TestFiles.open(file).use {
+            val report = TagReader.read(it.fd, file.name, legacyId3Data = true) as TagReadResult.Success
+            assertThat(requireNotNull(report.legacyId3Tag).otherProperties).isEqualTo(mapOf("TITLE" to listOf("Modern title")))
+            assertThat(report.properties["ARTIST"]).containsExactly("The Quiet Harbors")
+        }
+    }
+
+    @Test
+    fun anExplicitRestoreBringsBackTheOriginalTagByteForByte() {
+        val file = TestFiles.copy("tags/id3v1.mp3")
+        val before = file.readBytes()
+        val savedTag = before.copyOfRange(before.size - 128, before.size)
+        ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_WRITE).use {
+            assertThat(TagWriter.write(it.fd, emptyMap(), Id3v1WritePolicy.REMOVE)).isTrue()
+        }
+        assertThat(file.length()).isEqualTo(before.size.toLong() - savedTag.size)
+
+        ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_WRITE).use {
+            assertThat(TagWriter.write(it.fd, emptyMap(), restoreId3v1 = savedTag)).isTrue()
+        }
+        assertThat(file.readBytes().contentEquals(before)).isTrue()
+
+        ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_WRITE).use {
+            assertThat(TagWriter.write(it.fd, mapOf("TITLE" to listOf("Do not write")), restoreId3v1 = ByteArray(128))).isFalse()
+        }
+        assertThat(file.readBytes().contentEquals(before)).isTrue()
+    }
+
+    @Test
     fun removalWithNoTextChangesStripsOnlyTheLegacyTag() {
         val file = TestFiles.copy("tags/id3v1.mp3")
         val audio = file.readBytes().dropLast(128).toByteArray()

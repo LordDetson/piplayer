@@ -46,6 +46,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.lorddetson.piplayer.PiPlayerApplication
 import io.github.lorddetson.piplayer.R
 import io.github.lorddetson.piplayer.identification.contract.IdentificationTarget
+import io.github.lorddetson.piplayer.nativelib.taglib.Id3v1WritePolicy
 import io.github.lorddetson.piplayer.tagging.write.BatchTagWriter
 import io.github.lorddetson.piplayer.tagging.write.ManualTagPlan
 import io.github.lorddetson.piplayer.tagging.write.TagChange
@@ -93,7 +94,9 @@ private class ManualTagEditorModel(
         val plan = current.plan ?: return
         if (current.busy) return
         val diff = TagDiff.between(plan.properties, changes, fillEmptyOnly)
-        if (diff.changes.isNotEmpty()) mutableState.value = current.copy(preview = diff.changes, message = null)
+        if (diff.changes.isNotEmpty() || plan.removesId3v1) {
+            mutableState.value = current.copy(preview = diff.changes, message = null)
+        }
     }
 
     fun closePreview(): Boolean {
@@ -253,13 +256,15 @@ internal fun ManualTagEditorScreen(fileId: Long, onBack: () -> Unit) {
                 if (shown.preview == null) {
                     ManualTagForm(
                         plan.properties, modifier = Modifier.weight(1f), busy = shown.busy,
-                        draft = draft, actionLabel = R.string.manual_tag_review, onSubmit = model::preview,
+                        draft = draft, actionLabel = R.string.manual_tag_review, canRemoveLegacyTag = plan.removesId3v1,
+                        onSubmit = model::preview,
                     )
                 } else {
                     val canSave = remember(plan, shown.preview) { manualLibraryEdit(plan.properties, shown.preview) != null }
                     ManualTagPreview(
                         shown.preview, plan.format, shown.busy, onBack = { model.closePreview() },
                         onSave = (model::saveInPiPlayer).takeIf { canSave },
+                        legacyId3Policy = plan.options.id3v1.takeIf { plan.legacyId3 != null },
                     ) { model.submit { consent.launch(it) } }
                 }
             }
@@ -296,6 +301,7 @@ internal fun ManualTagPreview(
     busy: Boolean,
     onBack: () -> Unit,
     onSave: (() -> Unit)? = null,
+    legacyId3Policy: Id3v1WritePolicy? = null,
     onWrite: () -> Unit,
 ) {
     val empty = stringResource(R.string.tag_history_empty_value)
@@ -310,6 +316,16 @@ internal fun ManualTagPreview(
                         change.before.joinToString().ifEmpty { empty },
                         change.after.joinToString().ifEmpty { empty },
                     ))
+                }
+            }
+            if (legacyId3Policy != null) item {
+                Column {
+                    Text(stringResource(R.string.tag_writing_id3v1))
+                    Text(stringResource(when (legacyId3Policy) {
+                        Id3v1WritePolicy.UPDATE_IF_PRESENT -> R.string.tag_writing_id3v1_preview_update
+                        Id3v1WritePolicy.REMOVE -> R.string.tag_writing_id3v1_preview_remove
+                        Id3v1WritePolicy.LEAVE_UNTOUCHED -> R.string.tag_writing_id3v1_preview_keep
+                    }))
                 }
             }
         }
@@ -336,6 +352,7 @@ internal fun ManualTagForm(
     busy: Boolean = false,
     draft: ManualTagDraft = remember(initial) { ManualTagDraft() },
     actionLabel: Int = R.string.manual_tag_write,
+    canRemoveLegacyTag: Boolean = false,
     onSubmit: (Map<String, List<String>>, Set<String>) -> Unit,
 ) {
     val fields = remember(initial) {
@@ -373,7 +390,7 @@ internal fun ManualTagForm(
                 }
             }
         }
-        Button(enabled = canWrite && !busy, onClick = {
+        Button(enabled = (canWrite || canRemoveLegacyTag) && !busy, onClick = {
             val changes = buildMap {
                 for (field in fields) {
                     val text = edits[field.key] ?: continue

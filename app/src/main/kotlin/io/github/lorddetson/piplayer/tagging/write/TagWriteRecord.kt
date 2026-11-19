@@ -8,6 +8,9 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
 @Serializable
+internal data class LegacyId3Change(val before: String?, val after: String?)
+
+@Serializable
 internal data class TagWriteRecord(
     val originalSha256: ByteArray,
     val originalDevice: Long,
@@ -17,6 +20,8 @@ internal data class TagWriteRecord(
     val conflicts: Set<String> = emptySet(),
     val markedTagHash: Boolean = false,
     val coverChange: TagChange? = null,
+    val legacyId3Change: LegacyId3Change? = null,
+    val id3v2Changes: Map<String, TagChange>? = null,
 ) {
     fun encode(): ByteArray {
         val bytes = ByteArrayOutputStream()

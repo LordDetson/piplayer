@@ -25,6 +25,9 @@ enum class TagReadError {
 /** Audio stream details as TagLib reports them. */
 data class AudioProperties(val lengthMs: Int, val bitrateKbps: Int, val sampleRate: Int, val channels: Int)
 
+/** Exact ID3v1 bytes and the values available from the file's other tags. */
+data class LegacyId3Tag(val bytes: ByteArray, val otherProperties: Map<String, List<String>>)
+
 /**
  * An embedded picture; [pictureType] uses the ID3v2 names, such as "Front Cover". [data] is null when only the
  * pictures' sizes were asked for.
@@ -86,6 +89,8 @@ sealed interface TagReadResult {
         val container: String? = null,
         val codec: String? = null,
         val bitDepth: Int? = null,
+        val legacyId3Tag: LegacyId3Tag? = null,
+        val mpegId3v2Properties: Map<String, List<String>>? = null,
     ) : TagReadResult
 
     data class Failure(val error: TagReadError) : TagReadResult
@@ -114,13 +119,19 @@ object TagReader {
      * [markLegacy] marks each byte at or above 0x80 of text in a legacy encoding as 0xE000 plus the byte, so that the
      * caller can decode it (TI §3.6). Throws IllegalStateException outside the `:tagger` process.
      */
-    fun read(fd: Int, fileName: String? = null, pictures: Pictures = Pictures.NONE, markLegacy: Boolean = false): TagReadResult {
+    fun read(
+        fd: Int,
+        fileName: String? = null,
+        pictures: Pictures = Pictures.NONE,
+        markLegacy: Boolean = false,
+        legacyId3Data: Boolean = false,
+    ): TagReadResult {
         check(anyProcess || Application.getProcessName().endsWith(TAGGER_SUFFIX)) {
             "TagReader reads only in the $TAGGER_SUFFIX process"
         }
         if (fd < 0) return TagReadResult.Failure(TagReadError.INVALID_FD)
-        val sink = TagSink()
-        return when (nativeRead(fd, fileName, pictures.ordinal, markLegacy, sink)) {
+        val sink = TagSink(legacyId3Data)
+        return when (nativeRead(fd, fileName, pictures.ordinal, markLegacy, legacyId3Data, sink)) {
             0 -> sink.result()
             1 -> TagReadResult.Failure(TagReadError.INVALID_FD)
             2 -> TagReadResult.Failure(TagReadError.NOT_SEEKABLE)
@@ -152,13 +163,18 @@ object TagReader {
      * format, 4 native error, 5 read error.
      */
     @JvmStatic
-    private external fun nativeRead(fd: Int, fileName: String?, pictures: Int, markLegacy: Boolean, sink: TagSink): Int
+    private external fun nativeRead(
+        fd: Int, fileName: String?, pictures: Int, markLegacy: Boolean, legacyId3Data: Boolean, sink: TagSink,
+    ): Int
 }
 
 /** Collects what the native reader finds; its methods are called from native code by name. */
-internal class TagSink {
+internal class TagSink(private val legacyId3Data: Boolean = false) {
 
     private val properties = LinkedHashMap<String, List<String>>()
+    private val otherProperties = LinkedHashMap<String, List<String>>()
+    private val id3v2Properties = LinkedHashMap<String, List<String>>()
+    private var legacyId3: ByteArray? = null
     private var audio: AudioProperties? = null
     private val pictures = mutableListOf<Picture>()
     private var container: String? = null
@@ -193,6 +209,18 @@ internal class TagSink {
         properties[key] = values.toList()
     }
 
+    fun otherProperty(key: String, values: Array<String>) {
+        otherProperties[key] = values.toList()
+    }
+
+    fun id3v2Property(key: String, values: Array<String>) {
+        id3v2Properties[key] = values.toList()
+    }
+
+    fun id3v1(bytes: ByteArray) {
+        legacyId3 = bytes
+    }
+
     fun audio(lengthMs: Int, bitrateKbps: Int, sampleRate: Int, channels: Int) {
         audio = AudioProperties(lengthMs, bitrateKbps, sampleRate, channels)
     }
@@ -212,5 +240,9 @@ internal class TagSink {
         this.bitDepth = bitDepth.takeIf { it > 0 }
     }
 
-    fun result() = TagReadResult.Success(properties.toMap(), audio, pictures.toList(), container, codec, bitDepth)
+    fun result() = TagReadResult.Success(
+        properties.toMap(), audio, pictures.toList(), container, codec, bitDepth,
+        legacyId3?.let { LegacyId3Tag(it, otherProperties.toMap()) },
+        id3v2Properties.toMap().takeIf { legacyId3Data && (container == "mpeg" || container == "adts") },
+    )
 }

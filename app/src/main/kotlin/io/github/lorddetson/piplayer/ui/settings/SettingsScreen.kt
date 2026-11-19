@@ -38,8 +38,10 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.lorddetson.piplayer.BuildConfig
 import io.github.lorddetson.piplayer.R
+import io.github.lorddetson.piplayer.nativelib.taglib.Id3v1WritePolicy
 import io.github.lorddetson.piplayer.settings.HiddenFiles
 import io.github.lorddetson.piplayer.settings.ThemeMode
+import io.github.lorddetson.piplayer.tagging.write.TagCoverPreset
 
 /**
  * The Settings screen (docs/library.md §3.6, §14.3): sections fill in as their milestones land; M2a has Library,
@@ -56,6 +58,7 @@ fun SettingsScreen(
     val hidden by viewModel.hiddenFiles.collectAsStateWithLifecycle()
     val legacyEncoding by viewModel.legacyEncoding.collectAsStateWithLifecycle()
     val identificationPrivacy by viewModel.identificationPrivacy.collectAsStateWithLifecycle()
+    val tagWriting by viewModel.tagWritingOptions.collectAsStateWithLifecycle()
     SettingsScaffold(stringResource(R.string.settings_title), onBack) { padding ->
         Column(
             Modifier
@@ -121,6 +124,15 @@ fun SettingsScreen(
                 onTurnOff = viewModel::turnOffOnlineLookups,
                 onProtect = viewModel::setProtected,
             )
+            SectionTitle(stringResource(R.string.tag_writing_settings))
+            TagWritingChoice(
+                R.string.tag_writing_id3v1, tagWriting.id3v1, Id3v1WritePolicy.entries,
+                Id3v1WritePolicy::label, viewModel::setId3v1Policy,
+            )
+            TagWritingChoice(
+                R.string.tag_writing_cover, tagWriting.cover, TagCoverPreset.entries,
+                TagCoverPreset::label, viewModel::setCoverPreset,
+            )
             SectionTitle(stringResource(R.string.settings_appearance))
             ThemeChoice(theme, viewModel::setTheme)
             SectionTitle(stringResource(R.string.settings_about))
@@ -136,6 +148,55 @@ fun SettingsScreen(
             )
         }
     }
+}
+
+@Composable
+private fun <T> TagWritingChoice(
+    title: Int,
+    selected: T,
+    choices: List<T>,
+    label: (T) -> Int,
+    select: (T) -> Unit,
+) {
+    var choosing by rememberSaveable { mutableStateOf(false) }
+    val heading = stringResource(title)
+    TextRow(heading, stringResource(label(selected))) { choosing = true }
+    if (choosing) AlertDialog(
+        onDismissRequest = { choosing = false },
+        title = { Text(heading) },
+        text = {
+            Column(Modifier.selectableGroup()) {
+                for (choice in choices) {
+                    val checked = choice == selected
+                    Row(
+                        Modifier.fillMaxWidth().selectable(checked, role = Role.RadioButton, onClick = {
+                            select(choice)
+                            choosing = false
+                        }).padding(vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        RadioButton(checked, onClick = null)
+                        Text(stringResource(label(choice)), modifier = Modifier.padding(start = 12.dp))
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { choosing = false }) { Text(stringResource(R.string.settings_dialog_cancel)) }
+        },
+    )
+}
+
+private fun Id3v1WritePolicy.label(): Int = when (this) {
+    Id3v1WritePolicy.UPDATE_IF_PRESENT -> R.string.tag_writing_id3v1_update
+    Id3v1WritePolicy.REMOVE -> R.string.tag_writing_id3v1_remove
+    Id3v1WritePolicy.LEAVE_UNTOUCHED -> R.string.tag_writing_id3v1_keep
+}
+
+private fun TagCoverPreset.label(): Int = when (this) {
+    TagCoverPreset.COMPATIBLE -> R.string.tag_writing_cover_compatible
+    TagCoverPreset.CAR_STEREO -> R.string.tag_writing_cover_car_stereo
+    TagCoverPreset.ORIGINAL -> R.string.tag_writing_cover_original
 }
 
 /** A settings page: a top bar with the title and a way back, over [content]. */

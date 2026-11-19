@@ -9,6 +9,7 @@ import androidx.compose.ui.test.performTextReplacement
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.github.lorddetson.piplayer.R
 import io.github.lorddetson.piplayer.TestFiles
+import io.github.lorddetson.piplayer.nativelib.taglib.Id3v1WritePolicy
 import io.github.lorddetson.piplayer.tagging.write.TagChange
 import io.github.lorddetson.piplayer.tagging.write.TagFileFormat
 import io.github.lorddetson.piplayer.ui.theme.PiPlayerTheme
@@ -54,6 +55,19 @@ class ManualTagEditorTest {
             assertThat(saved).isTrue()
             assertThat(written).isFalse()
         }
+    }
+
+    @Test
+    fun anId3v1RemovalIsShownSeparatelyFromOtherFileTags() {
+        compose.setContent {
+            PiPlayerTheme {
+                ManualTagPreview(emptyMap(), TagFileFormat.ID3V24, busy = false, onBack = {}, legacyId3Policy = Id3v1WritePolicy.REMOVE) {}
+            }
+        }
+        val context = TestFiles.targetContext
+        compose.onNodeWithText(context.getString(R.string.tag_writing_id3v1)).assertIsDisplayed()
+        compose.onNodeWithText(context.getString(R.string.tag_writing_id3v1_preview_remove)).assertIsDisplayed()
+        compose.onNodeWithText(context.getString(R.string.manual_tag_write)).assertIsDisplayed()
     }
 
     @Test

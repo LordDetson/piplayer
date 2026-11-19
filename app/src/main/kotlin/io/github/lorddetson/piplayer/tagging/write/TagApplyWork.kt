@@ -1,20 +1,25 @@
 package io.github.lorddetson.piplayer.tagging.write
 
 import android.net.Uri
+import io.github.lorddetson.piplayer.settings.TagWritingOptions
 import io.github.lorddetson.piplayer.tagging.TagReport
 import io.github.lorddetson.piplayer.userdata.TagApplyItem
 import io.github.lorddetson.piplayer.userdata.TagApplyQueue
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
-internal data class TagApplyGroup(val planId: String, val files: Map<Long, Uri>)
+internal data class TagApplyGroup(
+    val planId: String,
+    val files: Map<Long, Uri>,
+    val options: TagWritingOptions = TagWritingOptions(),
+)
 
 internal class TagApplyWork(
     private val queue: TagApplyQueue,
     private val session: TagWriteSession,
     private val target: suspend (TagApplyItem) -> TagWriteTarget?,
     private val playback: TagWriteGate? = null,
-    private val diff: suspend (TagApplyItem) -> ((TagReport) -> TagDiff)?,
+    private val diff: suspend (TagApplyItem, TagWritingOptions) -> ((TagReport) -> TagDiff)?,
 ) {
     private val writing = Mutex()
 
@@ -32,7 +37,7 @@ internal class TagApplyWork(
     }
 
     /** Builds a request from the persisted selection. Unavailable files remain queued for a later session. */
-    suspend fun nextGroup(planId: String): TagApplyGroup {
+    suspend fun nextGroup(planId: String, options: TagWritingOptions = TagWritingOptions()): TagApplyGroup {
         val files = LinkedHashMap<Long, Uri>()
         val seen = HashSet<Uri>()
         for (item in queue.remaining(planId).sortedBy { it.writeId == null }) {
@@ -40,7 +45,7 @@ internal class TagApplyWork(
             if (seen.add(uri)) files[item.fileId] = uri
             if (files.size == MEDIASTORE_WRITE_REQUEST_LIMIT) break
         }
-        return TagApplyGroup(planId, files)
+        return TagApplyGroup(planId, files, options)
     }
 
     /** Only the URIs in the approved group can be opened for writing, even if the library changed meanwhile. */
@@ -57,7 +62,7 @@ internal class TagApplyWork(
                 continue
             }
             val result = lease.use {
-                val id = item.writeId ?: prepare(item, file)
+                val id = item.writeId ?: prepare(item, file, group.options)
                 id?.let { session.write(it, file, consent = true) }
             }
             when (result) {
@@ -74,13 +79,13 @@ internal class TagApplyWork(
             file.volume == item.volumeName && file.relativePath == item.relativePath && file.displayName == item.displayName
     }
 
-    private suspend fun prepare(item: TagApplyItem, file: TagWriteTarget): Long? {
-        val changes = diff(item)
+    private suspend fun prepare(item: TagApplyItem, file: TagWriteTarget, options: TagWritingOptions): Long? {
+        val changes = diff(item, options)
         if (changes == null) {
             queue.finish(item, "skipped")
             return null
         }
-        return when (val result = session.prepareForApply(file, item, changes)) {
+        return when (val result = session.prepareForApply(file, item, options.id3v1, changes)) {
             is QueuedTagWrite.Ready -> result.id
             is QueuedTagWrite.Skipped -> {
                 when (result.reason) {

@@ -6,6 +6,7 @@ import android.system.ErrnoException
 import android.system.Os
 import android.system.StructStat
 import io.github.lorddetson.piplayer.library.identity.Hex
+import io.github.lorddetson.piplayer.nativelib.taglib.Id3v1WritePolicy
 import io.github.lorddetson.piplayer.tagging.TagArtwork
 import io.github.lorddetson.piplayer.tagging.TagReport
 import io.github.lorddetson.piplayer.tagging.TagTarget
@@ -55,6 +56,7 @@ internal data class TagWriteHistoryEntry(
     val changes: Map<String, TagChange>,
     val conflicts: Set<String>,
     val coverChange: TagChange? = null,
+    val legacyId3Change: LegacyId3Change? = null,
 )
 
 internal class TagWriteSession(
@@ -89,7 +91,7 @@ internal class TagWriteSession(
             val record = TagWriteRecord.decode(entry.diff) ?: return@mapNotNull null
             TagWriteHistoryEntry(
                 entry.id, entry.displayName, entry.verifiedAt ?: entry.createdAt, entry.undoneAt,
-                record.undoOf, record.changes, record.conflicts, record.coverChange,
+                record.undoOf, record.changes, record.conflicts, record.coverChange, record.legacyId3Change,
             )
         }
 
@@ -104,8 +106,23 @@ internal class TagWriteSession(
         val coverChange = record.coverChange
         val savedCovers = if (coverChange != null) readCoverSnapshot(journal.backup(original.backupId)) else null
         var conflicts = emptySet<String>()
-        val queued = prepare(target, undoOf = id, item = null, inspectFrontCovers = coverChange != null) { report ->
-            var selected = TagDiff.undo(report.properties, record.changes)
+        val queued = prepare(
+            target, undoOf = id, item = null, inspectFrontCovers = coverChange != null,
+            id3v1Policy = Id3v1WritePolicy.LEAVE_UNTOUCHED,
+            verifyId3v2 = record.id3v2Changes != null,
+        ) { report ->
+            var selected = if (record.id3v2Changes != null) {
+                TagDiff.undo(checkNotNull(report.mpegId3v2Properties), record.id3v2Changes)
+            } else {
+                TagDiff.undo(report.properties, record.changes)
+            }
+            record.legacyId3Change?.let { change ->
+                selected = if (report.legacyId3?.rawTag == change.after) {
+                    selected.copy(restoreId3v1 = change.before.orEmpty())
+                } else {
+                    selected.copy(conflicts = selected.conflicts + LEGACY_ID3V1)
+                }
+            }
             if (coverChange != null) {
                 selected = if (savedCovers != null && savedCovers.fingerprints() == coverChange.before &&
                     report.frontCovers?.fingerprints() == coverChange.after
@@ -116,21 +133,33 @@ internal class TagWriteSession(
         TagUndo(queued, conflicts)
     }
 
-    suspend fun prepare(target: TagWriteTarget, inspectFrontCovers: Boolean = false, diff: (TagReport) -> TagDiff): QueuedTagWrite =
-        prepare(target, undoOf = null, item = null, inspectFrontCovers, diff)
+    suspend fun prepare(
+        target: TagWriteTarget,
+        inspectFrontCovers: Boolean = false,
+        id3v1Policy: Id3v1WritePolicy = Id3v1WritePolicy.UPDATE_IF_PRESENT,
+        diff: (TagReport) -> TagDiff?,
+    ): QueuedTagWrite =
+        prepare(target, undoOf = null, item = null, inspectFrontCovers, id3v1Policy, diff = diff)
 
-    suspend fun prepareForApply(target: TagWriteTarget, item: TagApplyItem, diff: (TagReport) -> TagDiff): QueuedTagWrite =
-        prepare(target, undoOf = null, item, diff = diff)
+    suspend fun prepareForApply(
+        target: TagWriteTarget,
+        item: TagApplyItem,
+        id3v1Policy: Id3v1WritePolicy,
+        diff: (TagReport) -> TagDiff,
+    ): QueuedTagWrite = prepare(target, undoOf = null, item, id3v1Policy = id3v1Policy, diff = diff)
 
     private suspend fun prepare(
         target: TagWriteTarget,
         undoOf: Long?,
         item: TagApplyItem?,
         inspectFrontCovers: Boolean = false,
-        diff: (TagReport) -> TagDiff,
+        id3v1Policy: Id3v1WritePolicy = Id3v1WritePolicy.UPDATE_IF_PRESENT,
+        verifyId3v2: Boolean = false,
+        diff: (TagReport) -> TagDiff?,
     ): QueuedTagWrite = withContext(Dispatchers.IO) {
         val result = preparation.prepare(
-            target.taggerTarget, { openForRead(target.uri) }, target.displayName, target.contentKey, inspectFrontCovers, diff,
+            target.taggerTarget, { openForRead(target.uri) }, target.displayName, target.contentKey,
+            inspectFrontCovers, id3v1Policy, verifyId3v2, diff,
         )
         if (result is PreparationFailure) return@withContext QueuedTagWrite.Skipped(result)
         val copy = result as PreparedTagCopy
@@ -164,6 +193,8 @@ internal class TagWriteSession(
                     copy.originalSha256, copy.originalDevice, copy.originalInode, copy.diff.changes, undoOf, copy.diff.conflicts,
                     markedTagHash = true,
                     coverChange = copy.coverChange,
+                    legacyId3Change = copy.legacyId3Change,
+                    id3v2Changes = copy.id3v2Changes,
                 ).encode(),
                 createdAt = at,
             )
@@ -321,3 +352,4 @@ internal class TagWriteSession(
 }
 
 internal const val FRONT_COVER = "Front Cover"
+internal const val LEGACY_ID3V1 = "ID3v1"

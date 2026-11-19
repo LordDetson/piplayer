@@ -203,6 +203,13 @@ internal fun TagHistoryContent(
                 entry.coverChange?.let { change ->
                     Text(stringResource(R.string.tag_history_cover_count, change.before.size, change.after.size))
                 }
+                entry.legacyId3Change?.let { change ->
+                    Text(stringResource(when {
+                        change.after == null -> R.string.tag_history_id3v1_removed
+                        change.before == null -> R.string.tag_history_id3v1_restored
+                        else -> R.string.tag_history_id3v1_updated
+                    }))
+                }
                 if (entry.conflicts.isNotEmpty()) {
                     val cover = stringResource(R.string.tag_history_front_cover)
                     val fields = entry.conflicts.sorted().joinToString { if (it == FRONT_COVER) cover else it }

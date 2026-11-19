@@ -8,6 +8,7 @@ import io.github.lorddetson.piplayer.identification.caa.CaaImage
 import io.github.lorddetson.piplayer.identification.caa.CaaReleaseIndex
 import io.github.lorddetson.piplayer.identification.caa.CaaResult
 import io.github.lorddetson.piplayer.identification.caa.CoverImage
+import io.github.lorddetson.piplayer.identification.caa.CoverSize
 import io.github.lorddetson.piplayer.identification.contract.ApplyRequest
 import io.github.lorddetson.piplayer.identification.contract.IdentificationTarget
 import io.github.lorddetson.piplayer.identification.musicbrainz.RefLookup
@@ -27,6 +28,8 @@ import io.github.lorddetson.piplayer.library.Library
 import io.github.lorddetson.piplayer.library.details.TrackDetails
 import io.github.lorddetson.piplayer.library.details.TrackDetailsSources
 import io.github.lorddetson.piplayer.settings.ProtectedField
+import io.github.lorddetson.piplayer.settings.TagWritingSettings
+import io.github.lorddetson.piplayer.tagging.write.TagCoverPreset
 import java.time.Instant
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -47,6 +50,7 @@ class AppReviewBackend(context: Context, private val batchUuid: String? = null) 
     private val app = context.applicationContext
     private val services by lazy { IdentificationServices.of(app) }
     private val network by lazy { ReviewNetwork(services) }
+    private val tagWriting = TagWritingSettings(app)
     private val pipeline by lazy { AppPipeline.of(app) }
     private val gate get() = (app as PiPlayerApplication).onlineGate
 
@@ -63,7 +67,9 @@ class AppReviewBackend(context: Context, private val batchUuid: String? = null) 
 
     override suspend fun protectedFields(): Set<ProtectedField> = gate.settings.protectedFields.first()
 
-    override suspend fun cover(details: ReleaseDetails): CaaResult<CoverImage> = withContext(Dispatchers.IO) { network.cover(details) }
+    override suspend fun cover(details: ReleaseDetails): CaaResult<CoverImage> = withContext(Dispatchers.IO) {
+        network.cover(details, embeddingCoverSize())
+    }
 
     override suspend fun edition(match: RecordingMatch, result: PipelineResult): SuggestedEdition? =
         withContext(Dispatchers.IO) { network.edition(match, result) }
@@ -81,7 +87,12 @@ class AppReviewBackend(context: Context, private val batchUuid: String? = null) 
     override suspend fun releaseImages(releaseId: String): CaaResult<CaaReleaseIndex> =
         withContext(Dispatchers.IO) { network.releaseImages(releaseId) }
 
-    override suspend fun image(image: CaaImage, px: Int?): CaaResult<CoverImage> = withContext(Dispatchers.IO) { network.image(image, px) }
+    override suspend fun image(image: CaaImage, px: Int?): CaaResult<CoverImage> = withContext(Dispatchers.IO) {
+        network.image(image, if (px == CoverSize.EMBED.px) embeddingCoverSize().px else px)
+    }
+
+    private suspend fun embeddingCoverSize(): CoverSize =
+        if (tagWriting.options.first().cover == TagCoverPreset.ORIGINAL) CoverSize.ORIGINAL else CoverSize.EMBED
 
     override suspend fun embeddedImages(uri: String): List<EmbeddedImage>? = withContext(Dispatchers.IO) { EmbeddedImages.read(app, uri.toUri()) }
 

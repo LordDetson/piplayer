@@ -16,6 +16,7 @@ import io.github.lorddetson.piplayer.tagging.contentkey.FdByteSource
 import io.github.lorddetson.piplayer.tagging.contentkey.FrameWalk
 import io.github.lorddetson.piplayer.tagging.contentkey.KeyFormat
 import java.io.IOException
+import java.util.Base64
 import kotlinx.serialization.json.Json
 
 /** The tag reader of the `:tagger` process: native calls only, no database, no DataStore (docs/library.md §4.1). */
@@ -24,8 +25,11 @@ class TaggerService : Service() {
     private val binder = object : ITagger.Stub() {
         override fun pid(): Int = Process.myPid()
 
-        override fun read(file: ParcelFileDescriptor, fileName: String?, markLegacy: Boolean, frontCoverData: Boolean): TaggerReply = file.use {
-            val read = TagReader.read(it.fd, fileName, if (frontCoverData) Pictures.WRITE_FRONT else Pictures.SIZES, markLegacy)
+        override fun read(
+            file: ParcelFileDescriptor, fileName: String?, markLegacy: Boolean, frontCoverData: Boolean, legacyId3Data: Boolean,
+        ): TaggerReply = file.use {
+            val mode = if (frontCoverData) Pictures.WRITE_FRONT else Pictures.SIZES
+            val read = TagReader.read(it.fd, fileName, mode, markLegacy, legacyId3Data)
             val source = FdByteSource(it.fileDescriptor)
             val content = ContentMeasure.of(source, read) { TagReader.mpegLayout(it.fd) }
             val version = if (content?.token == KeyFormat.MP3.token) id3Version(source) else null
@@ -50,7 +54,8 @@ class TaggerService : Service() {
                 ParcelFileDescriptor.AutoCloseInputStream(changes).bufferedReader().use { reader ->
                     lowPriority {
                         val edits = Json.decodeFromString<TagFileEdits>(reader.readText())
-                        TagWriter.write(audio.fd, edits.properties, edits.id3v1Policy, edits.frontCovers?.map(TagArtwork::picture))
+                        val legacy = edits.restoreId3v1?.let { Base64.getDecoder().decode(it) }
+                        TagWriter.write(audio.fd, edits.properties, edits.id3v1Policy, edits.frontCovers?.map(TagArtwork::picture), legacy)
                     }
                 }
             }

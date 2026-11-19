@@ -176,7 +176,7 @@ class TagApplyPlansTest {
             check(staging.mkdirs())
             val coverFile = File(staging, "source.jpg").apply { writeBytes(Fixtures.bytes("caa/front-250.jpg")) }
             val cover = requireNotNull(encodeFrontCover(coverFile))
-            val writer = BatchTagWriter(context, LibraryAccess.of(library), user, client, staging) { id -> cover.takeIf { id == 10L } }
+            val writer = BatchTagWriter(context, LibraryAccess.of(library), user, client, staging) { id, _ -> cover.takeIf { id == 10L } }
             val group = writer.nextGroup(batchUuid)
             assertThat(group.files.values).containsExactly(uri)
             writer.apply(group)

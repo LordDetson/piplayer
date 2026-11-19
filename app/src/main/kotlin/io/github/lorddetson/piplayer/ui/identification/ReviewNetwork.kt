@@ -37,10 +37,10 @@ class ReviewNetwork(
     private val country: () -> String? = { Locale.getDefault().country.ifEmpty { null } },
 ) {
 
-    /** The front image of [details]' release at the embedding size, with the fallbacks of TI §5.2. */
-    suspend fun cover(details: ReleaseDetails): CaaResult<CoverImage> {
+    /** The front image of [details]' release at the requested size, with the fallbacks of TI §5.2. */
+    suspend fun cover(details: ReleaseDetails, size: CoverSize = CoverSize.EMBED): CaaResult<CoverImage> {
         val sources = CoverUrls.sources(details.releaseId, details.releaseGroupId, details.coverArt)
-        return if (sources.isEmpty()) CaaResult.NotFound else services.coverArtArchive.cover(sources, CoverSize.EMBED)
+        return if (sources.isEmpty()) CaaResult.NotFound else services.coverArtArchive.cover(sources, size)
     }
 
     /** The suggested edition of another candidate [match] of [result], with the run's file values (TI §4.2, §5.1). */

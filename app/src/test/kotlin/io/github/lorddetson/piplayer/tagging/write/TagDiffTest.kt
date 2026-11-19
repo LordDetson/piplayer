@@ -1,9 +1,21 @@
 package io.github.lorddetson.piplayer.tagging.write
 
+import io.github.lorddetson.piplayer.library.values.DecidedField
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 
 class TagDiffTest {
+    @Test
+    fun `an accepted value from ID3v1 is written to ID3v2 before removing the fallback`() {
+        val selected = TagFileSelection(mapOf(DecidedField.TITLE to "Keep this title"), frontCovers = null)
+        val properties = mapOf("TITLE" to listOf("Keep this title"), "ALBUM" to listOf("Other ID3v1 field"))
+
+        val diff = selected.diff(TagFileFormat.ID3V24, properties, withoutRemovedId3v1 = emptyMap())
+
+        assertThat(diff.changes).containsExactlyEntriesOf(mapOf("TITLE" to TagChange(emptyList(), listOf("Keep this title"))))
+        assertThat(diff.properties).containsOnlyKeys("TITLE")
+    }
+
     @Test
     fun `a partial edit keeps the original strings of every untouched property`() {
         val current = mapOf("TITLE" to listOf("Old"), "ARTISTS" to listOf("a", "b"), "CUSTOM" to listOf("e\u0301"))

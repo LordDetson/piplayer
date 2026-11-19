@@ -29,4 +29,5 @@ internal data class TagFileEdits(
     val properties: Map<String, List<String>>,
     val id3v1Policy: Id3v1WritePolicy = Id3v1WritePolicy.UPDATE_IF_PRESENT,
     val frontCovers: List<TagArtwork>? = null,
+    val restoreId3v1: String? = null,
 )

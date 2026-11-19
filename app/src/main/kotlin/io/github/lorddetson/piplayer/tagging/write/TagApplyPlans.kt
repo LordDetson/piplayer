@@ -10,6 +10,8 @@ import io.github.lorddetson.piplayer.library.identity.Place
 import io.github.lorddetson.piplayer.library.values.DecidedField
 import io.github.lorddetson.piplayer.library.values.DecisionKind
 import io.github.lorddetson.piplayer.library.values.DecisionResolver
+import io.github.lorddetson.piplayer.nativelib.taglib.Id3v1WritePolicy
+import io.github.lorddetson.piplayer.settings.TagWritingOptions
 import io.github.lorddetson.piplayer.tagging.TagArtwork
 import io.github.lorddetson.piplayer.tagging.TagReport
 import io.github.lorddetson.piplayer.tagging.TagTarget
@@ -23,9 +25,13 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 
 internal data class TagFileSelection(val values: Map<DecidedField, String?>, val frontCovers: List<TagArtwork>?) {
-    fun diff(format: TagFileFormat, properties: Map<String, List<String>>): TagDiff {
+    fun diff(
+        format: TagFileFormat,
+        properties: Map<String, List<String>>,
+        withoutRemovedId3v1: Map<String, List<String>>? = null,
+    ): TagDiff {
         val projected = projectTags(format, properties, values)
-        return TagDiff.between(properties, projected.properties)
+        return TagDiff.between(withoutRemovedId3v1 ?: properties, projected.properties)
             .copy(frontCovers = frontCovers.takeUnless { format == TagFileFormat.UNSUPPORTED })
     }
 }
@@ -33,9 +39,9 @@ internal data class TagFileSelection(val values: Map<DecidedField, String?>, val
 internal class TagApplyPlans(
     private val library: LibraryAccess,
     private val user: UserDatabase,
-    private val loadCover: suspend (Long) -> TagArtwork? = { null },
+    private val loadCover: suspend (Long, TagCoverPreset) -> TagArtwork? = { _, _ -> null },
 ) {
-    suspend fun diff(item: TagApplyItem): ((TagReport) -> TagDiff)? {
+    suspend fun diff(item: TagApplyItem, options: TagWritingOptions = TagWritingOptions()): ((TagReport) -> TagDiff)? {
         val uuid = Hex.mbidBytes(item.planId) ?: return null
         val selected = user.decisions().decision(item.decisionId) ?: return null
         if (!selected.batchUuid.contentEquals(uuid) || selected.undoneAt != null) return null
@@ -46,14 +52,17 @@ internal class TagApplyPlans(
         }.mapTo(HashSet()) { it.row.id }
         val desired = DecisionResolver.resolve(stored.map { it.values })
             .filterValues { it.decisionId in approved }.mapValues { it.value.value }
-        val selection = selection(desired) ?: return null
-        return { report -> selection.diff(report.writeFormat(), report.properties) }
+        val selection = selection(desired, options.cover) ?: return null
+        return { report ->
+            val remaining = report.legacyId3?.otherProperties.takeIf { options.id3v1 == Id3v1WritePolicy.REMOVE }
+            selection.diff(report.writeFormat(), report.properties, remaining)
+        }
     }
 
-    suspend fun selection(values: Map<DecidedField, String?>): TagFileSelection? {
+    suspend fun selection(values: Map<DecidedField, String?>, preset: TagCoverPreset): TagFileSelection? {
         if (values.isEmpty()) return null
         val coverId = values[DecidedField.COVER]
-        val cover = if (coverId != null) loadCover(coverId.toLongOrNull() ?: return null) ?: return null else null
+        val cover = if (coverId != null) loadCover(coverId.toLongOrNull() ?: return null, preset) ?: return null else null
         return TagFileSelection(values, cover?.let(::listOf))
     }
 
