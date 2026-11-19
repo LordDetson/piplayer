@@ -9,6 +9,7 @@ import io.github.lorddetson.piplayer.covers.Covers
 import io.github.lorddetson.piplayer.library.db.LibraryAccess
 import io.github.lorddetson.piplayer.library.identity.Hex
 import io.github.lorddetson.piplayer.nativelib.taglib.Id3v1WritePolicy
+import io.github.lorddetson.piplayer.notifications.TagWriteNotifications
 import io.github.lorddetson.piplayer.settings.TagWritingOptions
 import io.github.lorddetson.piplayer.settings.TagWritingSettings
 import io.github.lorddetson.piplayer.tagging.TagArtwork
@@ -18,6 +19,7 @@ import io.github.lorddetson.piplayer.tagging.fingerprints
 import io.github.lorddetson.piplayer.tagging.Tagger
 import io.github.lorddetson.piplayer.tagging.TaggerClient
 import io.github.lorddetson.piplayer.tagging.TaggerResult
+import io.github.lorddetson.piplayer.userdata.AppliedChangeEntity
 import io.github.lorddetson.piplayer.userdata.TagApplyQueue
 import io.github.lorddetson.piplayer.userdata.TagWriteJournal
 import io.github.lorddetson.piplayer.userdata.UserData
@@ -58,6 +60,14 @@ internal data class ReviewTagPlan(
     val expectedCovers: List<String>?,
 )
 
+internal data class TagWriteRecovery(
+    val id: Long,
+    val fileId: Long,
+    val target: TagWriteTarget,
+    val failed: Boolean,
+    val changes: Map<String, TagChange>,
+)
+
 internal sealed interface TagUndoOutcome {
     data class Restored(val conflicts: Set<String>) : TagUndoOutcome
     data class NoChange(val conflicts: Set<String>) : TagUndoOutcome
@@ -81,6 +91,7 @@ internal class BatchTagWriter(
     private val planning = Mutex()
     private val waitingWrites = MutableStateFlow<Map<Any, Set<Long>>>(emptyMap())
     val waitingFiles = waitingWrites.map { waiting -> waiting.values.flatten().toSet() }.distinctUntilChanged()
+    private val activeSingles = HashSet<Long>()
     private val access = MediaStoreWriteAccess(app)
     private val journal = TagWriteJournal(database)
     private val session = TagWriteSession(
@@ -138,6 +149,37 @@ internal class BatchTagWriter(
     suspend fun historyForBatch(batchUuid: String): List<TagWriteHistoryEntry> =
         Hex.mbidBytes(batchUuid)?.let { session.historyForBatch(it) }.orEmpty()
 
+    suspend fun refreshRecoveryNotification() {
+        val pending = journal.interrupted().any { entry -> synchronized(activeSingles) { entry.id !in activeSingles } }
+        TagWriteNotifications.showRecovery(app, pending)
+    }
+
+    suspend fun recoverableWrites(identityId: Long? = null): List<TagWriteRecovery> =
+        journal.resumableSingles(identityId).mapNotNull { entry ->
+            if (synchronized(activeSingles) { entry.id in activeSingles }) null else recoveryPlan(entry)
+        }
+
+    private suspend fun recoveryPlan(entry: AppliedChangeEntity): TagWriteRecovery? {
+        if (entry.batchUuid != null || entry.state !in setOf("pending", "streaming", "streamed", "failed")) return null
+        val target = plans.target(entry) ?: return null
+        val file = target.taggerTarget as? TagTarget.LibraryFile ?: return null
+        val record = TagWriteRecord.decode(entry.diff) ?: return null
+        return TagWriteRecovery(entry.id, file.fileId, target, entry.state == "failed", record.changes)
+    }
+
+    fun request(recovery: TagWriteRecovery): IntentSender? = access.requestAccess(listOf(recovery.target.uri))
+
+    suspend fun resume(
+        recovery: TagWriteRecovery,
+        consent: Boolean,
+        onWaiting: (Boolean) -> Unit = {},
+    ): WriteBackResult {
+        if (!consent) return WriteBackResult.NEEDS_CONSENT
+        val live = journal.entry(recovery.id)?.let { recoveryPlan(it) } ?: return WriteBackResult.JOURNAL_CHANGED
+        if (live.target != recovery.target || live.fileId != recovery.fileId) return WriteBackResult.SOURCE_CHANGED
+        return writePrepared(live.id, live.fileId, live.target, onWaiting)
+    }
+
     suspend fun manualPlan(fileId: Long): ManualTagPlan? = withContext(Dispatchers.IO) {
         val target = plans.manualTarget(fileId) ?: return@withContext null
         val report = openRead(target.uri).use { descriptor ->
@@ -177,17 +219,15 @@ internal class BatchTagWriter(
 
     suspend fun applyReview(plan: ReviewTagPlan, onWaiting: (Boolean) -> Unit): WriteBackResult? {
         val file = plan.file
-        return writeWhenAvailable(file, onWaiting) {
-            if (plans.reviewValues(file.target.identityId, plan.decisionIds) != plan.selection.values) {
-                WriteBackResult.SOURCE_CHANGED
-            } else {
-                val diff = plan.selection.diff(file.format, file.properties, file.withoutRemovedId3v1)
-                applySelection(
-                    file, diff.changes.mapValues { it.value.after }, emptySet(), diff.frontCovers,
-                    plan.expectedCovers, preserveAcceptedId3v1Values = true,
-                )
-            }
+        val stillApproved: suspend () -> Boolean = {
+            plans.reviewValues(file.target.identityId, plan.decisionIds) == plan.selection.values
         }
+        if (!stillApproved()) return WriteBackResult.SOURCE_CHANGED
+        val diff = plan.selection.diff(file.format, file.properties, file.withoutRemovedId3v1)
+        return applySelection(
+            file, diff.changes.mapValues { it.value.after }, emptySet(), diff.frontCovers,
+            plan.expectedCovers, preserveAcceptedId3v1Values = true, onWaiting = onWaiting, stillApproved = stillApproved,
+        )
     }
 
     suspend fun applyManual(
@@ -195,17 +235,35 @@ internal class BatchTagWriter(
         changes: Map<String, List<String>>,
         fillEmptyOnly: Set<String> = emptySet(),
         onWaiting: (Boolean) -> Unit = {},
-    ): WriteBackResult? = writeWhenAvailable(plan, onWaiting) { applySelection(plan, changes, fillEmptyOnly) }
+    ): WriteBackResult? = applySelection(plan, changes, fillEmptyOnly, onWaiting = onWaiting)
 
-    private suspend fun <T> writeWhenAvailable(plan: ManualTagPlan, onWaiting: (Boolean) -> Unit, write: suspend () -> T): T {
+    private suspend fun writePrepared(
+        id: Long,
+        fileId: Long,
+        target: TagWriteTarget,
+        onWaiting: (Boolean) -> Unit,
+        stillApproved: suspend () -> Boolean = { true },
+    ): WriteBackResult {
+        if (!synchronized(activeSingles) { activeSingles.add(id) }) return WriteBackResult.JOURNAL_CHANGED
         val operation = Any()
-        val uri = plan.target.uri.toString()
-        val affected = setOf(plan.fileId)
+        val uri = target.uri.toString()
+        val affected = setOf(fileId)
         var waiting = false
         try {
             while (true) {
                 val lease = playbackTagWriteGate.tryWrite(uri)
-                if (lease != null) return lease.use { write() }
+                if (lease != null) return lease.use {
+                    if (!stillApproved()) {
+                        session.abandonPending(id)
+                        WriteBackResult.SOURCE_CHANGED
+                    } else {
+                        session.write(id, target, consent = true).also { result ->
+                            if (result == WriteBackResult.SOURCE_CHANGED || result == WriteBackResult.INVALID_COPY) {
+                                session.abandonPending(id)
+                            }
+                        }
+                    }
+                }
                 if (!waiting) {
                     waiting = true
                     updateWaiting(operation, affected)
@@ -214,6 +272,7 @@ internal class BatchTagWriter(
                 playbackTagWriteGate.awaitAnyWritable(setOf(uri))
             }
         } finally {
+            synchronized(activeSingles) { activeSingles.remove(id) }
             if (waiting) {
                 updateWaiting(operation, emptySet())
                 onWaiting(false)
@@ -228,6 +287,8 @@ internal class BatchTagWriter(
         frontCovers: List<TagArtwork>? = null,
         expectedCovers: List<String>? = null,
         preserveAcceptedId3v1Values: Boolean = false,
+        onWaiting: (Boolean) -> Unit,
+        stillApproved: suspend () -> Boolean = { true },
     ): WriteBackResult? {
         if (plan.format == TagFileFormat.UNSUPPORTED) return null
         val compareWithoutId3v1 = preserveAcceptedId3v1Values && plan.removesId3v1
@@ -249,7 +310,7 @@ internal class BatchTagWriter(
         }
         if (queued == QueuedTagWrite.Skipped(PreparationFailure.CONTENT_CHANGED)) return WriteBackResult.SOURCE_CHANGED
         val ready = queued as? QueuedTagWrite.Ready ?: return null
-        return session.write(ready.id, target, consent = true)
+        return writePrepared(ready.id, plan.fileId, target, onWaiting, stillApproved)
     }
 
     private fun openRead(uri: Uri): ParcelFileDescriptor =

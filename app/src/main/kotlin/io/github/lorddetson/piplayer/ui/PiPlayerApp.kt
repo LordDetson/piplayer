@@ -380,6 +380,7 @@ fun PiPlayerApp(viewModel: PlayerViewModel = viewModel()) {
                     FixScreen(
                         onOpenReview = { fileId, batchUuid -> open(IdentifyRoute(fileId = fileId, batchUuid = batchUuid)) },
                         onOpenWrite = { batchUuid -> open(BatchTagWriteRoute(batchUuid)) },
+                        onOpenHistory = { identityId -> open(TagHistoryRoute(identityId)) },
                     )
                 }
                 entry<BatchTagWriteRoute>(metadata = FROM_THE_SIDE) { route ->

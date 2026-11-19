@@ -509,6 +509,12 @@
     <string name="tag_history_cancelled">Откат отменён.</string>
     <string name="tag_history_no_change">Нет тегов, которые можно восстановить.</string>
     <string name="tag_history_waiting_for_playback">Откат продолжится, когда плеер освободит файл.</string>
+    <string name="tag_recovery_interrupted">Запись тегов прервана</string>
+    <string name="tag_recovery_failed">Не удалось записать теги</string>
+    <string name="tag_recovery_resume">Продолжить запись тегов</string>
+    <string name="tag_recovery_consent_required">Разрешите доступ к файлу, чтобы продолжить запись тегов.</string>
+    <string name="tag_recovery_notification_title">Запись тегов требует внимания</string>
+    <string name="tag_recovery_notification_text">Откройте вкладку «Исправить», чтобы проверить и продолжить записи.</string>
     <string name="manual_tag_open">Редактировать теги</string>
     <string name="manual_tag_write">Записать теги</string>
     <string name="manual_tag_save_in_player">Сохранить в PiPlayer</string>

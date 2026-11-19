@@ -69,6 +69,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.lorddetson.piplayer.R
+import io.github.lorddetson.piplayer.PiPlayerApplication
 import io.github.lorddetson.piplayer.covers.CoverRequest
 import io.github.lorddetson.piplayer.covers.Covers
 import io.github.lorddetson.piplayer.library.Library
@@ -110,6 +111,7 @@ import java.text.DateFormat
 import java.text.NumberFormat
 import java.util.Date
 import java.util.Locale
+import kotlin.coroutines.cancellation.CancellationException
 import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -161,7 +163,9 @@ class TrackDetailsViewModel(application: Application, private val fileId: Long?,
     }
 
     private suspend fun read(): DetailsState.Found? = when {
-        fileId != null -> if (Library.mayRead(app)) TrackDetailsSources.library(app).read(fileId)?.let { DetailsState.Found(it) } else null
+        fileId != null -> if (Library.mayRead(app)) TrackDetailsSources.library(app).read(fileId)?.let { details ->
+            DetailsState.Found(details, tagRecoveryMessage = tagRecoveryMessage(details))
+        } else null
         uri != null -> {
             val opened = TrackDetailsSources.opened(app)
             val details = opened.read(uri)
@@ -171,6 +175,20 @@ class TrackDetailsViewModel(application: Application, private val fileId: Long?,
             DetailsState.Found(details, if (embedded) opened.picture(uri, px)?.asImageBitmap() else null)
         }
         else -> null
+    }
+
+    private suspend fun tagRecoveryMessage(details: TrackDetails): Int? {
+        val identity = details.target?.identityId ?: return null
+        val writer = (app as? PiPlayerApplication)?.batchTagWriter ?: return null
+        return try {
+            val pending = writer.recoverableWrites(identity).firstOrNull { it.fileId == details.fileId } ?: return null
+            if (pending.failed) R.string.tag_recovery_failed else R.string.tag_recovery_interrupted
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            Log.w(TAG, "Could not read the tag write state", error)
+            null
+        }
     }
 
     private companion object {
@@ -225,7 +243,16 @@ fun TrackDetailsScreen(
                 style = MaterialTheme.typography.bodyLarge,
                 modifier = modifier.padding(16.dp),
             )
-            is DetailsState.Found -> DetailsContent(shown.details, shown.picture, snackbar, model.commands, modifier)
+            is DetailsState.Found -> Column(modifier) {
+                val recovery = shown.tagRecoveryMessage
+                val identity = shown.details.target?.identityId
+                if (recovery != null && identity != null && onTagHistory != null) {
+                    TextButton(onClick = { onTagHistory(identity) }, modifier = Modifier.padding(horizontal = 16.dp)) {
+                        Text(stringResource(recovery))
+                    }
+                }
+                DetailsContent(shown.details, shown.picture, snackbar, model.commands, Modifier.weight(1f))
+            }
         }
     }
 }

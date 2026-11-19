@@ -22,7 +22,11 @@ sealed interface DetailsState {
     data object Failed : DetailsState
 
     /** The [details] and, for a file opened from another app, its embedded [picture] for the header. */
-    data class Found(val details: TrackDetails, val picture: ImageBitmap? = null) : DetailsState
+    data class Found(
+        val details: TrackDetails,
+        val picture: ImageBitmap? = null,
+        val tagRecoveryMessage: Int? = null,
+    ) : DetailsState
 }
 
 /** How the details screen reads (docs/library.md §18.1, §18.5). */

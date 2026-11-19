@@ -14,10 +14,13 @@ import io.github.lorddetson.piplayer.library.sort.SortKeys
 import io.github.lorddetson.piplayer.net.AndroidConnectivity
 import io.github.lorddetson.piplayer.net.UserAgent
 import io.github.lorddetson.piplayer.notifications.BatchNotifier
+import io.github.lorddetson.piplayer.notifications.TagWriteNotifications
 import io.github.lorddetson.piplayer.settings.DataStoreOnlineGate
 import io.github.lorddetson.piplayer.settings.IdentificationSettings
 import io.github.lorddetson.piplayer.settings.SettingsFiles
 import io.github.lorddetson.piplayer.tagging.write.BatchTagWriter
+import io.github.lorddetson.piplayer.userdata.TagWriteJournal
+import io.github.lorddetson.piplayer.userdata.UserData
 import kotlin.concurrent.thread
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -111,6 +114,12 @@ class PiPlayerApplication : Application() {
             val app = this
             thread(name = "batch-resume", priority = Thread.MIN_PRIORITY) {
                 runCatching { kotlinx.coroutines.runBlocking { io.github.lorddetson.piplayer.identification.batch.BatchResume.resume(app) } }
+                runCatching {
+                    kotlinx.coroutines.runBlocking {
+                        val interrupted = TagWriteJournal(UserData.database(app)).interrupted()
+                        TagWriteNotifications.showRecovery(app, interrupted.isNotEmpty())
+                    }
+                }
             }
         }
         started.complete(Unit)

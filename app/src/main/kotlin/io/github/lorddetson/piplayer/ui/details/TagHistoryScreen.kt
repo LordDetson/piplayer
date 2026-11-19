@@ -43,9 +43,12 @@ import io.github.lorddetson.piplayer.PiPlayerApplication
 import io.github.lorddetson.piplayer.R
 import io.github.lorddetson.piplayer.tagging.write.BatchTagWriter
 import io.github.lorddetson.piplayer.tagging.write.FRONT_COVER
+import io.github.lorddetson.piplayer.tagging.write.TagChange
 import io.github.lorddetson.piplayer.tagging.write.TagUndoOutcome
 import io.github.lorddetson.piplayer.tagging.write.TagUndoPlan
 import io.github.lorddetson.piplayer.tagging.write.TagWriteHistoryEntry
+import io.github.lorddetson.piplayer.tagging.write.TagWriteRecovery
+import io.github.lorddetson.piplayer.tagging.write.WriteBackResult
 import java.text.DateFormat
 import java.util.Date
 import kotlin.coroutines.cancellation.CancellationException
@@ -59,14 +62,20 @@ private data class HistoryNotice(val text: Int, val fields: Set<String> = emptyS
 
 private data class TagHistoryState(
     val entries: List<TagWriteHistoryEntry>? = null,
+    val recoveries: List<TagWriteRecovery> = emptyList(),
     val busy: Boolean = false,
     val notice: HistoryNotice? = null,
 )
 
+private sealed interface HistoryWrite {
+    data class Undo(val plan: TagUndoPlan) : HistoryWrite
+    data class Resume(val plan: TagWriteRecovery) : HistoryWrite
+}
+
 private class TagHistoryModel(private val identityId: Long, private val writer: BatchTagWriter) : ViewModel() {
     private val mutableState = MutableStateFlow(TagHistoryState())
     val state = mutableState.asStateFlow()
-    private var awaitingConsent: TagUndoPlan? = null
+    private var awaitingConsent: HistoryWrite? = null
 
     fun refreshIfIdle() {
         val shown = mutableState.value
@@ -75,68 +84,105 @@ private class TagHistoryModel(private val identityId: Long, private val writer: 
         viewModelScope.launch { reload(shown.notice) }
     }
 
-    fun undo(changeId: Long, launch: (IntentSenderRequest) -> Unit) {
+    fun undo(changeId: Long, launch: (IntentSenderRequest) -> Unit) =
+        request(launch, R.string.tag_history_undo_error) { writer.undoPlan(identityId, changeId)?.let { HistoryWrite.Undo(it) } }
+
+    fun resume(plan: TagWriteRecovery, launch: (IntentSenderRequest) -> Unit) =
+        request(launch, R.string.tag_recovery_failed) { HistoryWrite.Resume(plan) }
+
+    private fun request(launch: (IntentSenderRequest) -> Unit, errorMessage: Int, resolve: suspend () -> HistoryWrite?) {
         if (mutableState.value.busy) return
         mutableState.value = mutableState.value.copy(busy = true, notice = null)
         viewModelScope.launch {
             try {
-                val plan = writer.undoPlan(identityId, changeId)
-                if (plan == null) {
+                val action = resolve()
+                if (action == null) {
                     reload(HistoryNotice(R.string.tag_history_unavailable))
                     return@launch
                 }
-                val sender = withContext(Dispatchers.IO) { writer.request(plan) }
+                val sender = withContext(Dispatchers.IO) {
+                    when (action) {
+                        is HistoryWrite.Undo -> writer.request(action.plan)
+                        is HistoryWrite.Resume -> writer.request(action.plan)
+                    }
+                }
                 if (sender == null) {
-                    apply(plan)
+                    apply(action)
                 } else {
-                    awaitingConsent = plan
+                    awaitingConsent = action
                     launch(IntentSenderRequest.Builder(sender).build())
                 }
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
                 awaitingConsent = null
-                Log.w(TAG, "Could not request permission to undo a tag write", error)
-                reload(HistoryNotice(R.string.tag_history_undo_error))
+                Log.w(TAG, "Could not request permission to write tags", error)
+                reload(HistoryNotice(errorMessage))
             }
         }
     }
 
     fun consentResult(granted: Boolean) {
-        val plan = awaitingConsent ?: return
+        val action = awaitingConsent ?: return
         awaitingConsent = null
         viewModelScope.launch {
-            if (granted) apply(plan) else reload(HistoryNotice(R.string.tag_history_cancelled))
+            if (granted) apply(action) else reload(HistoryNotice(when (action) {
+                is HistoryWrite.Undo -> R.string.tag_history_cancelled
+                is HistoryWrite.Resume -> R.string.manual_tag_cancelled
+            }))
         }
     }
 
-    private suspend fun apply(plan: TagUndoPlan) {
+    private suspend fun apply(action: HistoryWrite) {
         val notice = try {
-            val result = writer.applyUndo(plan) { waiting ->
-                val message = if (waiting) HistoryNotice(R.string.tag_history_waiting_for_playback) else null
-                mutableState.value = mutableState.value.copy(notice = message)
-            }
-            when (result) {
-                is TagUndoOutcome.Restored -> if (result.conflicts.isEmpty()) HistoryNotice(R.string.tag_history_undone) else null
-                is TagUndoOutcome.NoChange -> {
-                    if (result.conflicts.isEmpty()) HistoryNotice(R.string.tag_history_no_change)
-                    else HistoryNotice(R.string.tag_history_conflicts, result.conflicts)
-                }
-                TagUndoOutcome.Unavailable -> HistoryNotice(R.string.tag_history_unavailable)
-                TagUndoOutcome.Failed -> HistoryNotice(R.string.tag_history_undo_error)
+            when (action) {
+                is HistoryWrite.Undo -> undoNotice(writer.applyUndo(action.plan) { waiting ->
+                    showPlaybackWait(waiting, R.string.tag_history_waiting_for_playback)
+                })
+                is HistoryWrite.Resume -> resumeNotice(writer.resume(action.plan, consent = true) { waiting ->
+                    showPlaybackWait(waiting, R.string.manual_tag_waiting_for_playback)
+                })
             }
         } catch (error: CancellationException) {
             throw error
         } catch (error: Exception) {
-            Log.w(TAG, "Could not undo a tag write", error)
-            HistoryNotice(R.string.tag_history_undo_error)
+            Log.w(TAG, "Could not complete the tag write", error)
+            HistoryNotice(if (action is HistoryWrite.Undo) R.string.tag_history_undo_error else R.string.tag_recovery_failed)
         }
         reload(notice)
+        try {
+            withContext(Dispatchers.IO) { writer.refreshRecoveryNotification() }
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            Log.w(TAG, "Could not update the tag write notification", error)
+        }
     }
+
+    private fun showPlaybackWait(waiting: Boolean, message: Int) {
+        mutableState.value = mutableState.value.copy(notice = if (waiting) HistoryNotice(message) else null)
+    }
+
+    private fun undoNotice(result: TagUndoOutcome): HistoryNotice? = when (result) {
+        is TagUndoOutcome.Restored -> HistoryNotice(R.string.tag_history_undone).takeIf { result.conflicts.isEmpty() }
+        is TagUndoOutcome.NoChange -> {
+            if (result.conflicts.isEmpty()) HistoryNotice(R.string.tag_history_no_change)
+            else HistoryNotice(R.string.tag_history_conflicts, result.conflicts)
+        }
+        TagUndoOutcome.Unavailable -> HistoryNotice(R.string.tag_history_unavailable)
+        TagUndoOutcome.Failed -> HistoryNotice(R.string.tag_history_undo_error)
+    }
+
+    private fun resumeNotice(result: WriteBackResult): HistoryNotice = HistoryNotice(when (result) {
+        WriteBackResult.VERIFIED -> R.string.manual_tag_written
+        WriteBackResult.SOURCE_CHANGED -> R.string.manual_tag_changed
+        WriteBackResult.NEEDS_CONSENT -> R.string.tag_recovery_consent_required
+        else -> R.string.tag_recovery_failed
+    })
 
     private suspend fun reload(notice: HistoryNotice? = null) {
         mutableState.value = try {
-            TagHistoryState(writer.historyForTrack(identityId), notice = notice)
+            TagHistoryState(writer.historyForTrack(identityId), writer.recoverableWrites(identityId), notice = notice)
         } catch (error: CancellationException) {
             throw error
         } catch (error: Exception) {
@@ -147,6 +193,19 @@ private class TagHistoryModel(private val identityId: Long, private val writer: 
 
     private companion object {
         const val TAG = "TagHistory"
+    }
+}
+
+@Composable
+private fun TagChangeRows(changes: Map<String, TagChange>, empty: String) {
+    for ((field, change) in changes.toSortedMap()) {
+        Column {
+            Text(field, style = MaterialTheme.typography.labelLarge)
+            Text(stringResource(
+                R.string.tag_history_transition, change.before.joinToString().ifEmpty { empty },
+                change.after.joinToString().ifEmpty { empty },
+            ))
+        }
     }
 }
 
@@ -181,7 +240,11 @@ internal fun TagHistoryScreen(identityId: Long, onBack: () -> Unit) {
             }
             if (shown.busy || (shown.entries == null && shown.notice == null)) LinearProgressIndicator(Modifier.fillMaxWidth())
             shown.entries?.let { entries ->
-                TagHistoryContent(entries, Modifier.weight(1f), onUndo = { id -> model.undo(id) { consent.launch(it) } }, busy = shown.busy)
+                TagHistoryContent(
+                    entries, Modifier.weight(1f), onUndo = { id -> model.undo(id) { consent.launch(it) } },
+                    busy = shown.busy, recoveries = shown.recoveries,
+                    onResume = { plan -> model.resume(plan) { consent.launch(it) } },
+                )
             }
         }
     }
@@ -193,8 +256,10 @@ internal fun TagHistoryContent(
     modifier: Modifier = Modifier,
     onUndo: ((Long) -> Unit)? = null,
     busy: Boolean = false,
+    recoveries: List<TagWriteRecovery> = emptyList(),
+    onResume: ((TagWriteRecovery) -> Unit)? = null,
 ) {
-    if (entries.isEmpty()) {
+    if (entries.isEmpty() && recoveries.isEmpty()) {
         Text(stringResource(R.string.tag_history_empty), modifier.padding(16.dp))
         return
     }
@@ -202,19 +267,24 @@ internal fun TagHistoryContent(
     val date = remember(locale) { DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT, locale) }
     val empty = stringResource(R.string.tag_history_empty_value)
     LazyColumn(modifier.fillMaxSize()) {
+        items(recoveries, key = { it.id }) { recovery ->
+            Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(recovery.target.displayName, style = MaterialTheme.typography.titleMedium)
+                Text(stringResource(if (recovery.failed) R.string.tag_recovery_failed else R.string.tag_recovery_interrupted))
+                TagChangeRows(recovery.changes, empty)
+                if (onResume != null) {
+                    TextButton(onClick = { onResume(recovery) }, enabled = !busy) {
+                        Text(stringResource(R.string.tag_recovery_resume))
+                    }
+                }
+            }
+            HorizontalDivider()
+        }
         items(entries, key = { it.id }) { entry ->
             Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(entry.displayName, style = MaterialTheme.typography.titleMedium)
                 Text(date.format(Date(entry.at)), style = MaterialTheme.typography.labelMedium)
-                for ((field, change) in entry.changes.toSortedMap()) {
-                    Column {
-                        Text(field, style = MaterialTheme.typography.labelLarge)
-                        Text(stringResource(
-                            R.string.tag_history_transition, change.before.joinToString().ifEmpty { empty },
-                            change.after.joinToString().ifEmpty { empty },
-                        ))
-                    }
-                }
+                TagChangeRows(entry.changes, empty)
                 entry.coverChange?.let { change ->
                     Text(stringResource(R.string.tag_history_cover_count, change.before.size, change.after.size))
                 }

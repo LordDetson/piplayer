@@ -1,5 +1,6 @@
 package io.github.lorddetson.piplayer.ui.details
 
+import android.net.Uri
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
@@ -7,8 +8,11 @@ import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.github.lorddetson.piplayer.R
 import io.github.lorddetson.piplayer.TestFiles
+import io.github.lorddetson.piplayer.tagging.TagTarget
 import io.github.lorddetson.piplayer.tagging.write.TagChange
 import io.github.lorddetson.piplayer.tagging.write.TagWriteHistoryEntry
+import io.github.lorddetson.piplayer.tagging.write.TagWriteRecovery
+import io.github.lorddetson.piplayer.tagging.write.TagWriteTarget
 import io.github.lorddetson.piplayer.ui.fix.BatchTagUndoSummary
 import io.github.lorddetson.piplayer.ui.theme.PiPlayerTheme
 import org.assertj.core.api.Assertions.assertThat
@@ -60,5 +64,29 @@ class TagHistoryContentTest {
         compose.onNodeWithText(context.getString(R.string.tag_history_conflicts, "TITLE")).assertIsDisplayed()
         compose.onNodeWithText(context.getString(R.string.tag_history_undo)).performClick()
         compose.runOnIdle { assertThat(choices).containsExactly(entry.id) }
+    }
+
+    @Test
+    fun interruptedWritesShowTheirSavedDiffAndOfferAResumeAction() {
+        val context = TestFiles.targetContext
+        val target = TagWriteTarget(
+            Uri.parse("content://media/external_primary/audio/media/14"), TagTarget.LibraryFile(22),
+            identityId = 9, decisionId = null, batchUuid = null, volume = "external_primary", relativePath = "Music/",
+            displayName = "interrupted.mp3", contentKey = "01".repeat(32),
+        )
+        val recovery = TagWriteRecovery(
+            5, 22, target, failed = false, changes = mapOf("TITLE" to TagChange(listOf("Old"), listOf("New"))),
+        )
+        val resumed = mutableListOf<TagWriteRecovery>()
+        compose.setContent {
+            PiPlayerTheme {
+                TagHistoryContent(emptyList(), recoveries = listOf(recovery), onResume = { resumed += it })
+            }
+        }
+        compose.onNodeWithText(target.displayName).assertIsDisplayed()
+        compose.onNodeWithText(context.getString(R.string.tag_recovery_interrupted)).assertIsDisplayed()
+        compose.onNodeWithText(context.getString(R.string.tag_history_transition, "Old", "New")).assertIsDisplayed()
+        compose.onNodeWithText(context.getString(R.string.tag_recovery_resume)).performClick()
+        compose.runOnIdle { assertThat(resumed).containsExactly(recovery) }
     }
 }

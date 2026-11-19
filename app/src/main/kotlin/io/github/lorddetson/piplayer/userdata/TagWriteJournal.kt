@@ -39,7 +39,9 @@ internal class TagWriteJournal(private val database: UserDatabase) {
     suspend fun entry(id: Long): AppliedChangeEntity? = dao.entry(id) ?: archive.entry(id)
     suspend fun backup(id: Long): TagBackupEntity? = dao.backup(id) ?: archive.backup(id)
     suspend fun interrupted(): List<AppliedChangeEntity> = dao.interrupted()
+    suspend fun resumableSingles(identityId: Long? = null): List<AppliedChangeEntity> = dao.resumableSingles(identityId)
     suspend fun resumableForTrack(identityId: Long): List<AppliedChangeEntity> = dao.resumableForTrack(identityId)
+    suspend fun abandonPending(id: Long): Boolean = dao.abandonPending(id) == 1
     suspend fun observedWrites(identityIds: Collection<Long>): Map<Long, List<AppliedChangeEntity>> =
         identityIds.distinct().chunked(500).flatMap { dao.observedWrites(it) + archive.forIdentities(it) }
             .distinctBy { it.id }.groupBy { it.identityId }
@@ -80,6 +82,13 @@ interface TagWriteDao {
     @Query("SELECT * FROM applied_change WHERE state IN ('pending', 'streaming', 'streamed') ORDER BY id")
     suspend fun interrupted(): List<AppliedChangeEntity>
 
+    @Query(
+        "SELECT * FROM applied_change WHERE batch_uuid IS NULL AND " +
+            "state IN ('pending', 'streaming', 'streamed', 'failed') " +
+            "AND (:identityId IS NULL OR identity_id = :identityId) ORDER BY id",
+    )
+    suspend fun resumableSingles(identityId: Long?): List<AppliedChangeEntity>
+
     @Query("SELECT * FROM applied_change WHERE identity_id = :identityId AND state IN ('pending', 'streaming', 'streamed', 'failed') ORDER BY id DESC")
     suspend fun resumableForTrack(identityId: Long): List<AppliedChangeEntity>
 
@@ -106,6 +115,9 @@ interface TagWriteDao {
 
     @Query("DELETE FROM tag_backup WHERE id IN (:ids)")
     suspend fun deleteBackups(ids: List<Long>): Int
+
+    @Query("UPDATE applied_change SET state = 'abandoned' WHERE id = :id AND batch_uuid IS NULL AND state = 'pending'")
+    suspend fun abandonPending(id: Long): Int
 
     @Query("UPDATE applied_change SET undone_at = :at WHERE id = :id AND state = 'verified' AND undone_at IS NULL")
     suspend fun markUndone(id: Long, at: Long): Int

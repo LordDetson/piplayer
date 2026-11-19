@@ -72,6 +72,16 @@ internal class TagWriteSession(
     private val preparation = TagWritePreparation(copies, tagger, availableBytes)
     private val writing = Mutex()
 
+    suspend fun abandonPending(id: Long) = writing.withLock {
+        withContext(Dispatchers.IO) {
+            val entry = journal.entry(id) ?: return@withContext
+            if (journal.abandonPending(id)) {
+                val copy = File(copies, entry.copyPath)
+                if (copy.canonicalFile.parentFile == copies.canonicalFile) copy.delete()
+            }
+        }
+    }
+
     suspend fun historyForTrack(identityId: Long): List<TagWriteHistoryEntry> = withContext(Dispatchers.IO) {
         history(journal.forTrack(identityId))
     }

@@ -263,6 +263,9 @@ class TagApplyPlansTest {
                 val write = async(start = CoroutineStart.UNDISPATCHED) {
                     writer.applyManual(pending, mapOf("COMMENT" to delayedComment))
                 }
+                withTimeout(10_000) {
+                    while (write.isActive && !writer.isWaitingForPlayback(file.id)) delay(10)
+                }
                 assertThat(write.isActive).isTrue()
                 assertThat(writer.isWaitingForPlayback(file.id)).isTrue()
                 assertThat(report().properties["COMMENT"]).isEqualTo(comment)

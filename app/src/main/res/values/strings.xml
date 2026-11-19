@@ -500,6 +500,12 @@
     <string name="tag_history_cancelled">Undo was cancelled.</string>
     <string name="tag_history_no_change">There are no tags to restore.</string>
     <string name="tag_history_waiting_for_playback">Undo will continue when playback releases this file.</string>
+    <string name="tag_recovery_interrupted">Tag write interrupted</string>
+    <string name="tag_recovery_failed">Tag write failed</string>
+    <string name="tag_recovery_resume">Resume tag write</string>
+    <string name="tag_recovery_consent_required">Allow file access to resume the tag write.</string>
+    <string name="tag_recovery_notification_title">Tag writes need attention</string>
+    <string name="tag_recovery_notification_text">Open Fix to review and resume interrupted writes.</string>
     <string name="manual_tag_open">Edit tags</string>
     <string name="manual_tag_write">Write tags</string>
     <string name="manual_tag_save_in_player">Save in PiPlayer</string>

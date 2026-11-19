@@ -50,6 +50,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.lorddetson.piplayer.R
+import io.github.lorddetson.piplayer.PiPlayerApplication
 import io.github.lorddetson.piplayer.identification.batch.BatchCard
 import io.github.lorddetson.piplayer.identification.batch.BatchControl
 import io.github.lorddetson.piplayer.identification.batch.BatchReview
@@ -61,6 +62,7 @@ import io.github.lorddetson.piplayer.library.Library
 import io.github.lorddetson.piplayer.library.db.BatchEntity
 import io.github.lorddetson.piplayer.library.db.LibraryAccess
 import io.github.lorddetson.piplayer.notifications.BatchUserActions
+import io.github.lorddetson.piplayer.tagging.write.TagWriteRecovery
 import io.github.lorddetson.piplayer.userdata.UserData
 import java.text.DateFormat
 import java.util.Date
@@ -100,12 +102,14 @@ class FixViewModel(application: Application) : AndroidViewModel(application) {
 
     private val mutableBatches = MutableStateFlow<List<BatchEntity>?>(null)
     private val mutableCards = MutableStateFlow<Map<String, List<BatchCard>>>(emptyMap())
+    private val mutableRecoveries = MutableStateFlow<List<TagWriteRecovery>>(emptyList())
 
     /** The batches, oldest first; null until the first read. */
     val batches: StateFlow<List<BatchEntity>?> = mutableBatches.asStateFlow()
 
     /** The album cards of each batch in review, by the batch's UUID. */
     val cards: StateFlow<Map<String, List<BatchCard>>> = mutableCards.asStateFlow()
+    internal val recoveries = mutableRecoveries.asStateFlow()
 
     fun onStart() {
         val app = getApplication<Application>()
@@ -127,6 +131,15 @@ class FixViewModel(application: Application) : AndroidViewModel(application) {
             // The cards of the batches that are still in review: a batch the read finished has none to show.
             val reviewing = batches.filter { it.status == BatchEntity.STATUS_REVIEW }.mapTo(HashSet()) { it.uuid }
             mutableCards.value = views.filter { it.batch.uuid in reviewing }.associate { it.batch.uuid to it.cards }
+            mutableRecoveries.value = withContext(Dispatchers.IO) {
+                try {
+                    (app as? PiPlayerApplication)?.batchTagWriter?.recoverableWrites().orEmpty()
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                    emptyList()
+                }
+            }
         }
     }
 
@@ -165,6 +178,7 @@ fun FixScreen(
     modifier: Modifier = Modifier,
     onOpenReview: (fileId: Long, batchUuid: String) -> Unit = { _, _ -> },
     onOpenWrite: ((batchUuid: String) -> Unit)? = null,
+    onOpenHistory: ((identityId: Long) -> Unit)? = null,
 ) {
     val app = LocalContext.current.applicationContext as Application
     val model = viewModel { FixViewModel(app) }
@@ -174,6 +188,7 @@ fun FixScreen(
     }
     val batches by model.batches.collectAsStateWithLifecycle()
     val cards by model.cards.collectAsStateWithLifecycle()
+    val recoveries by model.recoveries.collectAsStateWithLifecycle()
     Scaffold(
         topBar = {
             TopAppBar(title = { Text(stringResource(R.string.fix_title), modifier = Modifier.semantics { heading() }) })
@@ -181,11 +196,14 @@ fun FixScreen(
         modifier = modifier,
     ) { padding ->
         Column(Modifier.padding(padding).fillMaxSize()) {
-            NeedsAttention(batches)
+            NeedsAttention(batches, hasRecoveries = onOpenHistory != null && recoveries.isNotEmpty())
             Counters(batches)
             when (batches) {
                 null -> Loading()
-                else -> BatchQueue(batches.orEmpty(), cards, onOpenReview, model::pause, model::resume, model::stop, onOpenWrite)
+                else -> BatchQueue(
+                    batches.orEmpty(), cards, onOpenReview, model::pause, model::resume, model::stop, onOpenWrite,
+                    recoveries, onOpenHistory,
+                )
             }
         }
     }
@@ -193,16 +211,16 @@ fun FixScreen(
 
 /** The review queue's entry (TI §8): the number of batches waiting for their cards. */
 @Composable
-private fun NeedsAttention(batches: List<BatchEntity>?) {
+private fun NeedsAttention(batches: List<BatchEntity>?, hasRecoveries: Boolean) {
     val waiting = batches.orEmpty().count { it.status == BatchEntity.STATUS_REVIEW }
     ListItem(
         headlineContent = { Text(stringResource(R.string.fix_needs_attention)) },
         supportingContent = {
             Text(
-                if (waiting > 0) {
-                    pluralStringResource(R.plurals.fix_review_waiting, waiting, waiting)
-                } else {
-                    stringResource(R.string.fix_needs_attention_none)
+                when {
+                    waiting > 0 -> pluralStringResource(R.plurals.fix_review_waiting, waiting, waiting)
+                    hasRecoveries -> stringResource(R.string.tag_recovery_notification_title)
+                    else -> stringResource(R.string.fix_needs_attention_none)
                 },
             )
         },
@@ -255,8 +273,10 @@ private fun BatchQueue(
     onResume: (String) -> Unit,
     onStop: (String) -> Unit,
     onOpenWrite: ((String) -> Unit)?,
+    recoveries: List<TagWriteRecovery>,
+    onOpenHistory: ((Long) -> Unit)?,
 ) {
-    if (batches.isEmpty()) {
+    if (batches.isEmpty() && (recoveries.isEmpty() || onOpenHistory == null)) {
         Text(
             stringResource(R.string.fix_batches_none),
             style = MaterialTheme.typography.bodyLarge,
@@ -273,6 +293,17 @@ private fun BatchQueue(
         }
     }
     LazyColumn(Modifier.fillMaxSize().testTag(FixTags.LIST)) {
+        if (onOpenHistory != null) {
+            items(recoveries.distinctBy { it.target.identityId }, key = { "tag-recovery-${it.target.identityId}" }) { recovery ->
+                ListItem(
+                    headlineContent = { Text(recovery.target.displayName) },
+                    supportingContent = {
+                        Text(stringResource(if (recovery.failed) R.string.tag_recovery_failed else R.string.tag_recovery_interrupted))
+                    },
+                    modifier = Modifier.clickable { onOpenHistory(recovery.target.identityId) },
+                )
+            }
+        }
         items(
             rows,
             key = { row ->
