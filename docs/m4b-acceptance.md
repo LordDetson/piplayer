@@ -1,7 +1,8 @@
 # M4b acceptance
 
 The checks for tag writing, history and undo in [Milestone M4b](features.md#m4b-tag-writing-history-and-undo)
-and [Track Identification §11](track-identification.md#11-acceptance-criteria-and-tests). The milestone is in progress.
+and [Track Identification §11](track-identification.md#11-acceptance-criteria-and-tests). M4b was accepted on
+20 November 2026.
 
 ## Test devices
 
@@ -28,6 +29,17 @@ and [Track Identification §11](track-identification.md#11-acceptance-criteria-a
 
 Record the revision and results for each API at acceptance. The instrumented pipeline fixtures use test-controlled
 write access. The consent checklist uses audio files added to MediaStore by another owner, such as `com.android.shell`.
+
+The [full instrumented run](https://github.com/LordDetson/piplayer/actions/runs/44629451357) passed on API 30 and
+36 at `280e0220`. Each job reported 1,483 app cases with 30 skips, 148 native tests and three explicit crash
+checks, with zero failures or flaky tests. The initial API 36 run lost the genre field while a Compose input
+action requested focus. The test now sets text without opening the keyboard and still checks mixed field
+edits, persistence, undo and unchanged file bytes.
+
+[Main CI](https://github.com/LordDetson/piplayer/actions/runs/44633407788) passed on `280e0220`, including
+`TagDiffTest`, lint and the minified release build. The
+[earlier production revision](https://github.com/LordDetson/piplayer/actions/runs/44625484710) `8d64df8b`
+passed the same CI, and the subsequent test correction kept the production code unchanged.
 
 ## MediaStore consent checklist
 
@@ -88,6 +100,8 @@ and tapping the recovery notification opens Fix. Restore the original setting be
 - API 36, local manual edit: one Save applied a title and genre together. The editor and the library showed the
   saved genre, and the library reopen retained both values. One Undo restored both values. The source MP3 was
   byte-identical throughout.
+- API 36, `Download/`: the diff showed the former and proposed title for a shell-owned MP3. One Android
+  dialog granted access. The new title was read back from the MP3 and MediaStore. The audio hash matched.
 - API 36, library refresh: the library showed the new title before the MediaStore observer. A simulated failure
   between database transactions left a pending refresh. Reopening the user database and reading the verified file
   updated the library with the file bytes unchanged. An older tag pass with matching size and modification time
@@ -96,6 +110,9 @@ and tapping the recovery notification opens Fix. Restore the original setting be
   the next process found 72 verified writes and completed the remaining 428. This test used ownership for file access.
 - API 36, 500 app-owned test files after journal compaction: a new process found 72 verified entries and completed the
   remaining 428. The test used write access from ownership.
+- API 36, repeat on `8d64df8b`: the app-owned 500-file test stopped PID 7511 at the checkpoint of 70.
+  PID 8271 recovered 72 verified entries, completed the other 428, and reread the expected title in
+  the first, middle and last sample. The test used write access from ownership.
 - API 36, 500 MP3 files owned by `com.android.shell` on the foreground service: the initial dialog covered all 500.
   Android timed out the service after Home. The same PiPlayer process remained alive, the UI showed 104 written and 396
   remaining, and the recovery notification opened Fix. After restoring the default timeout, apply resumed. The app was
