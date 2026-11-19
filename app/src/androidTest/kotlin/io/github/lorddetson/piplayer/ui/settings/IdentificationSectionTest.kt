@@ -242,7 +242,7 @@ class IdentificationSectionTest {
             .assert(SemanticsMatcher.expectValue(SemanticsProperties.ToggleableState, ToggleableState.On))
             .performClick()
         assertThat(calls).containsExactly("title=true", "title=false")
-        for (field in ProtectedField.entries) {
+        for (field in ProtectedField.identificationFields) {
             compose.onNode(hasText(text(protectedFieldLabel(field))) and isCheckbox).performScrollTo().assertHasClickAction()
         }
 

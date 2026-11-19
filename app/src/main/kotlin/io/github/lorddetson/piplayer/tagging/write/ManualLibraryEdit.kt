@@ -3,8 +3,20 @@ package io.github.lorddetson.piplayer.tagging.write
 import io.github.lorddetson.piplayer.library.values.DecidedField
 import io.github.lorddetson.piplayer.library.identity.Hex
 import io.github.lorddetson.piplayer.library.values.DecisionContent
+import io.github.lorddetson.piplayer.library.values.ManualTagValues
 import io.github.lorddetson.piplayer.library.values.TrackTags
 import io.github.lorddetson.piplayer.settings.ProtectedField
+
+internal fun manualPiPlayerEdit(
+    current: Map<String, List<String>>,
+    changes: Map<String, TagChange>,
+): Map<DecidedField, String?>? {
+    val (library, custom) = changes.entries.partition { it.key in libraryField }
+    val fields = if (library.isEmpty()) emptyMap() else manualLibraryEdit(current, library.associate { it.toPair() }) ?: return null
+    if (custom.isEmpty()) return fields.takeIf { it.isNotEmpty() }
+    val properties = custom.associate { (key, change) -> key to change.after }
+    return fields + (DecidedField.MANUAL_TAGS to ManualTagValues.encode(properties))
+}
 
 /** Converts the changed properties the library models to whole-field user decisions. */
 internal fun manualLibraryEdit(

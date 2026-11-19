@@ -68,7 +68,7 @@ object DecisionFixtures {
      */
     suspend fun identifyInBulk(database: UserDatabase, keys: List<String>) {
         val dao = database.decisions()
-        val fields = DecisionCodec.bits(ProtectedField.entries.toSet() - ProtectedField.COVER)
+        val fields = DecisionCodec.bits(ProtectedField.identificationFields.toSet() - ProtectedField.COVER)
         database.withWriteTransaction {
             val choices = (0..keys.size / 10).map { release ->
                 val parts = DecisionContent.ofRelease(details(album = "Decided album $release", release = release + 1, recording = release + 1))
@@ -110,7 +110,7 @@ object DecisionFixtures {
     fun request(
         contentKey: String,
         details: ReleaseDetails = details(),
-        fields: Set<ProtectedField> = ProtectedField.entries.toSet() - ProtectedField.COVER,
+        fields: Set<ProtectedField> = ProtectedField.identificationFields.toSet() - ProtectedField.COVER,
         fileId: Long = 1,
         fetchedAt: Long = 1_800_000_000_000L,
     ) = ApplyRequest(

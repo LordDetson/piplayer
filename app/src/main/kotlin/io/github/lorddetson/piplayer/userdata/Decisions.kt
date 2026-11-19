@@ -184,14 +184,15 @@ class Decisions(private val database: UserDatabase, private val clock: () -> Lon
             val details = request.details
             val parts = DecisionContent.ofRelease(details, savedCoverId)
             val choice = releaseChoice(details.releaseId, details.releaseGroupId, ReleaseValues.of(parts, details.at.disc), savedCoverId, now)
-            val decided = parts.filterKeys { it.group in request.fields }
+            val fields = request.fields - ProtectedField.MANUAL_TAGS
+            val decided = parts.filterKeys { it.group in fields }
             val provenance = request.provenance
             val id = dao.add(
                 DecisionEntity(
                     identityId = identity,
                     batchUuid = batchUuid,
                     kind = DecisionKind.APPLY.code,
-                    fields = DecisionCodec.bits(request.fields),
+                    fields = DecisionCodec.bits(fields),
                     releaseChoiceId = choice,
                     recordingMbid = Hex.mbidBytes(provenance.recordingId),
                     releaseTrackMbid = Hex.mbidBytes(provenance.releaseTrackId),
@@ -228,18 +229,20 @@ class Decisions(private val database: UserDatabase, private val clock: () -> Lon
             val identity = database.identities().current(identityId, contentKey) ?: return@withWriteTransaction null
             val fields = values.keys.mapTo(LinkedHashSet()) { it.group }
             val parts = fields.flatMap { DecidedField.partsOf(it) }.associateWith { values[it]?.takeIf(String::isNotEmpty) }
+            val fileParts = if (DecidedField.MANUAL_TAGS in parts) parts - DecidedField.MANUAL_TAGS else parts
             val id = dao.add(
                 DecisionEntity(
                     identityId = identity,
                     batchUuid = batchUuid,
                     kind = DecisionKind.EDIT.code,
                     fields = DecisionCodec.bits(fields),
-                    fileValues = atDecision.firstOrNull()?.let { FileReferences.encode(FileReferences.of(parts, it.values)) },
+                    fileValues = atDecision.firstOrNull()?.takeIf { fileParts.isNotEmpty() }
+                        ?.let { FileReferences.encode(FileReferences.of(fileParts, it.values)) },
                     createdAt = clock(),
                 ),
             )
             dao.addMetadata(rows(id, parts))
-            locations(identity, id, parts, atDecision)
+            locations(identity, id, fileParts, atDecision)
             committed(id, identity)
         }
     }

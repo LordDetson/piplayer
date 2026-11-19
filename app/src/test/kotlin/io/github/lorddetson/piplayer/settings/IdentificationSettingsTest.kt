@@ -371,7 +371,7 @@ class IdentificationSettingsTest {
 
     @Test
     fun `the stored names of the protected fields are those of TI 10`() {
-        assertThat(ProtectedField.entries.map { it.stored }).containsExactly(
+        assertThat(ProtectedField.identificationFields.map { it.stored }).containsExactly(
             "title", "artist", "album", "album_artist", "date", "original_date", "track_number", "disc_number",
             "disc_subtitle", "compilation", "label", "catalog_number", "barcode", "isrc", "musicbrainz_ids", "cover",
         )

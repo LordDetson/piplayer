@@ -58,7 +58,7 @@ import io.github.lorddetson.piplayer.tagging.write.TagChange
 import io.github.lorddetson.piplayer.tagging.write.TagDiff
 import io.github.lorddetson.piplayer.tagging.write.TagFileFormat
 import io.github.lorddetson.piplayer.tagging.write.WriteBackResult
-import io.github.lorddetson.piplayer.tagging.write.manualLibraryEdit
+import io.github.lorddetson.piplayer.tagging.write.manualPiPlayerEdit
 import io.github.lorddetson.piplayer.ui.identification.ReviewDecisions
 import io.github.lorddetson.piplayer.ui.identification.ReviewEdit
 import io.github.lorddetson.piplayer.ui.settings.LegacyEncodingChoice
@@ -194,14 +194,14 @@ private class ManualTagEditorModel(
         mutableState.value = current.copy(busy = true, message = null)
         viewModelScope.launch {
             storeDecision {
-                val live = writer.manualPlan(fileId, decodeLegacy = true)
+                val live = writer.manualPlan(fileId, forEditor = true)
                 if (live == null || live.target != plan.target || changes.any { (key, change) ->
                         live.properties[key] != plan.properties[key] || live.displayProperties[key].orEmpty() != change.before
                     }) {
                     finish(R.string.manual_tag_changed)
                     return@storeDecision
                 }
-                val values = manualLibraryEdit(live.displayProperties, changes)
+                val values = manualPiPlayerEdit(live.displayProperties, changes)
                 val target = IdentificationTarget.LibraryFile(fileId, live.target.contentKey)
                 val saved = values?.let { decisions.applyWithEdit(null, null, ReviewEdit(target, it, null, null)) }
                 if (saved == null) finish(R.string.manual_tag_save_failed)
@@ -257,7 +257,7 @@ private class ManualTagEditorModel(
 
     private suspend fun reload(message: Int? = null, savedEdit: Long? = null) {
         val plan = try {
-            writer.manualPlan(fileId, decodeLegacy = true)
+            writer.manualPlan(fileId, forEditor = true)
         } catch (error: CancellationException) {
             throw error
         } catch (error: Exception) {
@@ -329,7 +329,7 @@ internal fun ManualTagEditorScreen(fileId: Long, onBack: () -> Unit) {
                     )
                 } else {
                     val canSave = remember(plan, shown.preview) {
-                        manualLibraryEdit(plan.displayProperties, shown.preview.changes) != null
+                        manualPiPlayerEdit(plan.displayProperties, shown.preview.changes) != null
                     }
                     ManualTagPreview(
                         shown.preview.changes, plan.format, shown.busy, onBack = { model.closePreview() },

@@ -238,7 +238,7 @@ class ListsShowDecisionsTest {
                 DecisionFixtures.request(
                     OTHER_KEY,
                     DecisionFixtures.details(title = "Delta", artist = "Cid", album = "Record"),
-                    fields = ProtectedField.entries.toSet() - ProtectedField.COVER - ProtectedField.MUSICBRAINZ_IDS,
+                    fields = ProtectedField.identificationFields.toSet() - ProtectedField.COVER - ProtectedField.MUSICBRAINZ_IDS,
                     fileId = charlie,
                 ),
             ),

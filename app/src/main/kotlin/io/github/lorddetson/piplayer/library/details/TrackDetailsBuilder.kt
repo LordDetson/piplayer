@@ -61,6 +61,7 @@ import io.github.lorddetson.piplayer.userdata.Decisions
 import io.github.lorddetson.piplayer.library.values.FieldOverrides
 import io.github.lorddetson.piplayer.library.values.IndexValues
 import io.github.lorddetson.piplayer.library.values.MergedValues
+import io.github.lorddetson.piplayer.library.values.ManualTagValues
 import io.github.lorddetson.piplayer.library.values.TrackTags
 
 /**
@@ -204,8 +205,13 @@ object TrackDetailsBuilder {
         part(DISC_SUBTITLE, DecidedField.DISC_SUBTITLE)
         part(DATE, DecidedField.DATE)
         part(ORIGINAL_DATE, DecidedField.ORIGINAL_DATE)
-        texts(GENRE, if (read) tags?.genres.orEmpty() else listOfNotNull(index?.genre), fileLevel)
-        texts(COMPOSER, if (read) tags?.composers.orEmpty() else listOfNotNull(index?.composer), fileLevel)
+        val manual = ManualTagValues.decode(decided[DecidedField.MANUAL_TAGS]?.value)
+        val manualTags by lazy(LazyThreadSafetyMode.NONE) { TrackTags.from(manual) }
+        val manualSource = decidedSource(DecidedField.MANUAL_TAGS)
+        if ("GENRE" in manual) texts(GENRE, manualTags.genres, manualSource)
+        else texts(GENRE, if (read) tags?.genres.orEmpty() else listOfNotNull(index?.genre), fileLevel)
+        if ("COMPOSER" in manual) texts(COMPOSER, manualTags.composers, manualSource)
+        else texts(COMPOSER, if (read) tags?.composers.orEmpty() else listOfNotNull(index?.composer), fileLevel)
         // A decided flag that is off is a value that can be reverted; the tags' off stays left out.
         when {
             parts[DecidedField.COMPILATION]?.value == "1" -> add(COMPILATION, DetailValue.Flag(true), sourceOf(DecidedField.COMPILATION))

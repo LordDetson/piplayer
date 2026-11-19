@@ -647,7 +647,7 @@ private fun Diff(card: Card, onToggle: (ProtectedField) -> Unit, oldCover: (@Com
     for (line in card.lines) DiffRow(line, onToggle)
     (card.cover as? CoverState.Ready)?.line?.let { CoverRow(it, onToggle, oldCover) }
     if (card.protectedFields.isNotEmpty()) {
-        val names = ProtectedField.entries.filter { it in card.protectedFields }.map { stringResource(protectedFieldLabel(it)) }
+        val names = ProtectedField.identificationFields.filter { it in card.protectedFields }.map { stringResource(protectedFieldLabel(it)) }
         Text(stringResource(R.string.review_protected_note, names.joinToString(", ")), style = MaterialTheme.typography.bodyMedium)
     }
 }

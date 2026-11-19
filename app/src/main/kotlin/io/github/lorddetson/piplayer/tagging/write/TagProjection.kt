@@ -103,5 +103,5 @@ private val DecidedField.propertyKey: String?
         DecidedField.ARTIST_IDS -> "MUSICBRAINZ_ARTISTID"
         DecidedField.ALBUM_ARTIST_IDS -> "MUSICBRAINZ_ALBUMARTISTID"
         DecidedField.TRACK_NUMBER, DecidedField.TRACK_TOTAL, DecidedField.DISC_NUMBER,
-        DecidedField.DISC_TOTAL, DecidedField.COVER -> null
+        DecidedField.DISC_TOTAL, DecidedField.COVER, DecidedField.MANUAL_TAGS -> null
     }

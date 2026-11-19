@@ -106,7 +106,7 @@ class BatchAutoApplyTest {
 
     @Test
     fun `a release that decides no field but the protected ones is no automatic Apply`() {
-        assertThat(BatchAutoApply.request(high(), ProtectedField.entries.toSet(), at)).isNull()
+        assertThat(BatchAutoApply.request(high(), ProtectedField.identificationFields.toSet(), at)).isNull()
     }
 
     @Test

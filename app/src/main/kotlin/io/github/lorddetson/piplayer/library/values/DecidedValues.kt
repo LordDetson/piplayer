@@ -72,6 +72,7 @@ enum class DecidedField(
     ARTIST_IDS(25, "artist_ids", ProtectedField.MUSICBRAINZ_IDS, PartKind.MBID_LIST),
     ALBUM_ARTIST_IDS(26, "album_artist_ids", ProtectedField.MUSICBRAINZ_IDS, PartKind.MBID_LIST, release = true),
     COVER(27, "cover", ProtectedField.COVER, PartKind.COVER, release = true),
+    MANUAL_TAGS(28, "manual_tags", ProtectedField.MANUAL_TAGS, PartKind.TEXT),
     ;
 
     companion object {
@@ -184,7 +185,7 @@ object DecisionResolver {
             .sortedWith(NEWEST_FIRST)
         if (live.isEmpty()) return emptyMap()
         val result = LinkedHashMap<DecidedField, Decided>()
-        for (field in ProtectedField.entries) {
+        for (field in ProtectedField.identificationFields) {
             val winner = live.firstOrNull { field in it.fields } ?: continue
             // A revert hides the field: nothing older counts, and the file's value wins.
             val level = winner.kind.level ?: continue
@@ -192,7 +193,23 @@ object DecisionResolver {
                 result[part] = Decided(winner.values[part]?.takeIf { it.isNotEmpty() }, level, winner.id)
             }
         }
+        manualTags(live)?.let { result[DecidedField.MANUAL_TAGS] = it }
         return result
+    }
+
+    private fun manualTags(newestFirst: List<DecisionValues>): Decided? {
+        val properties = linkedMapOf<String, List<String>>()
+        var newest: Long? = null
+        for (decision in newestFirst) {
+            if (ProtectedField.MANUAL_TAGS !in decision.fields) continue
+            if (decision.kind == DecisionKind.REVERT_FIELD) break
+            if (decision.kind != DecisionKind.EDIT) continue
+            val patch = ManualTagValues.decode(decision.values[DecidedField.MANUAL_TAGS])
+            if (patch.isEmpty()) continue
+            if (newest == null) newest = decision.id
+            patch.forEach { (key, values) -> properties.putIfAbsent(key, values) }
+        }
+        return newest?.let { Decided(ManualTagValues.encode(properties), DecisionKind.LEVEL_USER_EDIT, it) }
     }
 
     /**

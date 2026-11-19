@@ -50,7 +50,7 @@ object DecisionCodec {
         }
     }
 
-    /** The bits of [fields] (TI §10.2: bit 0 `title` to bit 15 `cover`, in the order of the protected-fields list). */
+    /** Identification uses bits 0 to 15 (TI §10.2). Bit 16 stores additional manual tags. */
     fun bits(fields: Set<ProtectedField>): Int = fields.fold(0) { bits, field -> bits or (1 shl bitOf(field)) }
 
     /** The fields of [bits] this build knows. */
@@ -74,6 +74,7 @@ object DecisionCodec {
         ProtectedField.ISRC -> 13
         ProtectedField.MUSICBRAINZ_IDS -> 14
         ProtectedField.COVER -> 15
+        ProtectedField.MANUAL_TAGS -> 16
     }
 
     fun providerCode(provider: ProviderId): Int = when (provider) {

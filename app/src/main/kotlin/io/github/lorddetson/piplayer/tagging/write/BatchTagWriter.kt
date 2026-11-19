@@ -11,6 +11,9 @@ import io.github.lorddetson.piplayer.covers.Covers
 import io.github.lorddetson.piplayer.library.db.LibraryAccess
 import io.github.lorddetson.piplayer.library.db.SongRow
 import io.github.lorddetson.piplayer.library.identity.Hex
+import io.github.lorddetson.piplayer.library.values.DecidedField
+import io.github.lorddetson.piplayer.library.values.DecisionResolver
+import io.github.lorddetson.piplayer.library.values.ManualTagValues
 import io.github.lorddetson.piplayer.nativelib.taglib.Id3v1WritePolicy
 import io.github.lorddetson.piplayer.notifications.TagWriteNotifications
 import io.github.lorddetson.piplayer.settings.TagWritingOptions
@@ -25,6 +28,7 @@ import io.github.lorddetson.piplayer.tagging.Tagger
 import io.github.lorddetson.piplayer.tagging.TaggerClient
 import io.github.lorddetson.piplayer.tagging.TaggerResult
 import io.github.lorddetson.piplayer.userdata.AppliedChangeEntity
+import io.github.lorddetson.piplayer.userdata.Decisions
 import io.github.lorddetson.piplayer.userdata.TagApplyQueue
 import io.github.lorddetson.piplayer.userdata.TagWriteJournal
 import io.github.lorddetson.piplayer.userdata.TrackLegacyEncoding
@@ -58,8 +62,9 @@ internal data class ManualTagPlan(
     val options: TagWritingOptions = TagWritingOptions(),
     val legacyId3: TagReport.LegacyId3? = null,
     val legacyDisplay: ManualLegacyTags? = null,
+    val savedProperties: Map<String, List<String>> = emptyMap(),
 ) {
-    val displayProperties: Map<String, List<String>> get() = legacyDisplay?.displayed ?: properties
+    val displayProperties: Map<String, List<String>> = (legacyDisplay?.displayed ?: properties) + savedProperties
     val removesId3v1: Boolean get() = legacyId3 != null && options.id3v1 == Id3v1WritePolicy.REMOVE
     val withoutRemovedId3v1: Map<String, List<String>>? get() =
         legacyId3?.otherProperties.takeIf { options.id3v1 == Id3v1WritePolicy.REMOVE }
@@ -225,16 +230,24 @@ internal class BatchTagWriter(
         return writePrepared(live.id, live.fileId, live.target, onWaiting)
     }
 
-    suspend fun manualPlan(fileId: Long, decodeLegacy: Boolean = false): ManualTagPlan? = withContext(Dispatchers.IO) {
+    suspend fun manualPlan(fileId: Long, forEditor: Boolean = false): ManualTagPlan? = withContext(Dispatchers.IO) {
         val target = plans.manualTarget(fileId) ?: return@withContext null
         openRead(target.uri).use { descriptor ->
             val report = (tagger.read(
                 target.taggerTarget, descriptor, target.displayName, legacyId3Data = true,
             ) as? TaggerResult.Replied)?.value?.report ?: return@use null
             if (report.error != null || report.content?.key != target.contentKey) return@use null
-            val legacy = if (decodeLegacy) readLegacyDisplay(target, descriptor) else null
-            ManualTagPlan(fileId, target, report.properties, report.writeFormat(), settings.options.first(), report.legacyId3, legacy)
+            val legacy = if (forEditor) readLegacyDisplay(target, descriptor) else null
+            val saved = if (forEditor) savedManualProperties(target.identityId) else emptyMap()
+            ManualTagPlan(
+                fileId, target, report.properties, report.writeFormat(), settings.options.first(), report.legacyId3, legacy, saved,
+            )
         }
+    }
+
+    private suspend fun savedManualProperties(identityId: Long): Map<String, List<String>> {
+        val decisions = Decisions(database).storedOf(identityId).map { it.values }
+        return ManualTagValues.decode(DecisionResolver.resolve(decisions)[DecidedField.MANUAL_TAGS]?.value)
     }
 
     private suspend fun readLegacyDisplay(target: TagWriteTarget, descriptor: ParcelFileDescriptor): ManualLegacyTags? {

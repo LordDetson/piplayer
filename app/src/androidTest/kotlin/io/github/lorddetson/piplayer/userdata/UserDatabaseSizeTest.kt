@@ -159,7 +159,7 @@ class UserDatabaseSizeTest {
             }
             // One identification per track as Decisions.apply stores it: the per-track rows and the references of the
             // location it was made on, then the file_state rows of a second location.
-            val ticked = ProtectedField.entries.toSet() - ProtectedField.COVER
+            val ticked = ProtectedField.identificationFields.toSet() - ProtectedField.COVER
             val fields = DecisionCodec.bits(ticked)
             val reason = DecisionCodec.reason(DecisionFixtures.reason)
             for (i in 1..TRACKS) {

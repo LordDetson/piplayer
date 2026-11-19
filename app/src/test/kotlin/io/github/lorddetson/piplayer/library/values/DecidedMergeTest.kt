@@ -323,8 +323,8 @@ class DecidedMergeTest {
 
         val parts = MergedValues.parts("x.mp3", index = null, tags = full, read = true)
 
-        // Every part but the cover, which comes from the cover chain (TI §5.2).
-        assertThat(parts.keys).containsExactlyInAnyOrderElementsOf(DecidedField.entries - COVER)
+        // The cover comes from the cover chain. Local manual tags only come from a user edit.
+        assertThat(parts.keys).containsExactlyInAnyOrderElementsOf(DecidedField.entries - COVER - DecidedField.MANUAL_TAGS)
         assertThat(parts.values).allSatisfy { assertThat(it.level).isEqualTo(LEVEL_TAGS) }
         assertThat(parts[DecidedField.ALBUM_ARTIST_IDS]?.value).isEqualTo("0b8a3a2e-1111-4222-8333-444455556666")
         assertThat(parts[COMPILATION]?.value).isEqualTo("1")

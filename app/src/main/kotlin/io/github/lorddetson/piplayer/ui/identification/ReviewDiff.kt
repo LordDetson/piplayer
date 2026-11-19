@@ -199,7 +199,7 @@ object ReviewDiff {
         current: Map<ProtectedField, FieldValue>,
         proposed: Map<ProtectedField, FieldValue>,
         protected: Set<ProtectedField>,
-    ): List<DiffLine> = ProtectedField.entries.filter { it != ProtectedField.COVER && it !in protected }.mapNotNull { field ->
+    ): List<DiffLine> = ProtectedField.identificationFields.filter { it != ProtectedField.COVER && it !in protected }.mapNotNull { field ->
         val old = current[field]?.takeIf(::present)
         val new = proposed[field]
         val newPresent = new != null && present(new)
@@ -251,7 +251,7 @@ object ReviewDiff {
         val real = edits.filter { (field, value) -> field != ProtectedField.COVER && !sameValue(value, proposed[field]) }
         if (real.isEmpty()) return lines
         val byField = lines.associateBy { it.field }
-        return ProtectedField.entries.mapNotNull { field ->
+        return ProtectedField.identificationFields.mapNotNull { field ->
             if (field in real) {
                 DiffLine(field, current[field]?.takeIf(::present), real[field]?.takeIf(::present), ticked = true, edited = true)
             } else {

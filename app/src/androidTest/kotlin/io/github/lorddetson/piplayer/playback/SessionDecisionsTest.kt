@@ -163,7 +163,7 @@ class SessionDecisionsTest {
                     key(1),
                     DecisionFixtures.details(title = "Decided title", artist = "Decided artist", album = "Decided album"),
                     fileId = ids[0],
-                ).copy(fields = ProtectedField.entries.toSet(), cover = CoverSource(CoverEntity.RELEASE, DecisionFixtures.mbid(1, 0x1e1))),
+                ).copy(fields = ProtectedField.identificationFields.toSet(), cover = CoverSource(CoverEntity.RELEASE, DecisionFixtures.mbid(1, 0x1e1))),
                 savedCoverId = cover,
             ),
         )

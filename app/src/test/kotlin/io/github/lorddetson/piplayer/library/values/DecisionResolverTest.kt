@@ -82,6 +82,21 @@ class DecisionResolverTest {
     }
 
     @Test
+    fun `undoing one local tag edit keeps unrelated properties saved later`() {
+        val raw = DecidedField.MANUAL_TAGS
+        val old = edit(1, 10, mapOf(raw to ManualTagValues.encode(mapOf("GENRE" to listOf("Ambient")))))
+        val newer = edit(2, 20, mapOf(raw to ManualTagValues.encode(mapOf("COMMENT" to listOf("Note")))))
+        val cleared = edit(3, 30, mapOf(raw to ManualTagValues.encode(mapOf("GENRE" to emptyList()))))
+
+        val all = listOf(old, newer, cleared).winners()[raw]
+        assertThat(ManualTagValues.decode(all?.value)).containsExactlyInAnyOrderEntriesOf(
+            mapOf("GENRE" to emptyList<String>(), "COMMENT" to listOf("Note")),
+        )
+        val undone = listOf(old.copy(undone = true), newer, cleared.copy(undone = true)).winners()[raw]
+        assertThat(ManualTagValues.decode(undone?.value)).isEqualTo(mapOf("COMMENT" to listOf("Note")))
+    }
+
+    @Test
     fun `undoing the older of two identifications changes nothing, undoing the newer brings the older back`() {
         val both = listOf(identification(1, 10, "A"), identification(2, 20, "B"))
         val olderUndone = listOf(identification(1, 10, "A", undone = true), identification(2, 20, "B"))
@@ -250,8 +265,9 @@ class DecisionResolverTest {
         assertThat(ProtectedField.entries).allSatisfy { assertThat(DecidedField.partsOf(it)).isNotEmpty() }
         assertThat(DecidedField.entries.map { it.code }).doesNotHaveDuplicates()
         assertThat(DecidedField.entries.map { it.stored }).doesNotHaveDuplicates()
-        // The codes of TI §10.2.
-        assertThat(DecidedField.entries.map { it.code }).isEqualTo((1..27).toList())
+        // The original codes stay in order. The manual-only field extends the storage format.
+        assertThat(DecidedField.entries.map { it.code }).isEqualTo((1..28).toList())
+        assertThat(DecidedField.ofCode(28)).isEqualTo(DecidedField.MANUAL_TAGS)
         assertThat(DecidedField.entries).allSatisfy { assertThat(DecidedField.ofCode(it.code)).isEqualTo(it) }
         assertThat(DecidedField.entries).allSatisfy { assertThat(DecidedField.ofName(it.stored)).isEqualTo(it) }
     }

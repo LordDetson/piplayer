@@ -178,7 +178,7 @@ private fun ProtectedFieldsChoice(protected: Set<ProtectedField>, onProtect: (Pr
     val summary = if (protected.isEmpty()) {
         stringResource(R.string.identification_protected_fields_none)
     } else {
-        ProtectedField.entries.filter { it in protected }.map { stringResource(protectedFieldLabel(it)) }.joinToString(", ")
+        ProtectedField.identificationFields.filter { it in protected }.map { stringResource(protectedFieldLabel(it)) }.joinToString(", ")
     }
     Column(
         Modifier
@@ -202,7 +202,7 @@ private fun ProtectedFieldsChoice(protected: Set<ProtectedField>, onProtect: (Pr
                     style = MaterialTheme.typography.bodyMedium,
                     modifier = Modifier.padding(bottom = 8.dp),
                 )
-                for (field in ProtectedField.entries) {
+                for (field in ProtectedField.identificationFields) {
                     val checked = field in shown
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
@@ -249,4 +249,5 @@ internal fun protectedFieldLabel(field: ProtectedField): Int = when (field) {
     ProtectedField.ISRC -> R.string.identification_field_isrc
     ProtectedField.MUSICBRAINZ_IDS -> R.string.identification_field_musicbrainz_ids
     ProtectedField.COVER -> R.string.identification_field_cover
+    ProtectedField.MANUAL_TAGS -> R.string.details_field_tags
 }

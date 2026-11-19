@@ -52,7 +52,7 @@ class DecisionsTest {
         assertThat(committed.counter).isEqualTo(before + 1).isEqualTo(database.user().changeCounter())
         val row = checkNotNull(dao.decision(committed.decisionId))
         assertThat(row.kind).isEqualTo(DecisionKind.APPLY.code)
-        assertThat(DecisionCodec.fields(row.fields)).isEqualTo(ProtectedField.entries.toSet() - ProtectedField.COVER)
+        assertThat(DecisionCodec.fields(row.fields)).isEqualTo(ProtectedField.identificationFields.toSet() - ProtectedField.COVER)
         assertThat(DecisionCodec.provider(row.provider)).isEqualTo(ProviderId.MUSICBRAINZ)
         assertThat(DecisionCodec.license(row.licenseClass)).isEqualTo(LicenseClass.CC0)
         assertThat(row.confidence).isEqualTo(965)

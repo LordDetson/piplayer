@@ -10,9 +10,11 @@ class FieldEditsTest {
 
     @Test
     fun `the editor offers the fields the review proposes, not the flag, the IDs or the cover`() {
-        assertThat(FieldEdits.EDITABLE).doesNotContain(ProtectedField.COMPILATION, ProtectedField.MUSICBRAINZ_IDS, ProtectedField.COVER)
+        assertThat(FieldEdits.EDITABLE).doesNotContain(
+            ProtectedField.COMPILATION, ProtectedField.MUSICBRAINZ_IDS, ProtectedField.COVER, ProtectedField.MANUAL_TAGS,
+        )
         assertThat(FieldEdits.EDITABLE).containsExactlyElementsOf(
-            ProtectedField.entries - setOf(ProtectedField.COMPILATION, ProtectedField.MUSICBRAINZ_IDS, ProtectedField.COVER),
+            ProtectedField.identificationFields - setOf(ProtectedField.COMPILATION, ProtectedField.MUSICBRAINZ_IDS, ProtectedField.COVER),
         )
     }
 

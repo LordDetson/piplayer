@@ -58,6 +58,12 @@ enum class ProtectedField(val stored: String) {
     ISRC("isrc"),
     MUSICBRAINZ_IDS("musicbrainz_ids"),
     COVER("cover"),
+    MANUAL_TAGS("manual_tags"),
+    ;
+
+    companion object {
+        val identificationFields = entries.filter { it != MANUAL_TAGS }
+    }
 }
 
 /**
@@ -88,7 +94,7 @@ class IdentificationSettings(
     /** The fields identification leaves alone (TI §6); names this build does not know are left out here. */
     val protectedFields: Flow<Set<ProtectedField>> = file.data.map { preferences ->
         val stored = preferences[PROTECTED_FIELDS].orEmpty()
-        ProtectedField.entries.filterTo(LinkedHashSet()) { it.stored in stored }
+        ProtectedField.identificationFields.filterTo(LinkedHashSet()) { it.stored in stored }
     }.distinctUntilChanged()
 
     /**

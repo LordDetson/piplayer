@@ -139,9 +139,25 @@ object MergedValues {
         }
         val recordingId = if (DecidedField.RECORDING_MBID in decided) decided[DecidedField.RECORDING_MBID]?.value else tags?.recordingMbid
         val cover = embeddedCover || decided[DecidedField.COVER]?.value != null
+        val localProperties = ManualTagValues.decode(decided[DecidedField.MANUAL_TAGS]?.value)
+        val localTags by lazy(LazyThreadSafetyMode.NONE) { TrackTags.from(localProperties) }
+        val composersForSearch = if ("COMPOSER" in localProperties) {
+            localTags.composers.joinToString(" ")
+        } else {
+            tagValues?.composers?.joinToString(" ") ?: indexValues?.composer.present()
+        }
         // Each text normalized once: the title and file name for this file, the others for the batch (TextForms).
         // The genres lists group by (docs/library.md §19.1): the tags' once read, else the index's split as the tags are.
-        val genres = if (read) tagValues?.genres.orEmpty() else indexValues?.genre?.split(';')?.map(String::trim)?.filter { it.present() != null }.orEmpty()
+        val genres = when {
+            "GENRE" in localProperties -> localTags.genres
+            read -> tagValues?.genres.orEmpty()
+            else -> indexValues?.genre?.split(';')?.map(String::trim)?.filter { it.present() != null }.orEmpty()
+        }
+        val genresForSearch = if ("GENRE" in localProperties) {
+            genres.joinToString(" ")
+        } else {
+            tagValues?.genres?.joinToString(" ") ?: indexValues?.genre.present()
+        }
         val titleForm = forms.once(title)
         val fileForm = forms.once(fileName)
         val artistForm = artist?.let(forms::shared)
@@ -171,8 +187,8 @@ object MergedValues {
                 titleForm,
                 artistsForSearch?.let(forms::shared),
                 albumForm,
-                (tagValues?.composers?.joinToString(" ") ?: indexValues?.composer.present())?.let(forms::shared),
-                (tagValues?.genres?.joinToString(" ") ?: indexValues?.genre.present())?.let(forms::shared),
+                composersForSearch?.let(forms::shared),
+                genresForSearch?.let(forms::shared),
                 fileForm,
             ),
             // Unknown until read, as the tag pass soon does: the index fills albums with folder names (docs/playback.md

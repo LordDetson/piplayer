@@ -2,6 +2,7 @@ package io.github.lorddetson.piplayer.tagging.write
 
 import io.github.lorddetson.piplayer.library.values.DecidedField
 import io.github.lorddetson.piplayer.library.values.DecisionContent
+import io.github.lorddetson.piplayer.library.values.ManualTagValues
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 
@@ -42,5 +43,21 @@ class ManualLibraryEditTest {
         val number = TagChange(emptyList(), listOf("B3"))
         assertThat(manualLibraryEdit(emptyMap(), mapOf("TITLE" to title, "COMMENT" to comment))).isNull()
         assertThat(manualLibraryEdit(emptyMap(), mapOf("TRACKNUMBER" to number))).isNull()
+    }
+
+    @Test
+    fun `one local save retains known fields and exact extra values including explicit clears`() {
+        val edits = mapOf(
+            "TITLE" to TagChange(listOf("Old"), listOf("New")),
+            "COMMENT" to TagChange(listOf("Previous"), emptyList()),
+            "CUSTOM" to TagChange(emptyList(), listOf("Line 1\nLine 2", "Second")),
+        )
+        val result = checkNotNull(manualPiPlayerEdit(emptyMap(), edits))
+        assertThat(result[DecidedField.TITLE]).isEqualTo("New")
+        assertThat(ManualTagValues.decode(result[DecidedField.MANUAL_TAGS])).isEqualTo(mapOf(
+            "COMMENT" to emptyList<String>(),
+            "CUSTOM" to listOf("Line 1\nLine 2", "Second"),
+        ))
+        assertThat(manualPiPlayerEdit(emptyMap(), edits + ("TRACKNUMBER" to TagChange(emptyList(), listOf("B3"))))).isNull()
     }
 }

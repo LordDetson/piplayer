@@ -148,7 +148,7 @@ class ReviewDecisionsTest {
         val identity = checkNotNull(identityOf(1))
         val image = ReviewFixtures.cover()
         val applied = request(key(1), details(title = "Decided"), fileId = fileId(1))
-            .copy(fields = ProtectedField.entries.toSet(), cover = image.source)
+            .copy(fields = ProtectedField.identificationFields.toSet(), cover = image.source)
 
         val decisionId = checkNotNull(review.apply(applied, image))
 

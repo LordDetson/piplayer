@@ -18,6 +18,7 @@ and [Track Identification §11](track-identification.md#11-acceptance-criteria-a
 | Write and reread MP3, FLAC, M4A, Ogg Vorbis, Opus and WAV while preserving the audio content key | Native `TagWriterRoundTripTest`, `TagWriterId3v1Test` and `TagWriterCoverTest` |
 | Identify the changed fields that keep their existing ID3v1 values | `ManualTagEditorTest` and `TagWriterId3v1Test`, including a comparison against the bytes after writing |
 | Override legacy decoding for one track and return to the library setting without changing the file | `ManualTagEncodingTest`, `LegacyEncodingLibraryTest` and the v10 to v11 migration in `UserDatabaseTest` |
+| Save a title and extra tags together in PiPlayer, keep them after re-opening the library and undo the edit without writing the file | `ManualTagEncodingTest`, `ManualLibraryEditTest` and `DecisionResolverTest` |
 | Prepare and verify the copy, record the write before streaming, verify the original, and keep the journal for undo | `TagWriteSessionTest` and `TagWriteJournalTest` |
 | Update the library immediately and recover when its transaction is interrupted after journal verification | `SingleTagWriteRecoveryTest`, `TagPassTest` and `UserDatabaseTest` |
 | Reopen the journal with a deferred single-file write, require consent and verify the final file | `SingleTagWriteRecoveryTest` |
@@ -84,6 +85,9 @@ and tapping the recovery notification opens Fix. Restore the original setting be
   force-stopping PID 4129, PID 4690 found the interrupted write and requested fresh consent for the same file. Deny
   preserved every byte. A second attempt with Allow and Write tags now updated the title, preserved the audio hash
   and cleared the interrupted-write entry in Fix.
+- API 36, local manual edit: one Save applied a title and genre together. The editor and the library showed the
+  saved genre, and the library reopen retained both values. One Undo restored both values. The source MP3 was
+  byte-identical throughout.
 - API 36, library refresh: the library showed the new title before the MediaStore observer. A simulated failure
   between database transactions left a pending refresh. Reopening the user database and reading the verified file
   updated the library with the file bytes unchanged. An older tag pass with matching size and modification time

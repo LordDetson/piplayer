@@ -69,7 +69,7 @@ object BatchAutoApply {
      */
     fun fields(details: ReleaseDetails, protected: Set<ProtectedField>): Set<ProtectedField> {
         val values = DecisionContent.ofRelease(details)
-        return ProtectedField.entries.filterTo(LinkedHashSet()) { field ->
+        return ProtectedField.identificationFields.filterTo(LinkedHashSet()) { field ->
             field != ProtectedField.COVER && field !in protected && decided(details, values, field)
         }
     }

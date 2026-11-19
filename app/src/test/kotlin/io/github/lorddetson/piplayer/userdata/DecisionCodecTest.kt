@@ -193,10 +193,10 @@ class DecisionCodecTest {
     )
 
     @Test
-    fun `an identification gives every part, empty ones included`() {
+    fun `an identification gives every identification part, empty ones included`() {
         val parts = DecisionContent.ofRelease(details, savedCoverId = 4)
 
-        assertThat(parts.keys).containsExactlyInAnyOrderElementsOf(DecidedField.entries)
+        assertThat(parts.keys).containsExactlyInAnyOrderElementsOf(DecidedField.entries - DecidedField.MANUAL_TAGS)
         assertThat(parts[TITLE]).isEqualTo("Song")
         assertThat(parts[ARTIST]).isEqualTo("Ann feat. Bobby")
         assertThat(DecidedField.creditedNames(parts[DecidedField.ARTIST_CREDITS])).containsExactly("Ann", "Bobby")
