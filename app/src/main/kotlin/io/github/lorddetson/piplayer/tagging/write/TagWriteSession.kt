@@ -6,6 +6,8 @@ import android.system.ErrnoException
 import android.system.Os
 import android.system.StructStat
 import io.github.lorddetson.piplayer.library.identity.Hex
+import io.github.lorddetson.piplayer.library.values.DecisionContent
+import io.github.lorddetson.piplayer.library.values.TrackTags
 import io.github.lorddetson.piplayer.nativelib.taglib.Id3v1WritePolicy
 import io.github.lorddetson.piplayer.tagging.TagArtwork
 import io.github.lorddetson.piplayer.tagging.TagReport
@@ -14,6 +16,7 @@ import io.github.lorddetson.piplayer.tagging.TaggerClient
 import io.github.lorddetson.piplayer.tagging.TaggerResult
 import io.github.lorddetson.piplayer.tagging.fingerprints
 import io.github.lorddetson.piplayer.userdata.AppliedChangeEntity
+import io.github.lorddetson.piplayer.userdata.FileReferences
 import io.github.lorddetson.piplayer.userdata.TagApplyItem
 import io.github.lorddetson.piplayer.userdata.TagBackupEntity
 import io.github.lorddetson.piplayer.userdata.TagWriteJournal
@@ -205,6 +208,7 @@ internal class TagWriteSession(
                     coverChange = copy.coverChange,
                     legacyId3Change = copy.legacyId3Change,
                     id3v2Changes = copy.id3v2Changes,
+                    writtenPartHashes = writtenPartHashes(copy),
                 ).encode(),
                 createdAt = at,
             )
@@ -221,6 +225,16 @@ internal class TagWriteSession(
                 snapshot.delete()
                 artworkSnapshot?.delete()
                 copy.file.delete()
+            }
+        }
+    }
+
+    private fun writtenPartHashes(copy: PreparedTagCopy): Map<Int, Int> {
+        val before = DecisionContent.ofTags(TrackTags.from(copy.before.properties))
+        val after = DecisionContent.ofTags(TrackTags.from(copy.after.properties))
+        return buildMap {
+            for ((part, value) in after) {
+                if (before[part] != value) put(part.code, FileReferences.hash(value))
             }
         }
     }
@@ -257,7 +271,9 @@ internal class TagWriteSession(
                     journal = object : TagWriteBack.Journal {
                         override suspend fun streamed() = journal.streamed(id)
                         override suspend fun verified(stamp: Stamp) =
-                            journal.verified(id, stamp.size, stamp.modifiedMs, System.currentTimeMillis(), record.undoOf)
+                            journal.verified(
+                                id, stamp.size, stamp.modifiedMs, System.currentTimeMillis(), record.undoOf, record.writtenPartHashes,
+                            )
                         override suspend fun failed() = journal.failed(id)
                     },
                     stream = {
@@ -270,7 +286,9 @@ internal class TagWriteSession(
                         }
                     },
                     verify = { verifyOriginal(target, entry, record) },
-                ).run(copy, entry.copySize, entry.copySha256, consent)
+                ).run(copy, entry.copySize, entry.copySha256, consent).also { result ->
+                    if (result == WriteBackResult.VERIFIED) access.onVerified(target.uri)
+                }
             } catch (_: SourceChanged) {
                 WriteBackResult.SOURCE_CHANGED
             } catch (_: JournalChanged) {

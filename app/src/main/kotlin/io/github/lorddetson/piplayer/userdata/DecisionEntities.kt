@@ -2,6 +2,7 @@ package io.github.lorddetson.piplayer.userdata
 
 import androidx.room3.ColumnInfo
 import androidx.room3.Dao
+import androidx.room3.Delete
 import androidx.room3.Entity
 import androidx.room3.Index
 import androidx.room3.Insert
@@ -272,6 +273,9 @@ interface DecisionDao {
 
     @Upsert
     suspend fun saveFileStates(rows: List<FileStateEntity>)
+
+    @Delete
+    suspend fun deleteFileStates(rows: List<FileStateEntity>)
 
     @Insert
     suspend fun addSavedCover(cover: SavedCoverEntity): Long

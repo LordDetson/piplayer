@@ -5,6 +5,7 @@ import android.os.ParcelFileDescriptor
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.github.lorddetson.piplayer.TestFiles
 import io.github.lorddetson.piplayer.fakes.Fixtures
+import io.github.lorddetson.piplayer.library.values.DecidedField
 import io.github.lorddetson.piplayer.nativelib.taglib.Id3v1WritePolicy
 import io.github.lorddetson.piplayer.tagging.TagArtwork
 import io.github.lorddetson.piplayer.tagging.TagReadGuard
@@ -12,6 +13,7 @@ import io.github.lorddetson.piplayer.tagging.TagTarget
 import io.github.lorddetson.piplayer.tagging.TaggerResult
 import io.github.lorddetson.piplayer.tagging.TaggerTesting
 import io.github.lorddetson.piplayer.userdata.TagApplyItem
+import io.github.lorddetson.piplayer.userdata.FileReferences
 import io.github.lorddetson.piplayer.userdata.TagApplyQueue
 import io.github.lorddetson.piplayer.userdata.TagWriteJournal
 import io.github.lorddetson.piplayer.userdata.UserDatabase
@@ -65,16 +67,27 @@ class TagWriteSessionTest {
             assertThat(result).isInstanceOf(QueuedTagWrite.Ready::class.java)
             queued = result as QueuedTagWrite.Ready
             assertThat(original.readBytes()).isEqualTo(initialBytes)
-            assertThat(TagWriteJournal(db).entry(queued.id)?.state).isEqualTo("pending")
+            val pending = requireNotNull(TagWriteJournal(db).entry(queued.id))
+            assertThat(pending.state).isEqualTo("pending")
+            assertThat(TagWriteRecord.decode(pending.diff)?.writtenPartHashes)
+                .containsEntry(DecidedField.TITLE.code, FileReferences.hash("Approved after reopening"))
         } finally {
             db.close()
         }
         val reopened = UserDatabase.open(context, databaseName)
         try {
-            val writer = session(reopened)
+            val indexed = mutableListOf<Uri>()
+            val writer = session(reopened, object : TagWriteAccess by access {
+                override suspend fun onVerified(file: Uri) {
+                    assertThat(TagWriteJournal(reopened).entry(queued.id)?.state).isEqualTo("verified")
+                    indexed += file
+                }
+            })
             assertThat(writer.write(queued.id, target, consent = false)).isEqualTo(WriteBackResult.NEEDS_CONSENT)
             assertThat(original.readBytes()).isEqualTo(initialBytes)
+            assertThat(indexed).isEmpty()
             assertThat(writer.write(queued.id, target, consent = true)).isEqualTo(WriteBackResult.VERIFIED)
+            assertThat(indexed).containsExactly(uri)
             val after = TestFiles.open(original).use {
                 (client.read(target.taggerTarget, it, original.name) as TaggerResult.Replied).value.report
             }
@@ -82,6 +95,8 @@ class TagWriteSessionTest {
             assertThat(after.properties["TITLE"]).containsExactly("Approved after reopening")
             assertThat(TagWriteJournal(reopened).entry(queued.id)?.state).isEqualTo("verified")
             assertThat(TagWriteJournal(reopened).interrupted()).isEmpty()
+            assertThat(writer.write(queued.id, target, consent = true)).isEqualTo(WriteBackResult.VERIFIED)
+            assertThat(indexed).containsExactly(uri)
         } finally {
             reopened.close()
         }

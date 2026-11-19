@@ -107,7 +107,14 @@ class UserDatabaseSizeTest {
                     "ALBUM" to TagChange(listOf(words(3)), listOf(words(3))),
                     "TRACKNUMBER" to TagChange(listOf("1"), listOf("3")),
                 )
-                val record = TagWriteRecord(bytes(32), 80, track.id + 55_000, fields, markedTagHash = true)
+                val parts = mapOf(
+                    DecidedField.TITLE to "TITLE", DecidedField.ARTIST to "ARTIST",
+                    DecidedField.ALBUM to "ALBUM", DecidedField.TRACK_NUMBER to "TRACKNUMBER",
+                )
+                val written = parts.entries.associate { (part, key) ->
+                    part.code to FileReferences.hash(fields.getValue(key).after.single())
+                }
+                val record = TagWriteRecord(bytes(32), 80, track.id + 55_000, fields, markedTagHash = true, writtenPartHashes = written)
                 val change = AppliedChangeEntity(
                     identityId = track.id, decisionId = track.id, batchUuid = uuid, backupId = 0,
                     volumeName = item.volumeName, relativePath = item.relativePath, displayName = item.displayName, state = "pending",
@@ -117,7 +124,7 @@ class UserDatabaseSizeTest {
                 val id = checkNotNull(journal.prepareForApply(backup, change, item))
                 check(journal.beginStreaming(id))
                 check(journal.streamed(id))
-                check(journal.verified(id, size, at, at + 1))
+                check(journal.verified(id, size, at, at + 1, writtenPartHashes = written))
             }
             assertThat(queue.results(plan)).isEqualTo(mapOf("written" to items.size))
         }

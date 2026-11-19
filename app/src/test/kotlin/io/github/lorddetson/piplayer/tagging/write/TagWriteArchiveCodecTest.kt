@@ -1,6 +1,8 @@
 package io.github.lorddetson.piplayer.tagging.write
 
+import io.github.lorddetson.piplayer.library.values.DecidedField
 import io.github.lorddetson.piplayer.userdata.AppliedChangeEntity
+import io.github.lorddetson.piplayer.userdata.FileReferences
 import io.github.lorddetson.piplayer.userdata.TagBackupEntity
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -54,5 +56,21 @@ class TagWriteArchiveCodecTest {
     fun incompleteWritesKeepTheirWorkingCopyAndCannotBeArchived() {
         val interrupted = ArchivedTagWrite(entry.copy(state = "streaming"), backup)
         assertThatThrownBy { TagWriteArchiveCodec.encode(listOf(interrupted)) }.isInstanceOf(IllegalArgumentException::class.java)
+    }
+
+    @Test
+    fun archivedReferencesKeepTheirWinningDecisionAndAnyValueMissingFromTheTextDiff() {
+        val title = DecidedField.TITLE
+        val album = DecidedField.ALBUM
+        val actual = mapOf(title.code to FileReferences.hash("After"), album.code to FileReferences.hash("Album fallback"))
+        val record = diff.withVerifiedReferences(mapOf(title.code to 10L, album.code to 8L), 10L, actual)
+        assertThat(record.verifiedReferences?.hashes).containsOnlyKeys(album.code)
+        assertThat(record.verifiedReferences?.decisions).containsExactlyEntriesOf(mapOf(album.code to 8L))
+        val archived = ArchivedTagWrite(entry.copy(diff = record.encode()), backup)
+        val restored = TagWriteArchiveCodec.decode(TagWriteArchiveCodec.encode(listOf(archived))).single()
+        val updated = requireNotNull(TagWriteRecord.decode(restored.entry.diff))
+        assertThat(updated.verifiedPartHashes(10L, mapOf(title to 10L, album to 8L)))
+            .containsExactlyEntriesOf(mapOf(title to actual.getValue(title.code), album to actual.getValue(album.code)))
+        assertThat(updated.verifiedPartHashes(10L, mapOf(title to 11L, album to 6L))).isEmpty()
     }
 }

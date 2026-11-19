@@ -5,6 +5,7 @@ import androidx.room3.Insert
 import androidx.room3.Query
 import androidx.room3.withWriteTransaction
 import io.github.lorddetson.piplayer.library.identity.Hex
+import io.github.lorddetson.piplayer.tagging.write.TagWriteRecord
 
 /** Records the verified working copy and its snapshot together before the original can be opened for writing. */
 internal class TagWriteJournal(private val database: UserDatabase) {
@@ -51,13 +52,22 @@ internal class TagWriteJournal(private val database: UserDatabase) {
         (dao.forBatch(batchUuid) + archive.forBatch(batchUuid)).distinctBy { it.id }.sortedByDescending { it.id }
     suspend fun beginStreaming(id: Long): Boolean = dao.markStreaming(id) == 1
     suspend fun streamed(id: Long): Boolean = dao.markStreamed(id) == 1
-    suspend fun verified(id: Long, size: Long, mtime: Long, at: Long, undoOf: Long? = null): Boolean =
+    suspend fun verified(
+        id: Long, size: Long, mtime: Long, at: Long, undoOf: Long? = null,
+        writtenPartHashes: Map<Int, Int> = emptyMap(),
+    ): Boolean =
         database.withWriteTransaction {
             if (undoOf != null && entry(undoOf)?.let { it.state == "verified" && it.undoneAt == null } != true) {
                 return@withWriteTransaction false
             }
             if (dao.markVerified(id, size, mtime, at) != 1) return@withWriteTransaction false
             if (undoOf != null) check(dao.markUndone(undoOf, at) == 1 || archive.markUndone(undoOf, at))
+            if (writtenPartHashes.isNotEmpty()) {
+                val entry = checkNotNull(dao.entry(id))
+                val record = checkNotNull(TagWriteRecord.decode(entry.diff))
+                val winners = Decisions(database).acceptWrittenTagParts(entry, writtenPartHashes.keys)
+                dao.saveVerifiedReferences(id, record.withVerifiedReferences(winners, entry.decisionId, writtenPartHashes).encode())
+            }
             queue.recordVerifiedWrite(id)
             archive.compactPage()
             true
@@ -133,6 +143,9 @@ interface TagWriteDao {
             "verified_at = :at WHERE id = :id AND state = 'streamed'",
     )
     suspend fun markVerified(id: Long, size: Long, mtime: Long, at: Long): Int
+
+    @Query("UPDATE applied_change SET diff = :diff WHERE id = :id AND state = 'verified'")
+    suspend fun saveVerifiedReferences(id: Long, diff: ByteArray)
 
     @Query("UPDATE applied_change SET state = 'failed' WHERE id = :id AND state IN ('pending', 'streamed')")
     suspend fun markFailed(id: Long): Int

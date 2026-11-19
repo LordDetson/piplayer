@@ -16,6 +16,7 @@ import io.github.lorddetson.piplayer.library.values.DecisionResolver
 import io.github.lorddetson.piplayer.library.values.DecisionValues
 import io.github.lorddetson.piplayer.library.values.ResolvingCores
 import io.github.lorddetson.piplayer.settings.ProtectedField
+import io.github.lorddetson.piplayer.tagging.write.TagWriteRecord
 import java.nio.ByteBuffer
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -149,7 +150,8 @@ class Decisions(private val database: UserDatabase, private val clock: () -> Lon
         if (items.isEmpty()) return emptyList()
         return database.withWriteTransaction {
             val tracks = tracksOf(items.map { it.first })
-            items.map { (identity, location) -> changedAt(identity, location, tracks[identity]) }
+            val writes = TagWriteJournal(database).observedWrites(tracks.keys)
+            items.map { (identity, location) -> changedAt(identity, location, tracks[identity], writes[identity].orEmpty()) }
         }
     }
 
@@ -372,7 +374,7 @@ class Decisions(private val database: UserDatabase, private val clock: () -> Lon
      * parts, those flagged before included.
      */
     suspend fun fileChanged(identityId: Long, location: LocationValues): Set<DecidedField> =
-        database.withWriteTransaction { changedAt(identityId, location, tracksOf(listOf(identityId))[identityId]) }
+        filesChanged(listOf(identityId to location)).single()
 
     /**
      * What [changedAt] compares for each of [identityIds] that has decisions that are not undone: read for all of them at
@@ -393,8 +395,20 @@ class Decisions(private val database: UserDatabase, private val clock: () -> Lon
     /** The decisions of a track that are not undone, the values that win and its file states. */
     private class Track(val decisions: List<DecisionEntity>, val winners: Map<DecidedField, Decided>, val states: List<FileStateEntity>)
 
+    /** Clears the written parts' conflict state in the transaction that verifies the file. */
+    internal suspend fun acceptWrittenTagParts(entry: AppliedChangeEntity, written: Set<Int>): Map<Int, Long> {
+        val track = tracksOf(listOf(entry.identityId))[entry.identityId] ?: return emptyMap()
+        val location = LocationValues(entry.volumeName, entry.relativePath, entry.displayName, emptyMap())
+        val winners = track.winners.filterKeys { it.code in written }.entries.associate { (part, winner) -> part.code to winner.decisionId }
+        val obsolete = track.states.filter { it.at(location) && winners[it.field] == it.decisionId }
+        if (obsolete.isNotEmpty()) dao.deleteFileStates(obsolete)
+        return winners
+    }
+
     /** [fileChanged] inside the caller's transaction, with what [tracksOf] read of the track; null when it has no decision. */
-    private suspend fun changedAt(identityId: Long, location: LocationValues, track: Track?): Set<DecidedField> {
+    private suspend fun changedAt(
+        identityId: Long, location: LocationValues, track: Track?, writes: List<AppliedChangeEntity>,
+    ): Set<DecidedField> {
         if (track == null) return emptySet()
         val winners = track.winners
         val ofDecision = track.decisions.associate { it.id to FileReferences.decode(it.fileValues) }
@@ -402,7 +416,19 @@ class Decisions(private val database: UserDatabase, private val clock: () -> Lon
         val here = track.states.filter { it.at(location) }
             .mapNotNull { row -> DecidedField.ofCode(row.field)?.takeIf { winners[it]?.decisionId == row.decisionId }?.let { it to row } }
             .toMap()
-        val references = here.mapValues { (_, row) -> int(row.valueAtDecision) }
+        val winningIds = winners.mapValues { (_, winner) -> winner.decisionId }
+        val references = buildMap {
+            val atPlace = writes.filter {
+                it.state == "verified" && it.volumeName == location.volume &&
+                    it.relativePath == location.relativePath && it.displayName == location.displayName
+            }.sortedWith(compareBy({ it.verifiedAt ?: it.createdAt }, { it.id }))
+            for (write in atPlace) {
+                val record = TagWriteRecord.decode(write.diff) ?: continue
+                putAll(record.verifiedPartHashes(write.decisionId, winningIds))
+            }
+            // A choice made after the write overrides its reference until the next verified write of the part.
+            for ((part, row) in here) put(part, int(row.valueAtDecision))
+        }
         val flaggedBefore = here.filterValues { it.changedInFile }.keys
         val changed = FileReferences.changed(winners, ofDecision, references, location.values)
         val newly = changed - flaggedBefore

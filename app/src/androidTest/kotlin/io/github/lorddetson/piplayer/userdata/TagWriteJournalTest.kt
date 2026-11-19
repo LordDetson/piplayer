@@ -2,8 +2,12 @@ package io.github.lorddetson.piplayer.userdata
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.github.lorddetson.piplayer.TestFiles
+import io.github.lorddetson.piplayer.library.values.DecidedField
+import io.github.lorddetson.piplayer.library.values.DecisionKind
+import io.github.lorddetson.piplayer.settings.ProtectedField
 import io.github.lorddetson.piplayer.tagging.write.TagChange
 import io.github.lorddetson.piplayer.tagging.write.TagWriteRecord
+import java.nio.ByteBuffer
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.After
@@ -106,6 +110,49 @@ class TagWriteJournalTest {
             assertThat(journal.verified(id, 190L, 23L, 42L)).isTrue()
 
             assertThat(opened.user().identitiesHoldingData()).containsExactly(7L)
+        } finally {
+            opened.close()
+        }
+    }
+
+    @Test
+    fun verificationClearsOnlyWrittenConflictsAtTheWrittenLocation() = runBlocking<Unit> {
+        val opened = UserDatabase.open(context, name)
+        try {
+            val title = DecidedField.TITLE
+            val album = DecidedField.ALBUM
+            val dao = opened.decisions()
+            val decision = dao.add(DecisionEntity(
+                identityId = 7, kind = DecisionKind.EDIT.code, fields = DecisionCodec.bits(setOf(ProtectedField.TITLE, ProtectedField.ALBUM)),
+                fileValues = FileReferences.encode(mapOf(title to FileReferences.hash("Original title"))), createdAt = 1,
+            ))
+            dao.addMetadata(listOf(
+                TrackMetadataEntity(decision, title.code, "Accepted title".encodeToByteArray()),
+                TrackMetadataEntity(decision, album.code, "Accepted album".encodeToByteArray()),
+            ))
+            val reference = ByteBuffer.allocate(4).putInt(FileReferences.hash("Original title")).array()
+            val titleState = FileStateEntity(7, decision, "external_primary", "Music/", "same.mp3", title.code, reference, true)
+            val albumState = titleState.copy(field = album.code)
+            val copyState = titleState.copy(relativePath = "Copy/")
+            dao.saveFileStates(listOf(titleState, albumState, copyState))
+            val journal = TagWriteJournal(opened)
+            val diff = TagWriteRecord(
+                ByteArray(32), 1, 2, mapOf("TITLE" to TagChange(listOf("Original title"), listOf("Accepted title"))),
+            ).encode()
+            val id = journal.prepare(backup("same.mp3"), change("same.mp3").copy(decisionId = decision, diff = diff))
+            assertThat(journal.streamed(id)).isTrue()
+            assertThat(journal.verified(
+                id, 100L, 22L, 30L, writtenPartHashes = mapOf(title.code to FileReferences.hash("Accepted title")),
+            )).isTrue()
+            assertThat(dao.fileStates(7)).containsExactlyInAnyOrder(albumState, copyState)
+
+            val references = Decisions(opened)
+            val current = Decisions.LocationValues(
+                "external_primary", "Music/", "same.mp3", mapOf(title to "Accepted title", album to "External album"),
+            )
+            assertThat(references.fileChanged(7, current)).containsExactly(album)
+            assertThat(references.fileChanged(7, current.copy(values = current.values + (title to "New external edit"))))
+                .containsExactlyInAnyOrder(title, album)
         } finally {
             opened.close()
         }

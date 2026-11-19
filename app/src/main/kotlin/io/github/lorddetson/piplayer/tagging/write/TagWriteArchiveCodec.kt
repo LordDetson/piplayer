@@ -38,7 +38,8 @@ internal object TagWriteArchiveCodec {
             actualSize.takeUnless { it == entry.copySize }, entry.actualMtime?.minus(entry.createdAt),
             entry.createdAt, entry.verifiedAt?.minus(entry.createdAt), entry.undoneAt,
             StoredDiff(diff.changes.mapValues { (_, change) -> listOf(change.before, change.after) },
-                diff.undoOf, diff.conflicts, diff.markedTagHash, diff.coverChange, diff.legacyId3Change, diff.id3v2Changes),
+                diff.undoOf, diff.conflicts, diff.markedTagHash, diff.coverChange, diff.legacyId3Change, diff.id3v2Changes,
+                diff.verifiedReferences),
             StoredBackup(backup.id, backup.createdAt - entry.createdAt, backup.tagsPath, backup.tagsHash.base64(),
                 backup.coverPath, backup.coverHash?.base64(), backup.id3Version),
         )
@@ -60,6 +61,7 @@ internal object TagWriteArchiveCodec {
                 diff = TagWriteRecord(
                     byteArrayOf(), 0, 0, changes, diff.undoOf, diff.conflicts, diff.markedTagHash,
                     diff.coverChange, diff.legacyId3Change, diff.id3v2Changes,
+                    verifiedReferences = diff.verifiedReferences,
                 ).encode(),
                 actualSize = record.actualSize ?: record.size, actualMtime = record.mtimeDelta?.plus(record.createdAt),
                 createdAt = record.createdAt, verifiedAt = record.verifiedDelta?.plus(record.createdAt), undoneAt = record.undoneAt,
@@ -107,6 +109,7 @@ internal object TagWriteArchiveCodec {
         val coverChange: TagChange? = null,
         val legacyId3Change: LegacyId3Change? = null,
         val id3v2Changes: Map<String, TagChange>? = null,
+        val verifiedReferences: VerifiedTagReferences? = null,
     )
 
     @Serializable
