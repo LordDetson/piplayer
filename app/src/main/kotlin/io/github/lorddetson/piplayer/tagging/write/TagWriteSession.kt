@@ -105,7 +105,7 @@ internal class TagWriteSession(
                 backupId = 0, volumeName = target.volume, relativePath = target.relativePath,
                 displayName = target.displayName, state = "pending", copyPath = copy.file.name,
                 copySize = copy.file.length(), copySha256 = copy.sha256, expectedContentKey = Hex.bytes(target.contentKey),
-                tagHash = tagHash(copy.after), diff = encodeRecord(copy, undoOf), createdAt = at,
+                tagHash = copy.tagHash, diff = encodeRecord(copy, undoOf), createdAt = at,
             )
             val id = withContext(NonCancellable) {
                 val written = if (item == null) journal.prepare(backup, entry) else journal.prepareForApply(backup, entry, item)
@@ -193,9 +193,13 @@ internal class TagWriteSession(
             val info = stat(descriptor)
             if (!info.sameFile(record) || info.st_size != entry.copySize) return null
             if (!MessageDigest.isEqual(sha256(input), entry.copySha256)) return null
-            val result = tagger.read(target.taggerTarget, descriptor, target.displayName, background = true) as? TaggerResult.Replied
+            val result = tagger.read(
+                target.taggerTarget, descriptor, target.displayName, markLegacy = record.markedTagHash, background = true,
+            ) as? TaggerResult.Replied
             val report = result?.value?.report ?: return null
-            if (report.error != null || report.content?.key != target.contentKey || !MessageDigest.isEqual(tagHash(report), entry.tagHash)) {
+            if (report.error != null || report.content?.key != target.contentKey ||
+                !MessageDigest.isEqual(tagPropertiesHash(report.properties), entry.tagHash)
+            ) {
                 return null
             }
             val observed = stat(descriptor)
@@ -225,15 +229,12 @@ internal class TagWriteSession(
     private suspend fun undoable(id: Long, target: TagWriteTarget): AppliedChangeEntity? =
         journal.entry(id)?.takeIf { it.state == "verified" && it.undoneAt == null && it.matches(target) }
 
-    private fun tagHash(report: TagReport): ByteArray {
-        val ordered: Map<String, List<String>> = report.properties.toSortedMap()
-        return MessageDigest.getInstance("SHA-256").digest(Json.encodeToString(ordered).toByteArray())
-    }
-
     private fun encodeRecord(copy: PreparedTagCopy, undoOf: Long?): ByteArray {
         val bytes = ByteArrayOutputStream()
         GZIPOutputStream(bytes).bufferedWriter().use {
-            val record = WriteRecord(copy.originalSha256, copy.originalDevice, copy.originalInode, copy.diff.changes, undoOf, copy.diff.conflicts)
+            val record = WriteRecord(
+                copy.originalSha256, copy.originalDevice, copy.originalInode, copy.diff.changes, undoOf, copy.diff.conflicts, markedTagHash = true,
+            )
             it.write(Json.encodeToString(record))
         }
         return bytes.toByteArray()
@@ -269,5 +270,6 @@ internal class TagWriteSession(
         val changes: Map<String, TagChange>,
         val undoOf: Long? = null,
         val conflicts: Set<String> = emptySet(),
+        val markedTagHash: Boolean = false,
     )
 }

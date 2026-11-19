@@ -21,6 +21,7 @@ internal class PreparedTagCopy(
     val before: TagReport,
     val after: TagReport,
     val diff: TagDiff,
+    val tagHash: ByteArray,
     val sha256: ByteArray,
     val originalSha256: ByteArray,
     val originalDevice: Long,
@@ -69,9 +70,12 @@ internal class TagWritePreparation(
             if (after.content?.key != expectedKey || after.properties != selected.properties) {
                 return@withContext PreparationFailure.UNVERIFIED
             }
+            // The tag pass keeps legacy bytes marked, so its snapshot has to match this form of the properties.
+            val marked = read(working, target, fileName, markLegacy = true) ?: return@withContext PreparationFailure.UNVERIFIED
+            if (marked.content?.key != expectedKey) return@withContext PreparationFailure.UNVERIFIED
             FileOutputStream(working, true).use { it.fd.sync() }
             PreparedTagCopy(
-                working, before, after, selected, sha256(working), originalSha256,
+                working, before, after, selected, tagPropertiesHash(marked.properties), sha256(working), originalSha256,
                 originalStat.st_dev, originalStat.st_ino,
             ).also { verified = true }
         } catch (_: IOException) {
@@ -88,9 +92,9 @@ internal class TagWritePreparation(
         throw IOException(error)
     }
 
-    private suspend fun read(copy: File, target: TagTarget, fileName: String): TagReport? =
+    private suspend fun read(copy: File, target: TagTarget, fileName: String, markLegacy: Boolean = false): TagReport? =
         ParcelFileDescriptor.open(copy, ParcelFileDescriptor.MODE_READ_ONLY).use { descriptor ->
-            (tagger.read(target, descriptor, fileName, background = true) as? TaggerResult.Replied)
+            (tagger.read(target, descriptor, fileName, markLegacy = markLegacy, background = true) as? TaggerResult.Replied)
                 ?.value?.report?.takeIf { it.error == null }
         }
 }

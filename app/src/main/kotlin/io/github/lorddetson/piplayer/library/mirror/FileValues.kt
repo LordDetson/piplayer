@@ -2,6 +2,7 @@ package io.github.lorddetson.piplayer.library.mirror
 
 import io.github.lorddetson.piplayer.library.db.LibraryDao
 import io.github.lorddetson.piplayer.library.db.MirrorDao
+import io.github.lorddetson.piplayer.library.db.ReadFileRow
 import io.github.lorddetson.piplayer.library.db.TrackEntity
 import io.github.lorddetson.piplayer.library.values.DecisionContent
 import io.github.lorddetson.piplayer.userdata.Decisions
@@ -19,13 +20,20 @@ object FileValues {
         Decisions.LocationValues(volume, relativePath, displayName, DecisionContent.ofTags(track?.toTags()))
 
     /** The values of each of the files [fileIds] that the tag pass has read, by file ID in the order the database gives. */
-    suspend fun ofRead(dao: LibraryDao, fileIds: Collection<Long>): Map<Long, Decisions.LocationValues> {
-        val values = LinkedHashMap<Long, Decisions.LocationValues>()
+    suspend fun ofRead(dao: LibraryDao, fileIds: Collection<Long>): Map<Long, Decisions.LocationValues> =
+        readLocations(dao, fileIds).mapValues { it.value.values }
+
+    internal class ReadAtLocation(val file: ReadFileRow, val track: TrackEntity?) {
+        val values get() = at(file.volume, file.relativePath, file.displayName, track)
+    }
+
+    internal suspend fun readLocations(dao: LibraryDao, fileIds: Collection<Long>): Map<Long, ReadAtLocation> {
+        val values = LinkedHashMap<Long, ReadAtLocation>()
         for (chunk in fileIds.distinct().chunked(MirrorDao.CHUNK)) {
             // The rows come ordered by their start, so the first of each file is the one its file reads as.
             val tracks = dao.tracksOf(chunk).groupBy { it.fileId }
             for (read in dao.readFilesOf(chunk)) {
-                values.getOrPut(read.fileId) { at(read.volume, read.relativePath, read.displayName, tracks[read.fileId]?.first()) }
+                values.getOrPut(read.fileId) { ReadAtLocation(read, tracks[read.fileId]?.first()) }
             }
         }
         return values

@@ -8,6 +8,8 @@ import io.github.lorddetson.piplayer.tagging.TagReadGuard
 import io.github.lorddetson.piplayer.tagging.TagTarget
 import io.github.lorddetson.piplayer.tagging.TaggerResult
 import io.github.lorddetson.piplayer.tagging.TaggerTesting
+import io.github.lorddetson.piplayer.userdata.TagApplyItem
+import io.github.lorddetson.piplayer.userdata.TagApplyQueue
 import io.github.lorddetson.piplayer.userdata.TagWriteJournal
 import io.github.lorddetson.piplayer.userdata.UserDatabase
 import java.io.File
@@ -175,6 +177,61 @@ class TagWriteSessionTest {
             assertThat(session.prepareUndo(queued.id, target)).isNull()
         } finally {
             db.close()
+        }
+    }
+
+    @Test
+    fun aGroupWritesOnlyTheAvailableFilesAfterConsent() = runBlocking<Unit> {
+        val target = target()
+        val database = UserDatabase.open(context, databaseName)
+        try {
+            val queue = TagApplyQueue(database)
+            val item = TagApplyItem(
+                planId = "apply", fileId = 1, contentKey = target.contentKey, decisionId = checkNotNull(target.decisionId),
+                volumeName = target.volume, relativePath = target.relativePath, displayName = target.displayName,
+            )
+            val unavailable = item.copy(fileId = 2, displayName = "missing.mp3")
+            queue.save(listOf(item, unavailable))
+            val work = TagApplyWork(queue, session(database), target = { target.takeIf { _ -> it.fileId == item.fileId } }) {
+                { report -> TagDiff.between(report.properties, mapOf("TITLE" to listOf("One approved file"))) }
+            }
+            val originalBytes = original.readBytes()
+            val group = work.nextGroup(item.planId)
+            assertThat(group.files).isEqualTo(mapOf(item.fileId to target.uri))
+
+            work.apply(group, consent = false)
+            assertThat(original.readBytes()).isEqualTo(originalBytes)
+            assertThat(queue.remaining(item.planId)).containsExactly(item, unavailable)
+
+            work.apply(group, consent = true)
+            assertThat(read(target).properties["TITLE"]).containsExactly("One approved file")
+            assertThat(queue.remaining(item.planId)).containsExactly(unavailable)
+            assertThat(queue.results(item.planId)).isEqualTo(mapOf("written" to 1, "queued" to 1))
+        } finally {
+            database.close()
+        }
+    }
+
+    @Test
+    fun theJournalUsesTheTagPassHashForAFileWithLegacyTags() = runBlocking<Unit> {
+        TestFiles.assets.open("tagging/legacy-id3v1.mp3").use { source ->
+            original.outputStream().use { source.copyTo(it) }
+        }
+        val target = target()
+        val database = UserDatabase.open(context, databaseName)
+        try {
+            val session = session(database)
+            val prepared = queued(session, target)
+            assertThat(session.write(prepared.id, target, consent = true)).isEqualTo(WriteBackResult.VERIFIED)
+            val raw = TestFiles.open(original).use {
+                val result = client.read(target.taggerTarget, it, original.name, markLegacy = true) as TaggerResult.Replied
+                result.value.report.properties
+            }
+
+            assertThat(raw["ARTIST"]).isNotEqualTo(read(target).properties["ARTIST"])
+            assertThat(TagWriteJournal(database).entry(prepared.id)?.tagHash).isEqualTo(tagPropertiesHash(raw))
+        } finally {
+            database.close()
         }
     }
 

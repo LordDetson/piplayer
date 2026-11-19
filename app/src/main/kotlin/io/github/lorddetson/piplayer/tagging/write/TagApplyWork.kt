@@ -1,0 +1,70 @@
+package io.github.lorddetson.piplayer.tagging.write
+
+import android.net.Uri
+import io.github.lorddetson.piplayer.tagging.TagReport
+import io.github.lorddetson.piplayer.userdata.TagApplyItem
+import io.github.lorddetson.piplayer.userdata.TagApplyQueue
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+
+internal data class TagApplyGroup(val planId: String, val files: Map<Long, Uri>)
+
+internal class TagApplyWork(
+    private val queue: TagApplyQueue,
+    private val session: TagWriteSession,
+    private val target: suspend (TagApplyItem) -> TagWriteTarget?,
+    private val diff: suspend (TagApplyItem) -> ((TagReport) -> TagDiff)?,
+) {
+    private val writing = Mutex()
+
+    /** Builds a request from the persisted selection. Unavailable files remain queued for a later session. */
+    suspend fun nextGroup(planId: String): TagApplyGroup {
+        val files = LinkedHashMap<Long, Uri>()
+        val seen = HashSet<Uri>()
+        for (item in queue.remaining(planId).sortedBy { it.writeId == null }) {
+            val uri = resolve(item)?.uri ?: continue
+            if (seen.add(uri)) files[item.fileId] = uri
+            if (files.size == MEDIASTORE_WRITE_REQUEST_LIMIT) break
+        }
+        return TagApplyGroup(planId, files)
+    }
+
+    /** Only the URIs in the approved group can be opened for writing, even if the library changed meanwhile. */
+    suspend fun apply(group: TagApplyGroup, consent: Boolean) = writing.withLock {
+        if (!consent || group.files.isEmpty()) return@withLock
+        for (item in queue.remaining(group.planId)) {
+            val approved = group.files[item.fileId] ?: continue
+            val file = resolve(item)?.takeIf { it.uri == approved } ?: continue
+            val id = item.writeId ?: prepare(item, file) ?: continue
+            when (session.write(id, file, consent = true)) {
+                WriteBackResult.VERIFIED, WriteBackResult.JOURNAL_CHANGED -> Unit
+                WriteBackResult.NEEDS_CONSENT, WriteBackResult.INTERRUPTED -> return@withLock
+                WriteBackResult.INVALID_COPY, WriteBackResult.FAILED, WriteBackResult.SOURCE_CHANGED -> queue.finish(item, "failed")
+            }
+        }
+    }
+
+    private suspend fun resolve(item: TagApplyItem): TagWriteTarget? = target(item)?.takeIf { file ->
+        file.decisionId == item.decisionId && file.contentKey == item.contentKey &&
+            file.volume == item.volumeName && file.relativePath == item.relativePath && file.displayName == item.displayName
+    }
+
+    private suspend fun prepare(item: TagApplyItem, file: TagWriteTarget): Long? {
+        val changes = diff(item)
+        if (changes == null) {
+            queue.finish(item, "skipped")
+            return null
+        }
+        return when (val result = session.prepareForApply(file, item, changes)) {
+            is QueuedTagWrite.Ready -> result.id
+            is QueuedTagWrite.Skipped -> {
+                when (result.reason) {
+                    PreparationFailure.NO_CHANGES, PreparationFailure.NO_SPACE -> queue.finish(item, "skipped")
+                    PreparationFailure.CONTENT_CHANGED, PreparationFailure.UNVERIFIED -> queue.finish(item, "failed")
+                    PreparationFailure.QUEUE_CHANGED -> Unit
+                }
+                null
+            }
+        }
+    }
+}

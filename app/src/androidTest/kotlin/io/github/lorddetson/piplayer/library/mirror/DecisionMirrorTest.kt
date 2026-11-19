@@ -34,10 +34,14 @@ import io.github.lorddetson.piplayer.settings.ProtectedField
 import io.github.lorddetson.piplayer.tagging.TagReport
 import io.github.lorddetson.piplayer.tagging.contentkey.DurationCheck
 import io.github.lorddetson.piplayer.tagging.contentkey.DurationPlan
+import io.github.lorddetson.piplayer.tagging.write.tagPropertiesHash
+import io.github.lorddetson.piplayer.userdata.AppliedChangeEntity
 import io.github.lorddetson.piplayer.userdata.DecisionFixtures
 import io.github.lorddetson.piplayer.userdata.DecisionFixtures.details
 import io.github.lorddetson.piplayer.userdata.DecisionFixtures.request
 import io.github.lorddetson.piplayer.userdata.Decisions
+import io.github.lorddetson.piplayer.userdata.TagBackupEntity
+import io.github.lorddetson.piplayer.userdata.TagWriteJournal
 import io.github.lorddetson.piplayer.userdata.UserDatabase
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
@@ -1115,6 +1119,42 @@ class DecisionMirrorTest {
         // Flags are not mirrored: no counter moved, and the decision keeps winning.
         assertThat(user.user().changeCounter()).isEqualTo(counter)
         assertThat(display(1).title).isEqualTo("Song")
+    }
+
+    @Test
+    fun aReadMatchingAPendingTagWriteDoesNotFlagItsDecidedValue() = runBlocking<Unit> {
+        val oldTags = mapOf("TITLE" to listOf("Before"))
+        val writtenTags = mapOf("TITLE" to listOf("Song"))
+        val newSize = 9_000L
+        library(listOf(row(1)))
+        readAndReport(PropertiesReader(oldTags))
+        val file = library.library().files().single()
+        val identity = identityOf(1)
+        val location = Decisions.LocationValues(file.volumeName, file.relativePath, file.displayName, DecisionContent.ofTags(TrackTags.from(oldTags)))
+        val applied = checkNotNull(decisions.apply(request(key(1), fields = setOf(ProtectedField.TITLE)), atDecision = listOf(location)))
+        TagWriteJournal(user).prepare(
+            TagBackupEntity(
+                identityId = identity, volumeName = file.volumeName, relativePath = file.relativePath, displayName = file.displayName,
+                createdAt = 1, tagsPath = "tags.json", tagsHash = ByteArray(32), coverPath = null, coverHash = null, id3Version = 4,
+            ),
+            AppliedChangeEntity(
+                identityId = identity, decisionId = applied.decisionId, batchUuid = null, backupId = 0,
+                volumeName = file.volumeName, relativePath = file.relativePath, displayName = file.displayName,
+                state = "pending", copyPath = "copy", copySize = newSize, copySha256 = ByteArray(32),
+                expectedContentKey = Hex.bytes(key(1)), tagHash = tagPropertiesHash(writtenTags), diff = byteArrayOf(), createdAt = 1,
+            ),
+        )
+
+        index.volume().rows = listOf(row(1).copy(size = newSize, modifiedSeconds = 1_800_000_000, generationModified = 70))
+        sync.sync()
+        readAndReport(PropertiesReader(writtenTags))
+        assertThat(user.decisions().fileStates(identity)).isEmpty()
+        assertThat(display(1).title).isEqualTo("Song")
+
+        sync.exclusive { library.library().forgetReaderVersions() }
+        readAndReport(PropertiesReader(mapOf("TITLE" to listOf("Edited elsewhere"))))
+        assertThat(user.decisions().fileStates(identity).filter { it.changedInFile }.map { it.field })
+            .containsExactly(DecidedField.TITLE.code)
     }
 
     /** A reader of the tag pass that gives each file the key of its media ID and the properties of [tags]. */

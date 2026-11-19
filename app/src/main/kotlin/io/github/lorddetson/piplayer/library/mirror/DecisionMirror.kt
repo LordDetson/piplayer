@@ -16,7 +16,11 @@ import io.github.lorddetson.piplayer.library.sync.LibrarySync
 import io.github.lorddetson.piplayer.library.sync.TrackDisplayWriter
 import io.github.lorddetson.piplayer.library.values.Decided
 import io.github.lorddetson.piplayer.library.values.DecidedField
+import io.github.lorddetson.piplayer.tagging.write.TagWriteObservation
+import io.github.lorddetson.piplayer.tagging.write.matchesWrite
+import io.github.lorddetson.piplayer.tagging.write.tagPropertiesHash
 import io.github.lorddetson.piplayer.userdata.Decisions
+import io.github.lorddetson.piplayer.userdata.TagWriteJournal
 import io.github.lorddetson.piplayer.userdata.UserDatabase
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.time.Duration
@@ -38,6 +42,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.serialization.json.Json
 
 /**
  * Mirrors the decided values of the user database, and the Keep as-is or Skip of each track, into `decided_mirror` and
@@ -632,8 +637,27 @@ class DecisionMirror(
         if (decided.isEmpty()) return
         // The tags only of the files whose tracks have decided values.
         val identityOf = keys.mapNotNull { (file, key) -> key?.let(identityOfKey::get)?.takeIf { it in decided }?.let { file to it } }.toMap()
-        val items = FileValues.ofRead(library.library(), identityOf.keys).map { (fileId, values) -> identityOf.getValue(fileId) to values }
+        val journal = TagWriteJournal(user).observedWrites(identityOf.values)
+        val items = FileValues.readLocations(library.library(), identityOf.keys).mapNotNull { (fileId, read) ->
+            val identity = identityOf.getValue(fileId)
+            val writes = journal[identity].orEmpty()
+            if (writes.isNotEmpty()) {
+                val file = read.file
+                val observed = TagWriteObservation(
+                    file.volume, file.relativePath, file.displayName, file.size, file.mtime,
+                    Hex.bytes(checkNotNull(keys[fileId])), read.track?.rawTagsJson?.let(::rawTagHash),
+                )
+                if (writes.any { it.matchesWrite(observed) }) return@mapNotNull null
+            }
+            identity to read.values
+        }
         decisions.filesChanged(items)
+    }
+
+    private fun rawTagHash(json: String): ByteArray? = try {
+        tagPropertiesHash(Json.decodeFromString<Map<String, List<String>>>(json))
+    } catch (_: IllegalArgumentException) {
+        null
     }
 
 
