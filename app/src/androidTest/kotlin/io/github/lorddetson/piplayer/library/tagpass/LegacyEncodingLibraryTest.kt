@@ -6,13 +6,18 @@ import io.github.lorddetson.piplayer.library.FakeMediaIndex
 import io.github.lorddetson.piplayer.library.FakeMediaIndex.Companion.row
 import io.github.lorddetson.piplayer.library.Library
 import io.github.lorddetson.piplayer.library.LibraryRule
+import io.github.lorddetson.piplayer.library.identity.Hex
 import io.github.lorddetson.piplayer.library.songs.SongList
 import io.github.lorddetson.piplayer.library.values.LegacyEncodings
 import io.github.lorddetson.piplayer.library.values.LegacyText
 import io.github.lorddetson.piplayer.settings.DecodedLegacyEncoding
 import io.github.lorddetson.piplayer.settings.LibrarySettings
 import io.github.lorddetson.piplayer.tagging.TagReport
+import io.github.lorddetson.piplayer.tagging.contentkey.DurationCheck
+import io.github.lorddetson.piplayer.tagging.contentkey.DurationPlan
 import io.github.lorddetson.piplayer.ui.GrantAudioPermission
+import io.github.lorddetson.piplayer.userdata.TrackLegacyEncoding
+import io.github.lorddetson.piplayer.userdata.UserData
 import java.nio.charset.Charset
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.time.Duration.Companion.seconds
@@ -40,6 +45,7 @@ class LegacyEncodingLibraryTest {
     private val settings = LibrarySettings(context)
     private val index = FakeMediaIndex().apply { volume().rows = listOf(row(1, title = "Index title", name = "1.mp3")) }
     private val reads = AtomicInteger()
+    private val key = "02".repeat(32)
 
     /** "Кино" in Windows-1251 as `:tagger` hands over legacy text: each byte above ASCII marked. */
     private val kino = buildString {
@@ -54,7 +60,10 @@ class LegacyEncodingLibraryTest {
         SongList.forget()
         Library.passReaderForTests = PassReader {
             reads.incrementAndGet()
-            PassRead.Replied(TagReport(properties = mapOf("TITLE" to listOf(kino))))
+            PassRead.Replied(TagReport(
+                properties = mapOf("TITLE" to listOf(kino)),
+                content = TagReport.Content(key, "mp3", DurationPlan(60_000, DurationCheck.NONE)),
+            ))
         }
         Library.passGate.setUiVisible(true)
         Library.tagPassEnabled = true
@@ -97,5 +106,30 @@ class LegacyEncodingLibraryTest {
         val expected = String("Кино".toByteArray(Charset.forName("windows-1251")), Charset.forName("KOI8-R"))
         assertThat(dao.displays().single { it.fileId == fileId }.title).isEqualTo(expected)
         assertThat(reads.get()).describedAs("files read").isEqualTo(1)
+    }
+
+    @Test
+    fun theIdentityChoiceSurvivesALibraryReopenAndCanBeResetWithoutRereading() = runBlocking<Unit> {
+        val koi8 = LegacyEncodings.ALL.single { it.name == "koi8-r" }
+        settings.setLegacyEncoding(koi8)
+        assertThat(afterABatch { dao.files().singleOrNull()?.tagEncoding == koi8.name }).isTrue()
+        Library.identities(context).attach()
+        val user = UserData.database(context)
+        val identity = checkNotNull(user.identities().idOfKey(Hex.bytes(key)))
+        val encoding = user.trackLegacyEncodings()
+        encoding.save(TrackLegacyEncoding(identity, LegacyText.WINDOWS_1251, pending = true))
+
+        Library.reopen(context, index, empty = false)
+        LibraryRule.startAsANewProcess()
+        assertThat(afterABatch { dao.displays().singleOrNull()?.title == "Кино" })
+            .describedAs("the stored identity choice applies with KOI8-R still selected globally").isTrue()
+        assertThat(settings.readLegacyEncoding()).isEqualTo(koi8)
+        assertThat(reads.get()).isEqualTo(1)
+
+        encoding.save(TrackLegacyEncoding(identity, TrackLegacyEncoding.FOLLOW_LIBRARY, pending = true))
+        Library.reopen(context, index, empty = false)
+        LibraryRule.startAsANewProcess()
+        assertThat(afterABatch { dao.files().singleOrNull()?.tagEncoding == koi8.name }).isTrue()
+        assertThat(reads.get()).isEqualTo(1)
     }
 }

@@ -9,9 +9,12 @@ import io.github.lorddetson.piplayer.library.db.SongRow
 import io.github.lorddetson.piplayer.library.sync.LibrarySync
 import io.github.lorddetson.piplayer.library.sync.TrackDisplayWriter
 import io.github.lorddetson.piplayer.library.values.LegacyEncoding
-import io.github.lorddetson.piplayer.library.values.LegacyText
 import io.github.lorddetson.piplayer.library.values.TextForms
 import io.github.lorddetson.piplayer.library.values.TrackTags
+import io.github.lorddetson.piplayer.library.identity.Hex
+import io.github.lorddetson.piplayer.userdata.TrackLegacyEncoding
+import io.github.lorddetson.piplayer.userdata.TrackLegacyEncodingDao
+import io.github.lorddetson.piplayer.userdata.decode
 import io.github.lorddetson.piplayer.nativelib.taglib.TagReadError
 import io.github.lorddetson.piplayer.tagging.TagReadGuard
 import io.github.lorddetson.piplayer.tagging.TagReport
@@ -85,6 +88,7 @@ class TagPass(
     private val gate: suspend () -> Unit = {},
     private val onBatch: (List<SongRow>) -> Unit = {},
     private val onStored: (read: List<Long>, failed: List<Long>) -> Unit = { _, _ -> },
+    private val trackEncodings: TrackLegacyEncodingDao? = null,
 ) {
     private val dao: LibraryDao = database.library()
     private val displays = TrackDisplayWriter(database)
@@ -95,6 +99,7 @@ class TagPass(
 
     /** A change of the legacy encoding asked for the stored files to be decoded again (docs/library.md §5.7). */
     private val redecodeAsked = AtomicBoolean()
+    private val trackRedecodeAsked = AtomicBoolean()
 
     /** The manual legacy encoding the reads decode with: taken when a run starts and whenever the files are decoded again. */
     @Volatile
@@ -124,7 +129,7 @@ class TagPass(
                 pendingBytes = 0
             }
             for (file in files) {
-                if (redecodeAsked.get()) {
+                if (redecodeAsked.get() || trackRedecodeAsked.get()) {
                     // What this run stored so far was decoded with the old choice.
                     flush()
                     redecodeOrGoOn()
@@ -162,6 +167,8 @@ class TagPass(
     /** The legacy encoding changed: the next run, or the one under way before its next file, decodes the stored files again. */
     fun askRedecode() = redecodeAsked.set(true)
 
+    fun askTrackRedecode() = trackRedecodeAsked.set(true)
+
     /**
      * [redecodeIfAsked], but a failure leaves the reads going: the change stays unmarked, so the next run tries it again
      * (docs/library.md §5.7). Only the end of the process stops the run.
@@ -182,11 +189,17 @@ class TagPass(
      * as a read asks it before each file (docs/library.md §5.7).
      */
     private suspend fun redecodeIfAsked() {
-        if (!redecodeAsked.getAndSet(false)) return
+        val all = redecodeAsked.getAndSet(false)
+        trackRedecodeAsked.set(false)
+        val pending = trackEncodings?.pending().orEmpty()
+        if (!all && pending.isEmpty()) return
         choice = legacyEncoding()
         val manual = choice
         val cyrillic = cyrillicLanguage()
-        val ids = sync.exclusive { dao.legacyFileIds() }
+        val ids = sync.exclusive {
+            if (all) dao.legacyFileIds()
+            else pending.map { Hex.text(it.contentKey) }.distinct().chunked(CHUNK).flatMap { dao.legacyFileIdsOf(it) }
+        }
         for (chunk in ids.chunked(batchSize)) {
             gate()
             val rows = sync.exclusive {
@@ -195,7 +208,8 @@ class TagPass(
                     for (row in dao.legacyTracksOf(chunk)) {
                         val rawJson = row.rawTagsJson ?: continue
                         val (decoded, tags) = try {
-                            val decoded = LegacyText.decode(Json.decodeFromString<Map<String, List<String>>>(rawJson), cyrillic, manual)
+                            val preference = row.contentKey?.let { trackEncodings?.choiceForKey(Hex.bytes(it)) }
+                            val decoded = preference.decode(Json.decodeFromString<Map<String, List<String>>>(rawJson), cyrillic, manual)
                             decoded to TrackTags.from(decoded.properties)
                         } catch (e: Exception) {
                             // Stored raw tags that do not decode would fail every time: the file keeps what it shows.
@@ -216,7 +230,14 @@ class TagPass(
             }
             if (rows.isNotEmpty()) onBatch(rows)
         }
-        decodedEncoding.write(manual?.name)
+        for ((preference, key) in pending) {
+            if (preference.name == TrackLegacyEncoding.FOLLOW_LIBRARY) {
+                trackEncodings?.clearReset(preference.identityId, key)
+            } else {
+                trackEncodings?.applied(preference.identityId, preference.name, key)
+            }
+        }
+        if (all) decodedEncoding.write(manual?.name)
     }
 
     /** The files that failed in this process get another try in the next run. */
@@ -243,8 +264,12 @@ class TagPass(
             val failed = current.filter { it.parsed == null && it.answer !is PassRead.Unavailable }.map { it.file.fileId }
             database.withWriteTransaction {
                 for (item in current) {
-                    if (item.parsed != null) {
-                        storage.store(item.file.fileId, item.parsed, states.getValue(item.file.fileId), readerVersion)
+                    val parsed = item.parsed
+                    if (parsed != null) {
+                        val key = parsed.report.content?.key?.takeIf { parsed.encoding != null }
+                        val preference = key?.let { trackEncodings?.choiceForKey(Hex.bytes(it)) }
+                        val tags = preference?.let { storage.withPreference(parsed, cyrillicLanguage, choice, it) } ?: parsed
+                        storage.store(item.file.fileId, tags, states.getValue(item.file.fileId), readerVersion)
                     } else {
                         fail(item, states)
                     }

@@ -163,7 +163,8 @@ class TagPassTest {
             val target = TagWriteTarget(uri, TagTarget.LibraryFile(file.id), 1, null, null, file.volumeName,
                 file.relativePath, file.displayName, "01".repeat(32))
             val written = VerifiedTagRead(Stamp(file.size, file.mtime * 1_000), tagged("TITLE" to "Written tags").report)
-            TagWriteLibrary(context, LibraryAccess.of(database), TagWriteJournal(user)) {}.store(1, target, written)
+            TagWriteLibrary(context, LibraryAccess.of(database), TagWriteJournal(user), user.trackLegacyEncodings()) {}
+                .store(1, target, written)
         } finally {
             finishRead.complete(Unit)
             user.close()

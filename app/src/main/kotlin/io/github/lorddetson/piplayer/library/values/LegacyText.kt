@@ -43,7 +43,12 @@ object LegacyText {
      * [cyrillicLanguage] allows Windows-1251; without that condition other legacy text would read as words in it. A
      * [manual] choice replaces that guess (TI §3.6).
      */
-    fun decode(properties: Map<String, List<String>>, cyrillicLanguage: Boolean, manual: LegacyEncoding? = null): Decoded {
+    fun decode(
+        properties: Map<String, List<String>>,
+        cyrillicLanguage: Boolean,
+        manual: LegacyEncoding? = null,
+        preferUtf8: Boolean = true,
+    ): Decoded {
         val legacy = properties.values.flatten().filter(::isMarked)
         if (legacy.isEmpty()) return Decoded(properties, null)
         val utf8 = legacy.associateWith(::utf8OrNull)
@@ -51,7 +56,7 @@ object LegacyText {
         val charset = manual?.takeIf { it.name != WINDOWS_1251 }?.let { charsetOrNull(it.charset) }
         val chosen = manual?.takeIf { it.name == WINDOWS_1251 || charset != null }
         val encoding = when {
-            utf8.values.all { it != null } -> UTF_8
+            (preferUtf8 || chosen == null) && utf8.values.all { it != null } -> UTF_8
             chosen != null -> chosen.name
             cyrillicLanguage && readsAsCyrillic(legacy) -> WINDOWS_1251
             else -> LATIN_1

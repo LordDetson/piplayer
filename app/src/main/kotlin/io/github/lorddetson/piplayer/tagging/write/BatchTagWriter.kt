@@ -6,6 +6,7 @@ import android.net.Uri
 import android.os.ParcelFileDescriptor
 import android.os.storage.StorageManager
 import android.util.Log
+import androidx.room3.withWriteTransaction
 import io.github.lorddetson.piplayer.covers.Covers
 import io.github.lorddetson.piplayer.library.db.LibraryAccess
 import io.github.lorddetson.piplayer.library.db.SongRow
@@ -14,6 +15,8 @@ import io.github.lorddetson.piplayer.nativelib.taglib.Id3v1WritePolicy
 import io.github.lorddetson.piplayer.notifications.TagWriteNotifications
 import io.github.lorddetson.piplayer.settings.TagWritingOptions
 import io.github.lorddetson.piplayer.settings.TagWritingSettings
+import io.github.lorddetson.piplayer.settings.LibrarySettings
+import io.github.lorddetson.piplayer.settings.usesCyrillicTagLanguage
 import io.github.lorddetson.piplayer.tagging.TagArtwork
 import io.github.lorddetson.piplayer.tagging.TagReport
 import io.github.lorddetson.piplayer.tagging.TagTarget
@@ -24,8 +27,10 @@ import io.github.lorddetson.piplayer.tagging.TaggerResult
 import io.github.lorddetson.piplayer.userdata.AppliedChangeEntity
 import io.github.lorddetson.piplayer.userdata.TagApplyQueue
 import io.github.lorddetson.piplayer.userdata.TagWriteJournal
+import io.github.lorddetson.piplayer.userdata.TrackLegacyEncoding
 import io.github.lorddetson.piplayer.userdata.UserData
 import io.github.lorddetson.piplayer.userdata.UserDatabase
+import io.github.lorddetson.piplayer.userdata.decode
 import java.io.File
 import java.io.FileNotFoundException
 import java.util.Base64
@@ -52,11 +57,19 @@ internal data class ManualTagPlan(
     val format: TagFileFormat,
     val options: TagWritingOptions = TagWritingOptions(),
     val legacyId3: TagReport.LegacyId3? = null,
+    val legacyDisplay: ManualLegacyTags? = null,
 ) {
+    val displayProperties: Map<String, List<String>> get() = legacyDisplay?.displayed ?: properties
     val removesId3v1: Boolean get() = legacyId3 != null && options.id3v1 == Id3v1WritePolicy.REMOVE
     val withoutRemovedId3v1: Map<String, List<String>>? get() =
         legacyId3?.otherProperties.takeIf { options.id3v1 == Id3v1WritePolicy.REMOVE }
 }
+
+internal data class ManualLegacyTags(
+    val marked: Map<String, List<String>>,
+    val choice: TrackLegacyEncoding?,
+    val displayed: Map<String, List<String>>,
+)
 
 internal data class ReviewTagPlan(
     val file: ManualTagPlan,
@@ -83,7 +96,7 @@ internal sealed interface TagUndoOutcome {
 internal class BatchTagWriter(
     context: Context,
     library: LibraryAccess = LibraryAccess.app(context),
-    database: UserDatabase = UserData.database(context),
+    private val database: UserDatabase = UserData.database(context),
     private val tagger: TaggerClient = Tagger.client(context),
     staging: File = File(context.applicationContext.noBackupFilesDir, "tag-writes"),
     onLibraryTagsStored: (List<SongRow>) -> Unit = {},
@@ -92,6 +105,8 @@ internal class BatchTagWriter(
 ) {
     private val app = context.applicationContext
     private val settings = TagWritingSettings(app)
+    private val librarySettings = LibrarySettings(app)
+    private val legacyEncodings = database.trackLegacyEncodings()
     private val queue = TagApplyQueue(database)
     private val plans = TagApplyPlans(library, database, loadCover)
     private val planning = Mutex()
@@ -100,7 +115,7 @@ internal class BatchTagWriter(
     private val activeSingles = HashSet<Long>()
     private val access = MediaStoreWriteAccess(app)
     private val journal = TagWriteJournal(database)
-    private val libraryRefresh = TagWriteLibrary(app, library, journal, onLibraryTagsStored)
+    private val libraryRefresh = TagWriteLibrary(app, library, journal, legacyEncodings, onLibraryTagsStored)
     private val session = TagWriteSession(
         directory = staging,
         tagger = tagger,
@@ -210,16 +225,38 @@ internal class BatchTagWriter(
         return writePrepared(live.id, live.fileId, live.target, onWaiting)
     }
 
-    suspend fun manualPlan(fileId: Long): ManualTagPlan? = withContext(Dispatchers.IO) {
+    suspend fun manualPlan(fileId: Long, decodeLegacy: Boolean = false): ManualTagPlan? = withContext(Dispatchers.IO) {
         val target = plans.manualTarget(fileId) ?: return@withContext null
-        val report = openRead(target.uri).use { descriptor ->
-            (tagger.read(target.taggerTarget, descriptor, target.displayName, legacyId3Data = true) as? TaggerResult.Replied)?.value?.report
-        } ?: return@withContext null
-        val format = report.writeFormat()
-        if (report.error != null || report.content?.key != target.contentKey) {
-            return@withContext null
+        openRead(target.uri).use { descriptor ->
+            val report = (tagger.read(
+                target.taggerTarget, descriptor, target.displayName, legacyId3Data = true,
+            ) as? TaggerResult.Replied)?.value?.report ?: return@use null
+            if (report.error != null || report.content?.key != target.contentKey) return@use null
+            val legacy = if (decodeLegacy) readLegacyDisplay(target, descriptor) else null
+            ManualTagPlan(fileId, target, report.properties, report.writeFormat(), settings.options.first(), report.legacyId3, legacy)
         }
-        ManualTagPlan(fileId, target, report.properties, format, settings.options.first(), report.legacyId3)
+    }
+
+    private suspend fun readLegacyDisplay(target: TagWriteTarget, descriptor: ParcelFileDescriptor): ManualLegacyTags? {
+        val report = (tagger.read(
+            target.taggerTarget, descriptor, target.displayName, markLegacy = true,
+        ) as? TaggerResult.Replied)?.value?.report ?: return null
+        if (report.error != null || report.content?.key != target.contentKey) return null
+        val choice = legacyEncodings.choice(target.identityId)
+        val decoded = choice.decode(report.properties, usesCyrillicTagLanguage(app), librarySettings.readLegacyEncoding())
+        return ManualLegacyTags(report.properties, choice, decoded.properties).takeIf { decoded.encoding != null }
+    }
+
+    suspend fun chooseManualEncoding(plan: ManualTagPlan, name: String?): ManualTagPlan? = withContext(Dispatchers.IO) {
+        val legacy = plan.legacyDisplay ?: return@withContext null
+        if (plans.manualTarget(plan.fileId) != plan.target) return@withContext null
+        val choice = database.withWriteTransaction<TrackLegacyEncoding?> {
+            val id = database.identities().idOfKey(Hex.bytes(plan.target.contentKey))
+            if (id == null || id != plan.target.identityId) return@withWriteTransaction null
+            TrackLegacyEncoding(id, name, pending = true).also { legacyEncodings.save(it) }
+        } ?: return@withContext null
+        val decoded = choice.decode(legacy.marked, usesCyrillicTagLanguage(app), librarySettings.readLegacyEncoding())
+        plan.copy(legacyDisplay = legacy.copy(choice = choice, displayed = decoded.properties))
     }
 
     fun request(plan: ManualTagPlan): IntentSender? = access.requestAccess(listOf(plan.target.uri))

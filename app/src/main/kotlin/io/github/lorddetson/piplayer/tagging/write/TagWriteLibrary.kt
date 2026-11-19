@@ -2,7 +2,6 @@ package io.github.lorddetson.piplayer.tagging.write
 
 import android.content.ContentUris
 import android.content.Context
-import android.content.res.Resources
 import androidx.room3.withWriteTransaction
 import io.github.lorddetson.piplayer.library.db.FileState
 import io.github.lorddetson.piplayer.library.db.LibraryAccess
@@ -10,11 +9,12 @@ import io.github.lorddetson.piplayer.library.db.SongRow
 import io.github.lorddetson.piplayer.library.sync.TrackDisplayWriter
 import io.github.lorddetson.piplayer.library.tagpass.TagPass
 import io.github.lorddetson.piplayer.library.tagpass.TagPassStorage
-import io.github.lorddetson.piplayer.library.values.LegacyText
 import io.github.lorddetson.piplayer.library.values.TextForms
 import io.github.lorddetson.piplayer.settings.LibrarySettings
+import io.github.lorddetson.piplayer.settings.usesCyrillicTagLanguage
 import io.github.lorddetson.piplayer.tagging.TagTarget
 import io.github.lorddetson.piplayer.userdata.TagWriteJournal
+import io.github.lorddetson.piplayer.userdata.TrackLegacyEncodingDao
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
@@ -24,6 +24,7 @@ internal class TagWriteLibrary(
     private val app: Context,
     private val library: LibraryAccess,
     private val journal: TagWriteJournal,
+    private val trackEncodings: TrackLegacyEncodingDao,
     private val onStored: (List<SongRow>) -> Unit,
 ) {
     suspend fun store(id: Long, target: TagWriteTarget, read: VerifiedTagRead): Unit = withContext(Dispatchers.IO) {
@@ -39,7 +40,9 @@ internal class TagWriteLibrary(
                             (it.contentKey == null || it.contentKey == target.contentKey)
                     } ?: return@withWriteTransaction null
                     val storage = TagPassStorage(dao)
-                    val tags = storage.parse(read.report, ::isCyrillicLanguage, encoding) ?: return@withWriteTransaction null
+                    val preference = trackEncodings.choice(target.identityId)
+                    val tags = storage.parse(read.report, { usesCyrillicTagLanguage(app) }, encoding, preference)
+                        ?: return@withWriteTransaction null
                     val state = FileState(current.id, current.size, current.mtime, current.volumeName,
                         current.relativePath, current.durationMs, current.durationSource, current.tagPassAt)
                     dao.setVerifiedWriteStamp(current.id, read.stamp.size, Math.floorDiv(read.stamp.modifiedMs, 1_000))
@@ -53,10 +56,5 @@ internal class TagWriteLibrary(
         } ?: return@withContext
         journal.libraryRefreshed(id)
         if (rows.isNotEmpty()) onStored(rows)
-    }
-
-    private fun isCyrillicLanguage(): Boolean {
-        val locales = listOf(Resources.getSystem().configuration.locales, app.resources.configuration.locales)
-        return LegacyText.isCyrillicLanguage(locales.flatMap { list -> List(list.size()) { list[it].language } })
     }
 }

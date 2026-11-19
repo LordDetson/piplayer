@@ -80,7 +80,7 @@ fun SettingsScreen(
                 viewModel::setShowRecordings,
             )
             MinLengthChoice(hidden.minLengthSeconds, viewModel::setMinLengthSeconds)
-            LegacyEncodingChoice(legacyEncoding, viewModel.availableLegacyEncodings, viewModel::setLegacyEncoding)
+            LegacyEncodingChoice(legacyEncoding, viewModel.availableLegacyEncodings, onChoose = viewModel::setLegacyEncoding)
             TextRow(
                 stringResource(R.string.settings_library_folders),
                 stringResource(R.string.settings_library_folders_summary),

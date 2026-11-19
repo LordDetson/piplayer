@@ -1,10 +1,12 @@
 package io.github.lorddetson.piplayer.settings
 
 import android.content.Context
+import android.content.res.Resources
 import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.stringPreferencesKey
 import io.github.lorddetson.piplayer.library.values.LegacyEncoding
 import io.github.lorddetson.piplayer.library.values.LegacyEncodings
+import io.github.lorddetson.piplayer.library.values.LegacyText
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
@@ -60,4 +62,9 @@ class LibrarySettings(context: Context) {
         var latest: HiddenFiles? = null
             private set
     }
+}
+
+internal fun usesCyrillicTagLanguage(context: Context): Boolean {
+    val locales = listOf(Resources.getSystem().configuration.locales, context.resources.configuration.locales)
+    return LegacyText.isCyrillicLanguage(locales.flatMap { list -> List(list.size()) { list[it].language } })
 }

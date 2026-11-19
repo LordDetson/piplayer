@@ -1,11 +1,25 @@
 package io.github.lorddetson.piplayer.library.values
 
+import io.github.lorddetson.piplayer.userdata.TrackLegacyEncoding
+import io.github.lorddetson.piplayer.userdata.decode
 import java.nio.charset.Charset
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 
 /** The code pages of the manual legacy-encoding choice (TI §3.6). */
 class LegacyEncodingsTest {
+    @Test
+    fun `a named track choice overrides bytes that also form valid UTF-8`() {
+        val properties = mapOf("TITLE" to listOf("\uE0C2\uE0A8"))
+        val encoding = LegacyEncodings.ALL.single { it.name == LegacyText.WINDOWS_1251 }
+        val trackChoice = TrackLegacyEncoding(1, encoding.name, pending = false)
+        val automatic = trackChoice.copy(name = null)
+
+        assertThat(LegacyText.decode(properties, cyrillicLanguage = true, manual = encoding).encoding).isEqualTo(LegacyText.UTF_8)
+        assertThat(automatic.decode(properties, cyrillic = true, global = encoding).encoding).isEqualTo(LegacyText.UTF_8)
+        assertThat(trackChoice.decode(properties, cyrillic = true, global = null).properties["TITLE"]).containsExactly("ВЁ")
+    }
+
 
     @Test
     fun `the list holds the code pages old taggers used`() {

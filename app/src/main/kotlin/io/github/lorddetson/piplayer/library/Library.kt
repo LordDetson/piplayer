@@ -4,7 +4,6 @@ import java.util.concurrent.atomic.AtomicInteger
 import android.content.ContentUris
 import android.content.Context
 import android.content.pm.PackageManager
-import android.content.res.Resources
 import android.database.ContentObserver
 import android.database.sqlite.SQLiteDatabase
 import android.os.Handler
@@ -42,9 +41,9 @@ import io.github.lorddetson.piplayer.library.tagpass.DurationWalks
 import io.github.lorddetson.piplayer.library.tagpass.TagPass
 import io.github.lorddetson.piplayer.library.tagpass.TagPassRunner
 import io.github.lorddetson.piplayer.library.tagpass.TaggerPassReader
-import io.github.lorddetson.piplayer.library.values.LegacyText
 import io.github.lorddetson.piplayer.settings.DecodedLegacyEncoding
 import io.github.lorddetson.piplayer.settings.LibrarySettings
+import io.github.lorddetson.piplayer.settings.usesCyrillicTagLanguage
 import io.github.lorddetson.piplayer.tagging.Tagger
 import io.github.lorddetson.piplayer.userdata.FolderRuleEntity
 import io.github.lorddetson.piplayer.userdata.UserData
@@ -296,6 +295,11 @@ object Library {
             scope.launch {
                 LibrarySettings(app).legacyEncoding.drop(1).collect { opened.value?.pass?.redecode() }
             }
+            scope.launch {
+                UserData.database(app).trackLegacyEncodings().pendingChanges().collect { pending ->
+                    if (pending.isNotEmpty()) opened.value?.pass?.redecodeTracks()
+                }
+            }
         }
         sync.request()
     }
@@ -316,11 +320,9 @@ object Library {
             library.database,
             library.sync,
             passReaderForTests ?: reader,
-            cyrillicLanguage = {
-                val locales = listOf(Resources.getSystem().configuration.locales, app.resources.configuration.locales)
-                LegacyText.isCyrillicLanguage(locales.flatMap { list -> List(list.size()) { list[it].language } })
-            },
+            cyrillicLanguage = { usesCyrillicTagLanguage(app) },
             legacyEncoding = { LibrarySettings(app).readLegacyEncoding() },
+            trackEncodings = UserData.database(app).trackLegacyEncodings(),
             decodedEncoding = DecodedLegacyEncoding(app),
             gate = passGate::awaitOpen,
             onBatch = { rows ->

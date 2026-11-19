@@ -90,7 +90,8 @@ interface UserDao {
             "UNION SELECT identity_id FROM play_stats WHERE play_count > 0 " +
             "UNION SELECT identity_id FROM playlist_entry WHERE identity_id IS NOT NULL " +
             "UNION SELECT identity_id FROM decision UNION SELECT identity_id FROM file_state " +
-            "UNION SELECT identity_id FROM applied_change UNION SELECT identity_id FROM tag_write_archive_ref",
+            "UNION SELECT identity_id FROM applied_change UNION SELECT identity_id FROM tag_write_archive_ref " +
+            "UNION SELECT identity_id FROM track_legacy_encoding WHERE name IS NULL OR name <> ''",
     )
     suspend fun identitiesHoldingData(): List<Long>
 }
@@ -124,15 +125,16 @@ class CompletedTagApplyMigration : AutoMigrationSpec {
         DecisionEntity::class, ReleaseChoiceEntity::class, TrackMetadataEntity::class, FileStateEntity::class,
         SavedCoverEntity::class, ListenEventEntity::class, TagBackupEntity::class, AppliedChangeEntity::class, TagApplyItem::class,
         TagApplyProgress::class, TagWriteArchivePage::class, TagWriteArchiveRef::class, TagWriteArchiveBatch::class,
-        TagWriteRefresh::class,
+        TagWriteRefresh::class, TrackLegacyEncoding::class,
     ],
-    version = 10,
+    version = 11,
     exportSchema = true,
     // Version 2 adds the track identities (docs/library.md §8.1), version 3 the own covers (§13.2), version 4 favorites,
     // album members, plays and the rules counter (§15.1), version 5 playlists (§16.1), version 6 the decisions of
     // identification and their values (TI §10.2) and the listening outcomes, with play events keyed by their start
     // without row IDs (§15.7), version 7 the tag-write journal and snapshots (TI §10.2), version 8 the apply queue,
-    // version 9 the compacted journal and apply progress, and version 10 the separate library transaction's queue.
+    // version 9 the compacted journal and apply progress, version 10 the library refresh queue, and version 11 the
+    // per-track legacy encoding preferences.
     autoMigrations = [
         AutoMigration(from = 1, to = 2),
         AutoMigration(from = 2, to = 3),
@@ -143,6 +145,7 @@ class CompletedTagApplyMigration : AutoMigrationSpec {
         AutoMigration(from = 7, to = 8),
         AutoMigration(from = 8, to = 9, spec = CompletedTagApplyMigration::class),
         AutoMigration(from = 9, to = 10),
+        AutoMigration(from = 10, to = 11),
     ],
 )
 abstract class UserDatabase : RoomDatabase() {
@@ -150,6 +153,7 @@ abstract class UserDatabase : RoomDatabase() {
     abstract fun user(): UserDao
 
     abstract fun identities(): TrackIdentityDao
+    abstract fun trackLegacyEncodings(): TrackLegacyEncodingDao
 
     abstract fun covers(): OwnCoverDao
 

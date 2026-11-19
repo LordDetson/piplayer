@@ -147,6 +147,7 @@
     <string name="settings_legacy_encoding_explained">For text in old tags (ID3v1, ID3v2 without Unicode, WAV INFO) that shows as wrong characters. Other tags stay as they are.</string>
     <string name="settings_legacy_encoding_automatic">Automatic</string>
     <string name="settings_legacy_encoding_automatic_summary">Detected for each file</string>
+    <string name="settings_legacy_encoding_follow_library">Follow library setting</string>
     <string name="legacy_script_cyrillic">Cyrillic (%1$s)</string>
     <string name="legacy_script_central_european">Central European (%1$s)</string>
     <string name="legacy_script_western">Western (%1$s)</string>

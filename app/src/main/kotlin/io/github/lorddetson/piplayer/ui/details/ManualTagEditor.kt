@@ -50,6 +50,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.lorddetson.piplayer.PiPlayerApplication
 import io.github.lorddetson.piplayer.R
 import io.github.lorddetson.piplayer.identification.contract.IdentificationTarget
+import io.github.lorddetson.piplayer.library.values.LegacyEncodings
 import io.github.lorddetson.piplayer.nativelib.taglib.Id3v1WritePolicy
 import io.github.lorddetson.piplayer.tagging.write.BatchTagWriter
 import io.github.lorddetson.piplayer.tagging.write.ManualTagPlan
@@ -60,6 +61,10 @@ import io.github.lorddetson.piplayer.tagging.write.WriteBackResult
 import io.github.lorddetson.piplayer.tagging.write.manualLibraryEdit
 import io.github.lorddetson.piplayer.ui.identification.ReviewDecisions
 import io.github.lorddetson.piplayer.ui.identification.ReviewEdit
+import io.github.lorddetson.piplayer.ui.settings.LegacyEncodingChoice
+import io.github.lorddetson.piplayer.userdata.TrackLegacyEncoding
+import io.github.lorddetson.piplayer.userdata.followsLibrary
+import io.github.lorddetson.piplayer.userdata.overrideEncoding
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -108,7 +113,7 @@ private class ManualTagEditorModel(
         val current = mutableState.value
         val plan = current.plan ?: return
         if (current.busy) return
-        val diff = TagDiff.between(plan.properties, changes, fillEmptyOnly)
+        val diff = TagDiff.between(plan.displayProperties, changes, fillEmptyOnly)
         if (diff.changes.isEmpty() && !plan.removesId3v1) return
         if (plan.legacyId3 == null || plan.options.id3v1 != Id3v1WritePolicy.UPDATE_IF_PRESENT) {
             mutableState.value = current.copy(preview = EditorPreview(diff.changes), message = null)
@@ -125,6 +130,20 @@ private class ManualTagEditorModel(
                 null
             }
             mutableState.value = current.copy(preview = EditorPreview(diff.changes, keptFields), message = null)
+        }
+    }
+
+    fun chooseEncoding(name: String?) {
+        val current = mutableState.value
+        val plan = current.plan ?: return
+        if (current.busy) return
+        mutableState.value = current.copy(busy = true, message = null)
+        viewModelScope.launch {
+            storeDecision {
+                val updated = writer.chooseManualEncoding(plan, name)
+                if (updated == null) finish(R.string.manual_tag_changed)
+                else mutableState.value = current.copy(plan = updated, message = null)
+            }
         }
     }
 
@@ -175,12 +194,14 @@ private class ManualTagEditorModel(
         mutableState.value = current.copy(busy = true, message = null)
         viewModelScope.launch {
             storeDecision {
-                val live = writer.manualPlan(fileId)
-                if (live == null || live.target != plan.target || changes.any { (key, change) -> live.properties[key].orEmpty() != change.before }) {
+                val live = writer.manualPlan(fileId, decodeLegacy = true)
+                if (live == null || live.target != plan.target || changes.any { (key, change) ->
+                        live.properties[key] != plan.properties[key] || live.displayProperties[key].orEmpty() != change.before
+                    }) {
                     finish(R.string.manual_tag_changed)
                     return@storeDecision
                 }
-                val values = manualLibraryEdit(live.properties, changes)
+                val values = manualLibraryEdit(live.displayProperties, changes)
                 val target = IdentificationTarget.LibraryFile(fileId, live.target.contentKey)
                 val saved = values?.let { decisions.applyWithEdit(null, null, ReviewEdit(target, it, null, null)) }
                 if (saved == null) finish(R.string.manual_tag_save_failed)
@@ -236,7 +257,7 @@ private class ManualTagEditorModel(
 
     private suspend fun reload(message: Int? = null, savedEdit: Long? = null) {
         val plan = try {
-            writer.manualPlan(fileId)
+            writer.manualPlan(fileId, decodeLegacy = true)
         } catch (error: CancellationException) {
             throw error
         } catch (error: Exception) {
@@ -290,15 +311,26 @@ internal fun ManualTagEditorScreen(fileId: Long, onBack: () -> Unit) {
                 TextButton(onClick = model::undoSavedEdit, enabled = !shown.busy) { Text(stringResource(R.string.review_undo)) }
             }
             shown.plan?.let { plan ->
-                val draft = remember(plan, shown.savedEdit) { ManualTagDraft() }
+                val draft = remember(plan.target, plan.properties, shown.savedEdit) { ManualTagDraft() }
                 if (shown.preview == null) {
+                    plan.legacyDisplay?.let { legacy ->
+                        LegacyEncodingChoice(
+                            selected = legacy.choice.overrideEncoding(),
+                            available = remember { LegacyEncodings.available() },
+                            followsLibrary = legacy.choice.followsLibrary(),
+                            onFollowLibrary = { model.chooseEncoding(TrackLegacyEncoding.FOLLOW_LIBRARY) },
+                            enabled = !shown.busy,
+                        ) { model.chooseEncoding(it?.name) }
+                    }
                     ManualTagForm(
-                        plan.properties, modifier = Modifier.weight(1f), busy = shown.busy,
+                        plan.displayProperties, modifier = Modifier.weight(1f), busy = shown.busy,
                         draft = draft, actionLabel = R.string.manual_tag_review, canRemoveLegacyTag = plan.removesId3v1,
                         onSubmit = model::preview,
                     )
                 } else {
-                    val canSave = remember(plan, shown.preview) { manualLibraryEdit(plan.properties, shown.preview.changes) != null }
+                    val canSave = remember(plan, shown.preview) {
+                        manualLibraryEdit(plan.displayProperties, shown.preview.changes) != null
+                    }
                     ManualTagPreview(
                         shown.preview.changes, plan.format, shown.busy, onBack = { model.closePreview() },
                         onSave = (model::saveInPiPlayer).takeIf { canSave },

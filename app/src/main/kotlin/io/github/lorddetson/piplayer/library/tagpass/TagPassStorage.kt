@@ -8,9 +8,10 @@ import io.github.lorddetson.piplayer.library.db.TrackEntity
 import io.github.lorddetson.piplayer.library.db.TrackGenreEntity
 import io.github.lorddetson.piplayer.library.values.AlbumKey
 import io.github.lorddetson.piplayer.library.values.LegacyEncoding
-import io.github.lorddetson.piplayer.library.values.LegacyText
 import io.github.lorddetson.piplayer.library.values.TrackTags
 import io.github.lorddetson.piplayer.tagging.TagReport
+import io.github.lorddetson.piplayer.userdata.TrackLegacyEncoding
+import io.github.lorddetson.piplayer.userdata.decode
 import kotlinx.serialization.json.Json
 
 /** Persists tag reads for the library pass and for a verified file write. */
@@ -18,13 +19,28 @@ internal class TagPassStorage(private val dao: LibraryDao) {
     class ParsedRead(val report: TagReport, val tags: TrackTags, val encoding: String?, val rawTags: String)
 
     /** Null for a reply that holds no tags. */
-    fun parse(report: TagReport, cyrillicLanguage: () -> Boolean, choice: LegacyEncoding?): ParsedRead? {
+    fun parse(
+        report: TagReport,
+        cyrillicLanguage: () -> Boolean,
+        choice: LegacyEncoding?,
+        preference: TrackLegacyEncoding? = null,
+    ): ParsedRead? {
         if (report.error != null) return null
-        val decoded = LegacyText.decode(report.properties, cyrillicLanguage(), choice)
+        val decoded = preference.decode(report.properties, cyrillicLanguage(), choice)
         // As read, marks included, so that a change of the legacy encoding can decode them again without a read.
         val raw = report.properties.mapValues { (_, values) -> values.filter { it.length <= MAX_RAW_VALUE_CHARS } }
             .filterValues { it.isNotEmpty() }
         return ParsedRead(report, TrackTags.from(decoded.properties), decoded.encoding, Json.encodeToString(raw))
+    }
+
+    fun withPreference(
+        parsed: ParsedRead,
+        cyrillicLanguage: () -> Boolean,
+        global: LegacyEncoding?,
+        preference: TrackLegacyEncoding,
+    ): ParsedRead {
+        val decoded = preference.decode(parsed.report.properties, cyrillicLanguage(), global)
+        return ParsedRead(parsed.report, TrackTags.from(decoded.properties), decoded.encoding, parsed.rawTags)
     }
 
     suspend fun store(fileId: Long, parsed: ParsedRead, state: FileState, readerVersion: Int) {

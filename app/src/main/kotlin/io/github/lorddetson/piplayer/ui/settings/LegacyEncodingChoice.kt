@@ -36,18 +36,21 @@ import io.github.lorddetson.piplayer.library.values.LegacyScript
 internal fun LegacyEncodingChoice(
     selected: LegacyEncoding?,
     available: List<LegacyEncoding>,
+    followsLibrary: Boolean = false,
+    onFollowLibrary: (() -> Unit)? = null,
+    enabled: Boolean = true,
     onChoose: (LegacyEncoding?) -> Unit,
 ) {
     var choosing by rememberSaveable { mutableStateOf(false) }
     Column(
         Modifier
             .fillMaxWidth()
-            .clickable { choosing = true }
+            .clickable(enabled = enabled) { choosing = true }
             .padding(horizontal = 24.dp, vertical = 12.dp),
     ) {
         Text(stringResource(R.string.settings_legacy_encoding), style = MaterialTheme.typography.bodyLarge)
         Text(
-            legacyEncodingLabel(selected),
+            if (followsLibrary) stringResource(R.string.settings_legacy_encoding_follow_library) else legacyEncodingLabel(selected),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -68,10 +71,16 @@ internal fun LegacyEncodingChoice(
                     modifier = Modifier.padding(bottom = 8.dp),
                 )
                 Column(Modifier.selectableGroup()) {
+                    if (onFollowLibrary != null) {
+                        Option(stringResource(R.string.settings_legacy_encoding_follow_library), null, followsLibrary) {
+                            choosing = false
+                            onFollowLibrary()
+                        }
+                    }
                     Option(
                         stringResource(R.string.settings_legacy_encoding_automatic),
                         stringResource(R.string.settings_legacy_encoding_automatic_summary),
-                        selected == null,
+                        selected == null && !followsLibrary,
                     ) { choose(null) }
                     for (encoding in available) {
                         Option(legacyEncodingLabel(encoding), summary = null, encoding.name == selected?.name) { choose(encoding) }

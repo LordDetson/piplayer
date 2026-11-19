@@ -65,13 +65,45 @@ class UserDatabaseTest {
 
     @Test
     fun freshDatabaseHasWriteHistoryAndBackups() = runBlocking<Unit> {
-        assertThat(rows(database, "PRAGMA user_version")).containsExactly(listOf("10"))
+        assertThat(rows(database, "PRAGMA user_version")).containsExactly(listOf("11"))
         assertThat(rows(database, "SELECT name FROM sqlite_master WHERE name IN ('applied_change', 'tag_apply_item', " +
             "'tag_apply_progress', 'tag_backup', 'tag_write_archive', 'tag_write_refresh') ORDER BY name"))
             .containsExactly(
                 listOf("applied_change"), listOf("tag_apply_item"), listOf("tag_apply_progress"), listOf("tag_backup"),
                 listOf("tag_write_archive"), listOf("tag_write_refresh"),
             )
+    }
+
+    @Test
+    fun versionTenPreservesIdentitiesAndCanStoreAnEncodingChoice() = runBlocking<Unit> {
+        migrations.createDatabase(10).use { connection ->
+            connection.prepare(
+                "INSERT INTO track_identity (id, content_key, created_at) VALUES (7, x'0102', 1)",
+            ).use { it.step() }
+        }
+        migrations.runMigrationsAndValidate(11).close()
+        val opened = UserDatabase.open(context, file.name)
+        try {
+            val choices = opened.trackLegacyEncodings()
+            assertThat(choices.choice(7)).isNull()
+            assertThat(opened.identities().idOfKey(byteArrayOf(1, 2))).isEqualTo(7)
+            choices.save(TrackLegacyEncoding(7, "windows-1251", pending = true))
+            assertThat(opened.user().identitiesHoldingData()).containsExactly(7)
+        } finally {
+            opened.close()
+        }
+        val reopened = UserDatabase.open(context, file.name)
+        try {
+            val choices = reopened.trackLegacyEncodings()
+            val pending = choices.pending().single()
+            assertThat(pending.choice).isEqualTo(TrackLegacyEncoding(7, "windows-1251", pending = true))
+            assertThat(pending.contentKey).containsExactly(1, 2)
+            choices.applied(7, "windows-1251", pending.contentKey)
+            assertThat(choices.pending()).isEmpty()
+            assertThat(choices.choiceForKey(byteArrayOf(1, 2))).isEqualTo(TrackLegacyEncoding(7, "windows-1251", pending = false))
+        } finally {
+            reopened.close()
+        }
     }
 
     @Test

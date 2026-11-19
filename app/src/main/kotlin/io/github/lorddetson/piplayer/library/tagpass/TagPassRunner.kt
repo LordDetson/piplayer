@@ -82,6 +82,11 @@ class TagPassRunner(
         runAgain()
     }
 
+    fun redecodeTracks() {
+        pass.askTrackRedecode()
+        runAgain()
+    }
+
     /** One more run over every file, those that failed in this process too. */
     fun readAllAgain() {
         pass.forgetFailures()

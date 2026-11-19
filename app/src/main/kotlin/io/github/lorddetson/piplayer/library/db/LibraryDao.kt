@@ -193,10 +193,14 @@ interface LibraryDao {
     @Query("SELECT id FROM audio_file WHERE tag_encoding IS NOT NULL AND tag_pass_at IS NOT NULL ORDER BY id")
     suspend fun legacyFileIds(): List<Long>
 
+    @Query("SELECT id FROM audio_file WHERE content_key IN (:keys) AND tag_encoding IS NOT NULL AND tag_pass_at IS NOT NULL ORDER BY id")
+    suspend fun legacyFileIdsOf(keys: List<String>): List<Long>
+
     /** What decoding [fileIds] again needs: their raw tags as read, their track key and their place (docs/library.md §5.7). */
     @Query(
         "SELECT f.id AS fileId, f.tag_encoding AS tagEncoding, f.volume_name AS volume, f.relative_path AS relativePath, " +
-            "t.raw_tags_json AS rawTagsJson, t.track_key AS trackKey FROM audio_file f JOIN track t ON t.file_id = f.id " +
+            "t.raw_tags_json AS rawTagsJson, t.track_key AS trackKey, f.content_key AS contentKey " +
+            "FROM audio_file f JOIN track t ON t.file_id = f.id AND t.start_ms = 0 " +
             "WHERE f.id IN (:fileIds) AND f.tag_encoding IS NOT NULL AND f.tag_pass_at IS NOT NULL",
     )
     suspend fun legacyTracksOf(fileIds: List<Long>): List<LegacyTrackRow>
@@ -748,6 +752,7 @@ data class LegacyTrackRow(
     val relativePath: String,
     val rawTagsJson: String?,
     val trackKey: String?,
+    val contentKey: String?,
 )
 
 /** A file's size, modification time and place as the database holds them now. */

@@ -173,6 +173,7 @@ class IdentityAttacher(
                 val keysChanged = moved.filter { !it.contentKey.contentEquals(stored.getValue(it.id).contentKey) }
                 if (keysChanged.isNotEmpty()) dao.updateAll(keysChanged.map { it.copy(contentKey = placeholder(it.id)) })
                 dao.updateAll(moved)
+                keysChanged.map { it.id }.chunked(CHUNK).forEach { user.trackLegacyEncodings().markPending(it) }
             }
             if (plan.created.isNotEmpty()) dao.addAll(plan.created.map { it.newIdentity(now) })
         }
@@ -204,6 +205,7 @@ class IdentityAttacher(
             }
             dao.delete(takeovers.map { it.replacedId })
             dao.updateAll(takeovers.map { identity(byId.getValue(it.missingId)).following(it.file).entity(byId.getValue(it.missingId)) })
+            takeovers.map { it.missingId }.chunked(CHUNK).forEach { user.trackLegacyEncodings().markPending(it) }
             true
         }
         if (wrote) changes.value++
