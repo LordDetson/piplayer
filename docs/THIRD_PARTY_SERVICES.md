@@ -71,8 +71,8 @@ These are not used by any build yet. Each gets its own section here before it sh
 [track-identification.md](track-identification.md) §9):
 
 - GitHub Releases API: an opt-in update check in the GitHub build (M5).
-- Radio Browser: the station directory of internet radio (v1.x).
-- LRCLIB: synced lyrics on request (v1.x).
+- Radio Browser: the station directory of internet radio (M5).
+- LRCLIB: synced lyrics on request (M5).
 
 ## Forks
 

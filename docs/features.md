@@ -10,7 +10,7 @@ out. Track identification is specified in [track-identification.md](track-identi
 
 1. **A real everyday player for local music.** Reliable background playback, gapless albums, a library that is
    usable within seconds and stays correct, and system controls (notification, lock screen, headsets, Bluetooth car
-   stereos) that simply work; Android Auto follows soon after 1.0.
+   stereos) that simply work, with Android Auto in 1.0.
 2. **Identification is the main feature.** A file with a meaningless name becomes a correctly described track with
    cover art, after the user has seen the candidates and every proposed change (TI §1 to §6).
 3. **Trust.** Results are saved in PiPlayer by default; files are written only on request, verified and undoable;
@@ -18,7 +18,7 @@ out. Track identification is specified in [track-identification.md](track-identi
 4. **Correct non-Latin libraries.** Locale-aware sorting, search that ignores case, diacritics and the difference
    between ё and е, readable legacy-encoded tags.
 5. **Maintainable by one developer.** Standard Android and Media3 building blocks, few settings with good defaults,
-   no custom audio engine, and a 1.0 scope with an explicit cut line (see Milestones).
+   no custom audio engine, and an explicit 1.0 scope (see Milestones).
 6. **Free and private.** GPL-3.0-or-later, no ads, no paid features, donations only through an external link
    (TI §12 D1, D2). Online lookups are opt-in and disclosed (TI §9), there is no analytics, and the permission set
    is minimal.
@@ -29,18 +29,19 @@ out. Track identification is specified in [track-identification.md](track-identi
   that replaces the system volume, native DSD output (DoP or raw DSD) or PCM-to-DSD conversion.
 - Tracker module formats (MOD, XM, S3M, IT).
 - Skins or theme packages that carry code (APKs, scripts), visualization preset engines, downloadable native plugins.
-  User-made themes and layouts as declarative files, checked against a schema, come after 1.0 (After 1.0, item 2).
+  User-made themes and layouts use declarative files checked against a schema (First-release features, item 2).
 - An own lock screen, screen overlays, changes to system settings, privileged-permission workarounds, vendor hooks.
 - An exported library database or settings provider for other apps; other apps use the standard media session.
 - All-files storage access (TI §7.3).
-- Streaming services, cloud and network library sources in 1.0. Internet radio comes right after 1.0 (`v1.x`).
+- On-demand streaming services and cloud or network library sources. Internet radio is in the first release.
 - In-app purchases, ads, analytics or crash-reporting SDKs, numeric audio quality ratings.
 - Writing anything into a file without the user's confirmation.
 
 ## Features
 
-Tags: `M0` to `M5` are milestones of version 1.0 (see Milestones; M2 and M4 each have parts a and b), `v1.x` follows
-soon after 1.0, `later` is planned without a date. The items listed under Cut line move to `v1.x` if 1.0 slips.
+Tags: `M0` to `M5` are milestones of version 1.0 (see Milestones; M2 and M4 each have parts a and b).
+Features tagged `v1.x` in earlier specifications are included in `M5` under the first-release plan.
+The `later` tag identifies work planned without a date.
 
 ### Playback
 
@@ -65,22 +66,22 @@ soon after 1.0, `later` is planned without a date. The items listed under Cut li
 - Shuffle keeps "play next" items next (own shuffle order). `M2a`
 - A basic equalizer on the platform effect attached to PiPlayer's session, for devices without an effect panel;
   bands and quality depend on the device. `M5`
-- ReplayGain from tags: track, album and automatic modes, preamp, peak protection, Opus R128 values. `v1.x`
-- Speed and pitch control, optional silence skipping. `v1.x`
-- A-B repeat: loop a section of the current track between two marks. `v1.x`
-- Fades on play, pause and seek. `v1.x`
-- Own equalizer: 10-band graphic EQ, bass and treble, presets, parametric text import, headroom and limiter. `v1.x`
-- Car and headset command filters (stray play commands after connecting, triple press) with a command log. `v1.x`
-- Optional resume when headphones or a Bluetooth output connect while PiPlayer is running. `v1.x`
-- Bundled decoders for lossless formats the device cannot play, ALAC first. `v1.x`
-- Opt-in loudness analysis (EBU R128) in the background; album gain grouped by identified release. `v1.x`
+- ReplayGain from tags: track, album and automatic modes, preamp, peak protection, Opus R128 values. `M5`
+- Speed and pitch control, optional silence skipping. `M5`
+- A-B repeat: loop a section of the current track between two marks. `M5`
+- Fades on play, pause and seek. `M5`
+- Own equalizer: 10-band graphic EQ, bass and treble, presets, parametric text import, headroom and limiter. `M5`
+- Car and headset command filters (stray play commands after connecting, triple press) with a command log. `M5`
+- Optional resume when headphones or a Bluetooth output connect while PiPlayer is running. `M5`
+- Bundled decoders for lossless formats the device cannot play, ALAC first. `M5`
+- Opt-in loudness analysis (EBU R128) in the background; album gain grouped by identified release. `M5`
 - More lossless and niche formats decoded to PCM (APE, WavPack, TTA, Musepack, TAK, WMA, DSF/DFF). `later`
 - Crossfade that never fades inside continuous albums, using release data. `later`
 - Parametric EQ editor, per-device presets, headphone correction downloads, spectrum view, waveform seek bar. `later`
 - Bit-perfect USB output through the official platform API on Android 14+. `later`
 - CUE sheets. `later`
 - Internet radio: a station directory (Radio Browser) with search by country, genre and language, stations added by
-  their stream URL, favorites, and the current title from the stream (TI §9). `v1.x`
+  their stream URL, favorites, and the current title from the stream (TI §9). `M5`
 - Own radio on the home network: what PiPlayer plays is encoded on the phone and served to listeners on the same
   Wi-Fi, behind a password. No public broadcast, because streaming music to the public needs licences. Comes after
   the radio receiver. `later`
@@ -122,10 +123,10 @@ soon after 1.0, `later` is planned without a date. The items listed under Cut li
 - Play statistics counted from time actually listened. `M2b`
 - Multi-select for queue and playlist actions; identification and tag actions appear as their milestones
   land. `M2b`
-- Composers and Years, folder tree, an A to Z side index, choice and order of top-level tabs. `v1.x`
-- Nested browsing by genre, then artist, then album. `v1.x`
-- Artist splitting by user-chosen separators, with exceptions. `v1.x`
-- Star ratings with half stars, resume position for long tracks, delete to the system trash, share files. `v1.x`
+- Composers and Years, folder tree, an A to Z side index, choice and order of top-level tabs. `M5`
+- Nested browsing by genre, then artist, then album. `M5`
+- Artist splitting by user-chosen separators, with exceptions. `M5`
+- Star ratings with half stars, resume position for long tracks, delete to the system trash, share files. `M5`
 - Rule-based smart playlists, duplicate finder by recording, bookmarks, extra folders from the system
   picker. `later`
 
@@ -156,9 +157,9 @@ soon after 1.0, `later` is planned without a date. The items listed under Cut li
 - Adaptive layouts for landscape, tablets and foldables. `M5`
 - Accessibility audit with TalkBack and large font scales; confidence always as text, never by color alone. `M5`
 - English and Russian at launch, per-app language, layouts ready for right-to-left scripts. `M5`
-- Lyrics view, synced and plain, with tap to seek and timing offsets (global, per track, per output). `v1.x`
-- Home screen widget, configurable player buttons, seek back and forward buttons on long tracks. `v1.x`
-- Cover-tinted background, pure black theme, colors from the current cover. `v1.x`
+- Lyrics view, synced and plain, with tap to seek and timing offsets (global, per track, per output). `M5`
+- Home screen widget, configurable player buttons, seek back and forward buttons on long tracks. `M5`
+- Cover-tinted background, pure black theme, colors from the current cover. `M5`
 - Additional player layouts, shared-element transitions, Quick Settings tile, pinned shortcuts. `later`
 
 ### System integration
@@ -173,10 +174,10 @@ soon after 1.0, `later` is planned without a date. The items listed under Cut li
 - System surfaces show PiPlayer's own metadata (its tag reading, later identification results). `M2a`
 - A cover provider, so that hosts outside PiPlayer show the covers of the media library tree and of the playing song
   (cars, watches and other controllers that may read the library). `M2a`
-- Car displays (Android Auto) with browsing and search, voice requests. `v1.x`
+- Car displays (Android Auto) with browsing and search, voice requests. `M5`
 - Configurable extra buttons for the notification and the car (favorite, seek back 10 s, seek forward
-  10 s). `v1.x`
-- Share target for audio files that opens identification; launcher shortcuts. `v1.x`
+  10 s). `M5`
+- Share target for audio files that opens identification; launcher shortcuts. `M5`
 - Opt-in status broadcasts (track and play state only, no library data) for older scrobbling apps. `later`
 - Built-in ListenBrainz scrobbling with recording IDs; a permission-gated automation API if users ask. `later`
 - Casting, only if a GPL-compatible way is found (decision pending). `later`
@@ -196,7 +197,7 @@ soon after 1.0, `later` is planned without a date. The items listed under Cut li
   changes below). `M3`
 - Online covers from Cover Art Archive for identified albums and albums tagged with release IDs (TI §5). `M3`
 - Cover picker: the release's images and the file's embedded images (TI §5.2, §6). `M3` Its other sources (covers of
-  other editions, the folder image, an image from the device) are below the cut line.
+  other editions, the folder image, an image from the device) are part of the first release.
 - Batch identification for a selection, a folder or "Songs missing information", saved in PiPlayer until the user
   chooses to write tags (TI §8). `M4a`
 - Fix tab: review queue, needs-attention list, counters and ETA. `M4a`
@@ -205,12 +206,12 @@ soon after 1.0, `later` is planned without a date. The items listed under Cut li
 - Manual tag editor for one file on the same pipeline, with or without writing to the file. `M4b`
 - Change history per file and per batch, with revert. `M4b`
 - Folder grants for background tag writing, with a health check, re-grant and write-access status per folder
-  (TI §7.3). `v1.x`
-- Lyrics: embedded, .lrc files in granted folders, LRCLIB on request (TI §9). `v1.x`
-- Convert legacy-encoded tags to Unicode as a reviewed fix. `v1.x`
+  (TI §7.3). `M5`
+- Lyrics: embedded, .lrc files in granted folders, LRCLIB on request (TI §9). `M5`
+- Convert legacy-encoded tags to Unicode as a reviewed fix. `M5`
 - Batch tag editing, tags from file names, "Albums missing covers" batch, cover.jpg in the album folder (needs a
-  folder grant). `v1.x`
-- Artist, genre and playlist images derived from album covers. `v1.x`
+  folder grant). `M5`
+- Artist, genre and playlist images derived from album covers. `M5`
 - Rating tags; MusicBrainz genres (CC BY-NC-SA) behind a setting (TI §1, §9); contributing fingerprints with the
   user's own key (TI §12 D5). `later`
 
@@ -227,9 +228,9 @@ soon after 1.0, `later` is planned without a date. The items listed under Cut li
   runtime classpath (library.md §14.2, §14.3). `M2a`
 - About: source code, data source attribution (TI §9), privacy policy, donation link. `M5`
 - Opt-in update notice in the GitHub build only. `M5`
-- Export and import of user data as a versioned JSON file that merges with existing data. `v1.x`
-- Storage screen that clears caches but keeps identification results and undo history. `v1.x`
-- Diagnostics screen with media command history. `v1.x`
+- Export and import of user data as a versioned JSON file that merges with existing data. `M5`
+- Storage screen that clears caches but keeps identification results and undo history. `M5`
+- Diagnostics screen with media command history. `M5`
 - Settings search and per-screen reset. `later`
 
 ## Milestones
@@ -237,9 +238,8 @@ soon after 1.0, `later` is planned without a date. The items listed under Cut li
 Sizes are rough estimates of part-time work by one developer who is new to Android: S up to 2 weeks, M 3 to 6
 weeks, L 7 to 12 weeks. They are re-estimated after M0 and again after M1. Together they add up to roughly a year.
 
-Between milestones, 0.x pre-releases on GitHub put the app into real use: after M2a a player without online
-features, after M3 and M4a identification with results saved in PiPlayer only. AcoustID and MetaBrainz confirmed
-their terms in writing, so public pre-releases may use online identification (TI §9).
+The first public APK includes the full 1.0 scope, including all 13 issues in PIM-6. Internal builds are used for
+milestone verification. Publication requires a stable Media3 1.12 release and a passing gapless A/B comparison.
 
 ### M0 Project skeleton and identification spike
 
@@ -357,7 +357,7 @@ Size: L (about 8 weeks).
 
 - Tag writing through MediaStore write requests (one consent per apply); if the process dies during apply, the
   batch resumes after a new consent from the UI. The write-access interface exists from day one; its folder-grant
-  implementation follows in v1.x (TI §7.2 to §7.4).
+  implementation follows in M5 (TI §7.2 to §7.4).
 - History and undo, the manual tag editor and deferred writes for the file that is playing.
 - Optional media management access was evaluated on API 36. The write dialog still appears with the normal audio
   permission, so PiPlayer keeps the standard MediaStore consent flow (TI §7.3).
@@ -368,41 +368,36 @@ Size: L (about 8 weeks).
 
 ### M5 Polish and first release
 
-Size: M (about 6 weeks, plus at least 14 days of closed testing).
+The 20 November 2026 decision adds all 13 issues from PIM-6 to the first public APK. The expanded work needs a new
+estimate after the features are specified. For a new personal Play developer account, allow for at least 14 days of
+closed testing once the required testers have opted in.
 
 - Gestures, adaptive layouts, the basic platform equalizer, the accessibility audit and translation pass, About,
   problem reports, backup rules, the opt-in update notice, startup and list performance work.
 - Re-check thresholds on the full corpus (TI §11), privacy policy, store data-safety and foreground-service
   declarations, a fresh check of third-party terms (TI §9), a check that Google Play's payments policy allows the
   donation link in the Play build (TI §12 D2).
-- An architecture decision record for the v1.x customization (After 1.0, item 2): Now Playing, the player controls
-  and the list rows are drawn from a model rather than fixed in code, so that a schema can later drive them without a
-  rewrite. No user-facing customization in 1.0.
+- A model for Now Playing, the player controls and list rows, followed by the theme schema, editor and the other
+  customization features under First-release features. The built-in presets are AMOLED, Cool graphite and Warm
+  light, alongside System, Light and Dark.
 - Developer identity verification (also needed for APKs installed outside Google Play); a Play closed test with
   the required number of testers and days (12 testers for 14 days under the 2025 rules; check the current rule),
-  recruited from GitHub pre-release testers; store listing.
+  recruited for the closed test; store listing.
 - Release: a signed APK on GitHub Releases first, then Google Play. IzzyOnDroid (picks up APKs from GitHub
   Releases) and later F-Droid are channels that suit a GPL, ad-free, privacy-first app.
 - Done when all release tests in TI §11 pass on API 30 and 36, including the removable-storage check on a virtual
   SD card, no data loss occurs in round-trip and process-kill tests, and the high-band error rate stays within the
   owner's threshold.
 
-### Cut line
+### First-release features
 
-If 1.0 slips, these move to v1.x and the release goes ahead: M3U8 import and export; smart lists beyond Favorites
-and Recently played; cover picker sources other than release and embedded images; image from the device; tablet
-and foldable layouts; device-transfer re-attachment by content key; batch change history beyond per-file revert;
-the basic platform equalizer. Background (folder-grant) tag writing is already
-planned for v1.x.
+The 1.0 release includes the features below, the earlier milestones, and the rest of M5. The former cut-line items
+remain in the 1.0 scope: M3U8 import and export, the planned smart lists, cover picker sources and images from the
+device, tablet and foldable layouts, device-transfer re-attachment by content key, batch change history, and the
+basic platform equalizer.
 
-### After 1.0
-
-v1.x, in planned order (items moved by the cut line come first):
-
-1. Internet radio: station directory, own stream URLs, favorites, the current title (owner's decision of
-   2026-11-07: right after 1.0).
-2. User customization, sharing and an MCP server (owner's decision of 2026-11-15: after 1.0, right after internet
-   radio), in this order:
+1. Internet radio: station directory, own stream URLs, favorites and the current title.
+2. User customization, sharing and an MCP server, in this order:
    - a declarative, versioned schema of the UI: theme (colors, type, shapes), the Now Playing layout, the player
      buttons and their order, gestures and list rows; the app draws the screens from it with checked building
      blocks only, never code, and falls back to the default when a file fails the schema check;
@@ -426,9 +421,6 @@ v1.x, in planned order (items moved by the cut line come first):
 8. User data export and import, storage screen, diagnostics with the command log.
 9. Bundled lossless decoders, loudness analysis, batch tag editing, Unicode conversion of legacy tags, derived
    images, theme additions, command filters, resume on connect and the remaining library additions.
-
-Open decision for the owner: move the own equalizer up to item 4, or accept that devices without an effect panel
-have only the basic platform equalizer in 1.0 (and none if it falls below the cut line).
 
 Later: own radio on the home network (after the radio receiver), crossfade, CUE sheets, casting (only if a GPL-compatible way is found), more lossless and
 niche formats, parametric EQ and headphone presets, bit-perfect USB output, rule-based smart playlists, duplicate
@@ -462,7 +454,7 @@ These followed from the feature plan and were folded into TI v0.2 (2026-10-18); 
   binder transaction limit, without cover bytes (§7.2, §10).
 - A file that is playing or preloaded is written only after a pause and re-prepare, or later (§7.2).
 - One write-access interface from day one, with the MediaStore write request implementation in 1.0 for every
-  interactive and user-started batch write; the folder-grant implementation follows in v1.x. A batch interrupted
+  interactive and user-started batch write; the folder-grant implementation follows in M5. A batch interrupted
   during apply resumes after a new consent from the UI (§7.3, §7.4, §8).
 - Reading .lrc, cover images and playlists needs the same folder grant; an explanation before system write and
   trash dialogs (§7.3).

@@ -2233,9 +2233,9 @@ used, never through a stored content URI, which goes stale after a media index r
 ## 11. Acceptance criteria and tests
 
 Each test lands with the milestone that builds its feature (see features.md). The release (M5) needs every 1.0 test
-below to pass: the JVM tests in CI and the instrumented tests on API 30 and 36. Rows tagged v1.x, and tests of
-features moved by the cut line, are excluded. The release also needs no data loss in round-trip and process-kill
-tests, and a high-band error rate within the threshold of §11.4.
+below to pass: the JVM tests in CI and the instrumented tests on API 30 and 36. The first-release scope includes
+the features previously tagged v1.x and the former cut-line items. The release also needs no data loss in
+round-trip and process-kill tests, and a high-band error rate within the threshold of §11.4.
 
 ### 11.1 Unit tests (JVM)
 
@@ -2352,7 +2352,7 @@ tests, and a high-band error rate within the threshold of §11.4.
 | M4b | The current item and the next item in playback order are not written underneath the player; "Write now" pauses, stops, writes, prepares again and resumes at the same position |
 | M4b | A 500-file apply resumes correctly after its process is killed, with a new consent from the UI |
 | M5 | Restore into a fresh install: user data and settings come back, identities re-attach by content key once the library is built, text undo works from the journal's `diff`, and cover undo shows as unavailable |
-| v1.x | Folder-grant flows: tree grant, health check, re-grant, background writes |
+| M5 | Folder-grant flows: tree grant, health check, re-grant, background writes |
 
 ### 11.3 Manual checklist (M4b, repeated in M5)
 
@@ -2364,7 +2364,7 @@ brittle. They follow a written checklist on API 30 and 36, with a virtual SD car
 write request for a selection, files in `Download/` and on the SD-card root, and the explanation before the system
 dialogs. Cancel a request and check that the result stays in PiPlayer and the request ends normally. Kill the
 process during apply and check that resuming requests new consent.
-The trash dialog joins the checklist in v1.x.
+Check the trash dialog as part of the first release.
 
 ### 11.4 Corpus check
 
