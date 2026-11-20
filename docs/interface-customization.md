@@ -27,6 +27,17 @@ commands. Controls for later M5 features join the appropriate group when their f
 
 ## Imported themes
 
+The Appearance screen opens the theme editor at the current palette. Its quick controls set the accent,
+background and panel colors. The editor previews each change and offers automatic text colors or a manual
+text color. Automatic mode derives a readable foreground for each surface. The editor shows low contrast
+in manual mode. Saving makes a named theme, and canceling restores the appearance from before editing.
+
+The editor also previews the selected font in English and Russian with the system's font scale. It offers the
+system font, bundled fonts with Cyrillic coverage, and local TrueType or OpenType files (TTF or OTF). Import uses
+the system file picker and keeps a validated copy in app storage. A failed import leaves the previous font selected.
+The theme saves its font and palette together. The Now Playing layout remains a separate preference.
+These controls are tracked by PIM-97 and PIM-98.
+
 The editor and importer use a versioned JSON format with bounded values and known identifiers. Validate and resolve
 the model before applying it, keep the previous appearance for undo, and use the standard presentation if a saved
 theme can no longer be rendered. A package contains only bounded images and declarative data. Its references resolve

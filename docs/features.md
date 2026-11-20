@@ -33,7 +33,8 @@ out. Track identification is specified in [track-identification.md](track-identi
 - An own lock screen, screen overlays, changes to system settings, privileged-permission workarounds, vendor hooks.
 - An exported library database or settings provider for other apps; other apps use the standard media session.
 - All-files storage access (TI §7.3).
-- On-demand streaming services and cloud or network library sources. Internet radio is in the first release.
+- Commercial on-demand streaming service integrations and general-purpose cloud drives. The first release includes
+  self-hosted HomeMusic and internet radio.
 - In-app purchases, ads, analytics or crash-reporting SDKs, numeric audio quality ratings.
 - Writing anything into a file without the user's confirmation.
 
@@ -380,6 +381,9 @@ closed testing once the required testers have opted in.
 - Re-check thresholds on the full corpus (TI §11), privacy policy, store data-safety and foreground-service
   declarations, a fresh check of third-party terms (TI §9), a check that Google Play's payments policy allows the
   donation link in the Play build (TI §12 D2).
+- HomeMusic as a configurable library source. It covers Navidrome browsing and streaming, offline downloads,
+  favorites and playlist synchronization, plus the Hub's recommendations and server downloads. See
+  [HomeMusic integration](homemusic.md).
 - A model for Now Playing, the player controls and list rows, followed by the theme schema, editor and the other
   customization features under First-release features. The built-in presets are AMOLED, Cool graphite and Warm
   light, alongside System, Light and Dark.
