@@ -427,14 +427,19 @@ basic platform equalizer.
 
 1. Internet radio (PIM-10): station directory, own stream URLs, favorites and the current title.
    The first Google Play release includes radio in its AAB as an on-demand Play Feature Delivery module.
-   The library offers **Radio** under its sources without adding a permanent tab. Opening Radio for the first
-   time starts module installation through Google Play. Show progress, allow cancellation while available,
-   and offer retry on failure before opening the station screen. The base install contains the source entry
-   and the shared player. The module handles station search, the directory client, user-added URLs and
-   locally saved favorites. PiPlayer fetches directory results as needed from Radio Browser.
-   Verify on API 30 and 36 that the initial Play install excludes the radio module, that local playback works
-   with the module absent or its download canceled, and that installation opens Radio and enables station
-   playback. Report the base and module download sizes as release metrics. Radio is delivered on demand at any size.
+   The library offers **Radio** under its sources without adding a permanent tab. If the module is missing,
+   tapping Radio opens a PiPlayer dialog. It identifies internet radio as an optional module, shows that it
+   is not installed and describes the station directory, search and favorites. **Install** requests the module
+   from Google Play. **Not now** dismisses the dialog. Show progress after confirmation, allow cancellation
+   while available and offer retry on failure. Open Radio directly when the module is installed.
+   The base install contains the source entry and the shared player. The module handles station search,
+   the directory client, user-added URLs and locally saved favorites. PiPlayer fetches directory results as
+   needed from Radio Browser.
+   Verify on API 30 and 36 that the initial Play install excludes the radio module. Opening or dismissing the
+   dialog leaves the module uninstalled and makes zero installation requests. **Install** makes one request.
+   Verify local playback with the module absent or its download canceled. After installation, Radio opens and
+   plays a station. Report the base and module download sizes as release metrics. Radio is delivered on demand
+   at any size.
 2. User customization, sharing and an MCP server, in this order:
    - a declarative, versioned schema of the UI: theme (colors, type, shapes), the Now Playing layout, the player
      buttons and their order, gestures and list rows; the app draws the screens from it with checked building
