@@ -125,3 +125,19 @@ and tapping the recovery notification opens Fix. Restore the original setting be
   state. PiPlayer keeps the standard audio permissions and requires consent for writes to files owned by other
   apps. Android documents the additional [media location permission](https://developer.android.com/reference/android/Manifest.permission#MANAGE_MEDIA)
   needed to skip the write dialog. API 30 uses the regular write request because media management was added in API 31.
+
+## Google Play follow-up: stop a foreground tag write
+
+On 20 November, a debug build of `66f817f8` on the API 36 Pixel 8 emulator requested access to 500 MP3s owned by
+`com.android.shell`. While the `dataSync` foreground service was writing tags, Quick Settings > Active apps > PiPlayer >
+Stop ended the PiPlayer process. Android recorded `USER REQUESTED` and `STOP APP` for that process.
+
+After reopening PiPlayer, Fix offered **Continue writing tags** and showed 362 written, 138 remaining, zero skipped and
+zero failed. **Continue to file access** started the service for the remaining 138 files. Android retained the original
+MediaStore write grants in this run, so no second system dialog appeared. The force-stop check above covers recovery
+when a new MediaStore grant is required.
+
+The instrumented check verified all 500 writes and their history entries. MediaStore indexed the expected title on
+all 500 tracks. The title matched and the audio packet hashes were unchanged in five sampled files, including files
+on both sides of the recovery point. This run exercised Android's Active apps panel, which is available on Android 13
+and later.
