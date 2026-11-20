@@ -398,8 +398,9 @@ closed testing once the required testers have opted in.
   the forum APK relates to the planned GitHub Releases publication are open release decisions.
 - Community site (PIM-101): PiPlayer maintains its own web catalog for themes, plugins and packs. The catalog
   lists the signed community APK and supports searching, filtering and sorting its listings. Discourse hosts
-  support, feature proposals and a discussion for each listing. Define how submitted files are scanned and how
-  review status is shown for each version before opening community submissions.
+  support, feature proposals and a discussion for each listing. The private forum comes first. The initial
+  catalog offers themes and appearance packs after file and format checks. Executable plugins are planned for
+  a later catalog release, with review results shown for each version.
 - Done when all release tests in TI §11 pass on API 30 and 36, including the removable-storage check on a virtual
   SD card, no data loss occurs in round-trip and process-kill tests, and the high-band error rate stays within the
   owner's threshold.
