@@ -568,6 +568,30 @@ keeps playing meanwhile, and the crash leaves a native crash report of `:tagger`
   on a song row starts selecting songs (§20).
 - The debug entry moves from the list into the top bar.
 
+#### Library tab customization
+
+The library changes are tracked by PIM-93 (tab order and visibility), PIM-94 (custom sources and rules),
+PIM-95 (queue actions) and PIM-96 (folder views).
+
+- In the library tab editor, drag a handle to reorder tabs. Each tab offers accessible move actions. Hide or restore
+  built-in tabs and edit or remove custom tabs. Keep at least one tab visible. A hidden or removed active tab moves
+  selection to the first visible tab. Persist order and visibility with stable tab identifiers.
+- A custom tab has a name and a source. Pick a playlist, a folder or a built-in collection such as Favorites, or create
+  a set of rules over track tags. Rules initially cover title, artist, album, genre, composer and year. Match all or
+  any rules, and use exact or contains for text and a numeric range for year. Match the displayed metadata so local
+  tag edits and identification decisions are reflected. A source whose playlist or folder goes away has an empty state
+  and can be edited to select a new source.
+- Folders offers level navigation and a tree with expandable rows. Identify a directory by volume and path so folders
+  with the same name can expand independently. A node exposes its expanded or collapsed state and an accessible toggle.
+  Preserve the selected view mode and expansion through recomposition and configuration changes.
+- Song selection follows the open list. Append selected songs to keep current playback and its queue position, or
+  replace the queue and play the first selected song. Both actions use the current list order and the existing queue
+  commands. Changing tabs or opening a different folder starts with that list's own selection state.
+
+Test reorder and accessible moves, hide and restore, fallback for an invalid saved tab, custom source and tag rule
+changes, folder expansion across volumes, and queue changes using a subset in non-default order. Verify a saved tab
+layout after recreating the activity and confirm that a large folder tree scrolls within the library benchmarks.
+
 ### 6.2 Grouping
 
 - `track_display` also holds what groups and sorts a file: the album key, the album artist, the compilation flag, the
