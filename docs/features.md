@@ -373,8 +373,8 @@ Size: L (about 8 weeks).
 
 ### M5 Polish and first release
 
-The Google Play app is the current implementation priority. Verify shared app features in the Play build and
-work on its release requirements first. The community site, catalog and executable plugins stay queued in PIM-101.
+Develop and verify shared app features in the Google Play build and prepare it for delivery. The community site,
+catalog and executable plugins are a separate workstream tracked in PIM-101.
 
 The 20 November 2026 decision adds all 13 issues from PIM-6 to the first public APK. The expanded work needs a new
 estimate after the features are specified. For a new personal Play developer account, allow for at least 14 days of
