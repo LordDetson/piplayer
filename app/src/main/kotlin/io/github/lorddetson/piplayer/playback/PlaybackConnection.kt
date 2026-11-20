@@ -5,6 +5,8 @@ import android.content.Context
 import androidx.core.content.ContextCompat
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
+import kotlin.coroutines.resume
+import kotlinx.coroutines.suspendCancellableCoroutine
 
 /**
  * A controller of the playback service for the UI. Create it on the main thread; it lives until [release]. [listener]
@@ -24,6 +26,10 @@ class PlaybackConnection(context: Context, listener: MediaController.Listener? =
     /** Runs [block] on the main thread once the controller is connected; drops it if the connection failed. */
     fun whenConnected(block: MediaController.() -> Unit) {
         controller.addListener({ runCatching { controller.get() }.getOrNull()?.block() }, mainExecutor)
+    }
+
+    internal suspend fun awaitConnection(): MediaController? = suspendCancellableCoroutine { continuation ->
+        controller.addListener({ continuation.resume(runCatching { controller.get() }.getOrNull()) }, mainExecutor)
     }
 
     fun release() = MediaController.releaseFuture(controller)

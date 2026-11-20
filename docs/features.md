@@ -434,12 +434,14 @@ basic platform equalizer.
    while available and offer retry on failure. Open Radio directly when the module is installed.
    The base install contains the source entry and the shared player. The module handles station search,
    the directory client, user-added URLs and locally saved favorites. PiPlayer fetches directory results as
-   needed from Radio Browser.
+   needed from Radio Browser. This release accepts direct HTTPS audio streams.
    Verify on API 30 and 36 that the initial Play install excludes the radio module. Opening or dismissing the
    dialog leaves the module uninstalled and makes zero installation requests. **Install** makes one request.
    Verify local playback with the module absent or its download canceled. After installation, Radio opens and
    plays a station. Report the base and module download sizes as release metrics. Radio is delivered on demand
    at any size.
+   The bundle check is `./gradlew --no-configuration-cache -I scripts/verify_radio_bundle.gradle :app:verifyRadioBundle`.
+   Use `bundletool build-apks --local-testing` for device checks before the Play Console test track is available.
 2. User customization, sharing and an MCP server, in this order:
    - a declarative, versioned schema of the UI: theme (colors, type, shapes), the Now Playing layout, the player
      buttons and their order, gestures and list rows; the app draws the screens from it with checked building

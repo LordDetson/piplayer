@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="radio_title">Интернет-радио</string>
+    <string name="radio_back">Назад</string>
+    <string name="radio_directory">Каталог</string>
+    <string name="radio_favorites">Избранное</string>
+    <string name="radio_custom">Мои станции</string>
+    <string name="radio_directory_hint">Поиск станций с прямыми HTTPS-потоками в каталоге Radio Browser.</string>
+    <string name="radio_name">Название станции</string>
+    <string name="radio_filters">Фильтры</string>
+    <string name="radio_hide_filters">Скрыть фильтры</string>
+    <string name="radio_country">Код страны</string>
+    <string name="radio_country_hint">Например, BY или GB</string>
+    <string name="radio_invalid_country">Введите двухбуквенный код страны.</string>
+    <string name="radio_language">Язык</string>
+    <string name="radio_genre">Жанр</string>
+    <string name="radio_search">Поиск</string>
+    <string name="radio_search_error">Не удалось открыть каталог станций. Проверьте подключение и повторите поиск.</string>
+    <string name="radio_retry">Повторить</string>
+    <string name="radio_no_results">На этой странице нет прямых HTTPS-потоков.</string>
+    <string name="radio_load_more">Загрузить ещё</string>
+    <string name="radio_no_favorites">Добавьте станцию в избранное, чтобы найти её здесь.</string>
+    <string name="radio_no_custom">Вы пока не добавили ни одной станции.</string>
+    <string name="radio_add">Добавить станцию</string>
+    <string name="radio_remove_station">Удалить станцию?</string>
+    <string name="radio_remove">Удалить</string>
+    <string name="radio_remove_named">Удалить «%1$s»</string>
+    <string name="radio_cancel">Отмена</string>
+    <string name="radio_save">Сохранить</string>
+    <string name="radio_stream_url">HTTPS-адрес потока</string>
+    <string name="radio_optional_name">Название станции (необязательно)</string>
+    <string name="radio_invalid_url">Введите прямой HTTPS-адрес потока без логина и пароля.</string>
+    <string name="radio_storage_full">В хранилище станций нет места. Удалите сохранённую станцию и попробуйте ещё раз.</string>
+    <string name="radio_station_missing">Станция удалена. Обновите список и попробуйте ещё раз.</string>
+    <string name="radio_storage_write_error">Не удалось сохранить изменения. Попробуйте ещё раз.</string>
+    <string name="radio_storage_error">Не удалось загрузить сохранённые станции.</string>
+    <string name="radio_favorite">Добавить «%1$s» в избранное</string>
+    <string name="radio_unfavorite">Убрать «%1$s» из избранного</string>
+    <string name="radio_play_station">Воспроизвести «%1$s»</string>
+    <string name="radio_playback_error">Не удалось воспроизвести станцию. Попробуйте ещё раз.</string>
+    <string name="radio_connecting">Подключение к станции…</string>
+    <string name="radio_play">Воспроизвести</string>
+    <string name="radio_pause">Пауза</string>
+</resources>

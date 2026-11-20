@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="radio_install_entry">Radio</string>
+    <string name="radio_install_summary">Internet stations, search and favorites</string>
+    <string name="radio_install_question">Install internet radio?</string>
+    <string name="radio_install_explanation">Internet radio is a separate module and is not installed yet. It includes a station directory, search and favorites. You can install it from Google Play.</string>
+    <string name="radio_install_confirm">Install</string>
+    <string name="radio_install_later">Not now</string>
+    <string name="radio_install_progress">Installing internet radio</string>
+    <string name="radio_install_failed">Could not open internet radio</string>
+    <string name="radio_install_failed_detail">Check your internet connection and Google Play, then try again.</string>
+    <string name="radio_install_retry">Retry</string>
+</resources>

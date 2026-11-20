@@ -66,7 +66,7 @@ object Poms {
 }
 
 /**
- * A kind of licence the app ships one text of (docs/library.md §14.2): its SPDX [id], the [title] the screen shows, and
+ * A kind of licence the app ships one notice for (docs/library.md §14.2): its SPDX [id], the [title] the screen shows, and
  * whether each component under it must bring its own copyright notice, because the text asks for "the above copyright
  * notice" ([needsNotice]).
  */
@@ -81,11 +81,30 @@ object LicenseKinds {
 
     val all = listOf(APACHE_2, MIT, BSD_3)
 
+    private val playCoreSdk = LicenseKind("LicenseRef-Play-Core-SDK", "Play Core Software Development Kit Terms of Service")
+    private val androidSdk = LicenseKind("LicenseRef-Android-SDK", "Android Software Development Kit License")
+    private val playCoreTerms = playCoreSdk to "https://developer.android.com/guide/playcore/license"
+    private val androidSdkTerms = androidSdk to "https://developer.android.com/studio/terms.html"
+
+    // Only the Play release pulls these in. Confirm the inventory against Google's POM before permitting a new version.
+    private val externalNotices = mapOf(
+        "com.google.android.play:feature-delivery:2.1.0" to playCoreTerms,
+        "com.google.android.play:core-common:2.0.3" to playCoreTerms,
+        "com.google.android.gms:play-services-basement:18.1.0" to androidSdkTerms,
+        "com.google.android.gms:play-services-tasks:18.0.2" to androidSdkTerms,
+    )
+
+    fun of(component: Coordinates, license: PomLicense): LicenseKind? {
+        val notice = externalNotices[component.toString()]
+        if (notice != null && license.name == notice.first.title && license.url == notice.second) return notice.first
+        return of(license)
+    }
+
     /**
      * The kind of [license], from its name or URL; null when the build does not know it, or when the name and the URL
      * say different things (a GPL name with an Apache URL is no Apache licence).
      */
-    fun of(license: PomLicense): LicenseKind? {
+    private fun of(license: PomLicense): LicenseKind? {
         val name = license.name?.lowercase()?.replace(Regex("\\s+"), " ")?.trim()?.takeIf { it.isNotEmpty() }
         val url = license.url?.let(::normalizedUrl)?.takeIf { it.isNotEmpty() }
         val byName = name?.let { text -> NAMES.firstOrNull { (_, patterns) -> patterns.any { it.matches(text) } }?.first }
@@ -179,7 +198,7 @@ object DependencyLicenses {
                 problems += "$component: no POM with a <licenses> element, itself or a parent"
                 return@mapNotNull null
             }
-            val kinds = licenses.map { license -> license to LicenseKinds.of(license) }
+            val kinds = licenses.map { license -> license to LicenseKinds.of(component, license) }
             val unknown = kinds.filter { it.second == null }.map { it.first }
             if (unknown.isNotEmpty()) {
                 problems += "$component: unknown licence " + unknown.joinToString { "\"${it.name}\" <${it.url}>" } +

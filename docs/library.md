@@ -1476,7 +1476,7 @@ is at least its parcel.
 
 ### 14.3 The licences screen
 
-- Settings has an About section with the app's version and "Open-source licences". The licences screen lists the
+- Settings has an About section with the app's version and "Third-party licences". The licences screen lists the
   modules, one row each with `group:name`, version and licence, then the native components with theirs. A row opens
   the licence: the module's copyright notice when it has one, then the kind's text; for a native component, its own
   licence files one after another.

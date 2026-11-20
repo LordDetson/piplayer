@@ -103,6 +103,7 @@ fun SettingsScreen(
                 stringResource(R.string.settings_library_folders_summary),
                 onOpenFolders,
             )
+            RadioInstallSetting()
             TrackVisibilitySetting(hidden)
             TextRow(
                 stringResource(R.string.settings_refresh_library),

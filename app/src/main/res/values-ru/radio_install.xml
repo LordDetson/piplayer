@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="radio_install_entry">Радио</string>
+    <string name="radio_install_summary">Интернет-станции, поиск и избранное</string>
+    <string name="radio_install_question">Установить интернет-радио?</string>
+    <string name="radio_install_explanation">Интернет-радио — отдельный модуль. Он ещё не установлен. В нём есть каталог радиостанций, поиск и избранное. Модуль можно установить через Google Play.</string>
+    <string name="radio_install_confirm">Установить</string>
+    <string name="radio_install_later">Не сейчас</string>
+    <string name="radio_install_progress">Установка интернет-радио</string>
+    <string name="radio_install_failed">Не удалось открыть интернет-радио</string>
+    <string name="radio_install_failed_detail">Проверьте подключение к интернету и доступность Google Play, затем повторите попытку.</string>
+    <string name="radio_install_retry">Повторить</string>
+</resources>

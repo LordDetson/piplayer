@@ -1,0 +1,7 @@
+Play Core Software Development Kit Terms of Service
+
+Google's Maven metadata lists these terms for the Play Feature Delivery and
+Play Core Common libraries included in the Google Play build of PiPlayer.
+
+Terms published by Google:
+https://developer.android.com/guide/playcore/license

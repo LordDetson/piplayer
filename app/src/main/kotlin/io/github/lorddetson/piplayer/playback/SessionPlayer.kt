@@ -261,6 +261,9 @@ class SessionPlayer(private val player: ExoPlayer) : ForwardingPlayer(player) {
     private fun itemMetadata(stream: MediaMetadata): MediaMetadata {
         val current = currentMediaItem ?: return MediaMetadata.EMPTY
         val item = current.mediaMetadata
+        if (current.mediaId.startsWith(RadioPlayback.MEDIA_ID_PREFIX)) {
+            return if (stream.title.isNullOrBlank()) stream.buildUpon().setTitle(item.station).build() else stream
+        }
         if (item.artworkData != null || item.artworkUri != null) return item
         val own = artworks[current.mediaId]
         // A library song shows only the cover the resolver chose (TI §7.1); an opened file keeps the stream's picture.

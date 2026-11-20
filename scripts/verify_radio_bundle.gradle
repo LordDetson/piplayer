@@ -1,0 +1,79 @@
+// ./gradlew --no-configuration-cache -I scripts/verify_radio_bundle.gradle :app:verifyRadioBundle
+// Use the bundletool version on AGP's classpath, also used to build the app bundle.
+gradle.beforeProject { project ->
+    if (project.path != ':app') return
+
+    project.plugins.withId('com.android.application') { androidPlugin ->
+        def bundleFile = project.layout.buildDirectory.file('outputs/bundle/release/app-release.aab')
+        def bundletool = androidPlugin.class.classLoader
+
+        project.tasks.register('verifyRadioBundle') {
+            dependsOn('bundleRelease')
+            inputs.file(bundleFile)
+
+            doLast {
+                new java.util.zip.ZipFile(bundleFile.get().asFile).withCloseable { zip ->
+                    def bundleClass = bundletool.loadClass('com.android.tools.build.bundletool.model.AppBundle')
+                    def bundle = bundleClass.buildFromZip(zip)
+                    def radio = bundle.featureModules.values().find { it.name.name == 'radio' }
+                    if (radio == null) throw new GradleException('The release AAB has no radio feature split')
+
+                    def manifest = radio.androidManifest
+                    def delivery = manifest.manifestDeliveryElement.orElse(null)
+                    if (manifest.splitId.orElse(null) != 'radio' || !manifest.isFeatureSplit.orElse(false)) {
+                        throw new GradleException('Radio must be declared as the radio feature split')
+                    }
+                    if (delivery == null || !delivery.hasOnDemandElement() || delivery.hasInstallTimeElement()) {
+                        throw new GradleException('Radio must use dist:on-demand delivery in the release AAB')
+                    }
+                    if (manifest.isModuleIncludedInFusing.orElse(true)) {
+                        throw new GradleException('Radio must be excluded from release APK fusing')
+                    }
+                    if (!zip.entries().toList().any { it.name ==~ /radio\/dex\/classes\d*\.dex/ && it.size > 0 }) {
+                        throw new GradleException('The radio split contains no DEX code')
+                    }
+
+                    def activity = 'io.github.lorddetson.piplayer.radio.RadioActivity'
+                    def radioActivities = manifest.activitiesByName.get(activity)
+                    def androidNamespace = 'http://schemas.android.com/apk/res/android'
+                    def isNonExported = { declaration ->
+                        declaration.getAttribute(androidNamespace, 'exported').orElse(null)?.valueAsBoolean == false
+                    }
+                    if (radioActivities.size() != 1 || !isNonExported(radioActivities[0])) {
+                        throw new GradleException('The radio split must declare one non-exported RadioActivity')
+                    }
+                    // AGP adds the activity declaration to the base manifest when it links the feature.
+                    if (bundle.baseModule.androidManifest.activitiesByName.get(activity).any { !isNonExported(it) }) {
+                        throw new GradleException('RadioActivity must also be non-exported in the base manifest')
+                    }
+
+                    def licenseList = zip.getEntry('base/assets/licenses/dependencies.json')
+                    if (licenseList == null) throw new GradleException('The release AAB has no dependency notices')
+                    def licenses = zip.getInputStream(licenseList).withCloseable { stream ->
+                        new groovy.json.JsonSlurper().parse(stream)
+                    }
+                    def required = [
+                        'com.google.android.play:feature-delivery': 'LicenseRef-Play-Core-SDK',
+                        'com.google.android.play:core-common': 'LicenseRef-Play-Core-SDK',
+                        'com.google.android.gms:play-services-basement': 'LicenseRef-Android-SDK',
+                        'com.google.android.gms:play-services-tasks': 'LicenseRef-Android-SDK',
+                    ]
+                    required.each { coordinate, id ->
+                        if (!licenses.libraries.any { "${it.group}:${it.name}" == coordinate && it.licenses.contains(id) }) {
+                            throw new GradleException("The release does not inventory ${coordinate} under ${id}")
+                        }
+                        if (zip.getEntry("base/assets/licenses/kinds/${id}.txt") == null) {
+                            throw new GradleException("The release is missing the notice for ${id}")
+                        }
+                    }
+
+                    def validator = bundletool.loadClass('com.android.tools.build.bundletool.validation.AppBundleValidator')
+                        .create()
+                    validator.validateFile(zip)
+                    validator.validate(bundle)
+                    logger.lifecycle('Verified the release AAB contains a separate on-demand radio split')
+                }
+            }
+        }
+    }
+}

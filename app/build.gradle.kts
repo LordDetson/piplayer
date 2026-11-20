@@ -153,6 +153,7 @@ androidComponents {
 android {
     namespace = "io.github.lorddetson.piplayer"
     compileSdk = 37
+    dynamicFeatures += setOf(":radio")
 
     defaultConfig {
         applicationId = "io.github.lorddetson.piplayer"
@@ -207,6 +208,10 @@ android {
     }
 
     sourceSets {
+        getByName("release") { kotlin.directories.add("src/play/kotlin") }
+        listOf("debug", "forum", "benchmark").forEach { name ->
+            getByName(name) { kotlin.directories.add("src/standalone/kotlin") }
+        }
         // Both release-based builds use the release versions of the debug-only classes.
         listOf("benchmark", "forum").forEach { name ->
             getByName(name) { kotlin.directories.add("src/release/kotlin") }
@@ -258,6 +263,8 @@ android {
 
 dependencies {
     implementation(project(":nativelib"))
+    // The Play SDK is used by the Play bundle only. The public debug APK does not ship it.
+    releaseImplementation(libs.play.feature.delivery)
     implementation(libs.androidx.core)
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.lifecycle.runtime.compose)

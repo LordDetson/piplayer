@@ -1,0 +1,7 @@
+Android Software Development Kit License
+
+Google's Maven metadata lists this license for the Play services Tasks and
+Basement libraries included in the Google Play build of PiPlayer.
+
+Terms published by Google:
+https://developer.android.com/studio/terms.html

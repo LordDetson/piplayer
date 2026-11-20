@@ -98,6 +98,7 @@ class PiPlayerApplication : Application() {
         super.attachBaseContext(base)
         // First, so that a crash anywhere later in the process is reported (docs/playback.md §7.1).
         CrashReports.install(this)
+        RadioSplitCompat.attachApplication(this)
     }
 
     override fun onCreate() {

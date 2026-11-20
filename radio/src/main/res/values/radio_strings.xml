@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="radio_title">Internet radio</string>
+    <string name="radio_back">Back</string>
+    <string name="radio_directory">Directory</string>
+    <string name="radio_favorites">Favorites</string>
+    <string name="radio_custom">My stations</string>
+    <string name="radio_directory_hint">Search Radio Browser for stations with direct HTTPS streams.</string>
+    <string name="radio_name">Station name</string>
+    <string name="radio_filters">Filters</string>
+    <string name="radio_hide_filters">Hide filters</string>
+    <string name="radio_country">Country code</string>
+    <string name="radio_country_hint">For example, BY or GB</string>
+    <string name="radio_invalid_country">Enter a two-letter country code.</string>
+    <string name="radio_language">Language</string>
+    <string name="radio_genre">Genre</string>
+    <string name="radio_search">Search</string>
+    <string name="radio_search_error">Couldn\'t reach the station directory. Check your connection and try again.</string>
+    <string name="radio_retry">Retry</string>
+    <string name="radio_no_results">No direct HTTPS streams on this page.</string>
+    <string name="radio_load_more">Load more</string>
+    <string name="radio_no_favorites">Add a station to favorites to find it here.</string>
+    <string name="radio_no_custom">No stations added yet.</string>
+    <string name="radio_add">Add station</string>
+    <string name="radio_remove_station">Remove station?</string>
+    <string name="radio_remove">Remove</string>
+    <string name="radio_remove_named">Remove %1$s</string>
+    <string name="radio_cancel">Cancel</string>
+    <string name="radio_save">Save</string>
+    <string name="radio_stream_url">HTTPS stream URL</string>
+    <string name="radio_optional_name">Station name (optional)</string>
+    <string name="radio_invalid_url">Enter a direct HTTPS stream URL without a username or password.</string>
+    <string name="radio_storage_full">Station storage is full. Remove a saved station and try again.</string>
+    <string name="radio_station_missing">This station was removed. Refresh your list and try again.</string>
+    <string name="radio_storage_write_error">Couldn\'t save the station change. Try again.</string>
+    <string name="radio_storage_error">Couldn\'t load saved stations.</string>
+    <string name="radio_favorite">Add %1$s to favorites</string>
+    <string name="radio_unfavorite">Remove %1$s from favorites</string>
+    <string name="radio_play_station">Play %1$s</string>
+    <string name="radio_playback_error">Couldn\'t play this station. Try again.</string>
+    <string name="radio_connecting">Connecting to the station…</string>
+    <string name="radio_play">Play</string>
+    <string name="radio_pause">Pause</string>
+</resources>

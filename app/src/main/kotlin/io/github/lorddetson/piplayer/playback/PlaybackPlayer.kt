@@ -59,8 +59,11 @@ object PlaybackPlayer {
 }
 
 @OptIn(UnstableApi::class)
-private class PlaybackTagDataSource(private val upstream: DataSource) : DataSource by upstream {
+internal class PlaybackTagDataSource(private val upstream: DataSource) : DataSource by upstream {
     private var reading: Closeable? = null
+
+    // Kotlin delegation skips this Java default. Media3 needs icy-metaint to read radio metadata.
+    override fun getResponseHeaders(): Map<String, List<String>> = upstream.responseHeaders
 
     override fun open(dataSpec: DataSpec): Long {
         val lease = try {

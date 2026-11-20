@@ -17,7 +17,7 @@
     <string name="library_no_music_settings">Настройки</string>
     <string name="settings_about">О приложении</string>
     <string name="settings_version">Версия %1$s</string>
-    <string name="settings_licenses">Лицензии открытого ПО</string>
+    <string name="settings_licenses">Лицензии сторонних библиотек</string>
     <string name="settings_licenses_summary">Библиотеки, из которых собран PiPlayer, и их лицензии</string>
     <string name="licenses_native">Нативный код и встроенные данные</string>
     <string name="licenses_unreadable">Не удалось прочитать список лицензий.</string>
