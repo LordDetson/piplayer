@@ -373,6 +373,9 @@ Size: L (about 8 weeks).
 
 ### M5 Polish and first release
 
+The Google Play app is the current implementation priority. Verify shared app features in the Play build and
+work on its release requirements first. The community site, catalog and executable plugins stay queued in PIM-101.
+
 The 20 November 2026 decision adds all 13 issues from PIM-6 to the first public APK. The expanded work needs a new
 estimate after the features are specified. For a new personal Play developer account, allow for at least 14 days of
 closed testing once the required testers have opted in.
@@ -388,9 +391,13 @@ closed testing once the required testers have opted in.
 - A model for Now Playing, the player controls and list rows, followed by the theme schema, editor and the other
   customization features under First-release features. The built-in presets are AMOLED, Cool graphite and Warm
   light, alongside System, Light and Dark.
-- Developer identity verification (also needed for APKs installed outside Google Play); a Play closed test with
-  the required number of testers and days (12 testers for 14 days under the 2025 rules; check the current rule),
-  recruited for the closed test; store listing.
+- Developer identity verification, store listing and the Play closed test. A new personal account needs at
+  least 12 testers opted in for 14 consecutive days before applying for production access, per
+  [Google Play's test requirements](https://support.google.com/googleplay/android-developer/answer/14151465).
+- Play release preparation (PIM-42, PIM-48): inspect the signed AAB and the APKs generated from it, including
+  the manifest, native 16 KiB page size support and executable plugin exclusion. Complete Data safety and the
+  public privacy policy for the features in the submitted build. Prepare the foreground service demonstrations
+  and reusable English review instructions for any included server features before closed testing.
 - Release builds (PIM-101): the forum distributes a signed APK that supports installing plugins from the author
   and other developers. Google Play receives a standalone signed AAB with features that pass store review.
   Both builds import the same declarative data packages (PIM-72). The Play build excludes executable plugin
