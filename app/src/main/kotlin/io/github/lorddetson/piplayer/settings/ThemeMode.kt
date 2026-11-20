@@ -4,13 +4,16 @@ package io.github.lorddetson.piplayer.settings
 enum class ThemeMode(val stored: String) {
     SYSTEM("system"),
     LIGHT("light"),
-    DARK("dark");
+    DARK("dark"),
+    AMOLED("amoled"),
+    GRAPHITE("graphite"),
+    WARM_LIGHT("warm_light");
 
     /** Whether the app is dark, given whether the system is. */
     fun isDark(systemDark: Boolean): Boolean = when (this) {
         SYSTEM -> systemDark
-        LIGHT -> false
-        DARK -> true
+        LIGHT, WARM_LIGHT -> false
+        DARK, AMOLED, GRAPHITE -> true
     }
 
     companion object {

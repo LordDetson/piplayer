@@ -1,5 +1,10 @@
 package io.github.lorddetson.piplayer.ui.player
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
@@ -20,7 +25,10 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.dp
 import androidx.media3.common.C
 import androidx.media3.common.Format
 import androidx.media3.common.MimeTypes
@@ -28,6 +36,7 @@ import androidx.media3.common.Player
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.github.lorddetson.piplayer.R
 import io.github.lorddetson.piplayer.TestFiles
+import io.github.lorddetson.piplayer.settings.NowPlayingLayout
 import io.github.lorddetson.piplayer.ui.player.TestPlayer.Call
 import io.github.lorddetson.piplayer.ui.player.TestPlayer.TestSong
 import io.github.lorddetson.piplayer.ui.theme.PiPlayerTheme
@@ -64,11 +73,15 @@ class NowPlayingTest {
         positionMs: Long = 62_000,
         playing: Boolean = false,
         cover: Boolean = false,
+        layout: NowPlayingLayout = NowPlayingLayout.STANDARD,
+        onOpenQueue: (() -> Unit)? = null,
     ): TestPlayer {
         val player = compose.runOnUiThread { TestPlayer(songs, playing).also { it.positionMs = positionMs } }
         val image = if (cover) TestImages.cover() else null
         compose.setContent {
-            PiPlayerTheme { NowPlaying(player, image, onClose = { closed = true }) }
+            PiPlayerTheme {
+                NowPlaying(player, image, onClose = { closed = true }, onOpenQueue = onOpenQueue, layout = layout)
+            }
         }
         return player
     }
@@ -77,12 +90,68 @@ class NowPlayingTest {
         SemanticsMatcher("click label \"$label\"") { it.config.getOrNull(SemanticsActions.OnClick)?.label == label }
 
     @Test
+    fun minimalLayoutKeepsMainControlsAndRevealsOtherActionsOnTheSameScreen() {
+        show(layout = NowPlayingLayout.MINIMAL, onOpenQueue = {})
+
+        compose.onNodeWithContentDescription(text(R.string.player_play)).assertIsDisplayed()
+        compose.onNodeWithTag(PlayerTags.SEEK_BAR).assertIsDisplayed()
+        compose.onNodeWithContentDescription(text(R.string.player_shuffle)).assertDoesNotExist()
+        compose.onNodeWithContentDescription(text(R.string.queue_open)).assertDoesNotExist()
+
+        compose.onNodeWithTag("now-playing-show-controls").performClick()
+
+        compose.onNodeWithContentDescription(text(R.string.player_shuffle)).assertExists()
+        compose.onNodeWithContentDescription(text(R.string.queue_open)).assertExists()
+        compose.onNodeWithContentDescription(text(R.string.player_sleep_timer)).assertExists()
+
+        compose.onNodeWithTag("now-playing-show-controls").performClick()
+        compose.onNodeWithContentDescription(text(R.string.player_shuffle)).assertDoesNotExist()
+    }
+
+    @Test
+    fun expandedLayoutPutsCompactArtworkBesideTheTitleAndKeepsActionsInView() {
+        show(layout = NowPlayingLayout.EXPANDED, onOpenQueue = {})
+
+        val artwork = compose.onNodeWithTag(PlayerTags.COVER_PLACEHOLDER).fetchSemanticsNode().boundsInRoot
+        val title = compose.onNodeWithText("Halo").fetchSemanticsNode().boundsInRoot
+        assertThat(artwork.center.y).isBetween(title.top - artwork.height / 2f, title.bottom + artwork.height / 2f)
+        assertThat(artwork.right <= title.left || title.right <= artwork.left).isTrue()
+        compose.onNodeWithContentDescription(text(R.string.queue_open)).assertIsDisplayed()
+        compose.onNodeWithContentDescription(text(R.string.player_shuffle)).assertIsDisplayed()
+        compose.onNodeWithContentDescription(text(R.string.player_sleep_timer)).assertIsDisplayed()
+    }
+
+    @Test
+    fun expandedLayoutKeepsControlsReachableInAShortNarrowWindowWithLargeText() {
+        val player = compose.runOnUiThread { TestPlayer(listOf(halo, other), playing = false) }
+        compose.setContent {
+            CompositionLocalProvider(LocalDensity provides Density(LocalDensity.current.density, fontScale = 2f)) {
+                Box(Modifier.size(width = 288.dp, height = 398.dp)) {
+                    PiPlayerTheme {
+                        NowPlaying(player, null, onClose = {}, onOpenQueue = {}, layout = NowPlayingLayout.EXPANDED)
+                    }
+                }
+            }
+        }
+
+        for (label in listOf(R.string.player_play, R.string.player_repeat, R.string.player_sleep_timer)) {
+            compose.onNodeWithTag(PlayerTags.NOW_PLAYING).performScrollToNode(hasContentDescription(text(label)))
+            compose.onNodeWithContentDescription(text(label)).assertIsDisplayed()
+        }
+    }
+
+    @Test
     fun showsTheSongItsFormatAndItsTimes() {
         show()
 
         compose.onNodeWithText("Halo").assertIsDisplayed().assert(isHeading())
         compose.onNodeWithText("Beyoncé").assertIsDisplayed()
         compose.onNodeWithText("I Am... Sasha Fierce").assertIsDisplayed()
+        val titleCenter = compose.onNodeWithText("Halo").fetchSemanticsNode().boundsInRoot.center.x
+        for (label in listOf("Beyoncé", "I Am... Sasha Fierce")) {
+            val labelCenter = compose.onNodeWithText(label).fetchSemanticsNode().boundsInRoot.center.x
+            assertThat(kotlin.math.abs(labelCenter - titleCenter)).isLessThanOrEqualTo(1.5f)
+        }
         compose.onNodeWithText("FLAC · 24 bit · 96 kHz").assertIsDisplayed()
         compose.onNodeWithText("1:02").assertIsDisplayed()
         compose.onNodeWithText("-2:43").assertIsDisplayed()

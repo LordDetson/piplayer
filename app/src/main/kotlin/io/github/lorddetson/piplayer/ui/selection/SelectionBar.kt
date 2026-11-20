@@ -95,7 +95,9 @@ fun SelectionBar(
 fun SelectionMenuItems(entries: List<TrackMenuEntry>, close: () -> Unit, onEntry: (TrackMenuEntry) -> Unit) {
     for (entry in entries) {
         DropdownMenuItem(
-            text = { Text(label(entry)) },
+            text = {
+                Text(if (entry == TrackMenuEntry.Play) stringResource(R.string.selection_replace_queue) else label(entry))
+            },
             enabled = entry !is TrackMenuEntry.FavoriteUnavailable,
             onClick = {
                 close()

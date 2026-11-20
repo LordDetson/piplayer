@@ -126,7 +126,7 @@ The `later` tag identifies work planned without a date.
 - Composers and Years, an A to Z side index, and Folders with level navigation or an expandable tree. `M5`
 - Reorder library tabs by dragging, hide and restore them, and save named custom tabs backed by a playlist, a folder,
   a built-in collection or tag rules. `M5`
-- From the selected songs in the open list, append to the queue or replace it. `M5`
+- Add the selected songs in the open list to the current queue or replace it. `M5`
 - Nested browsing by genre, then artist, then album. `M5`
 - Artist splitting by user-chosen separators, with exceptions. `M5`
 - Star ratings with half stars, resume position for long tracks, delete to the system trash, share files. `M5`

@@ -19,10 +19,10 @@ object ThemeWindow {
      */
     fun remember(context: Context, mode: ThemeMode) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return
-        val night = when (mode) {
-            ThemeMode.SYSTEM -> UiModeManager.MODE_NIGHT_AUTO
-            ThemeMode.LIGHT -> UiModeManager.MODE_NIGHT_NO
-            ThemeMode.DARK -> UiModeManager.MODE_NIGHT_YES
+        val night = when {
+            mode == ThemeMode.SYSTEM -> UiModeManager.MODE_NIGHT_AUTO
+            mode.isDark(false) -> UiModeManager.MODE_NIGHT_YES
+            else -> UiModeManager.MODE_NIGHT_NO
         }
         context.getSystemService(UiModeManager::class.java).setApplicationNightMode(night)
     }
@@ -35,7 +35,7 @@ object ThemeWindow {
     fun override(mode: ThemeMode): Configuration? {
         if (mode == ThemeMode.SYSTEM) return null
         return Configuration().apply {
-            uiMode = if (mode == ThemeMode.DARK) Configuration.UI_MODE_NIGHT_YES else Configuration.UI_MODE_NIGHT_NO
+            uiMode = if (mode.isDark(false)) Configuration.UI_MODE_NIGHT_YES else Configuration.UI_MODE_NIGHT_NO
         }
     }
 

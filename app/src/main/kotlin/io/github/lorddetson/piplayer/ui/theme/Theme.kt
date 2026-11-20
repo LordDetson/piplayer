@@ -9,16 +9,18 @@ import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.platform.LocalContext
+import io.github.lorddetson.piplayer.settings.ThemeMode
 
-/** Material 3 theme: dynamic colors on Android 12+, a fixed palette on Android 11. */
+/** Applies the appearance setting to the Material 3 colors. */
 @Composable
 fun PiPlayerTheme(
-    darkTheme: Boolean = isSystemInDarkTheme(),
+    mode: ThemeMode = ThemeMode.SYSTEM,
     content: @Composable () -> Unit,
 ) {
-    val colorScheme = when {
+    val darkTheme = mode.isDark(isSystemInDarkTheme())
+    val context = LocalContext.current
+    val colorScheme = builtInColorScheme(mode) ?: when {
         Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
-            val context = LocalContext.current
             if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
         }
         darkTheme -> darkColorScheme()

@@ -12,9 +12,11 @@ import io.github.lorddetson.piplayer.library.Library
 import io.github.lorddetson.piplayer.library.values.LegacyEncoding
 import io.github.lorddetson.piplayer.library.values.LegacyEncodings
 import io.github.lorddetson.piplayer.nativelib.taglib.Id3v1WritePolicy
+import io.github.lorddetson.piplayer.settings.Appearance
 import io.github.lorddetson.piplayer.settings.AppearanceSettings
 import io.github.lorddetson.piplayer.settings.HiddenFiles
 import io.github.lorddetson.piplayer.settings.LibrarySettings
+import io.github.lorddetson.piplayer.settings.NowPlayingLayout
 import io.github.lorddetson.piplayer.settings.ProtectedField
 import io.github.lorddetson.piplayer.settings.TagWritingOptions
 import io.github.lorddetson.piplayer.settings.TagWritingSettings
@@ -54,10 +56,15 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         viewModelScope.launch { tagWriting.setCover(preset) }
     }
 
-    val theme: StateFlow<ThemeMode> = appearance.theme.stateIn(viewModelScope, SharingStarted.Eagerly, appearance.readTheme())
+    val appearanceChoice: StateFlow<Appearance> =
+        appearance.appearance.stateIn(viewModelScope, SharingStarted.Eagerly, appearance.read())
 
     fun setTheme(mode: ThemeMode) {
         viewModelScope.launch { appearance.setTheme(mode) }
+    }
+
+    fun setNowPlayingLayout(layout: NowPlayingLayout) {
+        viewModelScope.launch { appearance.setNowPlayingLayout(layout) }
     }
 
     val hiddenFiles: StateFlow<HiddenFiles> =

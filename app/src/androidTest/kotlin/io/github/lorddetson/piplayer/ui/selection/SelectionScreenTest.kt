@@ -203,12 +203,12 @@ class SelectionScreenTest {
     }
 
     @Test
-    fun playPlaysOnlyTheSelectedSongsInTheListsOrderAndEndsSelection() {
+    fun replacingTheQueueUsesOnlySelectedSongsInListOrderAndEndsSelection() {
         longPress("Charlie")
         compose.onAllNodes(songRow("Alpha"))[0].performClick()
         selected(2)
 
-        menuEntry(R.string.playlist_play)
+        menuEntry(R.string.selection_replace_queue)
 
         compose.waitUntilDoesNotExist(bar, timeoutMillis = 10_000)
         val controller = connectController()

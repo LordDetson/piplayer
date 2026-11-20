@@ -290,11 +290,15 @@ The data model it implements is sketched in track-identification.md §10 (TI bel
 - A Settings screen, opened from the Songs screen's top bar, has two sections in M2a: Library (the hidden-file
   settings and Library folders; from M2b also the legacy tag encoding, §5.7) and Appearance (the theme). Other
   sections arrive with their milestones.
-- The theme is System (the default), Light or Dark; dynamic color stays on where the system has it. The choice is
+- The theme is System (the default), Light, Dark, AMOLED, Cool graphite or Warm light. The last three choices use
+  fixed palettes and show color previews in Appearance. The first three use dynamic color where available. The choice is
   read before the activity draws anything and becomes the night mode of its configuration, so its window background and
   the system bars follow it from the first frame on. Android 12 and later also keep it as the app's night mode, which
   themes the splash screen; on Android 11 the starting window the system shows before the app runs follows the system.
   A new choice that changes what the screen shows creates it again, keeping its state.
+- Now Playing has Standard, Minimal and Expanded layouts. Its layout is saved independently from the theme.
+  Minimal can reveal its secondary controls on the same screen. Expanded puts compact artwork beside the track
+  information and fits more controls in the available height. See [Interface customization](interface-customization.md).
 - Library folders shows each attached volume as a tree of the folders that hold audio, with each folder included,
   excluded or following its parent; rules that match none of those folders (their volume is not attached, or their
   folder holds no audio now) are listed below with a way to remove them. Until the library knows its folders (before
@@ -584,9 +588,10 @@ PIM-95 (queue actions) and PIM-96 (folder views).
 - Folders offers level navigation and a tree with expandable rows. Identify a directory by volume and path so folders
   with the same name can expand independently. A node exposes its expanded or collapsed state and an accessible toggle.
   Preserve the selected view mode and expansion through recomposition and configuration changes.
-- Song selection follows the open list. Append selected songs to keep current playback and its queue position, or
-  replace the queue and play the first selected song. Both actions use the current list order and the existing queue
-  commands. Changing tabs or opening a different folder starts with that list's own selection state.
+- Song selection follows the open list. Use Add to queue to extend the current up-next run while keeping playback
+  on the same song at the same position. Use Replace queue to play the first selected song in a new queue. Both
+  actions use the current list order. Changing tabs or opening a different folder starts with that list's own selection
+  state.
 
 Test reorder and accessible moves, hide and restore, fallback for an invalid saved tab, custom source and tag rule
 changes, folder expansion across volumes, and queue changes using a subset in non-default order. Verify a saved tab

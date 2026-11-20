@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="library_tabs_manage">Manage library tabs</string>
+    <string name="library_tabs_close">Close tab editor</string>
+    <string name="library_tabs_show">Show %1$s</string>
+    <string name="library_tabs_move_up">Move up</string>
+    <string name="library_tabs_move_down">Move down</string>
+    <string name="library_tabs_save_failed">Could not save the library tabs</string>
+</resources>

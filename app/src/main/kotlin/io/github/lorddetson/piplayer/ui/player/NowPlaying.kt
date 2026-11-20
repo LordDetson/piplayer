@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -16,6 +17,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.systemGestures
 import androidx.compose.foundation.layout.union
@@ -29,6 +31,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.clickable
@@ -38,6 +41,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -59,10 +63,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.media3.common.C
 import androidx.media3.common.Format
+import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.common.Tracks
 import androidx.media3.common.util.UnstableApi
 import io.github.lorddetson.piplayer.R
+import io.github.lorddetson.piplayer.settings.NowPlayingLayout
 
 /**
  * Now Playing (docs/playback.md §3.3): the current song of [player] with its [cover] and every control. It keeps its
@@ -84,9 +90,14 @@ fun NowPlaying(
     favorite: FavoriteState? = null,
     /** The entries of "More options", the current song's track menu (docs/playback.md §9.1); null hides the button. */
     more: (@Composable (close: () -> Unit) -> Unit)? = null,
+    layout: NowPlayingLayout = NowPlayingLayout.STANDARD,
 ) {
     val metadata = rememberCurrentItemState(player).mediaMetadata
     val pane = stringResource(R.string.player_now_playing)
+    var controlsRevealed by rememberSaveable(layout) { mutableStateOf(false) }
+    val minimal = layout == NowPlayingLayout.MINIMAL
+    val expanded = layout == NowPlayingLayout.EXPANDED
+    val showSecondary = !minimal || controlsRevealed
     Column(
         modifier
             .fillMaxSize()
@@ -102,33 +113,109 @@ fun NowPlaying(
             IconButton(onClick = onClose) {
                 Icon(painterResource(R.drawable.ic_player_collapse), stringResource(R.string.player_close_now_playing))
             }
-            Spacer(Modifier.weight(1f))
-            io.github.lorddetson.piplayer.ui.identification.IdentifyButton(player)
-            favorite?.let { FavoriteButton(it, Modifier.testTag(PlayerTags.FAVORITE)) }
-            onOpenQueue?.let { open ->
-                IconButton(onClick = open) { Icon(painterResource(R.drawable.ic_queue), stringResource(R.string.queue_open)) }
-            }
-            more?.let { entries ->
-                var open by remember { mutableStateOf(false) }
-                Box {
-                    IconButton(onClick = { open = true }, modifier = Modifier.testTag(PlayerTags.MORE)) {
-                        Icon(painterResource(R.drawable.ic_more), stringResource(R.string.page_menu))
-                    }
-                    DropdownMenu(expanded = open, onDismissRequest = { open = false }) { entries { open = false } }
+            if (minimal) {
+                Spacer(Modifier.weight(1f))
+                TextButton(
+                    onClick = { controlsRevealed = !controlsRevealed },
+                    modifier = Modifier.testTag("now-playing-show-controls"),
+                ) {
+                    Text(stringResource(if (controlsRevealed) R.string.player_hide_controls else R.string.player_show_controls))
+                }
+            } else {
+                FlowRow(Modifier.weight(1f), horizontalArrangement = Arrangement.End) {
+                    TrackActions(player, favorite, onOpenQueue, more)
                 }
             }
         }
-        CoverImage(
-            cover,
-            Modifier.widthIn(max = 480.dp).fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(12.dp)),
-            noteSize = 96.dp,
-            placeholderName = coverName,
-        )
-        Spacer(Modifier.height(24.dp))
+        if (minimal && controlsRevealed) {
+            FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                TrackActions(player, favorite, onOpenQueue, more)
+            }
+        }
+        if (expanded) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                CoverImage(cover, Modifier.size(104.dp).clip(RoundedCornerShape(12.dp)), 36.dp, coverName)
+                TrackHeading(metadata, onOpenArtist, onOpenAlbum, TextAlign.Start, Modifier.weight(1f))
+            }
+        } else {
+            CoverImage(
+                cover,
+                Modifier.widthIn(max = if (minimal) 320.dp else 480.dp)
+                    .fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(12.dp)),
+                noteSize = 96.dp,
+                placeholderName = coverName,
+            )
+            Spacer(Modifier.height(24.dp))
+            TrackHeading(metadata, onOpenArtist, onOpenAlbum, TextAlign.Center, Modifier.fillMaxWidth())
+        }
+        if (showSecondary) {
+            io.github.lorddetson.piplayer.ui.details.PlayingBadge(player)
+            Spacer(Modifier.height(4.dp))
+            FormatLineText(player)
+        }
+        Spacer(Modifier.height(if (expanded) 8.dp else 16.dp))
+        SeekBar(player, Modifier.fillMaxWidth())
+        Spacer(Modifier.height(8.dp))
+        FlowRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            itemVerticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (showSecondary) ShuffleButton(player)
+            PreviousButton(player)
+            PlayPauseButton(player, large = true)
+            NextButton(player)
+            if (showSecondary) RepeatButton(player)
+        }
+        if (showSecondary) ExtraControlsRow(controls)
+    }
+}
+
+@OptIn(UnstableApi::class)
+@Composable
+private fun TrackActions(
+    player: Player?,
+    favorite: FavoriteState?,
+    onOpenQueue: (() -> Unit)?,
+    more: (@Composable (close: () -> Unit) -> Unit)?,
+) {
+    io.github.lorddetson.piplayer.ui.identification.IdentifyButton(player)
+    favorite?.let { FavoriteButton(it, Modifier.testTag(PlayerTags.FAVORITE)) }
+    onOpenQueue?.let { open ->
+        IconButton(onClick = open) { Icon(painterResource(R.drawable.ic_queue), stringResource(R.string.queue_open)) }
+    }
+    more?.let { entries ->
+        var open by remember { mutableStateOf(false) }
+        Box {
+            IconButton(onClick = { open = true }, modifier = Modifier.testTag(PlayerTags.MORE)) {
+                Icon(painterResource(R.drawable.ic_more), stringResource(R.string.page_menu))
+            }
+            DropdownMenu(expanded = open, onDismissRequest = { open = false }) { entries { open = false } }
+        }
+    }
+}
+
+@OptIn(UnstableApi::class)
+@Composable
+private fun TrackHeading(
+    metadata: MediaMetadata,
+    onOpenArtist: (() -> Unit)?,
+    onOpenAlbum: (() -> Unit)?,
+    textAlign: TextAlign,
+    modifier: Modifier,
+) {
+    Column(
+        modifier,
+        horizontalAlignment = if (textAlign == TextAlign.Center) Alignment.CenterHorizontally else Alignment.Start,
+    ) {
         Text(
             text = metadata.title?.toString().orEmpty(),
             style = MaterialTheme.typography.headlineSmall,
-            textAlign = TextAlign.Center,
+            textAlign = textAlign,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.fillMaxWidth().semantics { heading() },
@@ -137,7 +224,7 @@ fun NowPlaying(
             text = metadata.artist?.toString() ?: stringResource(R.string.songs_unknown_artist),
             style = MaterialTheme.typography.titleMedium,
             color = MaterialTheme.colorScheme.primary,
-            textAlign = TextAlign.Center,
+            textAlign = textAlign,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.opens(onOpenArtist, R.string.open_artist),
@@ -147,30 +234,12 @@ fun NowPlaying(
                 text = album.toString(),
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center,
+                textAlign = textAlign,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.opens(onOpenAlbum, R.string.open_album),
             )
         }
-        io.github.lorddetson.piplayer.ui.details.PlayingBadge(player)
-        Spacer(Modifier.height(4.dp))
-        FormatLineText(player)
-        Spacer(Modifier.height(16.dp))
-        SeekBar(player, Modifier.fillMaxWidth())
-        Spacer(Modifier.height(8.dp))
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceEvenly,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            ShuffleButton(player)
-            PreviousButton(player)
-            PlayPauseButton(player, large = true)
-            NextButton(player)
-            RepeatButton(player)
-        }
-        ExtraControlsRow(controls)
     }
 }
 

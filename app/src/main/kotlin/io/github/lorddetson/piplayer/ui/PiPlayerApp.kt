@@ -10,6 +10,7 @@ import io.github.lorddetson.piplayer.library.Library
 import io.github.lorddetson.piplayer.library.lists.LibraryLists
 import io.github.lorddetson.piplayer.library.lists.SongLinks
 import io.github.lorddetson.piplayer.settings.LibrarySettings
+import io.github.lorddetson.piplayer.settings.NowPlayingLayout
 import io.github.lorddetson.piplayer.ui.library.AlbumPage
 import io.github.lorddetson.piplayer.ui.player.FavoriteState
 import io.github.lorddetson.piplayer.ui.songs.FavoriteActions
@@ -233,7 +234,11 @@ private val FROM_THE_SIDE = NavDisplay.transitionSpec {
  * (docs/library.md §14.1).
  */
 @Composable
-fun PiPlayerApp(viewModel: PlayerViewModel = viewModel()) {
+fun PiPlayerApp(
+    viewModel: PlayerViewModel = viewModel(),
+    nowPlayingLayout: NowPlayingLayout = NowPlayingLayout.STANDARD,
+    backStack: MutableList<NavKey> = rememberNavBackStack(SongsRoute),
+) {
     val player by viewModel.player.collectAsStateWithLifecycle()
     val cover by viewModel.cover.collectAsStateWithLifecycle()
     val coverName by viewModel.coverName.collectAsStateWithLifecycle()
@@ -253,7 +258,6 @@ fun PiPlayerApp(viewModel: PlayerViewModel = viewModel()) {
         }
     }
     val onboarding = rememberOnboarding()
-    val backStack = rememberNavBackStack(SongsRoute)
     val close = { if (backStack.size > 1) backStack.removeLastOrNull() }
     // A page opens over the library or the page it was opened from; Now Playing gives way to it.
     val open = { route: NavKey ->
@@ -463,6 +467,7 @@ fun PiPlayerApp(viewModel: PlayerViewModel = viewModel()) {
                             player,
                             cover,
                             onClose = { close() },
+                            layout = nowPlayingLayout,
                             controls = rememberExtraControls(viewModel, player),
                             onOpenArtist = links?.artists?.firstOrNull()?.let {
                                 { openLatest { latest -> latest.artists.firstOrNull()?.let { ArtistRoute(it.key) } } }

@@ -49,6 +49,8 @@
     <string name="player_now_playing">Сейчас играет</string>
     <string name="player_open_now_playing">Открыть «Сейчас играет»</string>
     <string name="player_close_now_playing">Закрыть «Сейчас играет»</string>
+    <string name="player_show_controls">Больше действий</string>
+    <string name="player_hide_controls">Свернуть действия</string>
     <string name="player_play">Воспроизвести</string>
     <string name="player_pause">Пауза</string>
     <string name="player_previous">Предыдущая</string>
@@ -113,6 +115,13 @@
     <string name="theme_system">Как в системе</string>
     <string name="theme_light">Светлая</string>
     <string name="theme_dark">Тёмная</string>
+    <string name="theme_amoled">AMOLED</string>
+    <string name="theme_graphite">Холодный графит</string>
+    <string name="theme_warm_light">Тёплая светлая</string>
+    <string name="settings_now_playing_layout">Раскладка экрана «Сейчас играет»</string>
+    <string name="now_playing_layout_standard">Стандартная</string>
+    <string name="now_playing_layout_minimal">Минимальная</string>
+    <string name="now_playing_layout_expanded">Расширенная</string>
     <string name="settings_library">Библиотека</string>
     <string name="settings_show_system_sounds">Показывать системные звуки</string>
     <string name="settings_show_system_sounds_summary">Рингтоны, звуки уведомлений и будильники</string>

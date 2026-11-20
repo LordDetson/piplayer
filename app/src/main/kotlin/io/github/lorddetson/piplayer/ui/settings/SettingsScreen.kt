@@ -1,18 +1,26 @@
 package io.github.lorddetson.piplayer.ui.settings
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -30,6 +38,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -40,8 +49,14 @@ import io.github.lorddetson.piplayer.BuildConfig
 import io.github.lorddetson.piplayer.R
 import io.github.lorddetson.piplayer.nativelib.taglib.Id3v1WritePolicy
 import io.github.lorddetson.piplayer.settings.HiddenFiles
+import io.github.lorddetson.piplayer.settings.NowPlayingLayout
 import io.github.lorddetson.piplayer.settings.ThemeMode
 import io.github.lorddetson.piplayer.tagging.write.TagCoverPreset
+import io.github.lorddetson.piplayer.ui.theme.builtInColorScheme
+
+internal object SettingsTags {
+    const val CONTENT = "settings_content"
+}
 
 /**
  * The Settings screen (docs/library.md §3.6, §14.3): sections fill in as their milestones land; M2a has Library,
@@ -54,7 +69,7 @@ fun SettingsScreen(
     onOpenLicenses: () -> Unit = {},
     viewModel: SettingsViewModel = viewModel(),
 ) {
-    val theme by viewModel.theme.collectAsStateWithLifecycle()
+    val appearance by viewModel.appearanceChoice.collectAsStateWithLifecycle()
     val hidden by viewModel.hiddenFiles.collectAsStateWithLifecycle()
     val legacyEncoding by viewModel.legacyEncoding.collectAsStateWithLifecycle()
     val identificationPrivacy by viewModel.identificationPrivacy.collectAsStateWithLifecycle()
@@ -64,6 +79,7 @@ fun SettingsScreen(
             Modifier
                 .padding(padding)
                 .fillMaxSize()
+                .testTag(SettingsTags.CONTENT)
                 .verticalScroll(rememberScrollState()),
         ) {
             SectionTitle(stringResource(R.string.settings_library))
@@ -125,16 +141,20 @@ fun SettingsScreen(
                 onProtect = viewModel::setProtected,
             )
             SectionTitle(stringResource(R.string.tag_writing_settings))
-            TagWritingChoice(
+            ChoiceSetting(
                 R.string.tag_writing_id3v1, tagWriting.id3v1, Id3v1WritePolicy.entries,
                 Id3v1WritePolicy::label, viewModel::setId3v1Policy,
             )
-            TagWritingChoice(
+            ChoiceSetting(
                 R.string.tag_writing_cover, tagWriting.cover, TagCoverPreset.entries,
                 TagCoverPreset::label, viewModel::setCoverPreset,
             )
             SectionTitle(stringResource(R.string.settings_appearance))
-            ThemeChoice(theme, viewModel::setTheme)
+            ThemeChoice(appearance.theme, viewModel::setTheme)
+            ChoiceSetting(
+                R.string.settings_now_playing_layout, appearance.nowPlayingLayout, NowPlayingLayout.entries,
+                NowPlayingLayout::label, viewModel::setNowPlayingLayout,
+            )
             SectionTitle(stringResource(R.string.settings_about))
             Text(
                 text = stringResource(R.string.settings_version, BuildConfig.VERSION_NAME),
@@ -151,7 +171,7 @@ fun SettingsScreen(
 }
 
 @Composable
-private fun <T> TagWritingChoice(
+private fun <T> ChoiceSetting(
     title: Int,
     selected: T,
     choices: List<T>,
@@ -321,10 +341,28 @@ private fun ThemeChoice(theme: ThemeMode, onChoose: (ThemeMode) -> Unit) {
                 Text(
                     text = stringResource(mode.label),
                     style = MaterialTheme.typography.bodyLarge,
-                    modifier = Modifier.padding(start = 16.dp),
+                    modifier = Modifier.weight(1f).padding(start = 16.dp),
                 )
+                builtInColorScheme(mode)?.let { ThemePreview(mode, it) }
             }
         }
+    }
+}
+
+@Composable
+private fun ThemePreview(mode: ThemeMode, colors: ColorScheme) {
+    val shape = RoundedCornerShape(8.dp)
+    Row(
+        modifier = Modifier
+            .testTag("theme-preview-${mode.stored}")
+            .size(46.dp, 26.dp)
+            .background(colors.surface, shape)
+            .border(1.dp, colors.outline, shape),
+        horizontalArrangement = Arrangement.spacedBy(5.dp, Alignment.CenterHorizontally),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.size(10.dp).background(colors.primary, CircleShape))
+        Box(Modifier.size(10.dp).background(colors.onSurface, CircleShape))
     }
 }
 
@@ -333,4 +371,13 @@ private val ThemeMode.label: Int
         ThemeMode.SYSTEM -> R.string.theme_system
         ThemeMode.LIGHT -> R.string.theme_light
         ThemeMode.DARK -> R.string.theme_dark
+        ThemeMode.AMOLED -> R.string.theme_amoled
+        ThemeMode.GRAPHITE -> R.string.theme_graphite
+        ThemeMode.WARM_LIGHT -> R.string.theme_warm_light
     }
+
+private fun NowPlayingLayout.label(): Int = when (this) {
+    NowPlayingLayout.STANDARD -> R.string.now_playing_layout_standard
+    NowPlayingLayout.MINIMAL -> R.string.now_playing_layout_minimal
+    NowPlayingLayout.EXPANDED -> R.string.now_playing_layout_expanded
+}

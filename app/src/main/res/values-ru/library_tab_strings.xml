@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="library_tabs_manage">Настроить вкладки библиотеки</string>
+    <string name="library_tabs_close">Закрыть настройку вкладок</string>
+    <string name="library_tabs_show">Показывать вкладку «%1$s»</string>
+    <string name="library_tabs_move_up">Переместить вверх</string>
+    <string name="library_tabs_move_down">Переместить вниз</string>
+    <string name="library_tabs_save_failed">Не удалось сохранить вкладки библиотеки</string>
+</resources>

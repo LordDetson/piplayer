@@ -58,6 +58,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -95,6 +96,9 @@ import io.github.lorddetson.piplayer.library.lists.SongSort
 import io.github.lorddetson.piplayer.library.songs.Song
 import io.github.lorddetson.piplayer.settings.ListName
 import io.github.lorddetson.piplayer.settings.ListOrder
+import io.github.lorddetson.piplayer.settings.librarytabs.BuiltInLibraryTab as LibraryTab
+import io.github.lorddetson.piplayer.settings.librarytabs.LibraryTabLayout
+import io.github.lorddetson.piplayer.settings.librarytabs.LibraryTabsSettings
 import io.github.lorddetson.piplayer.ui.songs.AudioAccess
 import io.github.lorddetson.piplayer.ui.songs.NoMusic
 import io.github.lorddetson.piplayer.ui.songs.PermissionCard
@@ -164,19 +168,6 @@ class LibraryHost(
 )
 
 /**
- * The tabs in their order (docs/library.md §19.2): the first three are the root of the controller tree, the last three its
- * node "More" (docs/playback.md §10.1).
- */
-private enum class LibraryTab(val label: Int) {
-    SONGS(R.string.tab_songs),
-    ALBUMS(R.string.tab_albums),
-    ARTISTS(R.string.tab_artists),
-    PLAYLISTS(R.string.tab_playlists),
-    GENRES(R.string.tab_genres),
-    FOLDERS(R.string.tab_folders),
-}
-
-/**
  * The library screen (docs/library.md §6.1): the top bar with search, sort and the settings, then the tabs Songs, Albums,
  * Artists, Playlists, Genres and Folders. The search filters the tab shown. The mini player hangs above the bottom bar
  * at the app's root (PIM-18).
@@ -186,15 +177,29 @@ private enum class LibraryTab(val label: Int) {
 fun LibraryScreen(host: LibraryHost, onOpenSettings: () -> Unit) {
     val app = LocalContext.current.applicationContext as Application
     val access = rememberAudioAccess()
-    // Kept by its name, so that a new tab never turns a kept choice into another one (docs/library.md §19.2).
-    var tabName by rememberSaveable { mutableStateOf(LibraryTab.SONGS.name) }
-    val tab = LibraryTab.entries.firstOrNull { it.name == tabName } ?: LibraryTab.SONGS
+    var tabName by rememberSaveable { mutableStateOf(LibraryTab.SONGS.id) }
+    val tabsSettings = remember(app) { LibraryTabsSettings(app) }
+    val storedLayout by tabsSettings.layout.collectAsStateWithLifecycle<LibraryTabLayout?>(initialValue = null)
+    val tabLayout = storedLayout ?: LibraryTabLayout.DEFAULT
+    val activeId = tabLayout.selectedTab(tabName)
+    val tab = builtInTabsById.getValue(activeId)
+    var editingTabs by rememberSaveable { mutableStateOf(false) }
+    val tabEditScope = rememberCoroutineScope()
     var searching by rememberSaveable { mutableStateOf(false) }
     var search by rememberSaveable { mutableStateOf("") }
 
     val songs = viewModel(key = "songs") { SongsViewModel(app, saved = createSavedStateHandle()) }
     // The songs the Folders tab shows itself, while it shows some (docs/library.md §20.1).
     var folderSongs by remember { mutableStateOf<SongsViewModel?>(null) }
+    LaunchedEffect(storedLayout, tabName) {
+        if (storedLayout != null && tabName != activeId) {
+            if (LibraryTabLayout.DEFAULT.selectedTab(tabName) != activeId) {
+                songs.endSelection()
+                folderSongs?.endSelection()
+            }
+            tabName = activeId
+        }
+    }
     val selecting = when (tab) {
         LibraryTab.SONGS -> songs
         LibraryTab.FOLDERS -> folderSongs
@@ -250,21 +255,41 @@ fun LibraryScreen(host: LibraryHost, onOpenSettings: () -> Unit) {
                         Icon(painterResource(R.drawable.ic_settings), stringResource(R.string.settings_open))
                     }
                 }
-                PrimaryScrollableTabRow(selectedTabIndex = tab.ordinal, modifier = Modifier.testTag(LibraryTags.TABS), edgePadding = 8.dp) {
-                    LibraryTab.entries.forEach { entry ->
-                        Tab(
-                            selected = entry == tab,
-                            onClick = {
-                                // The selection belongs to the list it was made in (docs/library.md §20.2, 9).
-                                if (entry != tab) {
-                                    songs.endSelection()
-                                    folderSongs?.endSelection()
-                                }
-                                tabName = entry.name
-                            },
-                            text = { Text(stringResource(entry.label)) },
-                        )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    PrimaryScrollableTabRow(
+                        selectedTabIndex = tabLayout.visible.indexOf(activeId),
+                        modifier = Modifier.weight(1f).testTag(LibraryTags.TABS),
+                        edgePadding = 8.dp,
+                    ) {
+                        tabLayout.visible.forEach { id ->
+                            val entry = builtInTabsById.getValue(id)
+                            Tab(
+                                selected = id == activeId,
+                                onClick = {
+                                    // The selection belongs to the list it was made in (docs/library.md §20.2, 9).
+                                    if (id != activeId) {
+                                        songs.endSelection()
+                                        folderSongs?.endSelection()
+                                    }
+                                    tabName = id
+                                },
+                                text = { Text(stringResource(entry.labelResource)) },
+                            )
+                        }
                     }
+                    IconButton(onClick = { editingTabs = true }, enabled = storedLayout != null) {
+                        Icon(painterResource(R.drawable.ic_more_vert), stringResource(R.string.library_tabs_manage))
+                    }
+                }
+                if (editingTabs && storedLayout != null) {
+                    val failed = stringResource(R.string.library_tabs_save_failed)
+                    LibraryTabEditor(
+                        layout = tabLayout,
+                        settings = tabsSettings,
+                        scope = tabEditScope,
+                        onDismiss = { editingTabs = false },
+                        onSaveFailed = { host.snackbar.showSnackbar(failed) },
+                    )
                 }
             }
         },

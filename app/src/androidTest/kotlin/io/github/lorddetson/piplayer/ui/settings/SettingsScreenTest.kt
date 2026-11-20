@@ -7,9 +7,11 @@ import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToNode
 import androidx.test.espresso.Espresso
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.github.lorddetson.piplayer.MainActivity
@@ -17,6 +19,7 @@ import io.github.lorddetson.piplayer.R
 import io.github.lorddetson.piplayer.TestFiles
 import io.github.lorddetson.piplayer.playback.SongSourceRule
 import io.github.lorddetson.piplayer.settings.AppearanceSettings
+import io.github.lorddetson.piplayer.settings.NowPlayingLayout
 import io.github.lorddetson.piplayer.settings.ThemeMode
 import io.github.lorddetson.piplayer.ui.GrantAudioPermission
 import io.github.lorddetson.piplayer.ui.songs.SongsTags
@@ -39,7 +42,11 @@ private class ThemeRule(private val mode: ThemeMode, private val kept: ThemeMode
     override fun after() = set(ThemeMode.SYSTEM, ThemeMode.SYSTEM)
 
     private fun set(mode: ThemeMode, kept: ThemeMode) {
-        runBlocking { AppearanceSettings(TestFiles.targetContext).setTheme(mode) }
+        runBlocking {
+            val settings = AppearanceSettings(TestFiles.targetContext)
+            settings.setTheme(mode)
+            settings.setNowPlayingLayout(NowPlayingLayout.STANDARD)
+        }
         ThemeWindow.remember(TestFiles.targetContext, kept)
     }
 }
@@ -126,6 +133,44 @@ class SettingsScreenTest {
         ShownWindow.assertFollows(compose, dark = false)
         assertThat(brightness()).describedAs("light").isGreaterThan(0.6)
     }
+
+    @Test
+    fun builtInPalettesHavePreviewsAndCanBeSelected() {
+        openSettings()
+        val palettes = listOf(
+            Triple(R.string.theme_amoled, ThemeMode.AMOLED, true),
+            Triple(R.string.theme_graphite, ThemeMode.GRAPHITE, true),
+            Triple(R.string.theme_warm_light, ThemeMode.WARM_LIGHT, false),
+        )
+        for ((label, mode, dark) in palettes) {
+            scrollSettingsTo(label)
+            compose.onNodeWithTag("theme-preview-${mode.stored}", useUnmergedTree = true).assertExists()
+            choose(label, mode)
+            ShownWindow.assertFollows(compose, dark)
+            if (dark) assertThat(brightness()).isLessThan(0.3) else assertThat(brightness()).isGreaterThan(0.6)
+        }
+    }
+
+    @Test
+    fun paletteAndPlayerLayoutAreSavedIndependently() {
+        openSettings()
+        choose(R.string.theme_warm_light, ThemeMode.WARM_LIGHT)
+        scrollSettingsTo(R.string.settings_now_playing_layout)
+        compose.onNodeWithText(text(R.string.settings_now_playing_layout)).performClick()
+        compose.onNodeWithText(text(R.string.now_playing_layout_expanded)).performClick()
+
+        val settings = AppearanceSettings(context)
+        compose.waitUntil(5_000) { settings.read().nowPlayingLayout == NowPlayingLayout.EXPANDED }
+        assertThat(settings.readTheme()).isEqualTo(ThemeMode.WARM_LIGHT)
+
+        scrollSettingsTo(R.string.theme_graphite)
+        choose(R.string.theme_graphite, ThemeMode.GRAPHITE)
+        assertThat(settings.read().nowPlayingLayout).isEqualTo(NowPlayingLayout.EXPANDED)
+    }
+
+    private fun scrollSettingsTo(label: Int) {
+        compose.onNodeWithTag(SettingsTags.CONTENT).performScrollToNode(hasText(text(label)))
+    }
 }
 
 /**
@@ -139,14 +184,14 @@ abstract class SavedThemeTest(private val saved: ThemeMode, systemNight: Boolean
     private val songs = SongSourceRule { listOf(SongSourceRule.song(1, "Alpha")) }
     private val shown = ShownThemes()
     private val compose = createAndroidComposeRule<MainActivity>()
-    private val other = if (saved == ThemeMode.DARK) ThemeMode.LIGHT else ThemeMode.DARK
+    private val other = if (saved.isDark(false)) ThemeMode.LIGHT else ThemeMode.DARK
 
     @get:Rule
     val rules: RuleChain = RuleChain.outerRule(GrantAudioPermission).around(SystemNight(systemNight))
         .around(ThemeRule(saved, kept = other)).around(songs).around(shown).around(compose)
 
     protected fun assertTheAppStartsInTheSavedTheme() {
-        val dark = saved == ThemeMode.DARK
+        val dark = saved.isDark(false)
         ShownWindow.assertFollows(compose, dark)
         // Every activity shown, from the first on; the system may create it once more when it takes the choice.
         val expected = ShownThemes.Shown(night = dark, darkStatusIcons = !dark, darkNavigationIcons = !dark)
@@ -173,4 +218,10 @@ class SavedDarkThemeTest : SavedThemeTest(ThemeMode.DARK, systemNight = false) {
 class SavedLightThemeTest : SavedThemeTest(ThemeMode.LIGHT, systemNight = true) {
     @Test
     fun aSavedLightThemeAppliesWhenTheAppStartsOnADarkSystem() = assertTheAppStartsInTheSavedTheme()
+}
+
+@RunWith(AndroidJUnit4::class)
+class SavedAmoledThemeTest : SavedThemeTest(ThemeMode.AMOLED, systemNight = false) {
+    @Test
+    fun aSavedAmoledThemeAppliesWhenTheAppStartsOnALightSystem() = assertTheAppStartsInTheSavedTheme()
 }

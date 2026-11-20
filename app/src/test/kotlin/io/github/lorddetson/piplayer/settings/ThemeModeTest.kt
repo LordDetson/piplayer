@@ -19,4 +19,15 @@ class ThemeModeTest {
         assertThat(ThemeMode.fromStored(null)).isEqualTo(ThemeMode.SYSTEM)
         assertThat(ThemeMode.fromStored("sepia")).isEqualTo(ThemeMode.SYSTEM)
     }
+
+    @Test
+    fun `each preset round trips and keeps its own light or dark appearance`() {
+        val modes = mapOf("amoled" to true, "graphite" to true, "warm_light" to false)
+        for ((stored, dark) in modes) {
+            val mode = ThemeMode.fromStored(stored)
+            assertThat(mode.stored).isEqualTo(stored)
+            assertThat(mode.isDark(systemDark = false)).isEqualTo(dark)
+            assertThat(mode.isDark(systemDark = true)).isEqualTo(dark)
+        }
+    }
 }
