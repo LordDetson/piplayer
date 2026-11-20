@@ -8,8 +8,10 @@ import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.github.lorddetson.piplayer.MainActivity
 import io.github.lorddetson.piplayer.R
@@ -18,7 +20,9 @@ import androidx.lifecycle.Lifecycle
 import io.github.lorddetson.piplayer.library.Library
 import io.github.lorddetson.piplayer.library.songs.AudioPermission
 import io.github.lorddetson.piplayer.ui.GrantAudioPermission
+import io.github.lorddetson.piplayer.ui.demo.HasDemoPlaybackProgress
 import io.github.lorddetson.piplayer.ui.library.LibraryTags
+import io.github.lorddetson.piplayer.ui.player.PlayerTags
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.Assume.assumeFalse
@@ -168,6 +172,24 @@ class OnboardingFirstLaunchTest {
         compose.waitUntilExactlyOneExists(hasTestTag(OnboardingTags.SCREEN), timeoutMillis = 10_000)
         compose.onNodeWithTag(LibraryTags.TABS).assertDoesNotExist()
         compose.onNodeWithText(text(R.string.onboarding_allow)).assertIsDisplayed()
+        assertThat(runBlocking { Onboarding.isDone(context) }).isFalse()
+    }
+
+    @Test
+    fun demoOpensFromOnboardingWithoutPermissionAndReturnsThere() {
+        assumeFalse("Audio access is already granted", context.checkSelfPermission(AudioPermission.name) == PackageManager.PERMISSION_GRANTED)
+        compose.waitUntilExactlyOneExists(hasTestTag("demo-start"), timeoutMillis = 10_000)
+        compose.onNodeWithTag("demo-start").performScrollTo().performClick()
+        compose.waitUntilExactlyOneExists(hasTestTag("demo-screen"), timeoutMillis = 10_000)
+        compose.waitUntilExactlyOneExists(hasTestTag("demo-play-quiet-orbit"), timeoutMillis = 10_000)
+        compose.onNodeWithTag("demo-play-quiet-orbit").performScrollTo().performClick()
+        compose.waitUntilExactlyOneExists(hasTestTag(PlayerTags.NOW_PLAYING), timeoutMillis = 10_000)
+        compose.waitUntilExactlyOneExists(HasDemoPlaybackProgress, timeoutMillis = 5_000)
+        compose.onNodeWithContentDescription(text(R.string.player_close_now_playing)).performClick()
+        compose.waitUntilExactlyOneExists(hasTestTag("demo-screen"), timeoutMillis = 10_000)
+        compose.onNodeWithTag("demo-exit").performClick()
+        compose.waitUntilExactlyOneExists(hasTestTag(OnboardingTags.SCREEN), timeoutMillis = 10_000)
+        assertThat(context.checkSelfPermission(AudioPermission.name)).isNotEqualTo(PackageManager.PERMISSION_GRANTED)
         assertThat(runBlocking { Onboarding.isDone(context) }).isFalse()
     }
 }

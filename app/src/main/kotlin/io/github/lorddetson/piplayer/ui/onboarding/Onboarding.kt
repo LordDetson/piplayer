@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -146,9 +147,14 @@ fun OnboardingGate(
     state: OnboardingState,
     bottomBar: @Composable () -> Unit = {},
     snackbarHost: @Composable () -> Unit = {},
+    onTryDemo: (() -> Unit)? = null,
     content: @Composable () -> Unit,
 ) {
-    if (state.showing) OnboardingScreen(onAllow = state::allow, bottomBar = bottomBar, snackbarHost = snackbarHost) else content()
+    if (state.showing) {
+        OnboardingScreen(onAllow = state::allow, bottomBar = bottomBar, snackbarHost = snackbarHost, onTryDemo = onTryDemo)
+    } else {
+        content()
+    }
 }
 
 /** What PiPlayer is, why it needs access to the audio files, and "Allow" (docs/library.md §14.1). */
@@ -158,6 +164,7 @@ fun OnboardingScreen(
     modifier: Modifier = Modifier,
     bottomBar: @Composable () -> Unit = {},
     snackbarHost: @Composable () -> Unit = {},
+    onTryDemo: (() -> Unit)? = null,
 ) {
     Scaffold(modifier.fillMaxSize().testTag(OnboardingTags.SCREEN), bottomBar = bottomBar, snackbarHost = snackbarHost) { padding ->
         Column(
@@ -183,6 +190,11 @@ fun OnboardingScreen(
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            if (onTryDemo != null) {
+                TextButton(onClick = onTryDemo, modifier = Modifier.fillMaxWidth().testTag("demo-start")) {
+                    Text(stringResource(R.string.demo_start))
+                }
+            }
         }
     }
 }

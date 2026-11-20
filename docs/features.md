@@ -391,6 +391,12 @@ closed testing once the required testers have opted in.
 - A model for Now Playing, the player controls and list rows, followed by the theme schema, editor and the other
   customization features under First-release features. The built-in presets are AMOLED, Cool graphite and Warm
   light, alongside System, Light and Dark.
+- Offline demo (PIM-102): open from onboarding or Settings, play two original sample tracks in Now Playing and
+  try a theme. An explicitly labeled example match teaches tag preview, apply and undo on demo metadata.
+  The demo player, its queue and appearance are local to the demo. Closing it releases sample playback.
+- Track visibility check (PIM-103): choose a file with the system document picker from Library settings.
+  Report confirmed access and indexing facts and any active PiPlayer filter that hides the selected track.
+  Files from providers that cannot be matched to a local media row get an explicit undetermined result.
 - Developer identity verification, store listing and the Play closed test. A new personal account needs at
   least 12 testers opted in for 14 consecutive days before applying for production access, per
   [Google Play's test requirements](https://support.google.com/googleplay/android-developer/answer/14151465).

@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="demo_start">Попробовать без своей музыки</string>
+    <string name="demo_start_summary">Послушайте демотреки и попробуйте исправить их теги.</string>
+    <string name="demo_title">Деморежим PiPlayer</string>
+    <string name="demo_morning_steps">Утренние шаги</string>
+    <string name="demo_quiet_orbit">Тихая орбита</string>
+    <string name="demo_artist">PiPlayer Demo</string>
+    <string name="demo_album">Первое прослушивание</string>
+    <string name="demo_unknown_file">track-01.wav</string>
+    <string name="demo_music">Демотреки</string>
+    <string name="demo_audio_preparing">Подготавливаем демотреки…</string>
+    <string name="demo_audio_error">Не удалось подготовить демотреки.</string>
+    <string name="demo_theme">Попробовать тему</string>
+    <string name="demo_tag_title">Попробовать исправление тегов</string>
+    <string name="demo_tag_candidate">Показать учебный кандидат</string>
+    <string name="demo_tag_example">Учебный кандидат для %1$s</string>
+    <string name="demo_tag_explained">Здесь используется готовый кандидат. Изменения видны в отображаемых тегах демотрека.</string>
+    <string name="demo_tag_apply">Применить к демотреку</string>
+    <string name="demo_tag_undo">Отменить изменение</string>
+</resources>

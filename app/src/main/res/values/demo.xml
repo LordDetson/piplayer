@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="demo_start">Try without my music</string>
+    <string name="demo_start_summary">Play sample tracks and try fixing their tags.</string>
+    <string name="demo_title">PiPlayer demo</string>
+    <string name="demo_morning_steps">Morning Steps</string>
+    <string name="demo_quiet_orbit">Quiet Orbit</string>
+    <string name="demo_artist">PiPlayer Demo</string>
+    <string name="demo_album">First listen</string>
+    <string name="demo_unknown_file">track-01.wav</string>
+    <string name="demo_music">Demo tracks</string>
+    <string name="demo_audio_preparing">Preparing the demo tracks…</string>
+    <string name="demo_audio_error">Couldn’t prepare the demo tracks.</string>
+    <string name="demo_theme">Try a theme</string>
+    <string name="demo_tag_title">Try fixing a tag</string>
+    <string name="demo_tag_candidate">Show example match</string>
+    <string name="demo_tag_example">Example match for %1$s</string>
+    <string name="demo_tag_explained">This example uses a prepared match and changes the demo track’s displayed tags.</string>
+    <string name="demo_tag_apply">Apply to demo track</string>
+    <string name="demo_tag_undo">Undo demo change</string>
+</resources>

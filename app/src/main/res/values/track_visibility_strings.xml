@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="track_visibility_check">Why isn\'t a track visible?</string>
+    <string name="track_visibility_summary">Check a file against Android\'s media index and your library settings.</string>
+    <string name="track_visibility_close">Close</string>
+    <string name="track_visibility_inaccessible">PiPlayer couldn\'t open the selected file.</string>
+    <string name="track_visibility_no_permission">The file opens. PiPlayer needs its existing audio permission to check the music library.</string>
+    <string name="track_visibility_unknown">The file opens. PiPlayer can\'t match it to the Android audio index. For a local file, try picking it from device or SD card storage.</string>
+    <string name="track_visibility_not_indexed">The file opens. Android has no matching audio entry. If you just copied it, wait for Android to index it and then refresh the PiPlayer library.</string>
+    <string name="track_visibility_pending_library">Android has an audio entry for this file. Refresh the PiPlayer library and check again.</string>
+    <string name="track_visibility_visible">The track is indexed and passes your library visibility settings. Search for it in the library.</string>
+    <string name="track_visibility_hidden">Your library settings hide this track.</string>
+    <string name="track_visibility_excluded_folder">Its folder is excluded in Library folders.</string>
+    <string name="track_visibility_system_sound">Android marks it as a ringtone, notification sound or alarm. Show system sounds is off.</string>
+    <string name="track_visibility_recording">The library treats it as a recording. Show recordings is off.</string>
+    <string name="track_visibility_too_short">Its library duration is %1$s s. Your minimum is %2$d s.</string>
+</resources>

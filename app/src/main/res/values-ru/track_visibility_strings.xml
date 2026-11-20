@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="track_visibility_check">Почему трек не виден?</string>
+    <string name="track_visibility_summary">Проверьте файл по медиатеке Android и настройкам библиотеки.</string>
+    <string name="track_visibility_close">Закрыть</string>
+    <string name="track_visibility_inaccessible">PiPlayer не удалось открыть выбранный файл.</string>
+    <string name="track_visibility_no_permission">Файл открывается. Для проверки библиотеки PiPlayer нужно разрешение на доступ к музыке.</string>
+    <string name="track_visibility_unknown">Файл открывается. PiPlayer не может сопоставить его с медиатекой Android. Если файл локальный, попробуйте выбрать его из памяти устройства или с SD-карты.</string>
+    <string name="track_visibility_not_indexed">Файл открывается. В медиатеке Android нет соответствующей записи. Если вы только что скопировали файл, дождитесь индексации Android, затем обновите библиотеку PiPlayer.</string>
+    <string name="track_visibility_pending_library">В медиатеке Android есть этот аудиофайл. Обновите библиотеку PiPlayer и проверьте снова.</string>
+    <string name="track_visibility_visible">Трек проиндексирован и проходит проверку видимости по вашим настройкам. Его можно найти через поиск в библиотеке.</string>
+    <string name="track_visibility_hidden">Настройки библиотеки скрывают этот трек.</string>
+    <string name="track_visibility_excluded_folder">Папка исключена в разделе «Папки библиотеки».</string>
+    <string name="track_visibility_system_sound">Android пометил файл как мелодию вызова, звук уведомления или будильника. Показ системных звуков выключен.</string>
+    <string name="track_visibility_recording">В библиотеке файл считается записью диктофона. Показ записей выключен.</string>
+    <string name="track_visibility_too_short">Длительность трека %1$s с, а выбранный минимум %2$d с.</string>
+</resources>

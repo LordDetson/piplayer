@@ -32,6 +32,7 @@ import io.github.lorddetson.piplayer.ui.playlists.PlaylistPage
 import io.github.lorddetson.piplayer.ui.playlists.SmartListPage
 import io.github.lorddetson.piplayer.ui.playlists.rememberPlaylistActions
 import io.github.lorddetson.piplayer.ui.onboarding.OnboardingGate
+import io.github.lorddetson.piplayer.ui.demo.DemoScreen
 import io.github.lorddetson.piplayer.ui.onboarding.rememberOnboarding
 import io.github.lorddetson.piplayer.ui.settings.LicenseTextScreen
 import io.github.lorddetson.piplayer.ui.settings.LicensesScreen
@@ -210,6 +211,9 @@ data object FoldersRoute : NavKey
 @Serializable
 data object SettingsRoute : NavKey
 
+@Serializable
+data object DemoRoute : NavKey
+
 /** The open-source licences (docs/library.md §14.3). */
 @Serializable
 data object LicensesRoute : NavKey
@@ -375,6 +379,7 @@ fun PiPlayerApp(
                     OnboardingGate(
                         onboarding,
                         snackbarHost = { SnackbarHost(host.snackbar) },
+                        onTryDemo = { open(DemoRoute) },
                     ) {
                         LibraryScreen(host, onOpenSettings = { if (backStack.lastOrNull() != SettingsRoute) backStack.add(SettingsRoute) })
                     }
@@ -432,8 +437,10 @@ fun PiPlayerApp(
                         onBack = { close() },
                         onOpenFolders = { if (backStack.lastOrNull() != FoldersRoute) backStack.add(FoldersRoute) },
                         onOpenLicenses = { if (backStack.lastOrNull() != LicensesRoute) backStack.add(LicensesRoute) },
+                        onOpenDemo = { open(DemoRoute) },
                     )
                 }
+                entry<DemoRoute>(metadata = FROM_THE_SIDE) { DemoScreen(onBack = { close() }) }
                 entry<LicensesRoute>(metadata = FROM_THE_SIDE) {
                     LicensesScreen(
                         onBack = { close() },

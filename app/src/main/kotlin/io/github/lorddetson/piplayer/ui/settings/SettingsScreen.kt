@@ -68,6 +68,7 @@ fun SettingsScreen(
     onOpenFolders: () -> Unit,
     onOpenLicenses: () -> Unit = {},
     viewModel: SettingsViewModel = viewModel(),
+    onOpenDemo: (() -> Unit)? = null,
 ) {
     val appearance by viewModel.appearanceChoice.collectAsStateWithLifecycle()
     val hidden by viewModel.hiddenFiles.collectAsStateWithLifecycle()
@@ -102,6 +103,7 @@ fun SettingsScreen(
                 stringResource(R.string.settings_library_folders_summary),
                 onOpenFolders,
             )
+            TrackVisibilitySetting(hidden)
             TextRow(
                 stringResource(R.string.settings_refresh_library),
                 stringResource(R.string.settings_refresh_library_summary),
@@ -157,6 +159,9 @@ fun SettingsScreen(
             )
             ThemePackageSettings(appearance.customTheme?.name, viewModel)
             SectionTitle(stringResource(R.string.settings_about))
+            onOpenDemo?.let {
+                TextRow(stringResource(R.string.demo_start), stringResource(R.string.demo_start_summary), it)
+            }
             Text(
                 text = stringResource(R.string.settings_version, BuildConfig.VERSION_NAME),
                 style = MaterialTheme.typography.bodyLarge,
@@ -250,7 +255,7 @@ internal fun SectionTitle(text: String) {
 }
 
 @Composable
-private fun TextRow(title: String, summary: String, onClick: () -> Unit) {
+internal fun TextRow(title: String, summary: String, onClick: () -> Unit) {
     Column(
         Modifier
             .fillMaxWidth()
