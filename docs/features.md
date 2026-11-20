@@ -396,6 +396,10 @@ closed testing once the required testers have opted in.
   Both builds import the same declarative data packages (PIM-72). The Play build excludes executable plugin
   installation and its permissions at build time. Plugin format, Android package identity, signing and how
   the forum APK relates to the planned GitHub Releases publication are open release decisions.
+- Community site (PIM-101): PiPlayer maintains its own web catalog for themes, plugins and packs. The catalog
+  lists the signed community APK and supports searching, filtering and sorting its listings. Discourse hosts
+  support, feature proposals and a discussion for each listing. Define how submitted files are scanned and how
+  review status is shown for each version before opening community submissions.
 - Done when all release tests in TI §11 pass on API 30 and 36, including the removable-storage check on a virtual
   SD card, no data loss occurs in round-trip and process-kill tests, and the high-band error rate stays within the
   owner's threshold.
