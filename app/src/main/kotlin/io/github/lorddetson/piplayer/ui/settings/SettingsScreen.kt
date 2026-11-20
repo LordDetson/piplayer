@@ -150,11 +150,12 @@ fun SettingsScreen(
                 TagCoverPreset::label, viewModel::setCoverPreset,
             )
             SectionTitle(stringResource(R.string.settings_appearance))
-            ThemeChoice(appearance.theme, viewModel::setTheme)
+            ThemeChoice(appearance.theme.takeIf { appearance.customTheme == null }, viewModel::setTheme)
             ChoiceSetting(
                 R.string.settings_now_playing_layout, appearance.nowPlayingLayout, NowPlayingLayout.entries,
                 NowPlayingLayout::label, viewModel::setNowPlayingLayout,
             )
+            ThemePackageSettings(appearance.customTheme?.name, viewModel)
             SectionTitle(stringResource(R.string.settings_about))
             Text(
                 text = stringResource(R.string.settings_version, BuildConfig.VERSION_NAME),
@@ -322,7 +323,7 @@ private fun minLengthLabel(seconds: Int) =
     if (seconds == 0) stringResource(R.string.settings_min_length_off) else stringResource(R.string.settings_min_length_value, seconds)
 
 @Composable
-private fun ThemeChoice(theme: ThemeMode, onChoose: (ThemeMode) -> Unit) {
+private fun ThemeChoice(theme: ThemeMode?, onChoose: (ThemeMode) -> Unit) {
     Text(
         text = stringResource(R.string.settings_theme),
         style = MaterialTheme.typography.bodyLarge,
@@ -366,7 +367,7 @@ private fun ThemePreview(mode: ThemeMode, colors: ColorScheme) {
     }
 }
 
-private val ThemeMode.label: Int
+internal val ThemeMode.label: Int
     get() = when (this) {
         ThemeMode.SYSTEM -> R.string.theme_system
         ThemeMode.LIGHT -> R.string.theme_light
@@ -376,7 +377,7 @@ private val ThemeMode.label: Int
         ThemeMode.WARM_LIGHT -> R.string.theme_warm_light
     }
 
-private fun NowPlayingLayout.label(): Int = when (this) {
+internal fun NowPlayingLayout.label(): Int = when (this) {
     NowPlayingLayout.STANDARD -> R.string.now_playing_layout_standard
     NowPlayingLayout.MINIMAL -> R.string.now_playing_layout_minimal
     NowPlayingLayout.EXPANDED -> R.string.now_playing_layout_expanded

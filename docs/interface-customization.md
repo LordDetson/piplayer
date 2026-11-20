@@ -48,5 +48,30 @@ A saved theme that can no longer be rendered falls back to the standard presenta
 A shared data package carries declarative settings and assets. The forum build's executable plugins are tracked
 by PIM-101. Their format and permissions are decided independently.
 
+### Theme package version 1
+
+Open a UTF-8 JSON file of at most 32 KiB from the Appearance settings. Preview shows the named palette and
+its layout selection. Confirm to save and select the theme or cancel to keep the active appearance. Undo is
+available during the current visit to Settings and preserves later independent changes. The system save dialog
+exports the current palette and layout as `PiPlayer-theme.json`.
+
+```json
+{
+  "version": 1,
+  "name": "Forest",
+  "base": "graphite",
+  "palette": { "accentRgb": 7847843, "backgroundRgb": 1055274 },
+  "layout": "minimal"
+}
+```
+
+- `name` is nonblank, at most 80 UTF-16 code units, and contains no control characters.
+- `base` is one of `system`, `light`, `dark`, `amoled`, `graphite` or `warm_light`.
+- `palette` is optional. The `accentRgb`, `backgroundRgb`, `surfaceRgb` and `textRgb` values are integers from
+  0 to 16777215. Missing colors inherit from the base palette. `automaticText` defaults to `true`. Set it to
+  `false` to use a supplied `textRgb`.
+- `layout` is `standard`, `minimal` or `expanded`. Omit it to preserve the current layout.
+- Version 1 accepts the fields above. Font files, images and other assets require a separately specified version.
+
 The app shares its validated model with the local integration from PIM-73 and PIM-74. Applying a model requires the
 customization permission and uses the same validator as the manual editor. The catalog distributes the same format.

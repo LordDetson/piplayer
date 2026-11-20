@@ -51,7 +51,7 @@ class MainActivity : ComponentActivity() {
             LaunchedEffect(appearance.theme) {
                 ThemeWindow.follow(this@MainActivity, appearance.theme, initialAppearance.theme)
             }
-            PiPlayerTheme(mode = appearance.theme) {
+            PiPlayerTheme(mode = appearance.theme, palette = appearance.customTheme?.palette) {
                 // Test tags double as resource IDs, so that the checks of the release build find elements by them
                 // (docs/library.md §2.2).
                 Box(Modifier.fillMaxSize().semantics { testTagsAsResourceId = true }) {

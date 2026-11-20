@@ -10,11 +10,13 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.platform.LocalContext
 import io.github.lorddetson.piplayer.settings.ThemeMode
+import io.github.lorddetson.piplayer.settings.ThemePalette
 
 /** Applies the appearance setting to the Material 3 colors. */
 @Composable
 fun PiPlayerTheme(
     mode: ThemeMode = ThemeMode.SYSTEM,
+    palette: ThemePalette? = null,
     content: @Composable () -> Unit,
 ) {
     val darkTheme = mode.isDark(isSystemInDarkTheme())
@@ -26,5 +28,5 @@ fun PiPlayerTheme(
         darkTheme -> darkColorScheme()
         else -> lightColorScheme()
     }
-    MaterialTheme(colorScheme = colorScheme, content = content)
+    MaterialTheme(colorScheme = palette?.applyTo(colorScheme) ?: colorScheme, content = content)
 }

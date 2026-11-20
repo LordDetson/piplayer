@@ -180,6 +180,12 @@ android {
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
+        // The forum APK can add its own sources, manifest and dependencies (PIM-101).
+        create("forum") {
+            initWith(getByName("release"))
+            signingConfig = null
+            matchingFallbacks += "release"
+        }
         // The release build signed with the debug key and profileable, for the Macrobenchmark checks (docs/library.md
         // §2.1); never published.
         create("benchmark") {
@@ -201,8 +207,10 @@ android {
     }
 
     sourceSets {
-        // The benchmark build is the release build, with the release versions of the debug-only classes.
-        getByName("benchmark") { kotlin.directories.add("src/release/kotlin") }
+        // Both release-based builds use the release versions of the debug-only classes.
+        listOf("benchmark", "forum").forEach { name ->
+            getByName(name) { kotlin.directories.add("src/release/kotlin") }
+        }
         // The fakes and fixtures of the online services, shared by the JVM and the instrumented tests.
         listOf("test", "androidTest").forEach { name ->
             getByName(name) {

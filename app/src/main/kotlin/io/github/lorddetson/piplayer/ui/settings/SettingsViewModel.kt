@@ -1,9 +1,11 @@
 package io.github.lorddetson.piplayer.ui.settings
 
 import android.app.Application
+import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import io.github.lorddetson.piplayer.PiPlayerApplication
+import io.github.lorddetson.piplayer.R
 import io.github.lorddetson.piplayer.identification.FingerprintStage
 import io.github.lorddetson.piplayer.identification.IdentificationServices
 import io.github.lorddetson.piplayer.identification.provider.ProviderId
@@ -14,6 +16,7 @@ import io.github.lorddetson.piplayer.library.values.LegacyEncodings
 import io.github.lorddetson.piplayer.nativelib.taglib.Id3v1WritePolicy
 import io.github.lorddetson.piplayer.settings.Appearance
 import io.github.lorddetson.piplayer.settings.AppearanceSettings
+import io.github.lorddetson.piplayer.settings.CustomTheme
 import io.github.lorddetson.piplayer.settings.HiddenFiles
 import io.github.lorddetson.piplayer.settings.LibrarySettings
 import io.github.lorddetson.piplayer.settings.NowPlayingLayout
@@ -21,7 +24,15 @@ import io.github.lorddetson.piplayer.settings.ProtectedField
 import io.github.lorddetson.piplayer.settings.TagWritingOptions
 import io.github.lorddetson.piplayer.settings.TagWritingSettings
 import io.github.lorddetson.piplayer.settings.ThemeMode
+import io.github.lorddetson.piplayer.settings.ThemeApplyResult
+import io.github.lorddetson.piplayer.settings.ThemeApplyUndo
+import io.github.lorddetson.piplayer.settings.ThemePackage
+import io.github.lorddetson.piplayer.settings.ThemePackageCodec
+import io.github.lorddetson.piplayer.settings.ThemePackageRead
+import io.github.lorddetson.piplayer.settings.ThemePalette
+import io.github.lorddetson.piplayer.settings.ThemeUndoResult
 import io.github.lorddetson.piplayer.tagging.write.TagCoverPreset
+import java.io.IOException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
@@ -30,6 +41,7 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.CoroutineScope
@@ -37,6 +49,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 
 /** The Settings screen's state (docs/library.md §3.6). */
 class SettingsViewModel(application: Application) : AndroidViewModel(application) {
@@ -58,6 +71,92 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
 
     val appearanceChoice: StateFlow<Appearance> =
         appearance.appearance.stateIn(viewModelScope, SharingStarted.Eagerly, appearance.read())
+
+    private val themeDocuments = application.contentResolver
+    private val themePackage = MutableStateFlow<ThemePackageState>(ThemePackageState.Idle)
+    private val lastThemeImport = MutableStateFlow<ThemeApplyUndo?>(null)
+    internal val themePackageState: StateFlow<ThemePackageState> = themePackage
+    internal val themePackageUndo: StateFlow<ThemeApplyUndo?> = lastThemeImport
+
+    internal fun openThemePackage(uri: Uri) = workWithThemePackage {
+        val result = withContext(Dispatchers.IO) {
+            try {
+                themeDocuments.openInputStream(uri)?.use(ThemePackageCodec::decode) ?: ThemePackageRead.Unreadable
+            } catch (_: IOException) {
+                ThemePackageRead.Unreadable
+            } catch (_: SecurityException) {
+                ThemePackageRead.Unreadable
+            }
+        }
+        when (result) {
+            is ThemePackageRead.Loaded -> ThemePackageState.Preview(result.theme)
+            ThemePackageRead.Invalid -> ThemePackageState.Notice(R.string.theme_package_invalid)
+            ThemePackageRead.UnsupportedVersion -> ThemePackageState.Notice(R.string.theme_package_version)
+            ThemePackageRead.TooLarge -> ThemePackageState.Notice(R.string.theme_package_too_large)
+            ThemePackageRead.Unreadable -> ThemePackageState.Notice(R.string.theme_package_open_failed)
+        }
+    }
+
+    internal fun exportThemePackage(uri: Uri) = workWithThemePackage {
+        val current = appearance.appearance.first()
+        val export = ThemePackage(
+            name = current.customTheme?.name ?: getApplication<Application>().getString(current.theme.label),
+            base = current.theme,
+            palette = current.customTheme?.palette ?: ThemePalette(),
+            layout = current.nowPlayingLayout,
+        )
+        val written = withContext(Dispatchers.IO) {
+            try {
+                val bytes = ThemePackageCodec.encode(export)
+                themeDocuments.openOutputStream(uri, "wt")?.use { it.write(bytes) } != null
+            } catch (_: IOException) {
+                false
+            } catch (_: SecurityException) {
+                false
+            } catch (_: IllegalArgumentException) {
+                false
+            }
+        }
+        if (written) ThemePackageState.Notice(R.string.theme_package_exported, error = false)
+        else ThemePackageState.Notice(R.string.theme_package_export_failed)
+    }
+
+    internal fun cancelThemePackagePreview() {
+        if (themePackage.value is ThemePackageState.Preview) themePackage.value = ThemePackageState.Idle
+    }
+
+    internal fun applyThemePackage() {
+        val (theme) = themePackage.value as? ThemePackageState.Preview ?: return
+        workWithThemePackage {
+            when (val result = appearance.applyCustomTheme(CustomTheme(theme.name, theme.base, theme.palette), theme.layout)) {
+                is ThemeApplyResult.Applied -> {
+                    lastThemeImport.value = result.undo
+                    ThemePackageState.Idle
+                }
+                ThemeApplyResult.InvalidTheme -> ThemePackageState.Notice(R.string.theme_package_invalid)
+                ThemeApplyResult.WriteFailed -> ThemePackageState.Notice(R.string.theme_package_apply_failed)
+            }
+        }
+    }
+
+    internal fun undoThemePackage() {
+        val undo = lastThemeImport.value ?: return
+        workWithThemePackage {
+            val result = appearance.undoCustomTheme(undo)
+            if (result != ThemeUndoResult.WRITE_FAILED) lastThemeImport.value = null
+            when (result) {
+                ThemeUndoResult.RESTORED -> ThemePackageState.Idle
+                ThemeUndoResult.STALE -> ThemePackageState.Notice(R.string.theme_package_changed)
+                ThemeUndoResult.WRITE_FAILED -> ThemePackageState.Notice(R.string.theme_package_apply_failed)
+            }
+        }
+    }
+
+    private fun workWithThemePackage(work: suspend () -> ThemePackageState) {
+        if (themePackage.value == ThemePackageState.Working) return
+        themePackage.value = ThemePackageState.Working
+        viewModelScope.launch { themePackage.value = work() }
+    }
 
     fun setTheme(mode: ThemeMode) {
         viewModelScope.launch { appearance.setTheme(mode) }
