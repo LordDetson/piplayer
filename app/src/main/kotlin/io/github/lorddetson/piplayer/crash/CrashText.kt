@@ -1,6 +1,8 @@
 package io.github.lorddetson.piplayer.crash
 
 import android.app.ApplicationExitInfo
+import android.os.Build
+import io.github.lorddetson.piplayer.BuildConfig
 import java.time.Instant
 import java.time.format.DateTimeFormatter
 
@@ -22,7 +24,21 @@ data class DeviceInfo(
     val sdk: Int,
     val fingerprint: String,
     val abis: List<String>,
-)
+) {
+    companion object {
+        fun current(): DeviceInfo = DeviceInfo(
+            appVersion = "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
+            buildType = BuildConfig.BUILD_TYPE,
+            manufacturer = Build.MANUFACTURER,
+            model = Build.MODEL,
+            device = Build.DEVICE,
+            release = Build.VERSION.RELEASE,
+            sdk = Build.VERSION.SDK_INT,
+            fingerprint = Build.FINGERPRINT,
+            abis = Build.SUPPORTED_ABIS.toList(),
+        )
+    }
+}
 
 /** One way a process ended, as Android recorded it (`ApplicationExitInfo`), as plain data. */
 data class ExitRecord(

@@ -3,10 +3,8 @@ package io.github.lorddetson.piplayer.crash
 import android.app.ActivityManager
 import android.app.Application
 import android.content.Context
-import android.os.Build
 import android.os.Process
 import android.util.Log
-import io.github.lorddetson.piplayer.BuildConfig
 import io.github.lorddetson.piplayer.PiPlayerApplication
 import java.io.File
 import java.io.IOException
@@ -76,21 +74,7 @@ class CrashReports(
             private set
 
         /** The app and the device, the same in every report of this process. */
-        private val header: String by lazy {
-            CrashText.header(
-                DeviceInfo(
-                    appVersion = "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
-                    buildType = BuildConfig.BUILD_TYPE,
-                    manufacturer = Build.MANUFACTURER,
-                    model = Build.MODEL,
-                    device = Build.DEVICE,
-                    release = Build.VERSION.RELEASE,
-                    sdk = Build.VERSION.SDK_INT,
-                    fingerprint = Build.FINGERPRINT,
-                    abis = Build.SUPPORTED_ABIS.toList(),
-                ),
-            )
-        }
+        private val header: String by lazy { CrashText.header(DeviceInfo.current()) }
 
         /** Puts PiPlayer's handler in front of Android's, which it hands every crash on to (§7.1). */
         fun install(context: Context) {

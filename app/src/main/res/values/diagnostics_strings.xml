@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="problem_report_title">Report a problem</string>
+    <string name="problem_report_include_trace">Include identification trace</string>
+    <string name="problem_report_copy">Copy report</string>
+</resources>

@@ -43,8 +43,11 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -105,6 +108,7 @@ import io.github.lorddetson.piplayer.library.identity.IdentityAttacher
 import io.github.lorddetson.piplayer.library.lists.FolderLevels
 import io.github.lorddetson.piplayer.library.songs.SongList
 import io.github.lorddetson.piplayer.ui.covers.LibraryCover
+import io.github.lorddetson.piplayer.ui.diagnostics.ProblemReportDialog
 import io.github.lorddetson.piplayer.ui.player.CoverImage
 import io.github.lorddetson.piplayer.ui.player.kilohertz
 import java.text.DateFormat
@@ -267,6 +271,7 @@ fun DetailsContent(details: TrackDetails, picture: ImageBitmap?, snackbar: Snack
     val context = LocalContext.current
     val resources = LocalResources.current
     val scope = rememberCoroutineScope()
+    var showProblemReport by rememberSaveable { mutableStateOf(false) }
     val say = { id: Int -> scope.launch { snackbar.showSnackbar(resources.getString(id)) }; Unit }
     val copy = { label: String, text: String ->
         context.getSystemService(ClipboardManager::class.java)?.setPrimaryClip(ClipData.newPlainText(label, text))
@@ -320,8 +325,14 @@ fun DetailsContent(details: TrackDetails, picture: ImageBitmap?, snackbar: Snack
         if (details.trace.isNotEmpty()) {
             item(key = "trace") { SectionHeading(stringResource(R.string.details_section_trace), Modifier.testTag(DetailsTags.TRACE)) }
             items(details.trace) { run -> TraceRunRow(run) }
+            item(key = "problem_report") {
+                TextButton(onClick = { showProblemReport = true }, modifier = Modifier.padding(start = 8.dp)) {
+                    Text(stringResource(R.string.problem_report_title))
+                }
+            }
         }
     }
+    if (showProblemReport) ProblemReportDialog(onClose = { showProblemReport = false }, trace = details.trace)
 }
 
 /** What a row can decide: its field's revert, or the choices of a field changed in the file (§18.7). */

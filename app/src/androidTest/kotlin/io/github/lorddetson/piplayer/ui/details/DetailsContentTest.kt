@@ -1,5 +1,7 @@
 package io.github.lorddetson.piplayer.ui.details
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Scaffold
@@ -12,8 +14,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertContentDescriptionEquals
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsOff
+import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.isDialog
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -121,6 +126,51 @@ class DetailsContentTest {
 
     private val title = DetailRow(DetailField.TITLE, DetailValue.Text("Decided title"),
         ValueSource(DecisionKind.LEVEL_IDENTIFICATION, ProviderId.MUSICBRAINZ), decided = true)
+
+    @Test
+    fun theProblemReportPreviewsAnOptInTraceAndOnlyCopiesOnRequest() {
+        val trace = listOf(
+            TraceRun(1_700_000_000_000, "found=high", null, listOf(TraceStep("text_search", "musicbrainz"))),
+        )
+        show(details(listOf(title), trace = trace))
+
+        val clipboard = context.getSystemService(ClipboardManager::class.java)
+        val previousClip = compose.runOnIdle {
+            clipboard.primaryClip.also { clipboard.setPrimaryClip(ClipData.newPlainText("Test", "Existing clipboard")) }
+        }
+        try {
+            val report = text(R.string.problem_report_title)
+            val dialog = hasAnyAncestor(isDialog())
+            val includeTrace = compose.onNode(hasText(text(R.string.problem_report_include_trace)) and dialog)
+            val tracePreview = compose.onNode(hasText("found=high", substring = true) and dialog)
+            val button = compose.onNodeWithText(report)
+
+            compose.onNodeWithTag(DetailsTags.LIST).performScrollToNode(hasText(report))
+            button.performClick()
+            includeTrace.assertIsOff()
+            compose.onNode(hasText("Android", substring = true) and dialog).assertExists()
+            tracePreview.assertDoesNotExist()
+            includeTrace.performClick()
+            tracePreview.assertExists()
+            assertThat(compose.runOnIdle { clipboard.primaryClip?.getItemAt(0)?.text?.toString() })
+                .isEqualTo("Existing clipboard")
+
+            compose.onNode(hasText(text(R.string.settings_dialog_cancel)) and dialog).performClick()
+            button.performClick()
+            includeTrace.assertIsOff()
+            includeTrace.performClick()
+            compose.onNode(hasText(text(R.string.problem_report_copy)) and dialog).performClick()
+
+            val copied = compose.runOnIdle { clipboard.primaryClip?.getItemAt(0)?.text?.toString() }
+            assertThat(copied).contains("PiPlayer", "Identification trace", "found=high", "text_search")
+                .doesNotContain("Decided title", "a.flac")
+            compose.onNode(isDialog()).assertDoesNotExist()
+        } finally {
+            compose.runOnIdle {
+                if (previousClip == null) clipboard.clearPrimaryClip() else clipboard.setPrimaryClip(previousClip)
+            }
+        }
+    }
 
     @Test
     fun eachValueSaysWhereItComesFrom() {
