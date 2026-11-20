@@ -383,8 +383,9 @@ Size: M (about 6 weeks, plus at least 14 days of closed testing).
   recruited from GitHub pre-release testers; store listing.
 - Release: a signed APK on GitHub Releases first, then Google Play. IzzyOnDroid (picks up APKs from GitHub
   Releases) and later F-Droid are channels that suit a GPL, ad-free, privacy-first app.
-- Done when all TI §11 tests pass on API 30, 33, 35 and 36, no data loss occurs in round-trip and process-kill
-  tests, and the high-band error rate stays within the owner's threshold.
+- Done when all release tests in TI §11 pass on API 30 and 36, including the removable-storage check on a virtual
+  SD card, no data loss occurs in round-trip and process-kill tests, and the high-band error rate stays within the
+  owner's threshold.
 
 ### Cut line
 

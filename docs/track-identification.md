@@ -2233,7 +2233,7 @@ used, never through a stored content URI, which goes stale after a media index r
 ## 11. Acceptance criteria and tests
 
 Each test lands with the milestone that builds its feature (see features.md). The release (M5) needs every 1.0 test
-below to pass: the JVM tests in CI and the instrumented tests on API 30, 33, 35 and 36. Rows tagged v1.x, and tests of
+below to pass: the JVM tests in CI and the instrumented tests on API 30 and 36. Rows tagged v1.x, and tests of
 features moved by the cut line, are excluded. The release also needs no data loss in round-trip and process-kill
 tests, and a high-band error rate within the threshold of §11.4.
 
@@ -2360,9 +2360,10 @@ For M4b, use the [milestone acceptance checklist](m4b-acceptance.md) on API 30 a
 removable-storage check. The following coverage applies to the M5 release.
 
 System consent dialogs are not automated: they differ by API level and manufacturer and make UI Automator scripts
-brittle. They follow a written checklist on API 30, 33, 35 and 36 and on a device with an SD card: one write request
-for a selection; files in `Download/` and on the SD-card root; canceling a dialog (the result stays in PiPlayer, no
-error); a new consent after the process was killed during apply; the explanation shown before the system dialogs.
+brittle. They follow a written checklist on API 30 and 36, with a virtual SD card for removable storage. Check one
+write request for a selection, files in `Download/` and on the SD-card root, and the explanation before the system
+dialogs. Cancel a request and check that the result stays in PiPlayer and the request ends normally. Kill the
+process during apply and check that resuming requests new consent.
 The trash dialog joins the checklist in v1.x.
 
 ### 11.4 Corpus check
@@ -2385,7 +2386,7 @@ The trash dialog joins the checklist in v1.x.
 
 | # | Decision | Status |
 |---|----------|--------|
-| D1 | PiPlayer license | **Decided 2026-10-18: GPL-3.0-or-later.** TagLib is taken under its LGPL-2.1 option (its MPL-1.1 option is GPL-incompatible); it ships unmodified as the separate shared library `libtag.so`, while Chromaprint (MIT) with its KissFFT (BSD-3) and the resampler of speexdsp (BSD-3) are linked statically into PiPlayer's JNI library; the licence texts ship in the app. Donations go through an external link, so no proprietary billing library is linked |
+| D1 | PiPlayer license | **GPL-3.0-or-later, confirmed by the project owner for the first release on 2026-11-20.** TagLib is taken under its LGPL-2.1 option (its MPL-1.1 option is GPL-incompatible); it ships unmodified as the separate shared library `libtag.so`, while Chromaprint (MIT) with its KissFFT (BSD-3) and the resampler of speexdsp (BSD-3) are linked statically into PiPlayer's JNI library; the licence texts ship in the app. Donations go through an external link, so no proprietary billing library is linked |
 | D2 | Monetization (donations?) | **Decided 2026-10-18: donations only through an external link, no in-app payments and no Google Play Billing.** The app stays free with no ads or paid features; mention this when contacting AcoustID and MetaBrainz. Before the Play release (M5), check that Google Play's payments policy allows the donation link in the Play build |
 | D3 | minSdk | **Decided 2026-10-18: minSdk 30**, designed to be lowered to 26 later (see §7.4), but only once the folder-grant write implementation exists (v1.x). minSdk can only be lowered painlessly; raising it strands users |
 | D4 | Tag engine | **Decided 2026-10-18:** own thin JNI over TagLib 2.3.2 with partial updates, ID3v2 version control and picture writing (§7.5), with an existing open-source Kotlin binding of TagLib as the reference for fd ownership and native error handling; built and checked in the M0 native spike, which confirms or revises this decision. **Confirmed in M0:** TagLib reads every fixture format through a read-only stream over the caller's file descriptor, which it never closes (on Android 11+ closing a descriptor owned by a `ParcelFileDescriptor` aborts the process) |
