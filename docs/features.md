@@ -425,7 +425,16 @@ remain in the 1.0 scope: M3U8 import and export, the planned smart lists, cover 
 device, tablet and foldable layouts, device-transfer re-attachment by content key, batch change history, and the
 basic platform equalizer.
 
-1. Internet radio: station directory, own stream URLs, favorites and the current title.
+1. Internet radio (PIM-10): station directory, own stream URLs, favorites and the current title.
+   The first Google Play release includes radio in its AAB as an on-demand Play Feature Delivery module.
+   The library offers **Radio** under its sources without adding a permanent tab. Opening Radio for the first
+   time starts module installation through Google Play. Show progress, allow cancellation while available,
+   and offer retry on failure before opening the station screen. The base install contains the source entry
+   and the shared player. The module handles station search, the directory client, user-added URLs and
+   locally saved favorites. PiPlayer fetches directory results as needed from Radio Browser.
+   Verify on API 30 and 36 that the initial Play install excludes the radio module, that local playback works
+   with the module absent or its download canceled, and that installation opens Radio and enables station
+   playback. Report the base and module download sizes as release metrics. Radio is delivered on demand at any size.
 2. User customization, sharing and an MCP server, in this order:
    - a declarative, versioned schema of the UI: theme (colors, type, shapes), the Now Playing layout, the player
      buttons and their order, gestures and list rows; the app draws the screens from it with checked building
