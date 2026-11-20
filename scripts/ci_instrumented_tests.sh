@@ -15,7 +15,7 @@ status=0
 gradle() {
   local label="$1"
   shift
-  ./gradlew "$ABI_ARG" "$@"
+  ./gradlew "$ABI_ARG" -Ppiplayer.testAllLanguages=true "$@"
   local code=$?
   echo "::notice title=Gradle ${label}::exit code ${code}"
   return "$code"

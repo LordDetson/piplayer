@@ -77,6 +77,7 @@ class RetryTest(unittest.TestCase):
     def test_twoFlakyClassesAreEachRetriedAndTheRunPasses(self):
         a, b = f"{PACKAGE}.playback.FirstTest", f"{PACKAGE}.library.SecondTest"
         result, calls = self.run_script([a, b])
+        self.assertTrue(all("-Ppiplayer.testAllLanguages=true" in call.split() for call in calls), calls)
         retried = self.retries(calls)
         self.assertEqual(2, len(retried), calls)
         self.assertTrue(any(c.endswith(f".class={a}") for c in retried), retried)
