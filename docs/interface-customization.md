@@ -38,10 +38,15 @@ the system file picker and keeps a validated copy in app storage. A failed impor
 The theme saves its font and palette together. The Now Playing layout remains a separate preference.
 These controls are tracked by PIM-97 and PIM-98.
 
-The editor and importer use a versioned JSON format with bounded values and known identifiers. Validate and resolve
-the model before applying it, keep the previous appearance for undo, and use the standard presentation if a saved
-theme can no longer be rendered. A package contains only bounded images and declarative data. Its references resolve
-to assets bundled in that package or supplied by PiPlayer.
+Both release builds use the same data package format for sharing themes and supported layouts (PIM-72). Export
+through the Android share sheet and import through the system file picker, including files downloaded from the
+forum. The package contains a versioned JSON model and supported, size-limited assets. It refers to app-defined
+components and bundled assets by known identifiers. Validate all entries and the model before preview or import,
+preserve the current appearance on rejection, and keep the previous appearance for undo after applying a package.
+A saved theme that can no longer be rendered falls back to the standard presentation.
+
+A shared data package carries declarative settings and assets. The forum build's executable plugins are tracked
+by PIM-101. Their format and permissions are decided independently.
 
 The app shares its validated model with the local integration from PIM-73 and PIM-74. Applying a model requires the
 customization permission and uses the same validator as the manual editor. The catalog distributes the same format.

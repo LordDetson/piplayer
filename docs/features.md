@@ -28,8 +28,8 @@ out. Track identification is specified in [track-identification.md](track-identi
 - A custom native audio engine, own output drivers, own USB audio drivers (direct USB host access), an app volume
   that replaces the system volume, native DSD output (DoP or raw DSD) or PCM-to-DSD conversion.
 - Tracker module formats (MOD, XM, S3M, IT).
-- Skins or theme packages that carry code (APKs, scripts), visualization preset engines, downloadable native plugins.
-  User-made themes and layouts use declarative files checked against a schema (First-release features, item 2).
+- Skins or theme packages that carry code and visualization preset engines. Both builds use declarative data
+  packages for themes and layouts. The forum build has a separate plugin feature (PIM-101).
 - An own lock screen, screen overlays, changes to system settings, privileged-permission workarounds, vendor hooks.
 - An exported library database or settings provider for other apps; other apps use the standard media session.
 - All-files storage access (TI §7.3).
@@ -242,8 +242,9 @@ The `later` tag identifies work planned without a date.
 Sizes are rough estimates of part-time work by one developer who is new to Android: S up to 2 weeks, M 3 to 6
 weeks, L 7 to 12 weeks. They are re-estimated after M0 and again after M1. Together they add up to roughly a year.
 
-The first public APK includes the full 1.0 scope, including all 13 issues in PIM-6. Internal builds are used for
-milestone verification. Publication requires a stable Media3 1.12 release and a passing gapless A/B comparison.
+The first public APK includes the full agreed 1.0 scope, including all 13 issues in PIM-6. The forum and Google
+Play builds have separate release acceptance. Internal builds are used for milestone verification. Publication
+requires a stable Media3 1.12 release and a passing gapless A/B comparison.
 
 ### M0 Project skeleton and identification spike
 
@@ -390,8 +391,11 @@ closed testing once the required testers have opted in.
 - Developer identity verification (also needed for APKs installed outside Google Play); a Play closed test with
   the required number of testers and days (12 testers for 14 days under the 2025 rules; check the current rule),
   recruited for the closed test; store listing.
-- Release: a signed APK on GitHub Releases first, then Google Play. IzzyOnDroid (picks up APKs from GitHub
-  Releases) and later F-Droid are channels that suit a GPL, ad-free, privacy-first app.
+- Release builds (PIM-101): the forum distributes a signed APK that supports installing plugins from the author
+  and other developers. Google Play receives a standalone signed AAB with features that pass store review.
+  Both builds import the same declarative data packages (PIM-72). The Play build excludes executable plugin
+  installation and its permissions at build time. Plugin format, Android package identity, signing and how
+  the forum APK relates to the planned GitHub Releases publication are open release decisions.
 - Done when all release tests in TI §11 pass on API 30 and 36, including the removable-storage check on a virtual
   SD card, no data loss occurs in round-trip and process-kill tests, and the high-band error rate stays within the
   owner's threshold.

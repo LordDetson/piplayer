@@ -1,15 +1,18 @@
 # HomeMusic integration
 
 The first public PiPlayer APK includes all three parts of PIM-100. PiPlayer connects to the user's existing
-HomeMusic installation. An account and server profile are added in PiPlayer's settings.
+HomeMusic installation. An account and server profile are added in PiPlayer's settings. The Play build has a
+separate release review (PIM-42, PIM-101). The Play scope covers HTTPS access to the existing Navidrome library,
+synchronization and authorized offline copies. Any Hub recommendation or download action exposed in Play must
+meet the applicable terms and content rights, including automatic acquisition triggered by a mix.
 
 ## Server profile
 
 Keep the Navidrome and Hub URLs separate. Accept HTTP and HTTPS, preserve a reverse proxy's base path and add
 only fixed API paths or encoded identifiers. Validate URLs before making a request. Credentials and session
 state are scoped to the configured service. Connection checks report an unreachable service, a rejected login,
-an expired session or an unsupported API separately. HTTPS is the default. A user can explicitly enable
-cleartext for their own server if their HomeMusic installation uses plain HTTP on the local network.
+an expired session or an unsupported API separately. HTTPS is the default and is required in the Play build.
+The forum build can explicitly enable cleartext for the user's own installation on the local network.
 
 ## Library and playback
 
