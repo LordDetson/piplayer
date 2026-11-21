@@ -69,6 +69,7 @@ class AppearanceSettings internal constructor(private val file: DataStore<Prefer
             panel = LibraryTabsSettings.panelOf(preferences).layout,
             player = nowPlayingPanels.stateOf(preferences).panel,
             miniPlayer = miniPlayerPanels.stateOf(preferences).panel,
+            navigation = bottomNavigationLayouts.stateOf(preferences).panel,
         )
     }
 
@@ -78,6 +79,7 @@ class AppearanceSettings internal constructor(private val file: DataStore<Prefer
         panel: LibraryPanelLayout? = null,
         player: NowPlayingPanel? = null,
         miniPlayer: MiniPlayerPanel? = null,
+        navigation: BottomNavigationLayout? = null,
     ): ThemeApplyResult {
         if (!CustomThemesSettings.isValid(theme)) return ThemeApplyResult.InvalidTheme
         return update(ThemeApplyResult.WriteFailed) { preferences ->
@@ -85,12 +87,14 @@ class AppearanceSettings internal constructor(private val file: DataStore<Prefer
             val importedPanel = panel ?: LibraryTabsSettings.panelOf(preferences).layout
             val importedPlayer = player ?: nowPlayingPanels.stateOf(preferences).panel
             val importedMiniPlayer = miniPlayer ?: miniPlayerPanels.stateOf(preferences).panel
+            val importedNavigation = navigation ?: bottomNavigationLayouts.stateOf(preferences).panel
             if (!CustomThemesSettings.storeTheme(preferences, theme, select = true, replaceExisting = false)) {
                 return@update ThemeApplyResult.InvalidTheme
             }
             LibraryTabsSettings.storePanel(preferences, theme.id, importedPanel)
             nowPlayingPanels.storePanel(preferences, theme.id, importedPlayer)
             miniPlayerPanels.storePanel(preferences, theme.id, importedMiniPlayer)
+            bottomNavigationLayouts.storePanel(preferences, theme.id, importedNavigation)
             if (layout != null) storeLayout(preferences, layout)
             ThemeApplyResult.Applied(ThemeApplyUndo(previous, appearanceOf(preferences), layoutRevision(preferences)))
         }

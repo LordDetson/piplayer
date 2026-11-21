@@ -24,6 +24,7 @@ internal enum class PanelItemKind(val tag: String, val move: Int, val hide: Int,
     BUTTON("library_button", R.string.library_button_move, R.string.library_button_hide, R.string.library_button_add),
     PLAYER("player_element", R.string.player_element_move, R.string.player_element_hide, R.string.player_element_restore),
     MINI_PLAYER("mini_element", R.string.player_element_move, R.string.player_element_hide, R.string.player_element_restore),
+    BOTTOM_NAVIGATION("bottom_nav", R.string.library_button_move, R.string.library_button_hide, R.string.library_button_add),
 }
 
 @Composable

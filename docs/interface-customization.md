@@ -124,3 +124,13 @@ tap on the play/pause button controls playback. Each theme stores the order, hid
 Theme package version 4 adds a `miniPlayer` object with `order`, `hidden` and `progress`. `order` contains
 `cover`, `track_info` and `play_pause` exactly once. `hidden` may also contain `progress`. Both lists use comma
 separators. `progress` is `top` or `bottom`. Versions 1 through 3 import with the current mini player layout.
+
+### Bottom navigation layout
+
+Long press Library, Search or Fix to reorder the bottom bar, hide a button or restore a hidden button. A plus
+button also opens the restore menu when any button is hidden. Keep at least one destination visible. Editing the
+bar keeps the current page open and changes only the menu. A notification can still open Fix while its button is hidden.
+
+Theme package version 5 adds a `navigation` object with `order` and `hidden`. Both use comma-separated IDs.
+`order` lists `library`, `search` and `fix` exactly once. `hidden` may list up to two of them. Versions 1 through 4
+import with the current bottom navigation layout.

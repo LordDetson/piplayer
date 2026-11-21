@@ -64,9 +64,21 @@ class ThemePackageCodecTest {
 
     @Test
     fun `future versions are distinguished from invalid schema markers`() {
-        assertThat(decode(document.replace(":1,", ":5,"))).isEqualTo(ThemePackageRead.UnsupportedVersion)
+        assertThat(decode(document.replace(":1,", ":6,"))).isEqualTo(ThemePackageRead.UnsupportedVersion)
         assertThat(decode(document.replace(":1,", ":\"1\","))).isEqualTo(ThemePackageRead.Invalid)
         assertThat(decode(document.replace("\"version\":1,", ""))).isEqualTo(ThemePackageRead.Invalid)
+    }
+
+    @Test
+    fun `a version five theme preserves the bottom navigation order and keeps a reachable destination`() {
+        val source = """{"version":5,"name":"Mix","base":"dark","navigation":{"order":"search,library,fix","hidden":"fix"}}"""
+        val loaded = decode(source)
+        assertThat(loaded).isInstanceOf(ThemePackageRead.Loaded::class.java)
+        val bytes = ThemePackageCodec.encode((loaded as ThemePackageRead.Loaded).theme)
+        assertThat(bytes.decodeToString()).contains("\"version\":5", "search,library,fix", "\"hidden\":\"fix\"")
+        assertThat(ThemePackageCodec.decode(bytes.inputStream())).isEqualTo(loaded)
+        assertThat(decode(source.replace("\"hidden\":\"fix\"", "\"hidden\":\"search,library,fix\""))).isEqualTo(ThemePackageRead.Invalid)
+        assertThat(decode(source.replace("search,library,fix", "search,library,library"))).isEqualTo(ThemePackageRead.Invalid)
     }
 
     @Test

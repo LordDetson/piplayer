@@ -37,6 +37,7 @@ import io.github.lorddetson.piplayer.R
 import io.github.lorddetson.piplayer.settings.CustomTheme
 import io.github.lorddetson.piplayer.settings.ThemePackage
 import io.github.lorddetson.piplayer.settings.librarytabs.LibraryButton
+import io.github.lorddetson.piplayer.ui.labelResource
 import io.github.lorddetson.piplayer.ui.library.builtInTabsById
 import io.github.lorddetson.piplayer.ui.library.labelResource
 import io.github.lorddetson.piplayer.ui.theme.PiPlayerTheme
@@ -144,6 +145,10 @@ private fun ThemePackagePreview(theme: ThemePackage, cancel: () -> Unit, apply: 
                 }
                 theme.layout?.let { layout ->
                     Text(stringResource(R.string.theme_package_layout, stringResource(layout.label())))
+                }
+                theme.navigation?.let { navigation ->
+                    val destinations = navigation.visible.map { stringResource(it.labelResource) }
+                    Text(stringResource(R.string.theme_package_bottom_navigation, destinations.joinToString(" · ")))
                 }
                 theme.panel?.let { panel ->
                     val tabs = panel.tabs.visible.map { stringResource(builtInTabsById.getValue(it).labelResource) }

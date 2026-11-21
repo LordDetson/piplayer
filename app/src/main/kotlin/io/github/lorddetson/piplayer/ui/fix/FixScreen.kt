@@ -24,6 +24,8 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -185,6 +187,7 @@ fun FixScreen(
     onOpenReview: (fileId: Long, batchUuid: String) -> Unit = { _, _ -> },
     onOpenWrite: ((batchUuid: String) -> Unit)? = null,
     onOpenHistory: ((identityId: Long) -> Unit)? = null,
+    snackbar: SnackbarHostState? = null,
 ) {
     val app = LocalContext.current.applicationContext as Application
     val model = viewModel { FixViewModel(app) }
@@ -201,6 +204,7 @@ fun FixScreen(
             TopAppBar(title = { Text(stringResource(R.string.fix_title), modifier = Modifier.semantics { heading() }) })
         },
         modifier = modifier,
+        snackbarHost = { if (snackbar != null) SnackbarHost(snackbar) },
     ) { padding ->
         Column(Modifier.padding(padding).fillMaxSize()) {
             val hasFileRecoveries = onOpenHistory != null && recoveries.isNotEmpty()

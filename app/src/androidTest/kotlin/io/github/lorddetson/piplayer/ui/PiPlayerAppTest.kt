@@ -29,10 +29,12 @@ import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
+import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.core.view.ViewCompat
@@ -58,11 +60,17 @@ import io.github.lorddetson.piplayer.playback.PlaybackTesting.onMain
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.stopAndRelease
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.waitUntil
 import io.github.lorddetson.piplayer.playback.QueueIds
+import io.github.lorddetson.piplayer.settings.AppearanceSettings
+import io.github.lorddetson.piplayer.settings.ThemeMode
 import io.github.lorddetson.piplayer.playback.SongSourceRule
 import io.github.lorddetson.piplayer.ui.player.EqualizerPanel
 import io.github.lorddetson.piplayer.ui.player.PlayerTags
 import io.github.lorddetson.piplayer.ui.player.TimerChoice
 import io.github.lorddetson.piplayer.ui.player.TimerChoiceStore
+import io.github.lorddetson.piplayer.ui.player.withStockPlayerTheme
+import io.github.lorddetson.piplayer.ui.search.SearchTags
+import io.github.lorddetson.piplayer.ui.fix.FixTags
+import io.github.lorddetson.piplayer.ui.library.LibraryTags
 import io.github.lorddetson.piplayer.ui.songs.SongsTags
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.runBlocking
@@ -205,6 +213,59 @@ class PiPlayerAppTest {
         compose.runOnUiThread { event(compose.activity.onBackPressedDispatcher) }
 
     private fun gesture(progress: Float) = BackEventCompat(10f, 800f, progress, BackEventCompat.EDGE_LEFT)
+
+    @Test
+    fun bottomBarActionsMoveHideAndRestoreWithoutLeavingTheCurrentPage() = withStockPlayerTheme(context, "bottom_navigation_") {
+        fun hold(tag: String) = compose.onNodeWithTag(tag).performTouchInput { longClick() }
+        val library = compose.onNodeWithTag(BottomBarTags.LIBRARY)
+        val search = compose.onNodeWithTag(BottomBarTags.SEARCH)
+        library.assertIsSelected()
+        hold(BottomBarTags.SEARCH)
+        compose.onNodeWithTag("bottom_nav_move").performClick()
+        compose.onNodeWithTag("bottom_nav_move_to_library").performClick()
+        compose.waitUntil(5_000) { search.getBoundsInRoot().left < library.getBoundsInRoot().left }
+        library.assertIsSelected()
+
+        hold(BottomBarTags.LIBRARY)
+        compose.onNodeWithTag("bottom_nav_hide").performClick()
+        compose.waitUntilDoesNotExist(hasTestTag(BottomBarTags.LIBRARY), timeoutMillis = 5_000)
+        compose.onNodeWithTag(LibraryTags.TABS).assertExists()
+
+        hold(BottomBarTags.FIX)
+        compose.onNodeWithTag("bottom_nav_hide").performClick()
+        compose.waitUntilDoesNotExist(hasTestTag(BottomBarTags.FIX), timeoutMillis = 5_000)
+        hold(BottomBarTags.SEARCH)
+        compose.onNodeWithTag("bottom_nav_hide").assertDoesNotExist()
+        compose.onNodeWithTag("bottom_nav_add").performClick()
+        compose.onNodeWithTag("bottom_nav_restore_library").performClick()
+        compose.waitUntilExactlyOneExists(hasTestTag(BottomBarTags.LIBRARY), timeoutMillis = 5_000)
+        library.assertIsSelected()
+        search.performClick()
+        compose.waitUntilExactlyOneExists(hasTestTag(SearchTags.FIELD), timeoutMillis = 5_000)
+    }
+
+    @Test
+    fun eachThemeRecallsItsBottomNavigationAfterRecreation() = withStockPlayerTheme(context, "bottom_navigation_") {
+        compose.onNodeWithTag(BottomBarTags.FIX).performTouchInput { longClick() }
+        compose.onNodeWithTag("bottom_nav_hide").performClick()
+        compose.waitUntilDoesNotExist(hasTestTag(BottomBarTags.FIX), timeoutMillis = 5_000)
+        compose.activityRule.scenario.recreate()
+        compose.waitUntilExactlyOneExists(hasTestTag("bottom_nav_recovery"), timeoutMillis = 5_000)
+        compose.onNodeWithTag(BottomBarTags.FIX).assertDoesNotExist()
+        Places.request(Places.FIX)
+        compose.waitUntilExactlyOneExists(hasTestTag(FixTags.NEEDS_ATTENTION), timeoutMillis = 5_000)
+        compose.onNodeWithTag(BottomBarTags.FIX).assertDoesNotExist()
+
+        val appearance = AppearanceSettings(context)
+        runBlocking { appearance.setTheme(ThemeMode.DARK) }
+        compose.waitUntilExactlyOneExists(hasTestTag(BottomBarTags.FIX), timeoutMillis = 5_000)
+        runBlocking { appearance.setTheme(ThemeMode.SYSTEM) }
+        compose.waitUntilDoesNotExist(hasTestTag(BottomBarTags.FIX), timeoutMillis = 5_000)
+        compose.onNodeWithTag("bottom_nav_recovery").performClick()
+        compose.onNodeWithTag("bottom_nav_restore_fix").performClick()
+        compose.waitUntilExactlyOneExists(hasTestTag(BottomBarTags.FIX), timeoutMillis = 5_000)
+        compose.onNodeWithTag(BottomBarTags.FIX).assertIsSelected()
+    }
 
     @Test
     fun aTappedSongBringsUpTheMiniPlayerWhichOpensNowPlaying() {

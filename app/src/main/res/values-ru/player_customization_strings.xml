@@ -16,4 +16,6 @@
     <string name="mini_player_panel_save_failed">Не удалось сохранить раскладку мини-плеера</string>
     <string name="mini_progress_bottom">К нижнему краю</string>
     <string name="mini_progress_top">К верхнему краю</string>
+    <string name="bottom_navigation_save_failed">Не удалось сохранить раскладку нижнего меню</string>
+    <string name="theme_package_bottom_navigation">Нижнее меню: %1$s</string>
 </resources>

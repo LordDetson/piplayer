@@ -11,7 +11,7 @@ import kotlinx.serialization.SerializationException
 
 internal data class PlayerPanelState<P>(val themeId: String, val panel: P)
 
-/** Stores a player layout separately for each built-in or saved theme. */
+/** Stores a layout separately for each built-in or saved theme. */
 internal class PlayerPanelStore<P>(
     private val prefix: String,
     private val default: P,

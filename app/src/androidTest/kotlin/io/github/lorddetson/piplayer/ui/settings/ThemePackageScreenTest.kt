@@ -18,6 +18,8 @@ import androidx.core.app.ActivityOptionsCompat
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.github.lorddetson.piplayer.TestFiles
 import io.github.lorddetson.piplayer.settings.AppearanceSettings
+import io.github.lorddetson.piplayer.settings.BottomDestination
+import io.github.lorddetson.piplayer.settings.bottomNavigationLayouts
 import io.github.lorddetson.piplayer.settings.NowPlayingLayout
 import io.github.lorddetson.piplayer.settings.MiniPlayerElement
 import io.github.lorddetson.piplayer.settings.NowPlayingElement
@@ -105,6 +107,7 @@ class ThemePackageScreenTest {
         val panel = LibraryTabsSettings(context)
         val playerPanel = nowPlayingPanels.forContext(context)
         val mini = miniPlayerPanels.forContext(context)
+        val navigation = bottomNavigationLayouts.forContext(context)
         runBlocking {
             val inherited = panel.panel.first().layout
             panel.setButtonVisible("search", "search" in inherited.buttons.hidden, savedTheme.id)
@@ -114,6 +117,7 @@ class ThemePackageScreenTest {
                 current.move(MiniPlayerElement.PLAY_PAUSE, MiniPlayerElement.COVER)
                     .copy(hidden = current.hidden + MiniPlayerElement.TRACK_INFO, progressAtBottom = true)
             }
+            navigation.edit(savedTheme.id) { it.move(BottomDestination.SEARCH, BottomDestination.LIBRARY).hide(BottomDestination.FIX) }
         }
 
         compose.onNodeWithTag("theme_package_export").performScrollTo().performClick()
@@ -122,6 +126,7 @@ class ThemePackageScreenTest {
         assertThat(exported.theme.panel).isEqualTo(runBlocking { panel.panel.first().layout })
         assertThat(exported.theme.player?.hidden).contains(NowPlayingElement.COVER)
         assertThat(exported.theme.miniPlayer).isEqualTo(runBlocking { mini.state.first().panel })
+        assertThat(exported.theme.navigation).isEqualTo(runBlocking { navigation.state.first().panel })
 
         await("theme_package_undo")
         compose.onNodeWithTag("theme_package_undo").performScrollTo().performClick()
@@ -132,6 +137,7 @@ class ThemePackageScreenTest {
         assertThat(runBlocking { panel.panel.first().layout }).isEqualTo(exported.theme.panel)
         assertThat(runBlocking { playerPanel.state.first().panel }).isEqualTo(exported.theme.player)
         assertThat(runBlocking { mini.state.first().panel }).isEqualTo(exported.theme.miniPlayer)
+        assertThat(runBlocking { navigation.state.first().panel }).isEqualTo(exported.theme.navigation)
 
         runBlocking { settings.setTheme(ThemeMode.SYSTEM) }
         assertThat(runBlocking { panel.panel.first().layout }).isNotEqualTo(exported.theme.panel)
@@ -142,6 +148,7 @@ class ThemePackageScreenTest {
         assertThat(runBlocking { panel.panel.first().layout }).isEqualTo(exported.theme.panel)
         assertThat(runBlocking { playerPanel.state.first().panel }).isEqualTo(exported.theme.player)
         assertThat(runBlocking { mini.state.first().panel }).isEqualTo(exported.theme.miniPlayer)
+        assertThat(runBlocking { navigation.state.first().panel }).isEqualTo(exported.theme.navigation)
     }
 
     @Test

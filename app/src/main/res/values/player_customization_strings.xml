@@ -16,4 +16,6 @@
     <string name="mini_player_panel_save_failed">Could not save the mini player layout</string>
     <string name="mini_progress_bottom">To the bottom edge</string>
     <string name="mini_progress_top">To the top edge</string>
+    <string name="bottom_navigation_save_failed">Could not save the bottom navigation layout</string>
+    <string name="theme_package_bottom_navigation">Bottom navigation: %1$s</string>
 </resources>

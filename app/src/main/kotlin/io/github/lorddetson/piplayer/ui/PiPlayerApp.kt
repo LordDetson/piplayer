@@ -74,7 +74,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
@@ -85,8 +84,6 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarResult
@@ -390,6 +387,7 @@ fun PiPlayerApp(
                         onOpenReview = { fileId, batchUuid -> open(IdentifyRoute(fileId = fileId, batchUuid = batchUuid)) },
                         onOpenWrite = { batchUuid -> open(BatchTagWriteRoute(batchUuid)) },
                         onOpenHistory = { identityId -> open(TagHistoryRoute(identityId)) },
+                        snackbar = host.snackbar,
                     )
                 }
                 entry<BatchTagWriteRoute>(metadata = FROM_THE_SIDE) { route ->
@@ -520,7 +518,7 @@ fun PiPlayerApp(
                 bottomInset = onboarding.showing,
                 snackbar = host.snackbar,
             )
-            if (!onboarding.showing) PiPlayerBottomBar(backStack.firstOrNull(), switchTo)
+            if (!onboarding.showing) PiPlayerBottomBar(backStack.firstOrNull(), switchTo, snackbar)
         }
     }
     if (CrashReports.promptEnabled) CrashPrompt(CrashReports.of(LocalContext.current))
@@ -529,45 +527,6 @@ fun PiPlayerApp(
 
 /** The bottom bar's places, in their order (TI §8, PIM-18). */
 private val TOP_LEVEL_PLACES = listOf(SongsRoute, SearchRoute, FixRoute)
-
-/** Test tags of the bottom bar (PIM-18). */
-object BottomBarTags {
-    const val BAR = "bottom_bar"
-    const val LIBRARY = "bottom_library"
-    const val SEARCH = "bottom_search"
-    const val FIX = "bottom_fix"
-}
-
-/**
- * The bottom bar (PIM-18, docs/library.md §6.1): Library, Search and Fix. [current] is the base entry of the back stack,
- * so a page pushed over a place keeps its item selected, and an item makes its place the base again.
- */
-@Composable
-private fun PiPlayerBottomBar(current: NavKey?, onSelect: (NavKey) -> Unit) {
-    NavigationBar(Modifier.testTag(BottomBarTags.BAR)) {
-        BottomBarItem(SongsRoute, current, BottomBarTags.LIBRARY, R.drawable.ic_library, R.string.bottom_library, onSelect)
-        BottomBarItem(SearchRoute, current, BottomBarTags.SEARCH, R.drawable.ic_search, R.string.bottom_search, onSelect)
-        BottomBarItem(FixRoute, current, BottomBarTags.FIX, R.drawable.ic_fix, R.string.bottom_fix, onSelect)
-    }
-}
-
-@Composable
-private fun RowScope.BottomBarItem(
-    route: NavKey,
-    current: NavKey?,
-    tag: String,
-    icon: Int,
-    label: Int,
-    onSelect: (NavKey) -> Unit,
-) {
-    NavigationBarItem(
-        selected = route == current,
-        onClick = { onSelect(route) },
-        icon = { Icon(painterResource(icon), contentDescription = null) },
-        label = { Text(stringResource(label)) },
-        modifier = Modifier.testTag(tag),
-    )
-}
 
 /**
  * "Choose cover" and "Remove own cover" (docs/library.md §13.2): the system photo picker for images, then a copy of the
