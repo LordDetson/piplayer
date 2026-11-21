@@ -91,7 +91,7 @@ internal fun PageScaffold(
                 }
             }
         },
-        bottomBar = { MiniPlayer(host.player, host.cover, onOpen = host.openNowPlaying, coverName = host.coverName) },
+        bottomBar = { MiniPlayer(host.player, host.cover, onOpen = host.openNowPlaying, coverName = host.coverName, snackbar = host.snackbar) },
         snackbarHost = { SnackbarHost(host.snackbar) },
     ) { padding -> content(Modifier.padding(padding).fillMaxSize()) }
 }

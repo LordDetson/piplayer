@@ -1,12 +1,7 @@
 package io.github.lorddetson.piplayer.ui.player
 
-import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Box
-import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -14,30 +9,22 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.input.pointer.PointerEventPass
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.onLongClick
-import androidx.compose.ui.semantics.semantics
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.lorddetson.piplayer.R
 import io.github.lorddetson.piplayer.settings.NowPlayingElement
 import io.github.lorddetson.piplayer.settings.NowPlayingPanel
-import io.github.lorddetson.piplayer.settings.NowPlayingPanelState
-import io.github.lorddetson.piplayer.settings.NowPlayingPanelSettings
+import io.github.lorddetson.piplayer.settings.PlayerPanelState
+import io.github.lorddetson.piplayer.settings.nowPlayingPanels
 import io.github.lorddetson.piplayer.settings.NowPlayingRow
 import io.github.lorddetson.piplayer.ui.customization.PanelItemKind
 import io.github.lorddetson.piplayer.ui.customization.PanelItemMenu
 import io.github.lorddetson.piplayer.ui.customization.PanelMenuPage
-import io.github.lorddetson.piplayer.ui.customization.RestoreItems
+import io.github.lorddetson.piplayer.ui.customization.PanelRestoreButton
+import io.github.lorddetson.piplayer.ui.customization.customizeOnHold
 import kotlinx.coroutines.launch
 
 internal class NowPlayingCustomization(
@@ -71,8 +58,8 @@ internal fun rememberNowPlayingCustomization(
     onSaveFailed: suspend () -> Unit,
 ): NowPlayingCustomization {
     val app = LocalContext.current.applicationContext
-    val settings = remember(app) { NowPlayingPanelSettings(app) }
-    val state by settings.state.collectAsStateWithLifecycle<NowPlayingPanelState?>(initialValue = null)
+    val settings = remember(app) { nowPlayingPanels.forContext(app) }
+    val state by settings.state.collectAsStateWithLifecycle<PlayerPanelState<NowPlayingPanel>?>(initialValue = null)
     val scope = rememberCoroutineScope()
     val theme = state?.themeId
     return NowPlayingCustomization(theme, state?.panel ?: NowPlayingPanel.DEFAULT, available, showSecondary, { change ->
@@ -120,51 +107,9 @@ internal fun PlayerElement(
 
 @Composable
 internal fun RestorePlayerElements(editor: NowPlayingCustomization) {
-    if (editor.hidden.isEmpty()) return
     key(editor.themeId) {
-        var open by remember { mutableStateOf(false) }
-        Box {
-            IconButton(onClick = { open = true }, modifier = Modifier.testTag("now_playing_restore")) {
-                Icon(painterResource(R.drawable.ic_add), stringResource(R.string.player_element_restore))
-            }
-            DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-                RestoreItems(PanelItemKind.PLAYER, editor.hidden.map { it.id }, { NowPlayingElement.byId.getValue(it).label }) {
-                    open = false
-                    editor.restore(it)
-                }
-            }
-        }
-    }
-}
-
-/** Observe the hold before the child button or slider sees it. Leave taps and drags to that child. */
-@Composable
-private fun Modifier.customizeOnHold(onHold: () -> Unit): Modifier {
-    val label = stringResource(R.string.player_element_customize)
-    val haptic = LocalHapticFeedback.current
-    val open by rememberUpdatedState {
-        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-        onHold()
-    }
-    return semantics { onLongClick(label) { open(); true } }.pointerInput(Unit) {
-        awaitEachGesture {
-            val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
-            val held = withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis) {
-                while (true) {
-                    val pointer = awaitPointerEvent(PointerEventPass.Initial).changes.singleOrNull()
-                    if (pointer == null || pointer.id != down.id || !pointer.pressed ||
-                        (pointer.position - down.position).getDistance() > viewConfiguration.touchSlop) break
-                }
-                false
-            } ?: true
-            if (held) {
-                open()
-                do {
-                    val changes = awaitPointerEvent(PointerEventPass.Initial).changes
-                    changes.forEach { it.consume() }
-                } while (changes.any { it.pressed })
-            }
-        }
+        PanelRestoreButton(PanelItemKind.PLAYER, editor.hidden.map { it.id }, { NowPlayingElement.byId.getValue(it).label },
+            "now_playing_restore", editor::restore)
     }
 }
 

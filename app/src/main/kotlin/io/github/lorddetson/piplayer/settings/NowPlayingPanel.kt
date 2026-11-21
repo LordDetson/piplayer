@@ -1,14 +1,6 @@
 package io.github.lorddetson.piplayer.settings
 
-import android.content.Context
-import androidx.datastore.core.DataStore
-import androidx.datastore.preferences.core.MutablePreferences
-import androidx.datastore.preferences.core.Preferences
-import androidx.datastore.preferences.core.stringPreferencesKey
-import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.map
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 
 internal enum class NowPlayingRow { TOP, CONTENT, CONTROLS, EXTRAS }
@@ -108,41 +100,8 @@ internal data class NowPlayingPanelDocument(
     }
 }
 
-internal data class NowPlayingPanelState(val themeId: String, val panel: NowPlayingPanel)
-
-internal class NowPlayingPanelSettings(private val file: DataStore<Preferences>) {
-    constructor(context: Context) : this(SettingsFiles.settings(context))
-
-    val state = file.data.map(::stateOf).distinctUntilChanged()
-
-    suspend fun edit(themeId: String, change: (NowPlayingPanel) -> NowPlayingPanel): Boolean {
-        var applied = false
-        val written = SettingsFiles.edit(file) { preferences ->
-            val current = stateOf(preferences)
-            if (current.themeId == themeId) {
-                val updated = change(current.panel)
-                if (updated != current.panel) storePanel(preferences, themeId, updated)
-                applied = true
-            }
-        }
-        return applied && written != null
-    }
-
-    companion object {
-        fun stateOf(preferences: Preferences): NowPlayingPanelState {
-            val theme = AppearanceSettings.panelThemeId(preferences)
-            val panel = try {
-                preferences[key(theme)]?.let { Json.decodeFromString<NowPlayingPanelDocument>(it).toPanel() }
-            } catch (_: SerializationException) {
-                null
-            }
-            return NowPlayingPanelState(theme, panel ?: NowPlayingPanel.DEFAULT)
-        }
-
-        fun storePanel(preferences: MutablePreferences, theme: String, panel: NowPlayingPanel) {
-            preferences[key(theme)] = Json.encodeToString(NowPlayingPanelDocument.from(panel))
-        }
-
-        private fun key(theme: String) = stringPreferencesKey("now_playing_panel_$theme")
-    }
-}
+internal val nowPlayingPanels = PlayerPanelStore(
+    "now_playing_panel_", NowPlayingPanel.DEFAULT,
+    decode = { Json.decodeFromString<NowPlayingPanelDocument>(it).toPanel() },
+    encode = { Json.encodeToString(NowPlayingPanelDocument.from(it)) },
+)

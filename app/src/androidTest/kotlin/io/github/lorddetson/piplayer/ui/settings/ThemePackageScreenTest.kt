@@ -19,8 +19,10 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.github.lorddetson.piplayer.TestFiles
 import io.github.lorddetson.piplayer.settings.AppearanceSettings
 import io.github.lorddetson.piplayer.settings.NowPlayingLayout
+import io.github.lorddetson.piplayer.settings.MiniPlayerElement
 import io.github.lorddetson.piplayer.settings.NowPlayingElement
-import io.github.lorddetson.piplayer.settings.NowPlayingPanelSettings
+import io.github.lorddetson.piplayer.settings.miniPlayerPanels
+import io.github.lorddetson.piplayer.settings.nowPlayingPanels
 import io.github.lorddetson.piplayer.settings.ThemeMode
 import io.github.lorddetson.piplayer.settings.ThemePackageCodec
 import io.github.lorddetson.piplayer.settings.ThemePackageRead
@@ -101,12 +103,17 @@ class ThemePackageScreenTest {
         assertThat(settings.read().nowPlayingLayout).isEqualTo(NowPlayingLayout.EXPANDED)
         val savedTheme = checkNotNull(settings.read().customTheme)
         val panel = LibraryTabsSettings(context)
-        val playerPanel = NowPlayingPanelSettings(context)
+        val playerPanel = nowPlayingPanels.forContext(context)
+        val mini = miniPlayerPanels.forContext(context)
         runBlocking {
             val inherited = panel.panel.first().layout
             panel.setButtonVisible("search", "search" in inherited.buttons.hidden, savedTheme.id)
             panel.setVisible("artists", false, savedTheme.id)
             playerPanel.edit(savedTheme.id) { current -> current.copy(hidden = current.hidden + NowPlayingElement.COVER) }
+            mini.edit(savedTheme.id) { current ->
+                current.move(MiniPlayerElement.PLAY_PAUSE, MiniPlayerElement.COVER)
+                    .copy(hidden = current.hidden + MiniPlayerElement.TRACK_INFO, progressAtBottom = true)
+            }
         }
 
         compose.onNodeWithTag("theme_package_export").performScrollTo().performClick()
@@ -114,6 +121,7 @@ class ThemePackageScreenTest {
         val exported = packageFile.inputStream().use(ThemePackageCodec::decode) as ThemePackageRead.Loaded
         assertThat(exported.theme.panel).isEqualTo(runBlocking { panel.panel.first().layout })
         assertThat(exported.theme.player?.hidden).contains(NowPlayingElement.COVER)
+        assertThat(exported.theme.miniPlayer).isEqualTo(runBlocking { mini.state.first().panel })
 
         await("theme_package_undo")
         compose.onNodeWithTag("theme_package_undo").performScrollTo().performClick()
@@ -123,6 +131,7 @@ class ThemePackageScreenTest {
         compose.waitUntil(5_000) { settings.read().customTheme?.id == savedTheme.id }
         assertThat(runBlocking { panel.panel.first().layout }).isEqualTo(exported.theme.panel)
         assertThat(runBlocking { playerPanel.state.first().panel }).isEqualTo(exported.theme.player)
+        assertThat(runBlocking { mini.state.first().panel }).isEqualTo(exported.theme.miniPlayer)
 
         runBlocking { settings.setTheme(ThemeMode.SYSTEM) }
         assertThat(runBlocking { panel.panel.first().layout }).isNotEqualTo(exported.theme.panel)
@@ -132,6 +141,7 @@ class ThemePackageScreenTest {
         compose.waitUntil(5_000) { settings.read().customTheme?.id?.let { it != savedTheme.id } == true }
         assertThat(runBlocking { panel.panel.first().layout }).isEqualTo(exported.theme.panel)
         assertThat(runBlocking { playerPanel.state.first().panel }).isEqualTo(exported.theme.player)
+        assertThat(runBlocking { mini.state.first().panel }).isEqualTo(exported.theme.miniPlayer)
     }
 
     @Test

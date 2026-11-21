@@ -113,3 +113,14 @@ Theme package version 3 adds a `player` object with five comma-separated lists o
 hidden, in their saved positions. Button IDs may be placed in any button row. Content IDs may appear only in
 `content`. Unknown or repeated IDs invalidate the package. Versions 1 and 2 preserve the active component layout
 when they are imported. Version 3 can include the library `panel` object from version 2.
+
+### Mini player component layout
+
+Long press the artwork, track information or play/pause button to move, hide or restore components. Long press
+the progress strip to move it to the top or bottom edge, hide it or restore another component. A plus button
+returns hidden components, including when the whole panel is hidden. A tap on the bar opens Now Playing and a
+tap on the play/pause button controls playback. Each theme stores the order, hidden components and progress edge.
+
+Theme package version 4 adds a `miniPlayer` object with `order`, `hidden` and `progress`. `order` contains
+`cover`, `track_info` and `play_pause` exactly once. `hidden` may also contain `progress`. Both lists use comma
+separators. `progress` is `top` or `bottom`. Versions 1 through 3 import with the current mini player layout.

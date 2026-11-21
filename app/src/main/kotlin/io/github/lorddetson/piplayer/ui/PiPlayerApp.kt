@@ -518,6 +518,7 @@ fun PiPlayerApp(
                 onOpen = host.openNowPlaying,
                 coverName = host.coverName,
                 bottomInset = onboarding.showing,
+                snackbar = host.snackbar,
             )
             if (!onboarding.showing) PiPlayerBottomBar(backStack.firstOrNull(), switchTo)
         }

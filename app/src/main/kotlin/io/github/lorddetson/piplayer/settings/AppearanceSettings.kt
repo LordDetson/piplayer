@@ -67,7 +67,8 @@ class AppearanceSettings internal constructor(private val file: DataStore<Prefer
             palette = current.customTheme?.palette ?: ThemePalette(),
             layout = current.nowPlayingLayout,
             panel = LibraryTabsSettings.panelOf(preferences).layout,
-            player = NowPlayingPanelSettings.stateOf(preferences).panel,
+            player = nowPlayingPanels.stateOf(preferences).panel,
+            miniPlayer = miniPlayerPanels.stateOf(preferences).panel,
         )
     }
 
@@ -76,17 +77,20 @@ class AppearanceSettings internal constructor(private val file: DataStore<Prefer
         layout: NowPlayingLayout? = null,
         panel: LibraryPanelLayout? = null,
         player: NowPlayingPanel? = null,
+        miniPlayer: MiniPlayerPanel? = null,
     ): ThemeApplyResult {
         if (!CustomThemesSettings.isValid(theme)) return ThemeApplyResult.InvalidTheme
         return update(ThemeApplyResult.WriteFailed) { preferences ->
             val previous = appearanceOf(preferences)
             val importedPanel = panel ?: LibraryTabsSettings.panelOf(preferences).layout
-            val importedPlayer = player ?: NowPlayingPanelSettings.stateOf(preferences).panel
+            val importedPlayer = player ?: nowPlayingPanels.stateOf(preferences).panel
+            val importedMiniPlayer = miniPlayer ?: miniPlayerPanels.stateOf(preferences).panel
             if (!CustomThemesSettings.storeTheme(preferences, theme, select = true, replaceExisting = false)) {
                 return@update ThemeApplyResult.InvalidTheme
             }
             LibraryTabsSettings.storePanel(preferences, theme.id, importedPanel)
-            NowPlayingPanelSettings.storePanel(preferences, theme.id, importedPlayer)
+            nowPlayingPanels.storePanel(preferences, theme.id, importedPlayer)
+            miniPlayerPanels.storePanel(preferences, theme.id, importedMiniPlayer)
             if (layout != null) storeLayout(preferences, layout)
             ThemeApplyResult.Applied(ThemeApplyUndo(previous, appearanceOf(preferences), layoutRevision(preferences)))
         }

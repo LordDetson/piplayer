@@ -13,4 +13,7 @@
     <string name="player_move_controls">To the playback controls</string>
     <string name="player_move_extras">To the extra controls</string>
     <string name="player_panel_save_failed">Could not save the Now Playing layout</string>
+    <string name="mini_player_panel_save_failed">Could not save the mini player layout</string>
+    <string name="mini_progress_bottom">To the bottom edge</string>
+    <string name="mini_progress_top">To the top edge</string>
 </resources>

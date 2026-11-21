@@ -13,4 +13,7 @@
     <string name="player_move_controls">В ряд управления воспроизведением</string>
     <string name="player_move_extras">В ряд дополнительных действий</string>
     <string name="player_panel_save_failed">Не удалось сохранить раскладку экрана «Сейчас играет»</string>
+    <string name="mini_player_panel_save_failed">Не удалось сохранить раскладку мини-плеера</string>
+    <string name="mini_progress_bottom">К нижнему краю</string>
+    <string name="mini_progress_top">К верхнему краю</string>
 </resources>

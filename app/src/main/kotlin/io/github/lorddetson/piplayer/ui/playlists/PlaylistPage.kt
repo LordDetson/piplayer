@@ -193,7 +193,7 @@ fun PlaylistPage(id: Long, host: LibraryHost, actions: PlaylistActions, onBack: 
                 },
             )
         },
-        bottomBar = { MiniPlayer(host.player, host.cover, onOpen = host.openNowPlaying, coverName = host.coverName) },
+        bottomBar = { MiniPlayer(host.player, host.cover, onOpen = host.openNowPlaying, coverName = host.coverName, snackbar = host.snackbar) },
         snackbarHost = { SnackbarHost(host.snackbar) },
     ) { padding ->
         val modifier = Modifier.padding(padding).fillMaxSize()

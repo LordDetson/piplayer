@@ -21,6 +21,7 @@ internal data class ThemePackage(
     val layout: NowPlayingLayout? = null,
     val panel: LibraryPanelLayout? = null,
     val player: NowPlayingPanel? = null,
+    val miniPlayer: MiniPlayerPanel? = null,
 )
 
 internal sealed interface ThemePackageRead {
@@ -36,6 +37,7 @@ internal object ThemePackageCodec {
     private const val PALETTE_VERSION = 1
     private const val PANEL_VERSION = 2
     private const val PLAYER_VERSION = 3
+    private const val MINI_PLAYER_VERSION = 4
     private const val MAX_NAME_LENGTH = 80
 
     fun encode(theme: ThemePackage): ByteArray {
@@ -44,13 +46,16 @@ internal object ThemePackageCodec {
         require(panel == null || panel.toLayout() == theme.panel)
         val player = theme.player?.let(NowPlayingPanelDocument::from)
         require(player == null || player.toPanel() == theme.player)
+        val miniPlayer = theme.miniPlayer?.let(MiniPlayerPanelDocument::from)
+        require(miniPlayer == null || miniPlayer.toPanel() == theme.miniPlayer)
         val version = when {
+            miniPlayer != null -> MINI_PLAYER_VERSION
             player != null -> PLAYER_VERSION
             panel != null -> PANEL_VERSION
             else -> PALETTE_VERSION
         }
         return Json.encodeToString(
-            Document(version, theme.name, theme.base.stored, theme.palette, theme.layout?.stored, panel, player),
+            Document(version, theme.name, theme.base.stored, theme.palette, theme.layout?.stored, panel, player, miniPlayer),
         ).encodeToByteArray()
     }
 
@@ -75,9 +80,8 @@ internal object ThemePackageCodec {
             val parsed = Json.parseToJsonElement(text) as? JsonObject ?: return ThemePackageRead.Invalid
             val version = (parsed["version"] as? JsonPrimitive)?.takeUnless { it.isString }?.intOrNull
                 ?: return ThemePackageRead.Invalid
-            if (version !in PALETTE_VERSION..PLAYER_VERSION) return ThemePackageRead.UnsupportedVersion
-            if (("player" in parsed) != (version == PLAYER_VERSION)) return ThemePackageRead.Invalid
-            if (version != PLAYER_VERSION && ("panel" in parsed) != (version == PANEL_VERSION)) return ThemePackageRead.Invalid
+            if (version !in PALETTE_VERSION..MINI_PLAYER_VERSION) return ThemePackageRead.UnsupportedVersion
+            if (!hasVersionFields(version, parsed)) return ThemePackageRead.Invalid
 
             val palette = parsed["palette"] as? JsonObject
             if (palette?.values?.any { it is JsonPrimitive && it.isString } == true) return ThemePackageRead.Invalid
@@ -88,8 +92,9 @@ internal object ThemePackageCodec {
             }
             if (!validName(document.name) || !document.palette.hasValidColors) return ThemePackageRead.Invalid
             val panel = if ("panel" in parsed) document.panel?.toLayout() ?: return ThemePackageRead.Invalid else null
-            val player = if (version == PLAYER_VERSION) document.player?.toPanel() ?: return ThemePackageRead.Invalid else null
-            ThemePackageRead.Loaded(ThemePackage(document.name, base, document.palette, layout, panel, player))
+            val player = if ("player" in parsed) document.player?.toPanel() ?: return ThemePackageRead.Invalid else null
+            val miniPlayer = if ("miniPlayer" in parsed) document.miniPlayer?.toPanel() ?: return ThemePackageRead.Invalid else null
+            ThemePackageRead.Loaded(ThemePackage(document.name, base, document.palette, layout, panel, player, miniPlayer))
         } catch (_: CharacterCodingException) {
             ThemePackageRead.Invalid
         } catch (_: SerializationException) {
@@ -100,7 +105,17 @@ internal object ThemePackageCodec {
     private fun validName(name: String): Boolean = name.length <= MAX_NAME_LENGTH && name.isNotBlank() &&
         name.none(Char::isISOControl) && Charsets.UTF_8.newEncoder().canEncode(name)
 
-    /** The palette and panel are flat objects. Bound nesting before asking the JSON parser to build a tree. */
+    private fun hasVersionFields(version: Int, parsed: JsonObject): Boolean =
+        listOf(PANEL_VERSION to "panel", PLAYER_VERSION to "player", MINI_PLAYER_VERSION to "miniPlayer")
+            .all { (introduced, field) ->
+                when {
+                    version < introduced -> field !in parsed
+                    version == introduced -> field in parsed
+                    else -> true
+                }
+            }
+
+    /** Every nested object is flat. Bound nesting before asking the JSON parser to build a tree. */
     private fun hasBoundedStructure(text: String): Boolean {
         var depth = 0
         var inString = false
@@ -133,5 +148,6 @@ internal object ThemePackageCodec {
         val layout: String? = null,
         val panel: LibraryPanelDocument? = null,
         val player: NowPlayingPanelDocument? = null,
+        val miniPlayer: MiniPlayerPanelDocument? = null,
     )
 }

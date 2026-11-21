@@ -6,9 +6,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -31,7 +29,7 @@ import io.github.lorddetson.piplayer.settings.librarytabs.LibraryTabLayout
 import io.github.lorddetson.piplayer.ui.customization.PanelItemKind
 import io.github.lorddetson.piplayer.ui.customization.PanelItemMenu
 import io.github.lorddetson.piplayer.ui.customization.PanelMenuPage
-import io.github.lorddetson.piplayer.ui.customization.RestoreItems
+import io.github.lorddetson.piplayer.ui.customization.PanelRestoreButton
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -121,16 +119,5 @@ internal fun LibraryToolbarButton(
 
 @Composable
 internal fun RestoreLibraryButtons(hidden: List<String>, onRestore: (String) -> Unit) {
-    var open by remember { mutableStateOf(false) }
-    Box {
-        IconButton(onClick = { open = true }, modifier = Modifier.testTag("library_panel_add")) {
-            Icon(painterResource(R.drawable.ic_add), stringResource(R.string.library_button_add))
-        }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            RestoreItems(PanelItemKind.BUTTON, hidden, { LibraryButton.byId.getValue(it).labelResource }) {
-                open = false
-                onRestore(it)
-            }
-        }
-    }
+    PanelRestoreButton(PanelItemKind.BUTTON, hidden, { LibraryButton.byId.getValue(it).labelResource }, "library_panel_add", onRestore)
 }

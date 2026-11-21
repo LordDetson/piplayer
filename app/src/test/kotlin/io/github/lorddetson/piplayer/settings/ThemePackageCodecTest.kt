@@ -64,9 +64,22 @@ class ThemePackageCodecTest {
 
     @Test
     fun `future versions are distinguished from invalid schema markers`() {
-        assertThat(decode(document.replace(":1,", ":4,"))).isEqualTo(ThemePackageRead.UnsupportedVersion)
+        assertThat(decode(document.replace(":1,", ":5,"))).isEqualTo(ThemePackageRead.UnsupportedVersion)
         assertThat(decode(document.replace(":1,", ":\"1\","))).isEqualTo(ThemePackageRead.Invalid)
         assertThat(decode(document.replace("\"version\":1,", ""))).isEqualTo(ThemePackageRead.Invalid)
+    }
+
+    @Test
+    fun `a version four theme preserves the mini player order progress edge and hidden elements`() {
+        val source = """{"version":4,"name":"Mix","base":"dark","miniPlayer":{"order":"play_pause,cover,track_info","hidden":"track_info,progress","progress":"bottom"}}"""
+        val loaded = decode(source)
+        assertThat(loaded).isInstanceOf(ThemePackageRead.Loaded::class.java)
+        val bytes = ThemePackageCodec.encode((loaded as ThemePackageRead.Loaded).theme)
+        assertThat(bytes.decodeToString()).contains("\"version\":4", "play_pause,cover,track_info", "\"progress\":\"bottom\"")
+        assertThat(ThemePackageCodec.decode(bytes.inputStream())).isEqualTo(loaded)
+        assertThat(decode(source.replace("play_pause,cover,track_info", "play_pause,cover,cover"))).isEqualTo(ThemePackageRead.Invalid)
+        assertThat(decode(source.replace("play_pause,cover,track_info", "play_pause,progress,track_info"))).isEqualTo(ThemePackageRead.Invalid)
+        assertThat(decode(source.replace("\"bottom\"", "\"side\""))).isEqualTo(ThemePackageRead.Invalid)
     }
 
     @Test
