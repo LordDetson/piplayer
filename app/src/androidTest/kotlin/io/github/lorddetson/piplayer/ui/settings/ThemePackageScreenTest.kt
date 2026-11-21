@@ -22,8 +22,10 @@ import io.github.lorddetson.piplayer.settings.NowPlayingLayout
 import io.github.lorddetson.piplayer.settings.ThemeMode
 import io.github.lorddetson.piplayer.settings.ThemePackageCodec
 import io.github.lorddetson.piplayer.settings.ThemePackageRead
+import io.github.lorddetson.piplayer.settings.librarytabs.LibraryTabsSettings
 import io.github.lorddetson.piplayer.ui.theme.PiPlayerTheme
 import java.io.File
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.After
@@ -95,14 +97,34 @@ class ThemePackageScreenTest {
         compose.waitUntil(5_000) { settings.read().customTheme?.name == "Round trip" }
         assertThat(settings.read().customTheme?.palette?.backgroundRgb).isEqualTo(12345)
         assertThat(settings.read().nowPlayingLayout).isEqualTo(NowPlayingLayout.EXPANDED)
+        val savedTheme = checkNotNull(settings.read().customTheme)
+        val panel = LibraryTabsSettings(context)
+        runBlocking {
+            val inherited = panel.panel.first().layout
+            panel.setButtonVisible("search", "search" in inherited.buttons.hidden, savedTheme.id)
+            panel.setVisible("artists", false, savedTheme.id)
+        }
 
         compose.onNodeWithTag("theme_package_export").performScrollTo().performClick()
         await("theme_package_status")
+        val exported = packageFile.inputStream().use(ThemePackageCodec::decode) as ThemePackageRead.Loaded
+        assertThat(exported.theme.panel).isEqualTo(runBlocking { panel.panel.first().layout })
 
         await("theme_package_undo")
         compose.onNodeWithTag("theme_package_undo").performScrollTo().performClick()
         compose.waitUntil(5_000) { settings.read().customTheme == null }
         assertThat(settings.read().nowPlayingLayout).isEqualTo(NowPlayingLayout.STANDARD)
+        compose.onNodeWithTag("saved_theme_${savedTheme.id}").performScrollTo().performClick()
+        compose.waitUntil(5_000) { settings.read().customTheme?.id == savedTheme.id }
+        assertThat(runBlocking { panel.panel.first().layout }).isEqualTo(exported.theme.panel)
+
+        runBlocking { settings.setTheme(ThemeMode.SYSTEM) }
+        assertThat(runBlocking { panel.panel.first().layout }).isNotEqualTo(exported.theme.panel)
+        importPackage()
+        await("theme_package_preview")
+        compose.onNodeWithTag("theme_package_apply").performClick()
+        compose.waitUntil(5_000) { settings.read().customTheme?.id?.let { it != savedTheme.id } == true }
+        assertThat(runBlocking { panel.panel.first().layout }).isEqualTo(exported.theme.panel)
     }
 
     @Test

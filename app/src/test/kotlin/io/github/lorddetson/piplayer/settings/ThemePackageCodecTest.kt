@@ -64,9 +64,22 @@ class ThemePackageCodecTest {
 
     @Test
     fun `future versions are distinguished from invalid schema markers`() {
-        assertThat(decode(document.replace(":1,", ":2,"))).isEqualTo(ThemePackageRead.UnsupportedVersion)
+        assertThat(decode(document.replace(":1,", ":3,"))).isEqualTo(ThemePackageRead.UnsupportedVersion)
         assertThat(decode(document.replace(":1,", ":\"1\","))).isEqualTo(ThemePackageRead.Invalid)
         assertThat(decode(document.replace("\"version\":1,", ""))).isEqualTo(ThemePackageRead.Invalid)
+    }
+
+    @Test
+    fun `a version two theme preserves the order and visibility of tabs and buttons`() {
+        val source = """{"version":2,"name":"Mix","base":"dark","panel":{"tabOrder":"albums,songs,artists,playlists,genres,folders","hiddenTabs":"artists","buttonOrder":"settings,search,sort","hiddenButtons":"sort"}}"""
+        val loaded = decode(source)
+        assertThat(loaded).isInstanceOf(ThemePackageRead.Loaded::class.java)
+        val bytes = ThemePackageCodec.encode((loaded as ThemePackageRead.Loaded).theme)
+        assertThat(bytes.decodeToString()).contains("\"version\":2", "\"hiddenTabs\":\"artists\"", "\"hiddenButtons\":\"sort\"", "\"buttonOrder\":\"settings,search,sort\"")
+        assertThat(ThemePackageCodec.decode(bytes.inputStream())).isEqualTo(loaded)
+        assertThat(decode(source.replace("settings,search,sort", "custom,search,sort"))).isEqualTo(ThemePackageRead.Invalid)
+        assertThat(decode(source.replace("\"hiddenTabs\":\"artists\"", "\"hiddenTabs\":\"albums,songs,artists,playlists,genres,folders\"")))
+            .isEqualTo(ThemePackageRead.Invalid)
     }
 
     @Test

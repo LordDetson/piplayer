@@ -580,6 +580,11 @@ PIM-95 (queue actions) and PIM-96 (folder views).
 - Long press a tab to open its menu in the library. Move it to another visible position, hide it, or add a
   previously hidden tab. Apply each change as it is chosen. A short tap still selects the tab. Moving or
   restoring a tab keeps the current selection, and hiding the active tab selects the first visible tab.
+- Search, Sort and Settings in the library bar have the same long-press actions. The recovery action beside
+  the tabs is available while any button is hidden, including when all three buttons are hidden. A short tap
+  still opens the usual action. Keep the close-search action available during a search.
+- Save the order and visibility of both rows for the active theme. Themes without a saved panel start from
+  the existing library tab preferences and stock buttons. Switching to a saved theme restores its own panel.
 - In the library tab editor, drag a handle to reorder tabs. Each tab offers accessible move actions. Hide or restore
   built-in tabs and edit or remove custom tabs. Keep at least one tab visible. A hidden or removed active tab moves
   selection to the first visible tab. Persist order and visibility with stable tab identifiers.

@@ -7,6 +7,8 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
+import io.github.lorddetson.piplayer.settings.librarytabs.LibraryPanelLayout
+import io.github.lorddetson.piplayer.settings.librarytabs.LibraryTabsSettings
 import java.io.IOException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -56,13 +58,31 @@ class AppearanceSettings internal constructor(private val file: DataStore<Prefer
         SettingsFiles.edit(file) { storeLayout(it, layout) }
     }
 
-    internal suspend fun applyCustomTheme(theme: CustomTheme, layout: NowPlayingLayout? = null): ThemeApplyResult {
+    internal suspend fun exportThemePackage(defaultName: (ThemeMode) -> String): ThemePackage {
+        val preferences = file.data.first()
+        val current = appearanceOf(preferences)
+        return ThemePackage(
+            name = current.customTheme?.name ?: defaultName(current.theme),
+            base = current.theme,
+            palette = current.customTheme?.palette ?: ThemePalette(),
+            layout = current.nowPlayingLayout,
+            panel = LibraryTabsSettings.panelOf(preferences).layout,
+        )
+    }
+
+    internal suspend fun applyCustomTheme(
+        theme: CustomTheme,
+        layout: NowPlayingLayout? = null,
+        panel: LibraryPanelLayout? = null,
+    ): ThemeApplyResult {
         if (!CustomThemesSettings.isValid(theme)) return ThemeApplyResult.InvalidTheme
         return update(ThemeApplyResult.WriteFailed) { preferences ->
             val previous = appearanceOf(preferences)
+            val importedPanel = panel ?: LibraryTabsSettings.panelOf(preferences).layout
             if (!CustomThemesSettings.storeTheme(preferences, theme, select = true, replaceExisting = false)) {
                 return@update ThemeApplyResult.InvalidTheme
             }
+            LibraryTabsSettings.storePanel(preferences, theme.id, importedPanel)
             if (layout != null) storeLayout(preferences, layout)
             ThemeApplyResult.Applied(ThemeApplyUndo(previous, appearanceOf(preferences), layoutRevision(preferences)))
         }
@@ -93,20 +113,23 @@ class AppearanceSettings internal constructor(private val file: DataStore<Prefer
         writeFailure
     }
 
-    private companion object {
-        val THEME = stringPreferencesKey("theme_mode")
-        val NOW_PLAYING_LAYOUT = stringPreferencesKey("now_playing_layout")
-        val LAYOUT_REVISION = longPreferencesKey("now_playing_layout_revision")
+    internal companion object {
+        private val THEME = stringPreferencesKey("theme_mode")
+        private val NOW_PLAYING_LAYOUT = stringPreferencesKey("now_playing_layout")
+        private val LAYOUT_REVISION = longPreferencesKey("now_playing_layout_revision")
 
-        fun layoutRevision(preferences: Preferences): Long = preferences[LAYOUT_REVISION] ?: 0L
+        fun panelThemeId(preferences: Preferences): String = CustomThemesSettings.selectedTheme(preferences)?.id
+            ?: ThemeMode.fromStored(preferences[THEME]).stored
 
-        fun storeLayout(preferences: MutablePreferences, layout: NowPlayingLayout) {
+        private fun layoutRevision(preferences: Preferences): Long = preferences[LAYOUT_REVISION] ?: 0L
+
+        private fun storeLayout(preferences: MutablePreferences, layout: NowPlayingLayout) {
             preferences[NOW_PLAYING_LAYOUT] = layout.stored
             // A later manual choice may return to the same value without reviving an old undo.
             preferences[LAYOUT_REVISION] = layoutRevision(preferences) + 1L
         }
 
-        fun appearanceOf(preferences: Preferences): Appearance {
+        private fun appearanceOf(preferences: Preferences): Appearance {
             val custom = CustomThemesSettings.selectedTheme(preferences)
             return Appearance(
                 theme = custom?.base ?: ThemeMode.fromStored(preferences[THEME]),

@@ -14,6 +14,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performCustomAccessibilityActionWithLabel
 import androidx.compose.ui.test.performTouchInput
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -21,6 +22,8 @@ import io.github.lorddetson.piplayer.MainActivity
 import io.github.lorddetson.piplayer.R
 import io.github.lorddetson.piplayer.TestFiles
 import io.github.lorddetson.piplayer.settings.SettingsFiles
+import io.github.lorddetson.piplayer.settings.AppearanceSettings
+import io.github.lorddetson.piplayer.settings.ThemeMode
 import io.github.lorddetson.piplayer.settings.librarytabs.LibraryTabLayout
 import io.github.lorddetson.piplayer.settings.librarytabs.LibraryTabsSettings
 import io.github.lorddetson.piplayer.ui.GrantAudioPermission
@@ -47,6 +50,9 @@ class LibraryTabCustomizationTest {
             SettingsFiles.edit(file) {
                 it.remove(ORDER)
                 it.remove(HIDDEN)
+                it.remove(THEME)
+                it.remove(SELECTED_THEME)
+                it.clearPanelOverrides()
             }
         }
 
@@ -54,12 +60,72 @@ class LibraryTabCustomizationTest {
             SettingsFiles.edit(file) {
                 before[ORDER]?.let { order -> it[ORDER] = order } ?: it.remove(ORDER)
                 before[HIDDEN]?.let { hidden -> it[HIDDEN] = hidden } ?: it.remove(HIDDEN)
+                before[THEME]?.let { theme -> it[THEME] = theme } ?: it.remove(THEME)
+                before[SELECTED_THEME]?.let { theme -> it[SELECTED_THEME] = theme } ?: it.remove(SELECTED_THEME)
+                it.clearPanelOverrides()
+                for ((key, value) in before.asMap()) {
+                    if (key.name.startsWith("library_panel_") && value is String) {
+                        it[stringPreferencesKey(key.name)] = value
+                    }
+                }
             }
         }
     }
 
     @get:Rule
     val rules: RuleChain = RuleChain.outerRule(GrantAudioPermission).around(resetLayout).around(compose)
+
+    @Test
+    fun toolbarButtonsMoveHideAndReturnWithoutOpeningSettings() {
+        val search = action(R.string.library_search)
+        val sort = action(R.string.library_sort)
+        sort.performTouchInput { longClick() }
+        compose.onNodeWithTag("library_button_move").performClick()
+        compose.onNodeWithTag("library_button_move_to_search").performClick()
+        compose.waitUntil(5_000) { sort.fetchSemanticsNode().boundsInRoot.left < search.fetchSemanticsNode().boundsInRoot.left }
+
+        sort.performTouchInput { longClick() }
+        compose.onNodeWithTag("library_button_hide").performClick()
+        compose.waitUntilDoesNotExist(hasContentDescription(text(R.string.library_sort)), timeoutMillis = 5_000)
+        compose.onNodeWithTag("library_panel_add").performClick()
+        compose.onNodeWithTag("library_button_restore_sort").performClick()
+        compose.waitUntilAtLeastOneExists(hasContentDescription(text(R.string.library_sort)), timeoutMillis = 5_000)
+        compose.waitUntil(5_000) { sort.fetchSemanticsNode().boundsInRoot.left < search.fetchSemanticsNode().boundsInRoot.left }
+        sort.performClick()
+        compose.onNode(hasText(text(R.string.sort_reverse))).assertExists()
+    }
+
+    @Test
+    fun settingsCanBeRestoredWhenAllToolbarButtonsAreHidden() {
+        for (id in listOf(R.string.library_search, R.string.library_sort, R.string.settings_open)) {
+            action(id).performTouchInput { longClick() }
+            compose.onNodeWithTag("library_button_hide").performClick()
+            compose.waitUntilDoesNotExist(hasContentDescription(text(id)), timeoutMillis = 5_000)
+        }
+        compose.onNodeWithTag("library_panel_add").performClick()
+        compose.onNodeWithTag("library_button_restore_settings").performClick()
+        compose.waitUntilAtLeastOneExists(hasContentDescription(text(R.string.settings_open)), timeoutMillis = 5_000)
+        action(R.string.settings_open).performClick()
+        compose.waitUntilAtLeastOneExists(hasText(text(R.string.settings_theme)), timeoutMillis = 5_000)
+    }
+
+    @Test
+    fun selectingAThemeRestoresBothPartsOfItsPanel() {
+        action(R.string.library_search).performTouchInput { longClick() }
+        compose.onNodeWithTag("library_button_hide").performClick()
+        compose.waitUntilDoesNotExist(hasContentDescription(text(R.string.library_search)), timeoutMillis = 5_000)
+        tab(R.string.tab_albums).performTouchInput { longClick() }
+        compose.onNodeWithTag("library_tab_hide").performClick()
+        compose.waitUntilDoesNotExist(tabMatcher(R.string.tab_albums), timeoutMillis = 5_000)
+
+        val appearance = AppearanceSettings(TestFiles.targetContext)
+        runBlocking { appearance.setTheme(ThemeMode.DARK) }
+        compose.waitUntilAtLeastOneExists(tabMatcher(R.string.tab_albums), timeoutMillis = 5_000)
+        action(R.string.library_search).assertExists()
+        runBlocking { appearance.setTheme(ThemeMode.SYSTEM) }
+        compose.waitUntilDoesNotExist(tabMatcher(R.string.tab_albums), timeoutMillis = 5_000)
+        action(R.string.library_search).assertDoesNotExist()
+    }
 
     @Test
     fun longPressMovesHidesAndRestoresTabsOnTheLibraryStrip() {
@@ -150,6 +216,12 @@ class LibraryTabCustomizationTest {
 
     private fun text(id: Int, vararg args: Any): String = compose.activity.getString(id, *args)
 
+    private fun action(id: Int) = compose.onNode(hasContentDescription(text(id)))
+
+    private fun MutablePreferences.clearPanelOverrides() {
+        asMap().keys.filter { it.name.startsWith("library_panel_") }.forEach { remove(it) }
+    }
+
     private fun tabMatcher(id: Int) = hasText(text(id)) and hasAnyAncestor(hasTestTag(LibraryTags.TABS))
 
     private fun tab(id: Int) = compose.onNode(tabMatcher(id))
@@ -176,5 +248,7 @@ class LibraryTabCustomizationTest {
     private companion object {
         val ORDER = stringPreferencesKey("library_tab_order")
         val HIDDEN = stringSetPreferencesKey("library_hidden_tabs")
+        val THEME = stringPreferencesKey("theme_mode")
+        val SELECTED_THEME = stringPreferencesKey("selected_custom_theme_id")
     }
 }

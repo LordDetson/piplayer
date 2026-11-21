@@ -17,6 +17,8 @@ import io.github.lorddetson.piplayer.nativelib.taglib.Id3v1WritePolicy
 import io.github.lorddetson.piplayer.settings.Appearance
 import io.github.lorddetson.piplayer.settings.AppearanceSettings
 import io.github.lorddetson.piplayer.settings.CustomTheme
+import io.github.lorddetson.piplayer.settings.CustomThemesSettings
+import io.github.lorddetson.piplayer.settings.CustomThemeWrite
 import io.github.lorddetson.piplayer.settings.HiddenFiles
 import io.github.lorddetson.piplayer.settings.LibrarySettings
 import io.github.lorddetson.piplayer.settings.NowPlayingLayout
@@ -26,10 +28,8 @@ import io.github.lorddetson.piplayer.settings.TagWritingSettings
 import io.github.lorddetson.piplayer.settings.ThemeMode
 import io.github.lorddetson.piplayer.settings.ThemeApplyResult
 import io.github.lorddetson.piplayer.settings.ThemeApplyUndo
-import io.github.lorddetson.piplayer.settings.ThemePackage
 import io.github.lorddetson.piplayer.settings.ThemePackageCodec
 import io.github.lorddetson.piplayer.settings.ThemePackageRead
-import io.github.lorddetson.piplayer.settings.ThemePalette
 import io.github.lorddetson.piplayer.settings.ThemeUndoResult
 import io.github.lorddetson.piplayer.tagging.write.TagCoverPreset
 import java.io.IOException
@@ -41,6 +41,7 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
@@ -55,6 +56,7 @@ import kotlinx.coroutines.withContext
 class SettingsViewModel(application: Application) : AndroidViewModel(application) {
 
     private val appearance = AppearanceSettings(application)
+    private val customThemes = CustomThemesSettings(application)
     private val library = LibrarySettings(application)
     private val tagWriting = TagWritingSettings(application)
 
@@ -77,6 +79,12 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     private val lastThemeImport = MutableStateFlow<ThemeApplyUndo?>(null)
     internal val themePackageState: StateFlow<ThemePackageState> = themePackage
     internal val themePackageUndo: StateFlow<ThemeApplyUndo?> = lastThemeImport
+    internal val savedThemes: Flow<List<CustomTheme>> = customThemes.state.map { it.themes }
+
+    internal fun selectSavedTheme(id: String) = workWithThemePackage {
+        if (customThemes.select(id) == CustomThemeWrite.STORED) ThemePackageState.Idle
+        else ThemePackageState.Notice(R.string.theme_package_apply_failed)
+    }
 
     internal fun openThemePackage(uri: Uri) = workWithThemePackage {
         val result = withContext(Dispatchers.IO) {
@@ -98,13 +106,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     }
 
     internal fun exportThemePackage(uri: Uri) = workWithThemePackage {
-        val current = appearance.appearance.first()
-        val export = ThemePackage(
-            name = current.customTheme?.name ?: getApplication<Application>().getString(current.theme.label),
-            base = current.theme,
-            palette = current.customTheme?.palette ?: ThemePalette(),
-            layout = current.nowPlayingLayout,
-        )
+        val export = appearance.exportThemePackage { getApplication<Application>().getString(it.label) }
         val written = withContext(Dispatchers.IO) {
             try {
                 val bytes = ThemePackageCodec.encode(export)
@@ -128,7 +130,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     internal fun applyThemePackage() {
         val (theme) = themePackage.value as? ThemePackageState.Preview ?: return
         workWithThemePackage {
-            when (val result = appearance.applyCustomTheme(CustomTheme(theme.name, theme.base, theme.palette), theme.layout)) {
+            when (val result = appearance.applyCustomTheme(CustomTheme(theme.name, theme.base, theme.palette), theme.layout, theme.panel)) {
                 is ThemeApplyResult.Applied -> {
                     lastThemeImport.value = result.undo
                     ThemePackageState.Idle

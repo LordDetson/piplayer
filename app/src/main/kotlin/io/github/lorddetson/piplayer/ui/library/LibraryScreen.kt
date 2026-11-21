@@ -97,6 +97,9 @@ import io.github.lorddetson.piplayer.library.songs.Song
 import io.github.lorddetson.piplayer.settings.ListName
 import io.github.lorddetson.piplayer.settings.ListOrder
 import io.github.lorddetson.piplayer.settings.librarytabs.BuiltInLibraryTab as LibraryTab
+import io.github.lorddetson.piplayer.settings.librarytabs.LibraryButton
+import io.github.lorddetson.piplayer.settings.librarytabs.LibraryPanelLayout
+import io.github.lorddetson.piplayer.settings.librarytabs.LibraryPanelState
 import io.github.lorddetson.piplayer.settings.librarytabs.LibraryTabLayout
 import io.github.lorddetson.piplayer.settings.librarytabs.LibraryTabWrite
 import io.github.lorddetson.piplayer.settings.librarytabs.LibraryTabsSettings
@@ -181,11 +184,13 @@ fun LibraryScreen(host: LibraryHost, onOpenSettings: () -> Unit) {
     val access = rememberAudioAccess()
     var tabName by rememberSaveable { mutableStateOf(LibraryTab.SONGS.id) }
     val tabsSettings = remember(app) { LibraryTabsSettings(app) }
-    val storedLayout by tabsSettings.layout.collectAsStateWithLifecycle<LibraryTabLayout?>(initialValue = null)
-    val tabLayout = storedLayout ?: LibraryTabLayout.DEFAULT
+    val storedPanel by tabsSettings.panel.collectAsStateWithLifecycle<LibraryPanelState?>(initialValue = null)
+    val themeId = storedPanel?.themeId
+    val panel = storedPanel?.layout ?: LibraryPanelLayout()
+    val tabLayout = panel.tabs
     val activeId = tabLayout.selectedTab(tabName)
     val tab = builtInTabsById.getValue(activeId)
-    var editingTabs by rememberSaveable { mutableStateOf(false) }
+    var editingTabs by rememberSaveable(themeId) { mutableStateOf(false) }
     val tabEditScope = rememberCoroutineScope()
     val tabSaveFailed = stringResource(R.string.library_tabs_save_failed)
     fun writeTabs(change: suspend LibraryTabsSettings.() -> LibraryTabWrite) {
@@ -195,12 +200,16 @@ fun LibraryScreen(host: LibraryHost, onOpenSettings: () -> Unit) {
     }
     var searching by rememberSaveable { mutableStateOf(false) }
     var search by rememberSaveable { mutableStateOf("") }
+    fun setSearching(open: Boolean) {
+        searching = open
+        if (!open) search = ""
+    }
 
     val songs = viewModel(key = "songs") { SongsViewModel(app, saved = createSavedStateHandle()) }
     // The songs the Folders tab shows itself, while it shows some (docs/library.md §20.1).
     var folderSongs by remember { mutableStateOf<SongsViewModel?>(null) }
-    LaunchedEffect(storedLayout, tabName) {
-        if (storedLayout != null && tabName != activeId) {
+    LaunchedEffect(storedPanel, tabName) {
+        if (storedPanel != null && tabName != activeId) {
             if (LibraryTabLayout.DEFAULT.selectedTab(tabName) != activeId) {
                 songs.endSelection()
                 folderSongs?.endSelection()
@@ -226,21 +235,40 @@ fun LibraryScreen(host: LibraryHost, onOpenSettings: () -> Unit) {
         folders.setSearch(search)
     }
 
-    val sortControl: @Composable () -> Unit = {
+    val sortControl: @Composable (LibrarySortAnchor) -> Unit = { anchor ->
         when (tab) {
-            LibraryTab.SONGS -> SortButton(ListName.SONGS, songs.order.collectAsStateWithLifecycle().value, songs::setOrder)
+            LibraryTab.SONGS -> SortButton(ListName.SONGS, songs.order.collectAsStateWithLifecycle().value, songs::setOrder, anchor = anchor)
             LibraryTab.ALBUMS -> SortButton(
                 ListName.ALBUMS, albums.order.collectAsStateWithLifecycle().value, albums::setOrder,
-                grid = albums.grid.collectAsStateWithLifecycle().value, onGrid = albums::setGrid,
+                grid = albums.grid.collectAsStateWithLifecycle().value, onGrid = albums::setGrid, anchor = anchor,
             )
             LibraryTab.ARTISTS -> SortButton(
                 ListName.ARTISTS, artists.order.collectAsStateWithLifecycle().value, artists::setOrder,
-                grid = artists.grid.collectAsStateWithLifecycle().value, onGrid = artists::setGrid,
+                grid = artists.grid.collectAsStateWithLifecycle().value, onGrid = artists::setGrid, anchor = anchor,
             )
-            LibraryTab.FOLDERS -> SortButton(ListName.FOLDERS, folders.order.collectAsStateWithLifecycle().value, folders::setOrder)
+            LibraryTab.FOLDERS -> SortButton(ListName.FOLDERS, folders.order.collectAsStateWithLifecycle().value, folders::setOrder, anchor = anchor)
             // Playlists sort by name only (docs/library.md §16.3).
             LibraryTab.PLAYLISTS -> Unit
-            LibraryTab.GENRES -> SortButton(ListName.GENRES, genres.order.collectAsStateWithLifecycle().value, genres::setOrder)
+            LibraryTab.GENRES -> SortButton(ListName.GENRES, genres.order.collectAsStateWithLifecycle().value, genres::setOrder, anchor = anchor)
+        }
+    }
+    val buttons = panel.buttons
+    val visibleButtons = buttons.visible.filter { tab != LibraryTab.PLAYLISTS || it != LibraryButton.SORT.id }
+    val hiddenButtons = buttons.order.filter(buttons.hidden::contains)
+    val restoreButton: (String) -> Unit = { id ->
+        if (themeId != null) writeTabs { setButtonVisible(id, true, themeId) }
+    }
+    val toolbarButton: @Composable (LibraryButton, () -> Unit) -> Unit = { button, onClick ->
+        LibraryToolbarButton(
+            button, visibleButtons, hiddenButtons, themeId != null, onClick,
+            onMove = { target -> if (themeId != null) writeTabs { moveButton(button.id, target, themeId) } },
+            onHide = { if (themeId != null) writeTabs { setButtonVisible(button.id, false, themeId) } },
+            onRestore = restoreButton,
+        )
+    }
+    val closeSearch: @Composable () -> Unit = {
+        IconButton(onClick = { setSearching(false) }) {
+            Icon(painterResource(R.drawable.ic_close), stringResource(R.string.library_search_close))
         }
     }
     Scaffold(
@@ -252,17 +280,23 @@ fun LibraryScreen(host: LibraryHost, onOpenSettings: () -> Unit) {
                     searching = searching,
                     search = search,
                     onSearch = { search = it },
-                    onSearching = { open ->
-                        searching = open
-                        if (!open) search = ""
+                    onSearching = ::setSearching,
+                    customActions = {
+                        if (searching && LibraryButton.SEARCH.id !in visibleButtons) closeSearch()
+                        for (id in visibleButtons) {
+                            key(themeId, id) {
+                                when (LibraryButton.byId.getValue(id)) {
+                                    LibraryButton.SEARCH -> if (searching) closeSearch() else {
+                                        toolbarButton(LibraryButton.SEARCH) { setSearching(true) }
+                                    }
+                                    LibraryButton.SORT -> sortControl { open -> toolbarButton(LibraryButton.SORT, open) }
+                                    LibraryButton.SETTINGS -> toolbarButton(LibraryButton.SETTINGS, onOpenSettings)
+                                }
+                            }
+                        }
+                        DebugEntry()
                     },
-                    sort = sortControl,
-                ) {
-                    DebugEntry()
-                    IconButton(onClick = onOpenSettings) {
-                        Icon(painterResource(R.drawable.ic_settings), stringResource(R.string.settings_open))
-                    }
-                }
+                )
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     PrimaryScrollableTabRow(
                         selectedTabIndex = tabLayout.visible.indexOf(activeId),
@@ -270,12 +304,12 @@ fun LibraryScreen(host: LibraryHost, onOpenSettings: () -> Unit) {
                         edgePadding = 8.dp,
                     ) {
                         tabLayout.visible.forEach { id ->
-                            key(id) {
+                            key(themeId, id) {
                                 LibraryStripTab(
                                     id = id,
                                     selected = id == activeId,
                                     layout = tabLayout,
-                                    canCustomize = storedLayout != null,
+                                    canCustomize = themeId != null,
                                     onClick = {
                                         // The selection belongs to the list it was made in (docs/library.md §20.2, 9).
                                         if (id != activeId) {
@@ -284,18 +318,19 @@ fun LibraryScreen(host: LibraryHost, onOpenSettings: () -> Unit) {
                                         }
                                         tabName = id
                                     },
-                                    onMove = { target -> writeTabs { moveToTab(id, target) } },
-                                    onHide = { writeTabs { setVisible(id, false) } },
-                                    onRestore = { target -> writeTabs { setVisible(target, true) } },
+                                    onMove = { target -> writeTabs { moveToTab(id, target, themeId) } },
+                                    onHide = { writeTabs { setVisible(id, false, themeId) } },
+                                    onRestore = { target -> writeTabs { setVisible(target, true, themeId) } },
                                 )
                             }
                         }
                     }
-                    IconButton(onClick = { editingTabs = true }, enabled = storedLayout != null) {
+                    if (hiddenButtons.isNotEmpty()) key(themeId) { RestoreLibraryButtons(hiddenButtons, restoreButton) }
+                    IconButton(onClick = { editingTabs = true }, enabled = themeId != null) {
                         Icon(painterResource(R.drawable.ic_more_vert), stringResource(R.string.library_tabs_manage))
                     }
                 }
-                if (editingTabs && storedLayout != null) {
+                if (editingTabs && themeId != null) {
                     LibraryTabEditor(
                         layout = tabLayout,
                         settings = tabsSettings,
@@ -818,12 +853,25 @@ private val SORT_LABELS = mapOf(
  * The sort action of a top bar: the list's fields and "Reverse order" (docs/library.md §6.3), and "Show as grid" when
  * [grid] says whether the list shows as one (§11.3).
  */
+internal typealias LibrarySortAnchor = @Composable (onClick: () -> Unit) -> Unit
+
 @Composable
-internal fun SortButton(list: ListName, order: ListOrder, onOrder: (ListOrder) -> Unit, grid: Boolean? = null, onGrid: (Boolean) -> Unit = {}) {
+internal fun SortButton(
+    list: ListName,
+    order: ListOrder,
+    onOrder: (ListOrder) -> Unit,
+    grid: Boolean? = null,
+    onGrid: (Boolean) -> Unit = {},
+    anchor: LibrarySortAnchor? = null,
+) {
     var open by remember { mutableStateOf(false) }
     Box {
-        IconButton(onClick = { open = true }) {
-            Icon(painterResource(R.drawable.ic_sort), stringResource(R.string.library_sort))
+        if (anchor != null) {
+            anchor { open = true }
+        } else {
+            IconButton(onClick = { open = true }) {
+                Icon(painterResource(R.drawable.ic_sort), stringResource(R.string.library_sort))
+            }
         }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
             if (list.fields.size > 1) {
@@ -884,8 +932,9 @@ internal fun LibraryTopBar(
     search: String,
     onSearch: (String) -> Unit,
     onSearching: (Boolean) -> Unit,
-    sort: @Composable () -> Unit,
+    sort: @Composable () -> Unit = {},
     titleStyle: FontStyle? = null,
+    customActions: (@Composable () -> Unit)? = null,
     actions: @Composable () -> Unit = {},
 ) {
     TopAppBar(
@@ -915,17 +964,21 @@ internal fun LibraryTopBar(
             }
         },
         actions = {
-            if (searching) {
-                IconButton(onClick = { onSearching(false) }) {
-                    Icon(painterResource(R.drawable.ic_close), stringResource(R.string.library_search_close))
-                }
+            if (customActions != null) {
+                customActions()
             } else {
-                IconButton(onClick = { onSearching(true) }) {
-                    Icon(painterResource(R.drawable.ic_search), stringResource(R.string.library_search))
+                if (searching) {
+                    IconButton(onClick = { onSearching(false) }) {
+                        Icon(painterResource(R.drawable.ic_close), stringResource(R.string.library_search_close))
+                    }
+                } else {
+                    IconButton(onClick = { onSearching(true) }) {
+                        Icon(painterResource(R.drawable.ic_search), stringResource(R.string.library_search))
+                    }
                 }
+                sort()
+                actions()
             }
-            sort()
-            actions()
         },
         modifier = Modifier.testTag(LibraryTags.TOP_BAR),
     )

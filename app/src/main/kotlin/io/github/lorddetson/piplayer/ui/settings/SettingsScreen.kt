@@ -158,7 +158,7 @@ fun SettingsScreen(
                 R.string.settings_now_playing_layout, appearance.nowPlayingLayout, NowPlayingLayout.entries,
                 NowPlayingLayout::label, viewModel::setNowPlayingLayout,
             )
-            ThemePackageSettings(appearance.customTheme?.name, viewModel)
+            ThemePackageSettings(appearance.customTheme, viewModel)
             SectionTitle(stringResource(R.string.settings_about))
             onOpenDemo?.let {
                 TextRow(stringResource(R.string.demo_start), stringResource(R.string.demo_start_summary), it)

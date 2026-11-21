@@ -1,5 +1,7 @@
 package io.github.lorddetson.piplayer.settings
 
+import io.github.lorddetson.piplayer.settings.librarytabs.LibraryPanelDocument
+import io.github.lorddetson.piplayer.settings.librarytabs.LibraryPanelLayout
 import java.io.IOException
 import java.io.InputStream
 import java.nio.ByteBuffer
@@ -17,6 +19,7 @@ internal data class ThemePackage(
     val base: ThemeMode,
     val palette: ThemePalette = ThemePalette(),
     val layout: NowPlayingLayout? = null,
+    val panel: LibraryPanelLayout? = null,
 )
 
 internal sealed interface ThemePackageRead {
@@ -29,13 +32,17 @@ internal sealed interface ThemePackageRead {
 
 internal object ThemePackageCodec {
     const val MAX_BYTES = 32 * 1024
-    private const val VERSION = 1
+    private const val PALETTE_VERSION = 1
+    private const val PANEL_VERSION = 2
     private const val MAX_NAME_LENGTH = 80
 
     fun encode(theme: ThemePackage): ByteArray {
         require(validName(theme.name) && theme.palette.hasValidColors)
+        val panel = theme.panel?.let(LibraryPanelDocument::from)
+        require(panel == null || panel.toLayout() == theme.panel)
+        val version = if (panel == null) PALETTE_VERSION else PANEL_VERSION
         return Json.encodeToString(
-            Document(VERSION, theme.name, theme.base.stored, theme.palette, theme.layout?.stored),
+            Document(version, theme.name, theme.base.stored, theme.palette, theme.layout?.stored, panel),
         ).encodeToByteArray()
     }
 
@@ -60,7 +67,8 @@ internal object ThemePackageCodec {
             val parsed = Json.parseToJsonElement(text) as? JsonObject ?: return ThemePackageRead.Invalid
             val version = (parsed["version"] as? JsonPrimitive)?.takeUnless { it.isString }?.intOrNull
                 ?: return ThemePackageRead.Invalid
-            if (version != VERSION) return ThemePackageRead.UnsupportedVersion
+            if (version != PALETTE_VERSION && version != PANEL_VERSION) return ThemePackageRead.UnsupportedVersion
+            if (("panel" in parsed) != (version == PANEL_VERSION)) return ThemePackageRead.Invalid
 
             val palette = parsed["palette"] as? JsonObject
             if (palette?.values?.any { it is JsonPrimitive && it.isString } == true) return ThemePackageRead.Invalid
@@ -70,7 +78,8 @@ internal object ThemePackageCodec {
                 NowPlayingLayout.entries.firstOrNull { it.stored == id } ?: return ThemePackageRead.Invalid
             }
             if (!validName(document.name) || !document.palette.hasValidColors) return ThemePackageRead.Invalid
-            ThemePackageRead.Loaded(ThemePackage(document.name, base, document.palette, layout))
+            val panel = if (version == PANEL_VERSION) document.panel?.toLayout() ?: return ThemePackageRead.Invalid else null
+            ThemePackageRead.Loaded(ThemePackage(document.name, base, document.palette, layout, panel))
         } catch (_: CharacterCodingException) {
             ThemePackageRead.Invalid
         } catch (_: SerializationException) {
@@ -81,7 +90,7 @@ internal object ThemePackageCodec {
     private fun validName(name: String): Boolean = name.length <= MAX_NAME_LENGTH && name.isNotBlank() &&
         name.none(Char::isISOControl) && Charsets.UTF_8.newEncoder().canEncode(name)
 
-    /** Only the root and palette can be objects. Bound nesting before asking the JSON parser to build a tree. */
+    /** The palette and panel are flat objects. Bound nesting before asking the JSON parser to build a tree. */
     private fun hasBoundedStructure(text: String): Boolean {
         var depth = 0
         var inString = false
@@ -112,5 +121,6 @@ internal object ThemePackageCodec {
         val base: String,
         val palette: ThemePalette = ThemePalette(),
         val layout: String? = null,
+        val panel: LibraryPanelDocument? = null,
     )
 }

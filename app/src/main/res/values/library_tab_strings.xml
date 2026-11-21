@@ -12,4 +12,11 @@
     <string name="library_tab_add">Add a hidden tab</string>
     <string name="library_tab_move_before">Before %1$s</string>
     <string name="library_tab_move_after">After %1$s</string>
+    <string name="library_button_customize">Customize button</string>
+    <string name="library_button_move">Move button</string>
+    <string name="library_button_hide">Hide button</string>
+    <string name="library_button_add">Restore a hidden button</string>
+    <string name="theme_package_panel_tabs">Library tabs: %1$s</string>
+    <string name="theme_package_panel_buttons">Library buttons: %1$s</string>
+    <string name="theme_package_panel_no_buttons">All library buttons are hidden</string>
 </resources>

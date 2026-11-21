@@ -73,5 +73,28 @@ exports the current palette and layout as `PiPlayer-theme.json`.
 - `layout` is `standard`, `minimal` or `expanded`. Omit it to preserve the current layout.
 - Version 1 accepts the fields above. Font files, images and other assets require a separately specified version.
 
+### Theme package version 2
+
+Version 2 adds a `panel` object. It stores the library toolbar and tab strip for the chosen theme. Each field is a
+comma-separated list of stable component IDs. Hidden items keep their places in the saved order. All toolbar
+buttons may be hidden. At least one tab must stay visible. A package with unknown or duplicated IDs is invalid.
+
+```json
+{
+  "version": 2,
+  "name": "Library focus",
+  "base": "graphite",
+  "panel": {
+    "tabOrder": "songs,artists,albums,playlists,genres,folders",
+    "hiddenTabs": "genres",
+    "buttonOrder": "sort,search,settings",
+    "hiddenButtons": "settings"
+  }
+}
+```
+
+Export includes the current library panel. Import and activate a named theme in one write. Version 1 packages
+remain supported and carry over the current panel on import. Each saved theme can be reselected in Appearance.
+
 The app shares its validated model with the local integration from PIM-73 and PIM-74. Applying a model requires the
 customization permission and uses the same validator as the manual editor. The catalog distributes the same format.

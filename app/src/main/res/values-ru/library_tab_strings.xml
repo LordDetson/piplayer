@@ -12,4 +12,11 @@
     <string name="library_tab_add">Добавить скрытую вкладку</string>
     <string name="library_tab_move_before">Перед «%1$s»</string>
     <string name="library_tab_move_after">После «%1$s»</string>
+    <string name="library_button_customize">Настроить кнопку</string>
+    <string name="library_button_move">Переместить кнопку</string>
+    <string name="library_button_hide">Скрыть кнопку</string>
+    <string name="library_button_add">Вернуть скрытую кнопку</string>
+    <string name="theme_package_panel_tabs">Вкладки медиатеки: %1$s</string>
+    <string name="theme_package_panel_buttons">Кнопки медиатеки: %1$s</string>
+    <string name="theme_package_panel_no_buttons">Все кнопки медиатеки скрыты</string>
 </resources>
