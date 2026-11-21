@@ -8,6 +8,7 @@ import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
+import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performCustomAccessibilityActionWithLabel
@@ -59,6 +60,48 @@ class LibraryTabCustomizationTest {
 
     @get:Rule
     val rules: RuleChain = RuleChain.outerRule(GrantAudioPermission).around(resetLayout).around(compose)
+
+    @Test
+    fun longPressMovesHidesAndRestoresTabsOnTheLibraryStrip() {
+        tab(R.string.tab_songs).assertIsSelected()
+        tab(R.string.tab_albums).performTouchInput { longClick() }
+        compose.onNodeWithTag("library_tab_move").performClick()
+        compose.onNodeWithTag("library_tab_move_to_songs").performClick()
+        awaitLayout { it.visible.take(2) == listOf("albums", "songs") }
+        tab(R.string.tab_songs).assertIsSelected()
+
+        tab(R.string.tab_songs).performTouchInput { longClick() }
+        compose.onNodeWithTag("library_tab_hide").performClick()
+        awaitLayout { "songs" in it.hidden }
+        tab(R.string.tab_songs).assertDoesNotExist()
+        tab(R.string.tab_albums).assertIsSelected()
+
+        compose.activityRule.scenario.recreate()
+        compose.waitUntilAtLeastOneExists(tabMatcher(R.string.tab_albums), timeoutMillis = 10_000)
+        tab(R.string.tab_songs).assertDoesNotExist()
+        tab(R.string.tab_albums).performTouchInput { longClick() }
+        compose.onNodeWithTag("library_tab_add").performClick()
+        compose.onNodeWithTag("library_tab_restore_songs").performClick()
+        awaitLayout { it.visible.take(2) == listOf("albums", "songs") }
+        tab(R.string.tab_albums).assertIsSelected()
+        compose.onNodeWithTag("library_tab_editor").assertDoesNotExist()
+    }
+
+    @Test
+    fun theLastVisibleTabCannotBeHiddenAndCanRestoreAnotherTab() {
+        runBlocking {
+            for (id in LibraryTabLayout.DEFAULT.order.filterNot { it == "songs" }) {
+                LibraryTabsSettings(file).setVisible(id, false)
+            }
+        }
+        compose.waitUntilDoesNotExist(tabMatcher(R.string.tab_albums), timeoutMillis = 10_000)
+        tab(R.string.tab_songs).performTouchInput { longClick() }
+        compose.onNodeWithTag("library_tab_hide").assertDoesNotExist()
+        compose.onNodeWithTag("library_tab_add").performClick()
+        compose.onNodeWithTag("library_tab_restore_albums").performClick()
+        awaitLayout { it.visible == listOf("songs", "albums") }
+        tab(R.string.tab_songs).assertIsSelected()
+    }
 
     @Test
     fun aDragAndHideSurviveRecreatingTheActivityAndRestoreKeepsTheActiveTab() {

@@ -6,4 +6,10 @@
     <string name="library_tabs_move_up">Переместить вверх</string>
     <string name="library_tabs_move_down">Переместить вниз</string>
     <string name="library_tabs_save_failed">Не удалось сохранить вкладки библиотеки</string>
+    <string name="library_tab_customize">Настроить вкладку</string>
+    <string name="library_tab_move">Переместить вкладку</string>
+    <string name="library_tab_hide">Скрыть вкладку</string>
+    <string name="library_tab_add">Добавить скрытую вкладку</string>
+    <string name="library_tab_move_before">Перед «%1$s»</string>
+    <string name="library_tab_move_after">После «%1$s»</string>
 </resources>

@@ -6,4 +6,10 @@
     <string name="library_tabs_move_up">Move up</string>
     <string name="library_tabs_move_down">Move down</string>
     <string name="library_tabs_save_failed">Could not save the library tabs</string>
+    <string name="library_tab_customize">Customize tab</string>
+    <string name="library_tab_move">Move tab</string>
+    <string name="library_tab_hide">Hide tab</string>
+    <string name="library_tab_add">Add a hidden tab</string>
+    <string name="library_tab_move_before">Before %1$s</string>
+    <string name="library_tab_move_after">After %1$s</string>
 </resources>

@@ -62,9 +62,17 @@ internal class LibraryTabsSettings(private val file: DataStore<Preferences>) {
     val layout: Flow<LibraryTabLayout> = file.data.map(::layoutOf).distinctUntilChanged()
 
     /** Moves [id] to its final index in the editor, whose order includes hidden rows. */
-    suspend fun move(id: String, toIndex: Int): LibraryTabWrite = update { preferences, layout ->
+    suspend fun move(id: String, toIndex: Int): LibraryTabWrite = moveTo(id) { toIndex }
+
+    /** Moves a visible tab to the current position of another visible tab. */
+    suspend fun moveToTab(id: String, target: String): LibraryTabWrite = moveTo(id) { layout ->
+        layout.order.indexOf(target).takeIf { id in layout.visible && target in layout.visible }
+    }
+
+    private suspend fun moveTo(id: String, destination: (LibraryTabLayout) -> Int?): LibraryTabWrite = update { preferences, layout ->
         val from = layout.order.indexOf(id)
         if (from < 0) return@update LibraryTabWrite.UNKNOWN_TAB
+        val toIndex = destination(layout) ?: return@update LibraryTabWrite.UNKNOWN_TAB
         if (toIndex !in layout.order.indices) return@update LibraryTabWrite.OUT_OF_BOUNDS
         if (from != toIndex) {
             val reordered = layout.order.toMutableList()

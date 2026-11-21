@@ -48,7 +48,6 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
@@ -56,6 +55,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -98,6 +98,7 @@ import io.github.lorddetson.piplayer.settings.ListName
 import io.github.lorddetson.piplayer.settings.ListOrder
 import io.github.lorddetson.piplayer.settings.librarytabs.BuiltInLibraryTab as LibraryTab
 import io.github.lorddetson.piplayer.settings.librarytabs.LibraryTabLayout
+import io.github.lorddetson.piplayer.settings.librarytabs.LibraryTabWrite
 import io.github.lorddetson.piplayer.settings.librarytabs.LibraryTabsSettings
 import io.github.lorddetson.piplayer.ui.songs.AudioAccess
 import io.github.lorddetson.piplayer.ui.songs.NoMusic
@@ -109,6 +110,7 @@ import io.github.lorddetson.piplayer.ui.player.QueueTarget
 import io.github.lorddetson.piplayer.ui.songs.SongsScreen
 import io.github.lorddetson.piplayer.ui.songs.SongsState
 import io.github.lorddetson.piplayer.ui.songs.SongsViewModel
+import kotlinx.coroutines.launch
 import io.github.lorddetson.piplayer.ui.songs.rememberAudioAccess
 import io.github.lorddetson.piplayer.covers.CoverRequest
 import io.github.lorddetson.piplayer.ui.covers.CoverActions
@@ -185,6 +187,12 @@ fun LibraryScreen(host: LibraryHost, onOpenSettings: () -> Unit) {
     val tab = builtInTabsById.getValue(activeId)
     var editingTabs by rememberSaveable { mutableStateOf(false) }
     val tabEditScope = rememberCoroutineScope()
+    val tabSaveFailed = stringResource(R.string.library_tabs_save_failed)
+    fun writeTabs(change: suspend LibraryTabsSettings.() -> LibraryTabWrite) {
+        tabEditScope.launch {
+            if (tabsSettings.change() != LibraryTabWrite.STORED) host.snackbar.showSnackbar(tabSaveFailed)
+        }
+    }
     var searching by rememberSaveable { mutableStateOf(false) }
     var search by rememberSaveable { mutableStateOf("") }
 
@@ -262,19 +270,25 @@ fun LibraryScreen(host: LibraryHost, onOpenSettings: () -> Unit) {
                         edgePadding = 8.dp,
                     ) {
                         tabLayout.visible.forEach { id ->
-                            val entry = builtInTabsById.getValue(id)
-                            Tab(
-                                selected = id == activeId,
-                                onClick = {
-                                    // The selection belongs to the list it was made in (docs/library.md §20.2, 9).
-                                    if (id != activeId) {
-                                        songs.endSelection()
-                                        folderSongs?.endSelection()
-                                    }
-                                    tabName = id
-                                },
-                                text = { Text(stringResource(entry.labelResource)) },
-                            )
+                            key(id) {
+                                LibraryStripTab(
+                                    id = id,
+                                    selected = id == activeId,
+                                    layout = tabLayout,
+                                    canCustomize = storedLayout != null,
+                                    onClick = {
+                                        // The selection belongs to the list it was made in (docs/library.md §20.2, 9).
+                                        if (id != activeId) {
+                                            songs.endSelection()
+                                            folderSongs?.endSelection()
+                                        }
+                                        tabName = id
+                                    },
+                                    onMove = { target -> writeTabs { moveToTab(id, target) } },
+                                    onHide = { writeTabs { setVisible(id, false) } },
+                                    onRestore = { target -> writeTabs { setVisible(target, true) } },
+                                )
+                            }
                         }
                     }
                     IconButton(onClick = { editingTabs = true }, enabled = storedLayout != null) {
@@ -282,13 +296,12 @@ fun LibraryScreen(host: LibraryHost, onOpenSettings: () -> Unit) {
                     }
                 }
                 if (editingTabs && storedLayout != null) {
-                    val failed = stringResource(R.string.library_tabs_save_failed)
                     LibraryTabEditor(
                         layout = tabLayout,
                         settings = tabsSettings,
                         scope = tabEditScope,
                         onDismiss = { editingTabs = false },
-                        onSaveFailed = { host.snackbar.showSnackbar(failed) },
+                        onSaveFailed = { host.snackbar.showSnackbar(tabSaveFailed) },
                     )
                 }
             }

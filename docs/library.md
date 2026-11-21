@@ -577,6 +577,9 @@ keeps playing meanwhile, and the crash leaves a native crash report of `:tagger`
 The library changes are tracked by PIM-93 (tab order and visibility), PIM-94 (custom sources and rules),
 PIM-95 (queue actions) and PIM-96 (folder views).
 
+- Long press a tab to open its menu in the library. Move it to another visible position, hide it, or add a
+  previously hidden tab. Apply each change as it is chosen. A short tap still selects the tab. Moving or
+  restoring a tab keeps the current selection, and hiding the active tab selects the first visible tab.
 - In the library tab editor, drag a handle to reorder tabs. Each tab offers accessible move actions. Hide or restore
   built-in tabs and edit or remove custom tabs. Keep at least one tab visible. A hidden or removed active tab moves
   selection to the first visible tab. Persist order and visibility with stable tab identifiers.
