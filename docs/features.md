@@ -389,8 +389,9 @@ closed testing once the required testers have opted in.
   favorites and playlist synchronization, plus the Hub's recommendations and server downloads. See
   [HomeMusic integration](homemusic.md).
 - A model for Now Playing, the player controls and list rows, followed by the theme schema, editor and the other
-  customization features under First-release features. The built-in presets are AMOLED, Cool graphite and Warm
-  light, alongside System, Light and Dark.
+  customization features under First-release features. AMOLED, Cool graphite and Warm light are fixed palette
+  choices alongside System, Light and Dark. Cover Focus and Control Deck apply a palette and all four customizable
+  layouts together. See [Interface customization](interface-customization.md).
 - Offline demo (PIM-102): open from onboarding or Settings, play two original sample tracks in Now Playing and
   try a theme. An explicitly labeled example match teaches tag preview, apply and undo on demo metadata.
   The demo player, its queue and appearance are local to the demo. Closing it releases sample playback.

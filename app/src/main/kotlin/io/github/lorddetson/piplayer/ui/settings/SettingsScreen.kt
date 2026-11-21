@@ -341,15 +341,23 @@ private fun ThemeChoice(theme: ThemeMode?, onChoose: (ThemeMode) -> Unit) {
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
                     .fillMaxWidth()
+                    .testTag("theme-${mode.stored}")
                     .selectable(selected = mode == theme, role = Role.RadioButton, onClick = { onChoose(mode) })
                     .padding(horizontal = 24.dp, vertical = 12.dp),
             ) {
                 RadioButton(selected = mode == theme, onClick = null)
-                Text(
-                    text = stringResource(mode.label),
-                    style = MaterialTheme.typography.bodyLarge,
-                    modifier = Modifier.weight(1f).padding(start = 16.dp),
-                )
+                Column(Modifier.weight(1f).padding(start = 16.dp, end = 8.dp)) {
+                    Text(text = stringResource(mode.label), style = MaterialTheme.typography.bodyLarge)
+                    val description = when (mode) {
+                        ThemeMode.COVER_FOCUS -> R.string.theme_cover_focus_description
+                        ThemeMode.CONTROL_DECK -> R.string.theme_control_deck_description
+                        else -> null
+                    }
+                    if (description != null) Text(
+                        stringResource(description), style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
                 builtInColorScheme(mode)?.let { ThemePreview(mode, it) }
             }
         }
@@ -381,6 +389,8 @@ internal val ThemeMode.label: Int
         ThemeMode.AMOLED -> R.string.theme_amoled
         ThemeMode.GRAPHITE -> R.string.theme_graphite
         ThemeMode.WARM_LIGHT -> R.string.theme_warm_light
+        ThemeMode.COVER_FOCUS -> R.string.theme_cover_focus
+        ThemeMode.CONTROL_DECK -> R.string.theme_control_deck
     }
 
 internal fun NowPlayingLayout.label(): Int = when (this) {

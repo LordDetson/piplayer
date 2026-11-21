@@ -17,6 +17,7 @@ internal class PlayerPanelStore<P>(
     private val default: P,
     private val decode: (String) -> P?,
     private val encode: (P) -> String,
+    private val defaultForTheme: (String) -> P? = { null },
 ) {
     fun forContext(context: Context) = Settings(SettingsFiles.settings(context))
 
@@ -27,7 +28,7 @@ internal class PlayerPanelStore<P>(
         } catch (_: SerializationException) {
             null
         }
-        return PlayerPanelState(theme, panel ?: default)
+        return PlayerPanelState(theme, panel ?: defaultForTheme(theme) ?: default)
     }
 
     fun storePanel(preferences: MutablePreferences, theme: String, panel: P) {

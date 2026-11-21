@@ -58,4 +58,5 @@ internal val bottomNavigationLayouts = PlayerPanelStore(
     "bottom_navigation_", BottomNavigationLayout(),
     decode = { Json.decodeFromString<BottomNavigationDocument>(it).toLayout() },
     encode = { Json.encodeToString(BottomNavigationDocument.from(it)) },
+    defaultForTheme = { builtInThemeLayout(it)?.navigation },
 )

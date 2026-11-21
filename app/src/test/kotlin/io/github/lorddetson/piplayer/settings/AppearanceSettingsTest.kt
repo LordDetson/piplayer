@@ -21,6 +21,67 @@ class AppearanceSettingsTest {
     private val previous = CustomTheme(name = "Warm daylight", base = ThemeMode.WARM_LIGHT)
 
     @Test
+    fun `the ready themes change all panels together and remember local edits`() = runBlocking<Unit> {
+        val file = RecordingStore()
+        val settings = AppearanceSettings(file)
+        val cover = ThemeMode.fromStored("cover_focus")
+        val console = ThemeMode.fromStored("control_deck")
+        assertThat(cover.stored).isEqualTo("cover_focus")
+        assertThat(console.stored).isEqualTo("control_deck")
+
+        settings.setTheme(cover)
+        val first = settings.exportThemePackage { it.stored }
+        assertThat(first.layout).isEqualTo(NowPlayingLayout.MINIMAL)
+        assertThat(first.panel?.tabs?.visible).containsExactly("albums", "songs", "artists", "playlists")
+        assertThat(first.panel?.buttons?.visible).containsExactly("search", "settings")
+        assertThat(first.player?.get(NowPlayingRow.TOP)?.first()).isEqualTo(NowPlayingElement.FAVORITE)
+        assertThat(first.player?.hidden).contains(NowPlayingElement.FORMAT)
+        assertThat(first.miniPlayer?.progressAtBottom).isTrue()
+        assertThat(first.navigation?.visible).containsExactly(BottomDestination.LIBRARY, BottomDestination.SEARCH)
+
+        settings.setTheme(console)
+        val second = settings.exportThemePackage { it.stored }
+        assertThat(second.layout).isEqualTo(NowPlayingLayout.EXPANDED)
+        assertThat(second.panel?.tabs?.visible).containsExactly("songs", "folders", "playlists", "albums", "artists", "genres")
+        assertThat(second.panel?.buttons?.visible).containsExactly("sort", "search", "settings")
+        assertThat(second.player?.get(NowPlayingRow.CONTROLS)).containsSubsequence(NowPlayingElement.NEXT, NowPlayingElement.QUEUE)
+        assertThat(second.miniPlayer?.visible?.first()).isEqualTo(MiniPlayerElement.PLAY_PAUSE)
+        assertThat(second.navigation?.visible).containsExactly(BottomDestination.LIBRARY, BottomDestination.FIX, BottomDestination.SEARCH)
+        assertThat(ThemePackageCodec.decode(ThemePackageCodec.encode(second).inputStream())).isEqualTo(ThemePackageRead.Loaded(second))
+
+        file.updateData { preferences ->
+            preferences.toMutablePreferences().also { changed ->
+                bottomNavigationLayouts.storePanel(changed, console.stored, checkNotNull(second.navigation).hide(BottomDestination.SEARCH))
+            }
+        }
+        settings.setNowPlayingLayout(NowPlayingLayout.STANDARD)
+        settings.setTheme(cover)
+        assertThat(settings.exportThemePackage { it.stored }).isEqualTo(first)
+        settings.setTheme(ThemeMode.DARK)
+        assertThat(settings.read().nowPlayingLayout).isEqualTo(NowPlayingLayout.EXPANDED)
+        settings.setTheme(console)
+        assertThat(settings.read().nowPlayingLayout).isEqualTo(NowPlayingLayout.STANDARD)
+        assertThat(settings.exportThemePackage { it.stored }.navigation?.hidden).containsExactly(BottomDestination.SEARCH)
+    }
+
+    @Test
+    fun `an older import and undo preserve the ready theme and the original layout preference`() = runBlocking<Unit> {
+        val file = RecordingStore()
+        val settings = AppearanceSettings(file)
+        val cover = ThemeMode.fromStored("cover_focus")
+        settings.setTheme(cover)
+        val before = settings.exportThemePackage { it.stored }
+        val applied = settings.applyCustomTheme(imported) as ThemeApplyResult.Applied
+        val after = settings.exportThemePackage { it.stored }
+        assertThat(after.layout).isEqualTo(NowPlayingLayout.MINIMAL)
+        assertThat(after.copy(name = before.name, base = before.base, palette = before.palette)).isEqualTo(before)
+        assertThat(settings.undoCustomTheme(applied.undo)).isEqualTo(ThemeUndoResult.RESTORED)
+        assertThat(settings.exportThemePackage { it.stored }).isEqualTo(before)
+        settings.setTheme(ThemeMode.DARK)
+        assertThat(settings.read().nowPlayingLayout).isEqualTo(NowPlayingLayout.EXPANDED)
+    }
+
+    @Test
     fun `apply stores and activates a custom theme with its layout in one commit`() = runBlocking<Unit> {
         val file = RecordingStore()
         val settings = AppearanceSettings(file)

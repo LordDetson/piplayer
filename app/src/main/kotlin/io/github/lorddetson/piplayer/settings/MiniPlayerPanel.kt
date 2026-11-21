@@ -59,4 +59,5 @@ internal val miniPlayerPanels = PlayerPanelStore(
     "mini_player_panel_", MiniPlayerPanel(),
     decode = { Json.decodeFromString<MiniPlayerPanelDocument>(it).toPanel() },
     encode = { Json.encodeToString(MiniPlayerPanelDocument.from(it)) },
+    defaultForTheme = { builtInThemeLayout(it)?.miniPlayer },
 )

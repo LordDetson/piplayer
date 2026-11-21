@@ -290,13 +290,14 @@ The data model it implements is sketched in track-identification.md §10 (TI bel
 - A Settings screen, opened from the Songs screen's top bar, has two sections in M2a: Library (the hidden-file
   settings and Library folders; from M2b also the legacy tag encoding, §5.7) and Appearance (the theme). Other
   sections arrive with their milestones.
-- The theme is System (the default), Light, Dark, AMOLED, Cool graphite or Warm light. The last three choices use
-  fixed palettes and show color previews in Appearance. The first three use dynamic color where available. The choice is
+- Appearance offers System (the default), Light, Dark, AMOLED, Cool graphite, Warm light, Cover Focus and Control Deck.
+  System, Light and Dark use dynamic color where available. The fixed palettes show color previews. The choice is
   read before the activity draws anything and becomes the night mode of its configuration, so its window background and
   the system bars follow it from the first frame on. Android 12 and later also keep it as the app's night mode, which
   themes the splash screen; on Android 11 the starting window the system shows before the app runs follows the system.
   A new choice that changes what the screen shows creates it again, keeping its state.
-- Now Playing has Standard, Minimal and Expanded layouts. Its layout is saved independently from the theme.
+- Now Playing has Standard, Minimal and Expanded layouts. Cover Focus and Control Deck have their own default and
+  saved choice, along with all four customizable panel layouts. The other built-in themes share a presentation choice.
   Minimal can reveal its secondary controls on the same screen. Expanded puts compact artwork beside the track
   information and fits more controls in the available height. See [Interface customization](interface-customization.md).
 - Library folders shows each attached volume as a tree of the folders that hold audio, with each folder included,

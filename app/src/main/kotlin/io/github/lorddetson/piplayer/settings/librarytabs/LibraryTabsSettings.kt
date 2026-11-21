@@ -7,6 +7,7 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import io.github.lorddetson.piplayer.settings.AppearanceSettings
+import io.github.lorddetson.piplayer.settings.builtInThemeLayout
 import io.github.lorddetson.piplayer.settings.SettingsFiles
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -147,7 +148,7 @@ internal class LibraryTabsSettings(private val file: DataStore<Preferences>) {
                 null
             }
             // Read the old shared tabs as the starting layout for themes with no saved panel.
-            val layout = saved ?: LibraryPanelLayout(tabs = LibraryTabLayout.fromStored(
+            val layout = saved ?: builtInThemeLayout(themeId)?.library ?: LibraryPanelLayout(tabs = LibraryTabLayout.fromStored(
                 preferences[ORDER].orEmpty().split(','), preferences[HIDDEN].orEmpty(),
             ))
             return LibraryPanelState(themeId, layout)

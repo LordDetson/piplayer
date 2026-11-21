@@ -18,4 +18,8 @@
     <string name="mini_progress_top">К верхнему краю</string>
     <string name="bottom_navigation_save_failed">Не удалось сохранить раскладку нижнего меню</string>
     <string name="theme_package_bottom_navigation">Нижнее меню: %1$s</string>
+    <string name="theme_cover_focus">Обложка</string>
+    <string name="theme_cover_focus_description">Крупная обложка, альбомы в начале и меньше кнопок</string>
+    <string name="theme_control_deck">Пульт</string>
+    <string name="theme_control_deck_description">Очередь, папки и управление под рукой</string>
 </resources>

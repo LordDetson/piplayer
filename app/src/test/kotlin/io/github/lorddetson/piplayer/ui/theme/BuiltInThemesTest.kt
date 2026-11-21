@@ -9,6 +9,14 @@ import org.junit.jupiter.api.Test
 
 class BuiltInThemesTest {
     @Test
+    fun `cover focus and control deck use distinct palettes`() {
+        assertThat(palette("cover_focus").primary).isEqualTo(Color(0xFFF4AB93))
+        assertThat(palette("cover_focus").surface.luminance()).isLessThan(0.08f)
+        assertThat(palette("control_deck").primary).isEqualTo(Color(0xFF006051))
+        assertThat(palette("control_deck").surface.luminance()).isGreaterThan(0.75f)
+    }
+
+    @Test
     fun `AMOLED is black and each preset has its own surface and accent`() {
         val palettes = listOf("amoled", "graphite", "warm_light").map(::palette)
 
@@ -22,7 +30,7 @@ class BuiltInThemesTest {
 
     @Test
     fun `preset text and actions meet minimum contrast on their rendered backgrounds`() {
-        for (id in listOf("amoled", "graphite", "warm_light")) {
+        for (id in listOf("amoled", "graphite", "warm_light", "cover_focus", "control_deck")) {
             val colors = palette(id)
             val pairs = listOf(
                 colors.onBackground to colors.background,

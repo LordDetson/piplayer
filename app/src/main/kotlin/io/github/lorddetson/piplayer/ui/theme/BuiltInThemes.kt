@@ -10,6 +10,8 @@ internal fun builtInColorScheme(mode: ThemeMode): ColorScheme? = when (mode) {
     ThemeMode.AMOLED -> amoled
     ThemeMode.GRAPHITE -> graphite
     ThemeMode.WARM_LIGHT -> warmLight
+    ThemeMode.COVER_FOCUS -> coverFocus
+    ThemeMode.CONTROL_DECK -> controlDeck
     ThemeMode.SYSTEM, ThemeMode.LIGHT, ThemeMode.DARK -> null
 }
 
@@ -110,4 +112,70 @@ private val warmLight = lightColorScheme(
     inversePrimary = Color(0xFFF6BC80),
     outline = Color(0xFF846F5D),
     outlineVariant = Color(0xFFD6C3B0),
+)
+
+private val coverFocus = darkColorScheme(
+    primary = Color(0xFFF4AB93),
+    onPrimary = Color(0xFF422235),
+    primaryContainer = Color(0xFF573349),
+    onPrimaryContainer = Color(0xFFFFE0D6),
+    secondary = Color(0xFFD8BBD4),
+    onSecondary = Color(0xFF35243A),
+    secondaryContainer = Color(0xFF432F46),
+    onSecondaryContainer = Color(0xFFF1D9EF),
+    tertiary = Color(0xFFE4C3F5),
+    onTertiary = Color(0xFF3D294F),
+    tertiaryContainer = Color(0xFF503663),
+    onTertiaryContainer = Color(0xFFF9DCFF),
+    background = Color(0xFF1A1523),
+    onBackground = Color(0xFFF3E9F4),
+    surface = Color(0xFF1A1523),
+    onSurface = Color(0xFFF3E9F4),
+    surfaceVariant = Color(0xFF44364C),
+    onSurfaceVariant = Color(0xFFD5C4D7),
+    surfaceContainerLowest = Color(0xFF140F1C),
+    surfaceContainerLow = Color(0xFF1E1929),
+    surfaceContainer = Color(0xFF261F31),
+    surfaceContainerHigh = Color(0xFF302738),
+    surfaceContainerHighest = Color(0xFF392D42),
+    surfaceDim = Color(0xFF1A1523),
+    surfaceBright = Color(0xFF493B50),
+    inverseSurface = Color(0xFFF3E9F4),
+    inverseOnSurface = Color(0xFF34283C),
+    inversePrimary = Color(0xFF893E2E),
+    outline = Color(0xFFA28BA4),
+    outlineVariant = Color(0xFF514354),
+)
+
+private val controlDeck = lightColorScheme(
+    primary = Color(0xFF006051),
+    onPrimary = Color.White,
+    primaryContainer = Color(0xFFB6ECDD),
+    onPrimaryContainer = Color(0xFF00221B),
+    secondary = Color(0xFF3B675B),
+    onSecondary = Color.White,
+    secondaryContainer = Color(0xFFCFE8DF),
+    onSecondaryContainer = Color(0xFF142E26),
+    tertiary = Color(0xFF6C5323),
+    onTertiary = Color.White,
+    tertiaryContainer = Color(0xFFF6E1B0),
+    onTertiaryContainer = Color(0xFF2A2009),
+    background = Color(0xFFF2F8F5),
+    onBackground = Color(0xFF162A26),
+    surface = Color(0xFFF2F8F5),
+    onSurface = Color(0xFF162A26),
+    surfaceVariant = Color(0xFFDCEAE4),
+    onSurfaceVariant = Color(0xFF3F574E),
+    surfaceContainerLowest = Color.White,
+    surfaceContainerLow = Color(0xFFEEF5F1),
+    surfaceContainer = Color(0xFFE7F0EC),
+    surfaceContainerHigh = Color(0xFFDFEAE5),
+    surfaceContainerHighest = Color(0xFFD5E6DF),
+    surfaceDim = Color(0xFFD3E1DB),
+    surfaceBright = Color(0xFFF2F8F5),
+    inverseSurface = Color(0xFF263C34),
+    inverseOnSurface = Color(0xFFE5F5EF),
+    inversePrimary = Color(0xFF84D7C3),
+    outline = Color(0xFF627D72),
+    outlineVariant = Color(0xFFBCCFC6),
 )

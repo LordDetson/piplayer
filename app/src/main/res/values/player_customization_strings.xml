@@ -18,4 +18,8 @@
     <string name="mini_progress_top">To the top edge</string>
     <string name="bottom_navigation_save_failed">Could not save the bottom navigation layout</string>
     <string name="theme_package_bottom_navigation">Bottom navigation: %1$s</string>
+    <string name="theme_cover_focus">Cover Focus</string>
+    <string name="theme_cover_focus_description">Large artwork, albums first and fewer controls</string>
+    <string name="theme_control_deck">Control Deck</string>
+    <string name="theme_control_deck_description">Queue, folders and playback controls within reach</string>
 </resources>

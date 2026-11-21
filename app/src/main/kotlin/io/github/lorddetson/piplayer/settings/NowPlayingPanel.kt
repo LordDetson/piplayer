@@ -104,4 +104,5 @@ internal val nowPlayingPanels = PlayerPanelStore(
     "now_playing_panel_", NowPlayingPanel.DEFAULT,
     decode = { Json.decodeFromString<NowPlayingPanelDocument>(it).toPanel() },
     encode = { Json.encodeToString(NowPlayingPanelDocument.from(it)) },
+    defaultForTheme = { builtInThemeLayout(it)?.player },
 )

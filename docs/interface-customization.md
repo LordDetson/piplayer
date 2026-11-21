@@ -10,10 +10,10 @@ order and their presentation. Now Playing, its buttons and library rows use the 
 existing playback and navigation callbacks. Playback, settings and file operations keep their existing permission
 checks.
 
-The theme and the Now Playing layout are independent settings. The initial choices are System, Light, Dark,
-AMOLED, Cool graphite and Warm light. The first three follow system dynamic colors where available. The other
-three carry fixed Material color roles and previews in Appearance. An existing theme selection keeps its stored
-identifier. The layout defaults to Standard when absent or unrecognized.
+System, Light, Dark, AMOLED, Cool graphite and Warm light keep their independent Now Playing layout choice.
+The first three follow system dynamic colors where available. The fixed palettes have previews in Appearance.
+An existing theme selection keeps its stored identifier. The independent layout defaults to Standard when absent
+or unrecognized.
 
 | Layout | Now Playing |
 | --- | --- |
@@ -24,6 +24,17 @@ identifier. The layout defaults to Standard when absent or unrecognized.
 Every built-in layout retains labeled touch targets and access to the queue, identification, track actions,
 favorite, shuffle, repeat, timer and supported audio effects. The player continues to honor available Media3
 commands. Controls for later M5 features join the appropriate group when their feature is implemented.
+
+### Complete built-in themes
+
+| Theme | Colors | Library | Now Playing | Mini player | Bottom navigation |
+| --- | --- | --- | --- | --- | --- |
+| Cover Focus | Dark plum and peach | Albums first. Search and settings are visible. | Minimal presentation with artwork and basic playback. Audio information is hidden. | Artwork first, progress at the bottom. | Library and Search. |
+| Control Deck | Light mint and teal | Songs, Folders and Playlists first. Sort is the first button. | Expanded presentation with Queue beside Next. Equalizer leads the extra actions when available. | Play/pause first, progress at the top. | Library, Fix and Search. |
+
+Choosing a complete theme applies its palette, Now Playing presentation and all four panel layouts. Local edits
+are saved for that theme. Export includes the resulting layouts. Theme packages imported without a presentation
+inherit the current presentation, and undo restores the previous independent choice.
 
 ## Imported themes
 
@@ -66,7 +77,7 @@ exports the current palette and layout as `PiPlayer-theme.json`.
 ```
 
 - `name` is nonblank, at most 80 UTF-16 code units, and contains no control characters.
-- `base` is one of `system`, `light`, `dark`, `amoled`, `graphite` or `warm_light`.
+- `base` is one of `system`, `light`, `dark`, `amoled`, `graphite`, `warm_light`, `cover_focus` or `control_deck`.
 - `palette` is optional. The `accentRgb`, `backgroundRgb`, `surfaceRgb` and `textRgb` values are integers from
   0 to 16777215. Missing colors inherit from the base palette. `automaticText` defaults to `true`. Set it to
   `false` to use a supplied `textRgb`.

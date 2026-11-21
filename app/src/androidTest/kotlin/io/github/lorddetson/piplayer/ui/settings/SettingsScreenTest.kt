@@ -4,6 +4,7 @@ import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.hasContentDescription
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
@@ -149,6 +150,26 @@ class SettingsScreenTest {
             ShownWindow.assertFollows(compose, dark)
             if (dark) assertThat(brightness()).isLessThan(0.3) else assertThat(brightness()).isGreaterThan(0.6)
         }
+    }
+
+    @Test
+    fun readyThemesCanBeChosenWithTheirOwnPaletteAndPresentation() {
+        openSettings()
+        fun choosePreset(id: String, presentation: NowPlayingLayout) {
+            val choice = "theme-$id"
+            compose.onNodeWithTag(SettingsTags.CONTENT).performScrollToNode(hasTestTag(choice))
+            compose.onNodeWithTag("theme-preview-$id", useUnmergedTree = true).assertExists()
+            compose.onNodeWithTag(choice).performClick()
+            val settings = AppearanceSettings(context)
+            compose.waitUntil(5_000) { settings.readTheme().stored == id }
+            assertThat(settings.read().nowPlayingLayout).isEqualTo(presentation)
+        }
+        choosePreset("cover_focus", NowPlayingLayout.MINIMAL)
+        ShownWindow.assertFollows(compose, dark = true)
+        assertThat(brightness()).isLessThan(0.3)
+        choosePreset("control_deck", NowPlayingLayout.EXPANDED)
+        ShownWindow.assertFollows(compose, dark = false)
+        assertThat(brightness()).isGreaterThan(0.6)
     }
 
     @Test
