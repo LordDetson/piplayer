@@ -462,6 +462,7 @@ fun PiPlayerApp(
                         val pendingFileId = currentSongId?.takeIf { it in waiting }
                         val links = playingLinks
                         val scope = rememberCoroutineScope()
+                        val panelSaveFailed = stringResource(R.string.player_panel_save_failed)
                         // The keys are read again at the tap: the tag pass may have changed them since the song began.
                         val openLatest = { route: (SongLinks) -> NavKey? ->
                             scope.launch {
@@ -475,6 +476,7 @@ fun PiPlayerApp(
                             cover,
                             onClose = { close() },
                             layout = nowPlayingLayout,
+                            onPanelSaveFailed = { snackbar.showSnackbar(panelSaveFailed) },
                             controls = rememberExtraControls(viewModel, player),
                             onOpenArtist = links?.artists?.firstOrNull()?.let {
                                 { openLatest { latest -> latest.artists.firstOrNull()?.let { ArtistRoute(it.key) } } }

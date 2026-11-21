@@ -98,3 +98,18 @@ remain supported and carry over the current panel on import. Each saved theme ca
 
 The app shares its validated model with the local integration from PIM-73 and PIM-74. Applying a model requires the
 customization permission and uses the same validator as the manual editor. The catalog distributes the same format.
+
+### Now Playing component layout
+
+Long press a component on Now Playing to move it, hide it or restore another component. Move artwork, track
+information, audio details and progress within the content section. Move buttons within or between the top,
+playback and extra control rows. Keep the back control and the restore action available even if the panel is empty.
+Short taps and progress drags keep their playback behavior. A layout edit writes display preferences for the active
+theme, and a theme switch restores that theme's component layout. The basic Standard, Minimal and Expanded
+layout choices continue to control the size and presentation of components.
+
+Theme package version 3 adds a `player` object with five comma-separated lists of stable component IDs. `top`,
+`content`, `controls` and `extras` place each component exactly once. `hidden` lists components that are currently
+hidden, in their saved positions. Button IDs may be placed in any button row. Content IDs may appear only in
+`content`. Unknown or repeated IDs invalidate the package. Versions 1 and 2 preserve the active component layout
+when they are imported. Version 3 can include the library `panel` object from version 2.

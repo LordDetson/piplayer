@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
@@ -17,16 +18,22 @@ import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasStateDescription
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.isHeading
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipe
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.media3.common.C
@@ -34,13 +41,19 @@ import androidx.media3.common.Format
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.Player
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.datastore.preferences.core.stringPreferencesKey
 import io.github.lorddetson.piplayer.R
 import io.github.lorddetson.piplayer.TestFiles
 import io.github.lorddetson.piplayer.settings.NowPlayingLayout
+import io.github.lorddetson.piplayer.settings.AppearanceSettings
+import io.github.lorddetson.piplayer.settings.SettingsFiles
+import io.github.lorddetson.piplayer.settings.ThemeMode
 import io.github.lorddetson.piplayer.ui.player.TestPlayer.Call
 import io.github.lorddetson.piplayer.ui.player.TestPlayer.TestSong
 import io.github.lorddetson.piplayer.ui.theme.PiPlayerTheme
 import java.util.Locale
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.Rule
 import org.junit.Test
@@ -88,6 +101,87 @@ class NowPlayingTest {
 
     private fun hasClickLabel(label: String) =
         SemanticsMatcher("click label \"$label\"") { it.config.getOrNull(SemanticsActions.OnClick)?.label == label }
+
+    @Test
+    fun buttonsCanMoveBetweenRowsAndBeHiddenAndRestoredDuringPlayback() = withStockTheme {
+        var queueOpened = false
+        val player = show(playing = true, onOpenQueue = { queueOpened = true })
+        val queue = compose.onNodeWithContentDescription(text(R.string.queue_open))
+        queue.performTouchInput { longClick() }
+        compose.onNodeWithTag("player_element_move").performClick()
+        compose.onNodeWithTag("player_element_move_to_previous").performScrollTo().performClick()
+        compose.waitUntil(5_000) {
+            compose.onAllNodes(hasContentDescription(text(R.string.queue_open)) and hasAnyAncestor(hasTestTag("now_playing_transport")))
+                .fetchSemanticsNodes().size == 1
+        }
+        queue.performScrollTo().performTouchInput { longClick() }
+        compose.onNodeWithTag("player_element_hide").performClick()
+        compose.waitUntil(5_000) { compose.onAllNodes(hasContentDescription(text(R.string.queue_open))).fetchSemanticsNodes().isEmpty() }
+        compose.onNodeWithTag("now_playing_restore").performScrollTo().performClick()
+        compose.onNodeWithTag("player_element_restore_queue").performClick()
+        queue.performScrollTo().performClick()
+        assertThat(queueOpened).isTrue()
+        assertThat(compose.runOnUiThread { player.playWhenReady }).isTrue()
+        assertThat(compose.runOnUiThread { player.calls }).isEmpty()
+    }
+
+    @Test
+    fun draggingSeeksAndHoldingOpensTheProgressMenuWithoutSeeking() = withStockTheme {
+        val player = show(playing = true, layout = NowPlayingLayout.EXPANDED)
+        val seekBar = compose.onNodeWithTag(PlayerTags.SEEK_BAR).performScrollTo()
+        seekBar.performTouchInput {
+            swipe(Offset(width * 0.28f, center.y), Offset(width * 0.65f, center.y), durationMillis = 300)
+        }
+        val callsAfterDrag = compose.runOnUiThread { player.calls.toList() }
+        val seek = callsAfterDrag.single() as Call.Seek
+        assertThat(seek.positionMs).isBetween(120_000L, 170_000L)
+
+        seekBar.performTouchInput { longClick() }
+        compose.onNodeWithTag("player_element_move").assertIsDisplayed()
+        assertThat(compose.runOnUiThread { player.calls.toList() }).isEqualTo(callsAfterDrag)
+    }
+
+    @Test
+    fun theCoverVisibilityReturnsWithTheSelectedTheme() = withStockTheme {
+        show(playing = true, cover = true)
+        val cover = compose.onNodeWithTag(PlayerTags.COVER, useUnmergedTree = true)
+        cover.performTouchInput { longClick() }
+        compose.onNodeWithTag("player_element_hide").performClick()
+        fun shown() = compose.onAllNodes(hasTestTag(PlayerTags.COVER), useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
+        compose.waitUntil(5_000) { !shown() }
+        runBlocking { AppearanceSettings(context).setTheme(ThemeMode.DARK) }
+        compose.waitUntil(5_000) { shown() }
+        runBlocking { AppearanceSettings(context).setTheme(ThemeMode.SYSTEM) }
+        compose.waitUntil(5_000) { !shown() }
+    }
+
+    private fun withStockTheme(test: () -> Unit) {
+        val file = SettingsFiles.settings(context)
+        val theme = stringPreferencesKey("theme_mode")
+        val selected = stringPreferencesKey("selected_custom_theme_id")
+        val previous = runBlocking { file.data.first() }
+        runBlocking {
+            SettingsFiles.edit(file) { preferences ->
+                preferences.remove(theme)
+                preferences.remove(selected)
+                preferences.asMap().keys.filter { it.name.startsWith("now_playing_panel_") }.forEach { preferences.remove(it) }
+            }
+        }
+        try {
+            test()
+        } finally {
+            runBlocking {
+                SettingsFiles.edit(file) { preferences ->
+                    previous[theme]?.let { preferences[theme] = it } ?: preferences.remove(theme)
+                    previous[selected]?.let { preferences[selected] = it } ?: preferences.remove(selected)
+                    preferences.asMap().keys.filter { it.name.startsWith("now_playing_panel_") }.forEach { preferences.remove(it) }
+                    for ((key, value) in previous.asMap()) {
+                        if (key.name.startsWith("now_playing_panel_") && value is String) preferences[stringPreferencesKey(key.name)] = value
+                    }
+                }
+            }
+        }
+    }
 
     @Test
     fun minimalLayoutKeepsMainControlsAndRevealsOtherActionsOnTheSameScreen() {

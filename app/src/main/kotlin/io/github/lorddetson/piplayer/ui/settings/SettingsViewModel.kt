@@ -130,7 +130,9 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     internal fun applyThemePackage() {
         val (theme) = themePackage.value as? ThemePackageState.Preview ?: return
         workWithThemePackage {
-            when (val result = appearance.applyCustomTheme(CustomTheme(theme.name, theme.base, theme.palette), theme.layout, theme.panel)) {
+            when (val result = appearance.applyCustomTheme(
+                CustomTheme(theme.name, theme.base, theme.palette), theme.layout, theme.panel, theme.player,
+            )) {
                 is ThemeApplyResult.Applied -> {
                     lastThemeImport.value = result.undo
                     ThemePackageState.Idle

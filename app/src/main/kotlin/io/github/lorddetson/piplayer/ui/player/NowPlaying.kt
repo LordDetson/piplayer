@@ -68,7 +68,12 @@ import androidx.media3.common.Player
 import androidx.media3.common.Tracks
 import androidx.media3.common.util.UnstableApi
 import io.github.lorddetson.piplayer.R
+import io.github.lorddetson.piplayer.settings.NowPlayingElement
 import io.github.lorddetson.piplayer.settings.NowPlayingLayout
+import io.github.lorddetson.piplayer.settings.NowPlayingRow
+import io.github.lorddetson.piplayer.ui.details.PlayingBadge
+import io.github.lorddetson.piplayer.ui.identification.IdentifyButton
+import io.github.lorddetson.piplayer.ui.identification.LocalIdentify
 
 /**
  * Now Playing (docs/playback.md §3.3): the current song of [player] with its [cover] and every control. It keeps its
@@ -91,13 +96,58 @@ fun NowPlaying(
     /** The entries of "More options", the current song's track menu (docs/playback.md §9.1); null hides the button. */
     more: (@Composable (close: () -> Unit) -> Unit)? = null,
     layout: NowPlayingLayout = NowPlayingLayout.STANDARD,
+    onPanelSaveFailed: suspend () -> Unit = {},
 ) {
     val metadata = rememberCurrentItemState(player).mediaMetadata
     val pane = stringResource(R.string.player_now_playing)
     var controlsRevealed by rememberSaveable(layout) { mutableStateOf(false) }
     val minimal = layout == NowPlayingLayout.MINIMAL
     val expanded = layout == NowPlayingLayout.EXPANDED
-    val showSecondary = !minimal || controlsRevealed
+    val canIdentify = LocalIdentify.current != null && !player?.currentMediaItem?.mediaId.isNullOrBlank()
+    val available = NowPlayingElement.entries.filter { element ->
+        when (element) {
+            NowPlayingElement.IDENTIFY -> canIdentify
+            NowPlayingElement.FAVORITE -> favorite != null
+            NowPlayingElement.QUEUE -> onOpenQueue != null
+            NowPlayingElement.MORE -> more != null
+            NowPlayingElement.EQUALIZER -> controls.openEqualizer != null
+            else -> true
+        }
+    }.toSet()
+    val editor = rememberNowPlayingCustomization(available, !minimal || controlsRevealed, { controlsRevealed = true }, onPanelSaveFailed)
+    val button: @Composable (NowPlayingElement) -> Unit = { element ->
+        PlayerElement(editor, element) { press ->
+            when (element) {
+                NowPlayingElement.IDENTIFY -> IdentifyButton(player, press)
+                NowPlayingElement.FAVORITE -> favorite?.let { FavoriteButton(it, press.testTag(PlayerTags.FAVORITE)) }
+                NowPlayingElement.QUEUE -> onOpenQueue?.let { open ->
+                    IconButton(onClick = open, modifier = press) {
+                        Icon(painterResource(R.drawable.ic_queue), stringResource(R.string.queue_open))
+                    }
+                }
+                NowPlayingElement.MORE -> more?.let { TrackMenuButton(it, press) }
+                NowPlayingElement.SHUFFLE -> ShuffleButton(player, press)
+                NowPlayingElement.PREVIOUS -> PreviousButton(player, press)
+                NowPlayingElement.PLAY_PAUSE -> PlayPauseButton(player, press, large = true)
+                NowPlayingElement.NEXT -> NextButton(player, press)
+                NowPlayingElement.REPEAT -> RepeatButton(player, press)
+                NowPlayingElement.TIMER -> SleepTimerButton(controls, press)
+                NowPlayingElement.STOP_AFTER -> StopAfterCurrentButton(controls, press)
+                NowPlayingElement.EQUALIZER -> controls.openEqualizer?.let { EqualizerButton(it, press) }
+                else -> error("The content section only accepts content components")
+            }
+        }
+    }
+    val artwork: @Composable (Modifier) -> Unit = { press ->
+        val size = if (expanded) Modifier.size(104.dp) else {
+            Modifier.widthIn(max = if (minimal) 320.dp else 480.dp).fillMaxWidth().aspectRatio(1f)
+        }
+        CoverImage(cover, size.then(press).clip(RoundedCornerShape(12.dp)), if (expanded) 36.dp else 96.dp, coverName)
+    }
+    val top = editor.shown(NowPlayingRow.TOP)
+    val content = editor.shown(NowPlayingRow.CONTENT)
+    val transport = editor.shown(NowPlayingRow.CONTROLS)
+    val extras = editor.shown(NowPlayingRow.EXTRAS)
     Column(
         modifier
             .fillMaxSize()
@@ -123,79 +173,79 @@ fun NowPlaying(
                 }
             } else {
                 FlowRow(Modifier.weight(1f), horizontalArrangement = Arrangement.End) {
-                    TrackActions(player, favorite, onOpenQueue, more)
+                    top.forEach { button(it) }
                 }
             }
+            RestorePlayerElements(editor)
         }
-        if (minimal && controlsRevealed) {
+        if (minimal && top.isNotEmpty()) {
             FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                TrackActions(player, favorite, onOpenQueue, more)
+                top.forEach { button(it) }
             }
         }
-        if (expanded) {
+        val compactPair = expanded && content.take(2) == listOf(NowPlayingElement.COVER, NowPlayingElement.TRACK_INFO)
+        if (compactPair) {
             Row(
                 modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
                 horizontalArrangement = Arrangement.spacedBy(16.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                CoverImage(cover, Modifier.size(104.dp).clip(RoundedCornerShape(12.dp)), 36.dp, coverName)
-                TrackHeading(metadata, onOpenArtist, onOpenAlbum, TextAlign.Start, Modifier.weight(1f))
+                PlayerElement(editor, NowPlayingElement.COVER, content = artwork)
+                PlayerElement(editor, NowPlayingElement.TRACK_INFO, Modifier.weight(1f)) { press ->
+                    TrackHeading(metadata, onOpenArtist, onOpenAlbum, TextAlign.Start, press.fillMaxWidth())
+                }
             }
-        } else {
-            CoverImage(
-                cover,
-                Modifier.widthIn(max = if (minimal) 320.dp else 480.dp)
-                    .fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(12.dp)),
-                noteSize = 96.dp,
-                placeholderName = coverName,
-            )
-            Spacer(Modifier.height(24.dp))
-            TrackHeading(metadata, onOpenArtist, onOpenAlbum, TextAlign.Center, Modifier.fillMaxWidth())
         }
-        if (showSecondary) {
-            io.github.lorddetson.piplayer.ui.details.PlayingBadge(player)
-            Spacer(Modifier.height(4.dp))
-            FormatLineText(player)
+        val remaining = if (compactPair) content.drop(2) else content
+        remaining.forEachIndexed { index, element ->
+            if (!expanded && remaining.getOrNull(index - 1) == NowPlayingElement.COVER) Spacer(Modifier.height(24.dp))
+            if (element == NowPlayingElement.SEEK && (compactPair || index > 0)) {
+                Spacer(Modifier.height(if (expanded) 8.dp else 16.dp))
+            }
+            PlayerElement(editor, element) { press ->
+                when (element) {
+                    NowPlayingElement.COVER -> artwork(press)
+                    NowPlayingElement.TRACK_INFO -> TrackHeading(metadata, onOpenArtist, onOpenAlbum, TextAlign.Center, press.fillMaxWidth())
+                    NowPlayingElement.FORMAT -> Column(press, horizontalAlignment = Alignment.CenterHorizontally) {
+                        PlayingBadge(player)
+                        Spacer(Modifier.height(4.dp))
+                        FormatLineText(player)
+                    }
+                    NowPlayingElement.SEEK -> SeekBar(player, press.fillMaxWidth())
+                    else -> error("The content section only accepts content components")
+                }
+            }
         }
-        Spacer(Modifier.height(if (expanded) 8.dp else 16.dp))
-        SeekBar(player, Modifier.fillMaxWidth())
-        Spacer(Modifier.height(8.dp))
-        FlowRow(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceEvenly,
-            itemVerticalAlignment = Alignment.CenterVertically,
-        ) {
-            if (showSecondary) ShuffleButton(player)
-            PreviousButton(player)
-            PlayPauseButton(player, large = true)
-            NextButton(player)
-            if (showSecondary) RepeatButton(player)
+        if (transport.isNotEmpty()) {
+            Spacer(Modifier.height(8.dp))
+            FlowRow(
+                modifier = Modifier.fillMaxWidth().testTag("now_playing_transport"),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                itemVerticalAlignment = Alignment.CenterVertically,
+            ) {
+                transport.forEach { button(it) }
+            }
         }
-        if (showSecondary) ExtraControlsRow(controls)
+        if (extras.isNotEmpty()) {
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                itemVerticalAlignment = Alignment.CenterVertically,
+            ) {
+                extras.forEach { button(it) }
+            }
+        }
     }
 }
 
-@OptIn(UnstableApi::class)
 @Composable
-private fun TrackActions(
-    player: Player?,
-    favorite: FavoriteState?,
-    onOpenQueue: (() -> Unit)?,
-    more: (@Composable (close: () -> Unit) -> Unit)?,
-) {
-    io.github.lorddetson.piplayer.ui.identification.IdentifyButton(player)
-    favorite?.let { FavoriteButton(it, Modifier.testTag(PlayerTags.FAVORITE)) }
-    onOpenQueue?.let { open ->
-        IconButton(onClick = open) { Icon(painterResource(R.drawable.ic_queue), stringResource(R.string.queue_open)) }
-    }
-    more?.let { entries ->
-        var open by remember { mutableStateOf(false) }
-        Box {
-            IconButton(onClick = { open = true }, modifier = Modifier.testTag(PlayerTags.MORE)) {
-                Icon(painterResource(R.drawable.ic_more), stringResource(R.string.page_menu))
-            }
-            DropdownMenu(expanded = open, onDismissRequest = { open = false }) { entries { open = false } }
+private fun TrackMenuButton(entries: @Composable (close: () -> Unit) -> Unit, modifier: Modifier) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        IconButton(onClick = { open = true }, modifier = modifier.testTag(PlayerTags.MORE)) {
+            Icon(painterResource(R.drawable.ic_more), stringResource(R.string.page_menu))
         }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) { entries { open = false } }
     }
 }
 

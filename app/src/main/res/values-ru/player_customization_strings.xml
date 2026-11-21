@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="player_element_customize">Настроить элемент</string>
+    <string name="player_element_move">Переместить элемент</string>
+    <string name="player_element_hide">Скрыть элемент</string>
+    <string name="player_element_restore">Вернуть скрытый элемент</string>
+    <string name="player_element_cover">Обложка</string>
+    <string name="player_element_track">Сведения о треке</string>
+    <string name="player_element_format">Сведения об аудио</string>
+    <string name="player_element_favorite">Избранное</string>
+    <string name="player_element_play_pause">Воспроизведение и пауза</string>
+    <string name="player_move_top">В верхний ряд</string>
+    <string name="player_move_controls">В ряд управления воспроизведением</string>
+    <string name="player_move_extras">В ряд дополнительных действий</string>
+    <string name="player_panel_save_failed">Не удалось сохранить раскладку экрана «Сейчас играет»</string>
+</resources>

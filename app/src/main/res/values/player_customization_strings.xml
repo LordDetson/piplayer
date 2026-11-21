@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="player_element_customize">Customize component</string>
+    <string name="player_element_move">Move component</string>
+    <string name="player_element_hide">Hide component</string>
+    <string name="player_element_restore">Restore a hidden component</string>
+    <string name="player_element_cover">Artwork</string>
+    <string name="player_element_track">Track information</string>
+    <string name="player_element_format">Audio information</string>
+    <string name="player_element_favorite">Favorite</string>
+    <string name="player_element_play_pause">Play / pause</string>
+    <string name="player_move_top">To the top row</string>
+    <string name="player_move_controls">To the playback controls</string>
+    <string name="player_move_extras">To the extra controls</string>
+    <string name="player_panel_save_failed">Could not save the Now Playing layout</string>
+</resources>

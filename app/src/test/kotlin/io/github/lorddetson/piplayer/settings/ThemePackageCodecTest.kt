@@ -64,9 +64,22 @@ class ThemePackageCodecTest {
 
     @Test
     fun `future versions are distinguished from invalid schema markers`() {
-        assertThat(decode(document.replace(":1,", ":3,"))).isEqualTo(ThemePackageRead.UnsupportedVersion)
+        assertThat(decode(document.replace(":1,", ":4,"))).isEqualTo(ThemePackageRead.UnsupportedVersion)
         assertThat(decode(document.replace(":1,", ":\"1\","))).isEqualTo(ThemePackageRead.Invalid)
         assertThat(decode(document.replace("\"version\":1,", ""))).isEqualTo(ThemePackageRead.Invalid)
+    }
+
+    @Test
+    fun `a version three theme preserves moved and hidden now playing elements`() {
+        val source = """{"version":3,"name":"Mix","base":"dark","player":{"top":"identify,favorite,more","content":"track_info,cover,format,seek","controls":"shuffle,previous,queue,play_pause,next,repeat","extras":"timer,stop_after,equalizer","hidden":"cover,shuffle"}}"""
+        val loaded = decode(source)
+        assertThat(loaded).isInstanceOf(ThemePackageRead.Loaded::class.java)
+        val bytes = ThemePackageCodec.encode((loaded as ThemePackageRead.Loaded).theme)
+        assertThat(bytes.decodeToString()).contains("\"version\":3", "\"hidden\":\"cover,shuffle\"", "previous,queue,play_pause")
+        assertThat(ThemePackageCodec.decode(bytes.inputStream())).isEqualTo(loaded)
+        assertThat(decode(source.replace("track_info,cover,format,seek", "track_info,queue,cover,format,seek")))
+            .isEqualTo(ThemePackageRead.Invalid)
+        assertThat(decode(source.replace("previous,queue,play_pause", "previous,play_pause"))).isEqualTo(ThemePackageRead.Invalid)
     }
 
     @Test
