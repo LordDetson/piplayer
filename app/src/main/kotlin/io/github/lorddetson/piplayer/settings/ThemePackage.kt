@@ -23,6 +23,7 @@ internal data class ThemePackage(
     val player: NowPlayingPanel? = null,
     val miniPlayer: MiniPlayerPanel? = null,
     val navigation: BottomNavigationLayout? = null,
+    val canvases: UiThemeCanvases? = null,
 )
 
 internal sealed interface ThemePackageRead {
@@ -34,12 +35,14 @@ internal sealed interface ThemePackageRead {
 }
 
 internal object ThemePackageCodec {
-    const val MAX_BYTES = 32 * 1024
+    const val MAX_BYTES = 512 * 1024
+    const val LEGACY_MAX_BYTES = 32 * 1024
     private const val PALETTE_VERSION = 1
     private const val PANEL_VERSION = 2
     private const val PLAYER_VERSION = 3
     private const val MINI_PLAYER_VERSION = 4
     private const val NAVIGATION_VERSION = 5
+    private const val CANVAS_VERSION = 6
     private const val MAX_NAME_LENGTH = 80
 
     fun encode(theme: ThemePackage): ByteArray {
@@ -52,7 +55,9 @@ internal object ThemePackageCodec {
         require(miniPlayer == null || miniPlayer.toPanel() == theme.miniPlayer)
         val navigation = theme.navigation?.let(BottomNavigationDocument::from)
         require(navigation == null || navigation.toLayout() == theme.navigation)
+        require(theme.canvases?.isValid != false)
         val version = when {
+            theme.canvases != null -> CANVAS_VERSION
             navigation != null -> NAVIGATION_VERSION
             miniPlayer != null -> MINI_PLAYER_VERSION
             player != null -> PLAYER_VERSION
@@ -60,7 +65,7 @@ internal object ThemePackageCodec {
             else -> PALETTE_VERSION
         }
         return Json.encodeToString(
-            Document(version, theme.name, theme.base.stored, theme.palette, theme.layout?.stored, panel, player, miniPlayer, navigation),
+            Document(version, theme.name, theme.base.stored, theme.palette, theme.layout?.stored, panel, player, miniPlayer, navigation, theme.canvases),
         ).encodeToByteArray()
     }
 
@@ -85,7 +90,9 @@ internal object ThemePackageCodec {
             val parsed = Json.parseToJsonElement(text) as? JsonObject ?: return ThemePackageRead.Invalid
             val version = (parsed["version"] as? JsonPrimitive)?.takeUnless { it.isString }?.intOrNull
                 ?: return ThemePackageRead.Invalid
-            if (version !in PALETTE_VERSION..NAVIGATION_VERSION) return ThemePackageRead.UnsupportedVersion
+            if (version !in PALETTE_VERSION..CANVAS_VERSION) return ThemePackageRead.UnsupportedVersion
+            if (version < CANVAS_VERSION && length > LEGACY_MAX_BYTES) return ThemePackageRead.TooLarge
+            if (version < CANVAS_VERSION && !hasBoundedStructure(text, legacy = true)) return ThemePackageRead.Invalid
             if (!hasVersionFields(version, parsed)) return ThemePackageRead.Invalid
 
             val palette = parsed["palette"] as? JsonObject
@@ -100,7 +107,10 @@ internal object ThemePackageCodec {
             val player = if ("player" in parsed) document.player?.toPanel() ?: return ThemePackageRead.Invalid else null
             val miniPlayer = if ("miniPlayer" in parsed) document.miniPlayer?.toPanel() ?: return ThemePackageRead.Invalid else null
             val navigation = if ("navigation" in parsed) document.navigation?.toLayout() ?: return ThemePackageRead.Invalid else null
-            ThemePackageRead.Loaded(ThemePackage(document.name, base, document.palette, layout, panel, player, miniPlayer, navigation))
+            val canvases = if ("canvases" in parsed) {
+                document.canvases?.takeIf(UiThemeCanvases::isValid) ?: return ThemePackageRead.Invalid
+            } else null
+            ThemePackageRead.Loaded(ThemePackage(document.name, base, document.palette, layout, panel, player, miniPlayer, navigation, canvases))
         } catch (_: CharacterCodingException) {
             ThemePackageRead.Invalid
         } catch (_: SerializationException) {
@@ -112,7 +122,8 @@ internal object ThemePackageCodec {
         name.none(Char::isISOControl) && Charsets.UTF_8.newEncoder().canEncode(name)
 
     private fun hasVersionFields(version: Int, parsed: JsonObject): Boolean =
-        listOf(PANEL_VERSION to "panel", PLAYER_VERSION to "player", MINI_PLAYER_VERSION to "miniPlayer", NAVIGATION_VERSION to "navigation")
+        listOf(PANEL_VERSION to "panel", PLAYER_VERSION to "player", MINI_PLAYER_VERSION to "miniPlayer",
+            NAVIGATION_VERSION to "navigation", CANVAS_VERSION to "canvases")
             .all { (introduced, field) ->
                 when {
                     version < introduced -> field !in parsed
@@ -121,8 +132,9 @@ internal object ThemePackageCodec {
                 }
             }
 
-    /** Every nested object is flat. Bound nesting before asking the JSON parser to build a tree. */
-    private fun hasBoundedStructure(text: String): Boolean {
+    /** Bound nesting before asking the JSON parser to build a tree. */
+    private fun hasBoundedStructure(text: String, legacy: Boolean = false): Boolean {
+        val maxDepth = if (legacy) 2 else 9
         var depth = 0
         var inString = false
         var escaped = false
@@ -136,9 +148,8 @@ internal object ThemePackageCodec {
             } else {
                 when (character) {
                     '"' -> inString = true
-                    '{' -> if (++depth > 2) return false
-                    '}' -> if (--depth < 0) return false
-                    '[', ']' -> return false
+                    '{', '[' -> if ((legacy && character == '[') || ++depth > maxDepth) return false
+                    '}', ']' -> if (--depth < 0) return false
                 }
             }
         }
@@ -156,5 +167,6 @@ internal object ThemePackageCodec {
         val player: NowPlayingPanelDocument? = null,
         val miniPlayer: MiniPlayerPanelDocument? = null,
         val navigation: BottomNavigationDocument? = null,
+        val canvases: UiThemeCanvases? = null,
     )
 }

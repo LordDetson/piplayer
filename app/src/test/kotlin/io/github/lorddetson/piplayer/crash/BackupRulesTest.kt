@@ -28,12 +28,13 @@ class BackupRulesTest {
     }
 
     @Test
-    fun `backups and transfers take the user database and the settings file only`() {
+    fun `backups and transfers take the user database and settings only`() {
         for ((file, section) in sections) {
             assertThat(rules(file, section, "include")).describedAs("$file $section").containsExactlyInAnyOrder(
                 "database" to "user.db",
                 "database" to "user.db-wal",
                 "file" to "datastore/settings.preferences_pb",
+                "sharedpref" to "app_language.xml",
             )
         }
     }

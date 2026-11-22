@@ -61,6 +61,30 @@ class MiniPlayerTest {
         SemanticsMatcher("click label \"$label\"") { it.config.getOrNull(SemanticsActions.OnClick)?.label == label }
 
     @Test
+    fun theInlineEditorKeepsItsOwnLayoutAndTheTransportControlStillWorks() =
+        withStockPlayerTheme(context, "mini_player_panel_", "ui_canvas_") {
+            val player = show(listOf(halo), cover = true)
+            val cover = compose.onNodeWithTag(PlayerTags.COVER, useUnmergedTree = true)
+            cover.performTouchInput { longClick() }
+            compose.onNodeWithTag("ui_edit_mode").performClick()
+            compose.onNodeWithTag("ui_component_mini:cover").performClick()
+            compose.onNodeWithTag("ui_edit_hide").performClick()
+            compose.onNodeWithTag("ui_edit_done").performClick()
+            compose.waitUntil(5_000) { compose.onAllNodes(hasTestTag("ui_edit_done")).fetchSemanticsNodes().isEmpty() }
+            cover.assertDoesNotExist()
+            assertThat(compose.runOnUiThread { player.calls }).isEmpty()
+
+            val appearance = AppearanceSettings(context)
+            runBlocking { appearance.setTheme(ThemeMode.DARK) }
+            compose.waitUntil(5_000) { compose.onAllNodes(hasTestTag(PlayerTags.COVER), useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }
+            runBlocking { appearance.setTheme(ThemeMode.SYSTEM) }
+            compose.waitUntil(5_000) { compose.onAllNodes(hasTestTag(PlayerTags.COVER), useUnmergedTree = true).fetchSemanticsNodes().isEmpty() }
+            compose.onNodeWithTag("ui_canvas").assertIsDisplayed()
+            compose.onNodeWithContentDescription(text(R.string.player_play)).performClick()
+            assertThat(compose.runOnUiThread { player.calls }).containsExactly(Call.PlayWhenReady(true))
+        }
+
+    @Test
     fun movingHidingAndRestoringMiniPlayerElementsKeepsTheirTapActions() = withStockPlayerTheme(context, "mini_player_panel_") {
         val player = show(listOf(halo), cover = true)
         val cover = compose.onNodeWithTag(PlayerTags.COVER, useUnmergedTree = true)

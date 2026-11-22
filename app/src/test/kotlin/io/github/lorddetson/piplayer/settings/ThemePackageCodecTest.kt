@@ -64,7 +64,8 @@ class ThemePackageCodecTest {
 
     @Test
     fun `future versions are distinguished from invalid schema markers`() {
-        assertThat(decode(document.replace(":1,", ":6,"))).isEqualTo(ThemePackageRead.UnsupportedVersion)
+        assertThat(decode(document.replace(":1,", ":7,"))).isEqualTo(ThemePackageRead.UnsupportedVersion)
+        assertThat(decode(document.replace(":1,", ":6,"))).isEqualTo(ThemePackageRead.Invalid)
         assertThat(decode(document.replace(":1,", ":\"1\","))).isEqualTo(ThemePackageRead.Invalid)
         assertThat(decode(document.replace("\"version\":1,", ""))).isEqualTo(ThemePackageRead.Invalid)
     }
@@ -131,9 +132,13 @@ class ThemePackageCodecTest {
 
     @Test
     fun `size is bounded even when a provider has no advertised length`() {
-        val padded = document.padEnd(ThemePackageCodec.MAX_BYTES, ' ')
+        val padded = document.padEnd(ThemePackageCodec.LEGACY_MAX_BYTES, ' ')
         assertThat(decode(padded)).isInstanceOf(ThemePackageRead.Loaded::class.java)
         assertThat(decode("$padded ")).isEqualTo(ThemePackageRead.TooLarge)
+        val canvas = """{"version":6,"name":"Test","base":"system","canvases":{"panels":{}}}"""
+            .padEnd(ThemePackageCodec.MAX_BYTES, ' ')
+        assertThat(decode(canvas)).isInstanceOf(ThemePackageRead.Loaded::class.java)
+        assertThat(decode("$canvas ")).isEqualTo(ThemePackageRead.TooLarge)
     }
 
     @Test

@@ -154,10 +154,8 @@ android {
     namespace = "io.github.lorddetson.piplayer"
     compileSdk = 37
     dynamicFeatures += setOf(":radio")
-    // Instrumented tests switch locale without Google Play to install an additional language split.
-    if (providers.gradleProperty("piplayer.testAllLanguages").orNull == "true") {
-        bundle.language.enableSplit = false
-    }
+    // Both app languages are available from Settings without downloading another split.
+    bundle.language.enableSplit = false
 
     defaultConfig {
         applicationId = "io.github.lorddetson.piplayer"

@@ -43,6 +43,24 @@ that still rely on them. Existing theme-specific edits take precedence. Export i
 Theme packages imported without a presentation inherit the current presentation. Undo reselects the previous theme
 and keeps subsequent edits in the imported theme.
 
+### Inline UI edit mode
+
+Use **UI edit mode** in the long-press menu on a library tab or toolbar action, Now Playing, the mini player, or
+bottom navigation. The component stays on its screen. Drag it to a freely chosen position, resize it with the
+corner handle and set inner spacing in Properties. Alignment guides appear near panel and component edges.
+Components may overlap. Layers lets users select covered components, and the layer actions change drawing order.
+
+Add component lists the panel's built-in controls and compatible controls from other panels, such as playback,
+queue, settings and navigation. The library list, the way out of Now Playing and the route back to it remain
+available when controls are hidden. Done writes the current panel to the active theme. Cancel discards the draft.
+Reset layout restores that panel's order and visibility from the selected theme.
+
+Properties supports foreground and background colors and stock or imported PNG, WebP and standalone static SVG
+icons on icon controls. Vector icons keep their shape when resized. The editor supports SVG paths, ordinary
+shapes and grouped transforms. An icon with unsupported effects or external resources is rejected. A button can
+preview and use a press, bounce or tilt animation. The theme's version 6 package includes positions, sizes,
+spacing, layers, icon data and animations. Earlier versions keep their existing fields.
+
 ## Imported themes
 
 The Appearance screen opens the theme editor at the current palette. Its quick controls set the accent,

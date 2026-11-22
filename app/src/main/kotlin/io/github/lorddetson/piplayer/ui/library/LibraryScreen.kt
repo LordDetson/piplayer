@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
@@ -42,6 +43,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.PrimaryScrollableTabRow
 import androidx.compose.material3.RadioButton
@@ -52,6 +54,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -96,6 +99,7 @@ import io.github.lorddetson.piplayer.library.lists.SongSort
 import io.github.lorddetson.piplayer.library.songs.Song
 import io.github.lorddetson.piplayer.settings.ListName
 import io.github.lorddetson.piplayer.settings.ListOrder
+import io.github.lorddetson.piplayer.settings.UiSurface
 import io.github.lorddetson.piplayer.settings.librarytabs.BuiltInLibraryTab as LibraryTab
 import io.github.lorddetson.piplayer.settings.librarytabs.LibraryButton
 import io.github.lorddetson.piplayer.settings.librarytabs.LibraryPanelLayout
@@ -118,6 +122,9 @@ import io.github.lorddetson.piplayer.ui.songs.rememberAudioAccess
 import io.github.lorddetson.piplayer.covers.CoverRequest
 import io.github.lorddetson.piplayer.ui.covers.CoverActions
 import io.github.lorddetson.piplayer.ui.covers.LibraryCover
+import io.github.lorddetson.piplayer.ui.customization.EditableUiPanel
+import io.github.lorddetson.piplayer.ui.customization.UiCanvasComponent
+import io.github.lorddetson.piplayer.ui.customization.UiControlColor
 import io.github.lorddetson.piplayer.ui.fix.BatchActions
 import io.github.lorddetson.piplayer.identification.entry.BatchRequest
 import io.github.lorddetson.piplayer.ui.playlists.PlaylistActions
@@ -188,7 +195,16 @@ fun LibraryScreen(host: LibraryHost, onOpenSettings: () -> Unit) {
     val themeId = storedPanel?.themeId
     val panel = storedPanel?.layout ?: LibraryPanelLayout()
     val tabLayout = panel.tabs
-    val activeId = tabLayout.selectedTab(tabName)
+    var appliedCanvasIds by remember(themeId) { mutableStateOf<List<String>?>(null) }
+    var canvasLoaded by remember(themeId) { mutableStateOf(false) }
+    val placedTabs = appliedCanvasIds?.mapNotNull { component ->
+        val id = component.removePrefix("tab:")
+        id.takeIf { component != id && it in builtInTabsById }
+    }
+    val activeId = if (placedTabs == null) tabLayout.selectedTab(tabName) else {
+        val requested = LibraryTabLayout.DEFAULT.selectedTab(tabName)
+        requested.takeIf { placedTabs.isEmpty() || it in placedTabs } ?: placedTabs.first()
+    }
     val tab = builtInTabsById.getValue(activeId)
     var editingTabs by rememberSaveable(themeId) { mutableStateOf(false) }
     val tabEditScope = rememberCoroutineScope()
@@ -208,8 +224,16 @@ fun LibraryScreen(host: LibraryHost, onOpenSettings: () -> Unit) {
     val songs = viewModel(key = "songs") { SongsViewModel(app, saved = createSavedStateHandle()) }
     // The songs the Folders tab shows itself, while it shows some (docs/library.md §20.1).
     var folderSongs by remember { mutableStateOf<SongsViewModel?>(null) }
-    LaunchedEffect(storedPanel, tabName) {
-        if (storedPanel != null && tabName != activeId) {
+    fun selectTab(id: String) {
+        // Selection belongs to the list it was made in (docs/library.md §20.2, 9).
+        if (id != activeId) {
+            songs.endSelection()
+            folderSongs?.endSelection()
+        }
+        tabName = id
+    }
+    LaunchedEffect(storedPanel, canvasLoaded, activeId, tabName) {
+        if (storedPanel != null && canvasLoaded && tabName != activeId) {
             if (LibraryTabLayout.DEFAULT.selectedTab(tabName) != activeId) {
                 songs.endSelection()
                 folderSongs?.endSelection()
@@ -271,73 +295,124 @@ fun LibraryScreen(host: LibraryHost, onOpenSettings: () -> Unit) {
             Icon(painterResource(R.drawable.ic_close), stringResource(R.string.library_search_close))
         }
     }
+    val canvasComponents = buildList {
+        add(UiCanvasComponent("library:title", R.string.app_name, width = 128.dp) {
+            Box(Modifier.fillMaxSize().padding(start = 12.dp), contentAlignment = Alignment.CenterStart) {
+                Text(stringResource(R.string.app_name), color = UiControlColor(LocalContentColor.current),
+                    style = MaterialTheme.typography.titleLarge, maxLines = 1)
+            }
+        })
+        for ((id, entry) in builtInTabsById) {
+            add(UiCanvasComponent("tab:$id", entry.labelResource, width = 96.dp) {
+                LibraryTabFace(id, id == activeId, { selectTab(id) }, Modifier.fillMaxSize(), horizontalPadding = 4.dp)
+            })
+        }
+        for (button in LibraryButton.entries) {
+            add(UiCanvasComponent("library:${button.id}", button.labelResource, customizableIcon = true) {
+                when (button) {
+                    LibraryButton.SEARCH -> LibraryToolbarButtonFace(button, { setSearching(!searching) }, Modifier.fillMaxSize())
+                    LibraryButton.SORT -> if (tab == LibraryTab.PLAYLISTS) {
+                        LibraryToolbarButtonFace(button, {}, Modifier.fillMaxSize(), enabled = false)
+                    } else {
+                        sortControl { open -> LibraryToolbarButtonFace(button, open, Modifier.fillMaxSize()) }
+                    }
+                    LibraryButton.SETTINGS -> LibraryToolbarButtonFace(button, onOpenSettings, Modifier.fillMaxSize())
+                }
+            })
+        }
+    }
+    val canvasRows = listOf(listOf("library:title") + buttons.visible.map { "library:$it" }) +
+        tabLayout.visible.map { "tab:$it" }.chunked(3)
     Scaffold(
         topBar = {
-            Column {
-                if (selecting != null && selected != null) SongsSelectionBar(host, selecting, selected) else LibraryTopBar(
-                    title = stringResource(R.string.app_name),
-                    onBack = null,
-                    searching = searching,
-                    search = search,
-                    onSearch = { search = it },
-                    onSearching = ::setSearching,
-                    customActions = {
-                        if (searching && LibraryButton.SEARCH.id !in visibleButtons) closeSearch()
-                        for (id in visibleButtons) {
-                            key(themeId, id) {
-                                when (LibraryButton.byId.getValue(id)) {
-                                    LibraryButton.SEARCH -> if (searching) closeSearch() else {
-                                        toolbarButton(LibraryButton.SEARCH) { setSearching(true) }
+            EditableUiPanel(
+                surface = UiSurface.LIBRARY,
+                themeId = themeId,
+                components = canvasComponents,
+                initialRows = canvasRows,
+                height = 184.dp,
+                modifier = Modifier.fillMaxWidth().windowInsetsPadding(TopAppBarDefaults.windowInsets).testTag(LibraryTags.TABS),
+                onSaveFailed = { host.snackbar.showSnackbar(tabSaveFailed) },
+                onAppliedIds = {
+                    appliedCanvasIds = it
+                    canvasLoaded = true
+                },
+                canvasChrome = {
+                    if (selecting != null && selected != null) {
+                        SongsSelectionBar(host, selecting, selected)
+                    } else if (searching) {
+                        LibraryTopBar(
+                            title = stringResource(R.string.app_name),
+                            onBack = null,
+                            searching = true,
+                            search = search,
+                            onSearch = { search = it },
+                            onSearching = ::setSearching,
+                            customActions = closeSearch,
+                        )
+                    }
+                },
+            ) {
+                Column {
+                    if (selecting != null && selected != null) SongsSelectionBar(host, selecting, selected) else LibraryTopBar(
+                        title = stringResource(R.string.app_name),
+                        onBack = null,
+                        searching = searching,
+                        search = search,
+                        onSearch = { search = it },
+                        onSearching = ::setSearching,
+                        customActions = {
+                            if (searching && LibraryButton.SEARCH.id !in visibleButtons) closeSearch()
+                            for (id in visibleButtons) {
+                                key(themeId, id) {
+                                    when (LibraryButton.byId.getValue(id)) {
+                                        LibraryButton.SEARCH -> if (searching) closeSearch() else {
+                                            toolbarButton(LibraryButton.SEARCH) { setSearching(true) }
+                                        }
+                                        LibraryButton.SORT -> sortControl { open -> toolbarButton(LibraryButton.SORT, open) }
+                                        LibraryButton.SETTINGS -> toolbarButton(LibraryButton.SETTINGS, onOpenSettings)
                                     }
-                                    LibraryButton.SORT -> sortControl { open -> toolbarButton(LibraryButton.SORT, open) }
-                                    LibraryButton.SETTINGS -> toolbarButton(LibraryButton.SETTINGS, onOpenSettings)
+                                }
+                            }
+                            DebugEntry()
+                        },
+                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        val stockSelection = tabLayout.selectedTab(activeId)
+                        PrimaryScrollableTabRow(
+                            selectedTabIndex = tabLayout.visible.indexOf(stockSelection),
+                            modifier = Modifier.weight(1f).testTag(LibraryTags.TABS),
+                            edgePadding = 8.dp,
+                        ) {
+                            tabLayout.visible.forEach { id ->
+                                key(themeId, id) {
+                                    LibraryStripTab(
+                                        id = id,
+                                        selected = id == stockSelection,
+                                        layout = tabLayout,
+                                        canCustomize = themeId != null,
+                                        onClick = { selectTab(id) },
+                                        onMove = { target -> writeTabs { moveToTab(id, target, themeId) } },
+                                        onHide = { writeTabs { setVisible(id, false, themeId) } },
+                                        onRestore = { target -> writeTabs { setVisible(target, true, themeId) } },
+                                    )
                                 }
                             }
                         }
-                        DebugEntry()
-                    },
-                )
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    PrimaryScrollableTabRow(
-                        selectedTabIndex = tabLayout.visible.indexOf(activeId),
-                        modifier = Modifier.weight(1f).testTag(LibraryTags.TABS),
-                        edgePadding = 8.dp,
-                    ) {
-                        tabLayout.visible.forEach { id ->
-                            key(themeId, id) {
-                                LibraryStripTab(
-                                    id = id,
-                                    selected = id == activeId,
-                                    layout = tabLayout,
-                                    canCustomize = themeId != null,
-                                    onClick = {
-                                        // The selection belongs to the list it was made in (docs/library.md §20.2, 9).
-                                        if (id != activeId) {
-                                            songs.endSelection()
-                                            folderSongs?.endSelection()
-                                        }
-                                        tabName = id
-                                    },
-                                    onMove = { target -> writeTabs { moveToTab(id, target, themeId) } },
-                                    onHide = { writeTabs { setVisible(id, false, themeId) } },
-                                    onRestore = { target -> writeTabs { setVisible(target, true, themeId) } },
-                                )
-                            }
+                        if (hiddenButtons.isNotEmpty()) key(themeId) { RestoreLibraryButtons(hiddenButtons, restoreButton) }
+                        IconButton(onClick = { editingTabs = true }, enabled = themeId != null) {
+                            Icon(painterResource(R.drawable.ic_more_vert), stringResource(R.string.library_tabs_manage))
                         }
                     }
-                    if (hiddenButtons.isNotEmpty()) key(themeId) { RestoreLibraryButtons(hiddenButtons, restoreButton) }
-                    IconButton(onClick = { editingTabs = true }, enabled = themeId != null) {
-                        Icon(painterResource(R.drawable.ic_more_vert), stringResource(R.string.library_tabs_manage))
+                    if (editingTabs && themeId != null) {
+                        LibraryTabEditor(
+                            layout = tabLayout,
+                            settings = tabsSettings,
+                            scope = tabEditScope,
+                            onDismiss = { editingTabs = false },
+                            onSaveFailed = { host.snackbar.showSnackbar(tabSaveFailed) },
+                        )
                     }
-                }
-                if (editingTabs && themeId != null) {
-                    LibraryTabEditor(
-                        layout = tabLayout,
-                        settings = tabsSettings,
-                        scope = tabEditScope,
-                        onDismiss = { editingTabs = false },
-                        onSaveFailed = { host.snackbar.showSnackbar(tabSaveFailed) },
-                    )
                 }
             }
         },

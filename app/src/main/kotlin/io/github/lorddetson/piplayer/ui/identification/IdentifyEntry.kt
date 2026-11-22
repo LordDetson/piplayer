@@ -1,6 +1,5 @@
 package io.github.lorddetson.piplayer.ui.identification
 
-import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -15,6 +14,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.media3.common.Player
 import io.github.lorddetson.piplayer.R
 import io.github.lorddetson.piplayer.playback.QueueIds
+import io.github.lorddetson.piplayer.ui.customization.UiControlIcon
 
 /** What "Identify" opens the review for (TI §1): a song of the library by its file ID, or an opened file by its URI. */
 sealed interface IdentifyTarget {
@@ -62,5 +62,5 @@ fun IdentifyAction(fileId: Long?, uri: String?) {
 
 @Composable
 private fun IdentifyIcon(modifier: Modifier = Modifier, onClick: () -> Unit) {
-    IconButton(onClick = onClick, modifier = modifier) { Icon(painterResource(R.drawable.ic_identify), stringResource(R.string.identify)) }
+    IconButton(onClick = onClick, modifier = modifier) { UiControlIcon(painterResource(R.drawable.ic_identify), stringResource(R.string.identify)) }
 }

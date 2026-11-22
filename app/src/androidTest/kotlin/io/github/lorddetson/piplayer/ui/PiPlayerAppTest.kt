@@ -23,6 +23,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.getBoundsInRoot
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasContentDescription
@@ -213,6 +214,23 @@ class PiPlayerAppTest {
         compose.runOnUiThread { event(compose.activity.onBackPressedDispatcher) }
 
     private fun gesture(progress: Float) = BackEventCompat(10f, 800f, progress, BackEventCompat.EDGE_LEFT)
+
+    @Test
+    fun theBottomBarCanEnterFreeEditAndItsButtonsStillNavigateAfterSaving() =
+        withStockPlayerTheme(context, "bottom_navigation_", "ui_canvas_") {
+            compose.onNodeWithTag(BottomBarTags.FIX).performTouchInput { longClick() }
+            compose.onNodeWithTag("ui_edit_mode").performClick()
+            compose.waitUntilExactlyOneExists(hasTestTag("ui_canvas"), timeoutMillis = 5_000)
+            compose.onNodeWithTag("ui_component_nav:fix").performTouchInput { click() }
+            compose.onNodeWithTag("ui_edit_hide").performClick()
+            compose.onNodeWithTag("ui_edit_done").performClick()
+            compose.waitUntilDoesNotExist(hasTestTag("ui_edit_done"), timeoutMillis = 5_000)
+
+            compose.onNodeWithTag("ui_component_nav:fix").assertDoesNotExist()
+            compose.onNodeWithTag(BottomBarTags.LIBRARY).assertIsSelected()
+            compose.onNodeWithTag(BottomBarTags.SEARCH).performClick()
+            compose.waitUntilExactlyOneExists(hasTestTag(SearchTags.FIELD), timeoutMillis = 5_000)
+        }
 
     @Test
     fun bottomBarActionsMoveHideAndRestoreWithoutLeavingTheCurrentPage() = withStockPlayerTheme(context, "bottom_navigation_") {

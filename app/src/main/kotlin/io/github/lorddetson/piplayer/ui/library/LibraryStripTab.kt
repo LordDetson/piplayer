@@ -6,7 +6,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.material3.Icon
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -22,6 +22,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import io.github.lorddetson.piplayer.R
 import io.github.lorddetson.piplayer.settings.librarytabs.LibraryButton
@@ -30,6 +31,8 @@ import io.github.lorddetson.piplayer.ui.customization.PanelItemKind
 import io.github.lorddetson.piplayer.ui.customization.PanelItemMenu
 import io.github.lorddetson.piplayer.ui.customization.PanelMenuPage
 import io.github.lorddetson.piplayer.ui.customization.PanelRestoreButton
+import io.github.lorddetson.piplayer.ui.customization.UiControlColor
+import io.github.lorddetson.piplayer.ui.customization.UiControlIcon
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -45,30 +48,39 @@ internal fun LibraryStripTab(
 ) {
     var menu by remember { mutableStateOf<PanelMenuPage?>(null) }
     val openMenu = { menu = PanelMenuPage.ACTIONS }
-    val label = stringResource(builtInTabsById.getValue(id).labelResource)
     Box {
-        Box(
-            Modifier.heightIn(min = 48.dp)
-                .combinedClickable(
-                    role = Role.Tab,
-                    onClick = onClick,
-                    onLongClickLabel = stringResource(R.string.library_tab_customize),
-                    onLongClick = openMenu.takeIf { canCustomize },
-                )
-                .semantics { this.selected = selected }
-                .padding(horizontal = 16.dp, vertical = 4.dp),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(
-                label,
-                style = MaterialTheme.typography.titleSmall,
-                color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-            )
-        }
+        LibraryTabFace(id, selected, onClick, onLongClick = openMenu.takeIf { canCustomize })
         PanelItemMenu(menu, { menu = it }, PanelItemKind.TAB, id, layout.visible,
             layout.order.filter(layout.hidden::contains), { builtInTabsById.getValue(it).labelResource },
             onMove, onHide.takeIf { layout.visible.size > 1 }, onRestore)
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+internal fun LibraryTabFace(
+    id: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier.heightIn(min = 48.dp),
+    onLongClick: (() -> Unit)? = null,
+    horizontalPadding: Dp = 16.dp,
+) {
+    Box(
+        modifier.combinedClickable(
+            role = Role.Tab,
+            onClick = onClick,
+            onLongClickLabel = stringResource(R.string.library_tab_customize),
+            onLongClick = onLongClick,
+        ).semantics { this.selected = selected }.padding(horizontal = horizontalPadding, vertical = 4.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            stringResource(builtInTabsById.getValue(id).labelResource),
+            style = MaterialTheme.typography.titleSmall,
+            color = UiControlColor(if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant),
+            maxLines = 1,
+        )
     }
 }
 
@@ -101,19 +113,33 @@ internal fun LibraryToolbarButton(
     var menu by remember { mutableStateOf<PanelMenuPage?>(null) }
     val openMenu = { menu = PanelMenuPage.ACTIONS }
     Box {
-        Box(
-            Modifier.size(48.dp).combinedClickable(
-                role = Role.Button,
-                onClick = onClick,
-                onLongClickLabel = stringResource(R.string.library_button_customize),
-                onLongClick = openMenu.takeIf { canCustomize },
-            ),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(painterResource(button.icon), stringResource(button.labelResource))
-        }
+        LibraryToolbarButtonFace(button, onClick, onLongClick = openMenu.takeIf { canCustomize })
         PanelItemMenu(menu, { menu = it }, PanelItemKind.BUTTON, button.id, visible, hidden,
             { LibraryButton.byId.getValue(it).labelResource }, onMove, onHide, onRestore)
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+internal fun LibraryToolbarButtonFace(
+    button: LibraryButton,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier.size(48.dp),
+    enabled: Boolean = true,
+    onLongClick: (() -> Unit)? = null,
+) {
+    Box(
+        modifier.combinedClickable(
+            role = Role.Button,
+            enabled = enabled,
+            onClick = onClick,
+            onLongClickLabel = stringResource(R.string.library_button_customize),
+            onLongClick = onLongClick,
+        ),
+        contentAlignment = Alignment.Center,
+    ) {
+        val tint = LocalContentColor.current
+        UiControlIcon(painterResource(button.icon), stringResource(button.labelResource), tint = if (enabled) tint else tint.copy(alpha = 0.38f))
     }
 }
 

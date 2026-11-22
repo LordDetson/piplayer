@@ -1,7 +1,13 @@
 package io.github.lorddetson.piplayer.ui.settings
 
+import android.app.LocaleManager
+import android.os.Build
+import android.os.LocaleList
 import androidx.compose.ui.graphics.toPixelMap
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasTestTag
@@ -16,15 +22,19 @@ import androidx.compose.ui.test.performScrollToNode
 import androidx.test.espresso.Espresso
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.github.lorddetson.piplayer.MainActivity
+import io.github.lorddetson.piplayer.PiPlayerApplication
 import io.github.lorddetson.piplayer.R
 import io.github.lorddetson.piplayer.TestFiles
 import io.github.lorddetson.piplayer.playback.SongSourceRule
+import io.github.lorddetson.piplayer.settings.AppLanguageSettings
 import io.github.lorddetson.piplayer.settings.AppearanceSettings
 import io.github.lorddetson.piplayer.settings.NowPlayingLayout
+import io.github.lorddetson.piplayer.settings.SettingsFiles
 import io.github.lorddetson.piplayer.settings.ThemeMode
 import io.github.lorddetson.piplayer.ui.GrantAudioPermission
 import io.github.lorddetson.piplayer.ui.songs.SongsTags
 import io.github.lorddetson.piplayer.ui.theme.ThemeWindow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.Rule
@@ -174,23 +184,110 @@ class SettingsScreenTest {
 
     @Test
     fun eachThemeKeepsItsOwnPlayerLayout() {
-        openSettings()
-        choose(R.string.theme_warm_light, ThemeMode.WARM_LIGHT)
-        scrollSettingsTo(R.string.settings_now_playing_layout)
-        compose.onNodeWithText(text(R.string.settings_now_playing_layout)).performClick()
-        compose.onNodeWithText(text(R.string.now_playing_layout_minimal)).performClick()
+        val file = SettingsFiles.settings(context)
+        val keys = listOf(ThemeMode.GRAPHITE, ThemeMode.WARM_LIGHT).map { AppearanceSettings.themeLayoutKey(it.stored) }
+        val prior = runBlocking { file.data.first() }
+        try {
+            runBlocking { SettingsFiles.edit(file) { preferences -> keys.forEach { preferences.remove(it) } } }
+            openSettings()
+            choose(R.string.theme_warm_light, ThemeMode.WARM_LIGHT)
+            scrollSettingsTo(R.string.settings_now_playing_layout)
+            compose.onNodeWithText(text(R.string.settings_now_playing_layout)).performClick()
+            val option = SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.RadioButton) and
+                hasText(text(R.string.now_playing_layout_minimal))
+            compose.onNode(option).performClick()
 
-        val settings = AppearanceSettings(context)
-        compose.waitUntil(5_000) { settings.read().nowPlayingLayout == NowPlayingLayout.MINIMAL }
-        assertThat(settings.readTheme()).isEqualTo(ThemeMode.WARM_LIGHT)
+            val settings = AppearanceSettings(context)
+            compose.waitUntil(5_000) { settings.read().nowPlayingLayout == NowPlayingLayout.MINIMAL }
+            assertThat(settings.readTheme()).isEqualTo(ThemeMode.WARM_LIGHT)
 
-        scrollSettingsTo(R.string.theme_graphite)
-        choose(R.string.theme_graphite, ThemeMode.GRAPHITE)
-        assertThat(settings.read().nowPlayingLayout).isEqualTo(NowPlayingLayout.EXPANDED)
+            scrollSettingsTo(R.string.theme_graphite)
+            choose(R.string.theme_graphite, ThemeMode.GRAPHITE)
+            assertThat(settings.read().nowPlayingLayout).isEqualTo(NowPlayingLayout.EXPANDED)
 
-        scrollSettingsTo(R.string.theme_warm_light)
-        choose(R.string.theme_warm_light, ThemeMode.WARM_LIGHT)
-        assertThat(settings.read().nowPlayingLayout).isEqualTo(NowPlayingLayout.MINIMAL)
+            scrollSettingsTo(R.string.theme_warm_light)
+            choose(R.string.theme_warm_light, ThemeMode.WARM_LIGHT)
+            assertThat(settings.read().nowPlayingLayout).isEqualTo(NowPlayingLayout.MINIMAL)
+        } finally {
+            runBlocking {
+                SettingsFiles.edit(file) { preferences ->
+                    keys.forEach { key ->
+                        val value = prior[key]
+                        if (value == null) preferences.remove(key) else preferences[key] = value
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
+    fun languageFollowsTheChoiceAcrossRecreationAndKeepsTheThemeAndPlayerLayout() {
+        val preferences = context.getSharedPreferences("app_language", 0)
+        val beforeLegacy = preferences.getString("locale", null)
+        val beforePlatform = if (Build.VERSION.SDK_INT >= 33) {
+            context.getSystemService(LocaleManager::class.java).applicationLocales
+        } else LocaleList.getEmptyLocaleList()
+        val settingsFile = SettingsFiles.settings(context)
+        val layoutKey = AppearanceSettings.themeLayoutKey(ThemeMode.GRAPHITE.stored)
+        val savedLayout = runBlocking { settingsFile.data.first()[layoutKey] }
+        try {
+            openSettings()
+            choose(R.string.theme_graphite, ThemeMode.GRAPHITE)
+            ShownWindow.assertFollows(compose, dark = true)
+            val settings = AppearanceSettings(context)
+            runBlocking { settings.setNowPlayingLayout(NowPlayingLayout.MINIMAL) }
+            val appearanceBefore = settings.read()
+            fun chooseLanguage(label: String) {
+                val language = hasText("App language") or hasText("Язык приложения")
+                compose.onNodeWithTag(SettingsTags.CONTENT).performScrollToNode(language)
+                compose.onNode(language).performClick()
+                compose.onNodeWithText(label).performClick()
+            }
+            fun assertLanguage(tag: String, title: String) {
+                fun activityLanguage() = ShownWindow.resumed()?.resources?.configuration?.locales?.get(0)?.language
+                fun applicationLanguage() = context.applicationContext.resources.configuration.locales[0]?.language
+                fun persistedLanguage() = AppLanguageSettings.read(context).tag
+                runCatching {
+                    compose.waitUntil(10_000) {
+                        persistedLanguage() == tag && activityLanguage() == tag && applicationLanguage() == tag
+                    }
+                }
+                assertThat(persistedLanguage()).describedAs("persisted app language").isEqualTo(tag)
+                assertThat(activityLanguage()).describedAs("resumed Activity resource language").isEqualTo(tag)
+                assertThat(applicationLanguage()).describedAs("Application resource language").isEqualTo(tag)
+                compose.waitUntilExactlyOneExists(hasTestTag(SettingsTags.CONTENT), timeoutMillis = 5_000)
+                compose.waitUntilExactlyOneExists(hasTestTag(SettingsTags.TITLE) and hasText(title), timeoutMillis = 5_000)
+            }
+
+            chooseLanguage("Русский")
+            assertLanguage("ru", "Настройки")
+            compose.activityRule.scenario.recreate()
+            assertLanguage("ru", "Настройки")
+            assertThat(settings.read()).isEqualTo(appearanceBefore)
+
+            chooseLanguage("English")
+            assertLanguage("en", "Settings")
+            assertThat(settings.read()).isEqualTo(appearanceBefore)
+
+            chooseLanguage("System")
+            compose.waitUntil(5_000) {
+                if (Build.VERSION.SDK_INT >= 33) {
+                    context.getSystemService(LocaleManager::class.java).applicationLocales.isEmpty
+                } else preferences.getString("locale", null) == null
+            }
+        } finally {
+            if (Build.VERSION.SDK_INT >= 33) {
+                context.getSystemService(LocaleManager::class.java).applicationLocales = beforePlatform
+            } else {
+                preferences.edit().putString("locale", beforeLegacy).apply()
+                compose.runOnUiThread { (context.applicationContext as PiPlayerApplication).applyLegacyLanguage() }
+            }
+            runBlocking {
+                SettingsFiles.edit(settingsFile) { data ->
+                    if (savedLayout == null) data.remove(layoutKey) else data[layoutKey] = savedLayout
+                }
+            }
+        }
     }
 
     private fun scrollSettingsTo(label: Int) {

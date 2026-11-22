@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="ui_edit_mode">UI edit mode</string>
+    <string name="ui_edit_done">Done</string>
+    <string name="ui_edit_add">Add component</string>
+    <string name="ui_edit_layers">Layers</string>
+    <string name="ui_edit_reset">Reset layout</string>
+    <string name="ui_edit_cancel">Cancel</string>
+    <string name="ui_edit_properties">Properties</string>
+    <string name="ui_edit_hide">Hide</string>
+    <string name="ui_edit_forward">Forward</string>
+    <string name="ui_edit_backward">Backward</string>
+    <string name="ui_edit_padding">Inner spacing (dp)</string>
+    <string name="ui_edit_padding_start">Start</string>
+    <string name="ui_edit_padding_end">End</string>
+    <string name="ui_edit_padding_top">Top</string>
+    <string name="ui_edit_padding_bottom">Bottom</string>
+    <string name="ui_edit_foreground">Text and icon color</string>
+    <string name="ui_edit_background">Background color</string>
+    <string name="ui_edit_theme_color_hint">Theme color or #RRGGBB</string>
+    <string name="ui_edit_theme_color">Theme color</string>
+    <string name="ui_edit_choose_icon">Choose icon</string>
+    <string name="ui_edit_reset_icon">Default icon</string>
+    <string name="ui_edit_invalid_icon">Use a PNG, WebP, or supported standalone SVG icon.</string>
+    <string name="ui_edit_motion">Press animation</string>
+    <string name="ui_edit_motion_none">None</string>
+    <string name="ui_edit_motion_press">Press</string>
+    <string name="ui_edit_motion_bounce">Bounce</string>
+    <string name="ui_edit_motion_tilt">Tilt</string>
+    <string name="ui_edit_motion_preview">Preview animation</string>
+    <string name="ui_edit_apply">Apply</string>
+</resources>

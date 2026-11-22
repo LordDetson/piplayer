@@ -16,6 +16,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.lorddetson.piplayer.RadioSplitCompat
 import io.github.lorddetson.piplayer.net.OnlineGate
 import io.github.lorddetson.piplayer.playback.RadioPlayback
+import io.github.lorddetson.piplayer.settings.AppLanguageSettings
 import io.github.lorddetson.piplayer.settings.Appearance
 import io.github.lorddetson.piplayer.settings.AppearanceSettings
 import io.github.lorddetson.piplayer.ui.theme.PiPlayerTheme
@@ -27,7 +28,8 @@ class RadioActivity : ComponentActivity() {
     override fun attachBaseContext(newBase: Context) {
         super.attachBaseContext(newBase)
         initialAppearance = AppearanceSettings(newBase).read()
-        ThemeWindow.override(initialAppearance.theme)?.let(::applyOverrideConfiguration)
+        AppLanguageSettings.configurationOverride(newBase, ThemeWindow.override(initialAppearance.theme))
+            ?.let(::applyOverrideConfiguration)
         RadioSplitCompat.attachActivity(this)
     }
 

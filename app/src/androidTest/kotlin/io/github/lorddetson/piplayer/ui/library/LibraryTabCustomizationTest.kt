@@ -3,6 +3,7 @@ package io.github.lorddetson.piplayer.ui.library
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasTestTag
@@ -52,6 +53,7 @@ class LibraryTabCustomizationTest {
                 it.remove(HIDDEN)
                 it.remove(THEME)
                 it.remove(SELECTED_THEME)
+                it.remove(SYSTEM_CANVAS)
                 it.clearPanelOverrides()
             }
         }
@@ -62,6 +64,7 @@ class LibraryTabCustomizationTest {
                 before[HIDDEN]?.let { hidden -> it[HIDDEN] = hidden } ?: it.remove(HIDDEN)
                 before[THEME]?.let { theme -> it[THEME] = theme } ?: it.remove(THEME)
                 before[SELECTED_THEME]?.let { theme -> it[SELECTED_THEME] = theme } ?: it.remove(SELECTED_THEME)
+                before[SYSTEM_CANVAS]?.let { canvas -> it[SYSTEM_CANVAS] = canvas } ?: it.remove(SYSTEM_CANVAS)
                 it.clearPanelOverrides()
                 for ((key, value) in before.asMap()) {
                     if (key.name.startsWith("library_panel_") && value is String) {
@@ -74,6 +77,22 @@ class LibraryTabCustomizationTest {
 
     @get:Rule
     val rules: RuleChain = RuleChain.outerRule(GrantAudioPermission).around(resetLayout).around(compose)
+
+    @Test
+    fun anEditStartedFromTheToolbarAlsoChangesLibraryTabsAndSurvivesRecreation() {
+        action(R.string.library_sort).performTouchInput { longClick() }
+        compose.onNodeWithTag("ui_edit_mode").performClick()
+        compose.waitUntilExactlyOneExists(hasTestTag("ui_canvas"), timeoutMillis = 5_000)
+        compose.onNodeWithTag("ui_component_tab:albums").performTouchInput { click() }
+        compose.onNodeWithTag("ui_edit_hide").performClick()
+        compose.onNodeWithTag("ui_edit_done").performClick()
+        compose.waitUntilDoesNotExist(hasTestTag("ui_edit_done"), timeoutMillis = 5_000)
+
+        compose.activityRule.scenario.recreate()
+        compose.waitUntilExactlyOneExists(hasTestTag("ui_component_tab:songs"), timeoutMillis = 10_000)
+        compose.onNodeWithTag("ui_component_tab:albums").assertDoesNotExist()
+        compose.onNodeWithTag("ui_component_library:sort").assertExists()
+    }
 
     @Test
     fun toolbarButtonsMoveHideAndReturnWithoutOpeningSettings() {
@@ -250,5 +269,6 @@ class LibraryTabCustomizationTest {
         val HIDDEN = stringSetPreferencesKey("library_hidden_tabs")
         val THEME = stringPreferencesKey("theme_mode")
         val SELECTED_THEME = stringPreferencesKey("selected_custom_theme_id")
+        val SYSTEM_CANVAS = stringPreferencesKey("ui_canvas_system")
     }
 }

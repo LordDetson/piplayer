@@ -4,6 +4,7 @@ import android.app.Activity
 import android.app.Application
 import android.content.Context
 import android.content.res.Configuration
+import android.content.res.Resources
 import android.os.Bundle
 import androidx.annotation.VisibleForTesting
 import io.github.lorddetson.piplayer.crash.CrashReports
@@ -18,6 +19,7 @@ import io.github.lorddetson.piplayer.notifications.TagWriteNotifications
 import io.github.lorddetson.piplayer.tagging.write.BatchTagApply
 import io.github.lorddetson.piplayer.userdata.TagApplyQueue
 import io.github.lorddetson.piplayer.settings.DataStoreOnlineGate
+import io.github.lorddetson.piplayer.settings.AppLanguageSettings
 import io.github.lorddetson.piplayer.settings.IdentificationSettings
 import io.github.lorddetson.piplayer.settings.SettingsFiles
 import io.github.lorddetson.piplayer.tagging.write.BatchTagWriter
@@ -53,6 +55,10 @@ private object PassGateActivities : Application.ActivityLifecycleCallbacks {
 
 /** PiPlayer's application object, in every process of the app. */
 class PiPlayerApplication : Application() {
+
+    @Volatile private var legacyLanguageResources: Resources? = null
+
+    override fun getResources(): Resources = legacyLanguageResources ?: super.getResources()
 
     val crashReports: CrashReports by lazy { CrashReports.forApp(this) }
 
@@ -99,6 +105,7 @@ class PiPlayerApplication : Application() {
         // First, so that a crash anywhere later in the process is reported (docs/playback.md §7.1).
         CrashReports.install(this)
         RadioSplitCompat.attachApplication(this)
+        refreshLegacyLanguageResources()
     }
 
     override fun onCreate() {
@@ -106,6 +113,7 @@ class PiPlayerApplication : Application() {
         // How earlier processes ended is read in the main process only, and off its main thread: it takes binder calls
         // and disk reads.
         if (ProcessRole.current(this) == ProcessRole.MAIN) {
+            AppLanguageSettings.migrateLegacy(this)
             thread(name = "crash-reports", priority = Thread.MIN_PRIORITY) { crashReports.refresh() }
             registerActivityLifecycleCallbacks(PassGateActivities)
             // Starts reading the online-lookup choice, off the main thread, so that it is known before the first lookup.
@@ -157,9 +165,22 @@ class PiPlayerApplication : Application() {
     /** Another language of the app makes every sort key again, by a sync now (docs/library.md §11.1). */
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
-        if (ProcessRole.current(this) == ProcessRole.MAIN && SortKeys.use(languages(newConfig))) {
+        applyLegacyLanguage()
+    }
+
+    /** Refreshes service and library resources before the activity is recreated on Android 11 and 12. */
+    internal fun applyLegacyLanguage() {
+        refreshLegacyLanguageResources()
+        if (ProcessRole.current(this) == ProcessRole.MAIN && SortKeys.use(languages(resources.configuration))) {
             Library.sync(this).request()
             warmLetters()
+        }
+    }
+
+    private fun refreshLegacyLanguageResources() {
+        val base = baseContext
+        legacyLanguageResources = AppLanguageSettings.configurationOverride(base)?.let {
+            base.createConfigurationContext(it).resources
         }
     }
 

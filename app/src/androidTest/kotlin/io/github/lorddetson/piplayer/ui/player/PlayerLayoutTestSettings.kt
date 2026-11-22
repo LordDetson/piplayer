@@ -6,16 +6,17 @@ import io.github.lorddetson.piplayer.settings.SettingsFiles
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 
-internal fun withStockPlayerTheme(context: Context, panelPrefix: String, test: () -> Unit) {
+internal fun withStockPlayerTheme(context: Context, vararg panelPrefixes: String, test: () -> Unit) {
     val file = SettingsFiles.settings(context)
     val theme = stringPreferencesKey("theme_mode")
     val selected = stringPreferencesKey("selected_custom_theme_id")
+    fun isPanelSetting(name: String): Boolean = panelPrefixes.any { prefix -> name.startsWith(prefix) }
     val previous = runBlocking { file.data.first() }
     runBlocking {
         SettingsFiles.edit(file) { preferences ->
             preferences.remove(theme)
             preferences.remove(selected)
-            preferences.asMap().keys.filter { it.name.startsWith(panelPrefix) }.forEach { preferences.remove(it) }
+            preferences.asMap().keys.filter { isPanelSetting(it.name) }.forEach { preferences.remove(it) }
         }
     }
     try {
@@ -25,9 +26,9 @@ internal fun withStockPlayerTheme(context: Context, panelPrefix: String, test: (
             SettingsFiles.edit(file) { preferences ->
                 previous[theme]?.let { preferences[theme] = it } ?: preferences.remove(theme)
                 previous[selected]?.let { preferences[selected] = it } ?: preferences.remove(selected)
-                preferences.asMap().keys.filter { it.name.startsWith(panelPrefix) }.forEach { preferences.remove(it) }
+                preferences.asMap().keys.filter { isPanelSetting(it.name) }.forEach { preferences.remove(it) }
                 for ((key, value) in previous.asMap()) {
-                    if (key.name.startsWith(panelPrefix) && value is String) preferences[stringPreferencesKey(key.name)] = value
+                    if (isPanelSetting(key.name) && value is String) preferences[stringPreferencesKey(key.name)] = value
                 }
             }
         }

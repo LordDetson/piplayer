@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.displayCutout
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -20,9 +21,12 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ProgressIndicatorDefaults
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -37,11 +41,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -54,11 +61,15 @@ import io.github.lorddetson.piplayer.R
 import io.github.lorddetson.piplayer.settings.MiniPlayerElement
 import io.github.lorddetson.piplayer.settings.MiniPlayerPanel
 import io.github.lorddetson.piplayer.settings.PlayerPanelState
+import io.github.lorddetson.piplayer.settings.UiSurface
 import io.github.lorddetson.piplayer.settings.miniPlayerPanels
+import io.github.lorddetson.piplayer.ui.customization.EditableUiPanel
 import io.github.lorddetson.piplayer.ui.customization.PanelItemKind
 import io.github.lorddetson.piplayer.ui.customization.PanelItemMenu
 import io.github.lorddetson.piplayer.ui.customization.PanelMenuPage
 import io.github.lorddetson.piplayer.ui.customization.PanelRestoreButton
+import io.github.lorddetson.piplayer.ui.customization.UiCanvasComponent
+import io.github.lorddetson.piplayer.ui.customization.UiControlColor
 import io.github.lorddetson.piplayer.ui.customization.customizeOnHold
 import kotlinx.coroutines.launch
 
@@ -96,6 +107,52 @@ fun MiniPlayer(
     }
     fun restore(id: String) = edit { it.copy(hidden = it.hidden - MiniPlayerElement.byId.getValue(id)) }
     val hidden = MiniPlayerElement.entries.filter(panel.hidden::contains).map(MiniPlayerElement::id)
+    val artwork: @Composable (Modifier) -> Unit = { press ->
+        CoverImage(cover, press.clip(RoundedCornerShape(6.dp)), placeholderName = coverName)
+    }
+    val details: @Composable (Modifier) -> Unit = { press ->
+        Column(press.fillMaxWidth()) {
+            Text(
+                text = metadata.title?.toString().orEmpty(),
+                style = MaterialTheme.typography.titleMedium,
+                color = UiControlColor(Color.Unspecified),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = metadata.artist?.toString() ?: stringResource(R.string.songs_unknown_artist),
+                style = MaterialTheme.typography.bodyMedium,
+                color = UiControlColor(MaterialTheme.colorScheme.onSurfaceVariant),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+    val openLabel = stringResource(R.string.player_open_now_playing)
+    val openTrack = Modifier.clickable(onClickLabel = openLabel, role = Role.Button, onClick = onOpen)
+    val components = listOf(
+        UiCanvasComponent(MiniPlayerElement.COVER.canvasId, R.string.player_element_cover) {
+            artwork(Modifier.fillMaxSize().then(openTrack))
+        },
+        UiCanvasComponent(MiniPlayerElement.TRACK_INFO.canvasId, R.string.player_element_track, fillWidth = true) {
+            details(openTrack)
+        },
+        UiCanvasComponent(MiniPlayerElement.PLAY_PAUSE.canvasId, R.string.player_element_play_pause, customizableIcon = true) {
+            PlayPauseButton(player, Modifier.fillMaxSize())
+        },
+        UiCanvasComponent(MiniPlayerElement.PROGRESS.canvasId, R.string.player_position, height = 8.dp, fillWidth = true) {
+            Box(Modifier.fillMaxSize().testTag("mini_player_progress"), contentAlignment = Alignment.Center) {
+                ProgressLine(player, item.durationMs)
+            }
+        },
+    )
+    val trackRow = listOf(panel.visible.map { it.canvasId })
+    val progressRow = listOf(listOf(MiniPlayerElement.PROGRESS.canvasId))
+    val initialRows = when {
+        MiniPlayerElement.PROGRESS in panel.hidden -> trackRow
+        panel.progressAtBottom -> trackRow + progressRow
+        else -> progressRow + trackRow
+    }
     val progress: @Composable () -> Unit = {
         if (MiniPlayerElement.PROGRESS !in panel.hidden) {
             MiniPlayerItem(MiniPlayerElement.PROGRESS, theme, panel, hidden, ::edit, ::restore, Modifier.fillMaxWidth()) { press ->
@@ -111,50 +168,54 @@ fun MiniPlayer(
         color = MaterialTheme.colorScheme.surfaceContainer,
     ) {
         Column(if (bottomInset) Modifier.windowInsetsPadding(barInsets) else Modifier) {
-            if (!panel.progressAtBottom) progress()
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = 64.dp)
-                    .clickable(onClickLabel = stringResource(R.string.player_open_now_playing), role = Role.Button, onClick = onOpen)
-                    .padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalAlignment = Alignment.CenterVertically,
+            EditableUiPanel(
+                surface = UiSurface.MINI_PLAYER,
+                themeId = theme,
+                components = components,
+                initialRows = initialRows.filter { it.isNotEmpty() },
+                height = 104.dp,
+                onSaveFailed = { snackbar?.showSnackbar(saveFailed) },
+                canvasChrome = {
+                    IconButton(onClick = onOpen) {
+                        Icon(painterResource(R.drawable.ic_player_collapse), openLabel, Modifier.rotate(180f))
+                    }
+                },
             ) {
-                for (element in panel.visible) {
-                    val width = if (element == MiniPlayerElement.TRACK_INFO) Modifier.weight(1f) else Modifier
-                    MiniPlayerItem(element, theme, panel, hidden, ::edit, ::restore, width) { press ->
-                        when (element) {
-                            MiniPlayerElement.COVER -> CoverImage(cover, press.size(48.dp).clip(RoundedCornerShape(6.dp)), placeholderName = coverName)
-                            MiniPlayerElement.TRACK_INFO -> Column(press.fillMaxWidth()) {
-                                Text(
-                                    text = metadata.title?.toString().orEmpty(),
-                                    style = MaterialTheme.typography.titleMedium,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                                Text(
-                                    text = metadata.artist?.toString() ?: stringResource(R.string.songs_unknown_artist),
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
+                Column {
+                    if (!panel.progressAtBottom) progress()
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 64.dp)
+                            .then(openTrack)
+                            .padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        for (element in panel.visible) {
+                            val width = if (element == MiniPlayerElement.TRACK_INFO) Modifier.weight(1f) else Modifier
+                            MiniPlayerItem(element, theme, panel, hidden, ::edit, ::restore, width) { press ->
+                                when (element) {
+                                    MiniPlayerElement.COVER -> artwork(press.size(48.dp))
+                                    MiniPlayerElement.TRACK_INFO -> details(press)
+                                    MiniPlayerElement.PLAY_PAUSE -> PlayPauseButton(player, press)
+                                    MiniPlayerElement.PROGRESS -> error("Progress belongs at the edge of the mini player")
+                                }
                             }
-                            MiniPlayerElement.PLAY_PAUSE -> PlayPauseButton(player, press)
-                            MiniPlayerElement.PROGRESS -> error("Progress belongs at the edge of the mini player")
+                        }
+                        if (MiniPlayerElement.TRACK_INFO !in panel.visible) Spacer(Modifier.weight(1f))
+                        key(theme) {
+                            PanelRestoreButton(PanelItemKind.MINI_PLAYER, hidden, ::miniPlayerLabel, "mini_player_restore", ::restore)
                         }
                     }
-                }
-                if (MiniPlayerElement.TRACK_INFO !in panel.visible) Spacer(Modifier.weight(1f))
-                key(theme) {
-                    PanelRestoreButton(PanelItemKind.MINI_PLAYER, hidden, ::miniPlayerLabel, "mini_player_restore", ::restore)
+                    if (panel.progressAtBottom) progress()
                 }
             }
-            if (panel.progressAtBottom) progress()
         }
     }
 }
+
+private val MiniPlayerElement.canvasId: String get() = "mini:$id"
 
 @Composable
 private fun MiniPlayerItem(
@@ -221,6 +282,7 @@ private fun ProgressLine(player: Player, durationMs: Long) {
     val progress = rememberProgressTicks(player, progressTicks(widthPx, durationMs))
     LinearProgressIndicator(
         progress = { progress.currentPositionProgress },
+        color = UiControlColor(ProgressIndicatorDefaults.linearColor),
         modifier = Modifier
             .fillMaxWidth()
             .height(2.dp)

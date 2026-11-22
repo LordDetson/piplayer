@@ -234,7 +234,8 @@ The data model it implements is sketched in track-identification.md §10 (TI bel
 ### 3.3 Backup
 
 - Both rule files (`fullBackupContent` for Android 11, `dataExtractionRules` for cloud backup and device transfer on
-  Android 12 and later) list what is backed up: `user.db` with its WAL file and the `settings` file. Everything else
+  Android 12 and later) include `user.db` with its WAL file, the `settings` file and the app language choice on
+  Android 11 and 12. Android 13 and later retain the choice through the system's per-app language settings. Everything else
   stays out: the library database, `device_state`, the saved queue, crash reports, the copies of own covers (§13.2) and
   caches (TI §10.3).
 
@@ -290,6 +291,8 @@ The data model it implements is sketched in track-identification.md §10 (TI bel
 - A Settings screen, opened from the Songs screen's top bar, has two sections in M2a: Library (the hidden-file
   settings and Library folders; from M2b also the legacy tag encoding, §5.7) and Appearance (the theme). Other
   sections arrive with their milestones.
+- App language offers System, English and Russian. Both translations ship with the app and can be selected offline.
+  Language changes preserve the selected theme and its layouts.
 - Appearance offers System (the default), Light, Dark, AMOLED, Cool graphite, Warm light, Cover Focus and Control Deck.
   System, Light and Dark use dynamic color where available. The fixed palettes show color previews. The choice is
   read before the activity draws anything and becomes the night mode of its configuration, so its window background and

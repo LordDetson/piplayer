@@ -1,5 +1,6 @@
 package io.github.lorddetson.piplayer.ui.settings
 
+import androidx.activity.compose.LocalActivity
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -27,6 +28,8 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -34,6 +37,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -43,11 +47,14 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.lorddetson.piplayer.BuildConfig
 import io.github.lorddetson.piplayer.R
 import io.github.lorddetson.piplayer.nativelib.taglib.Id3v1WritePolicy
+import io.github.lorddetson.piplayer.settings.AppLanguage
 import io.github.lorddetson.piplayer.settings.HiddenFiles
 import io.github.lorddetson.piplayer.settings.NowPlayingLayout
 import io.github.lorddetson.piplayer.settings.ThemeMode
@@ -56,6 +63,7 @@ import io.github.lorddetson.piplayer.ui.theme.builtInColorScheme
 
 internal object SettingsTags {
     const val CONTENT = "settings_content"
+    const val TITLE = "settings_title"
 }
 
 /**
@@ -75,7 +83,12 @@ fun SettingsScreen(
     val legacyEncoding by viewModel.legacyEncoding.collectAsStateWithLifecycle()
     val identificationPrivacy by viewModel.identificationPrivacy.collectAsStateWithLifecycle()
     val tagWriting by viewModel.tagWritingOptions.collectAsStateWithLifecycle()
-    SettingsScaffold(stringResource(R.string.settings_title), onBack) { padding ->
+    val language by viewModel.languageChoice.collectAsStateWithLifecycle()
+    val activity = LocalActivity.current
+    val snackbar = remember { SnackbarHostState() }
+    val languageSaveFailed = stringResource(R.string.app_language_save_failed)
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { viewModel.refreshLanguage() }
+    SettingsScaffold(stringResource(R.string.settings_title), onBack, snackbarHost = { SnackbarHost(snackbar) }) { padding ->
         Column(
             Modifier
                 .padding(padding)
@@ -83,6 +96,9 @@ fun SettingsScreen(
                 .testTag(SettingsTags.CONTENT)
                 .verticalScroll(rememberScrollState()),
         ) {
+            ChoiceSetting(R.string.app_language, language, AppLanguage.entries, AppLanguage::label) { chosen ->
+                viewModel.setLanguage(chosen, recreate = { activity?.recreate() }) { snackbar.showSnackbar(languageSaveFailed) }
+            }
             SectionTitle(stringResource(R.string.settings_library))
             SwitchRow(
                 stringResource(R.string.settings_show_system_sounds),
@@ -177,6 +193,12 @@ fun SettingsScreen(
     }
 }
 
+private fun AppLanguage.label(): Int = when (this) {
+    AppLanguage.SYSTEM -> R.string.app_language_system
+    AppLanguage.RUSSIAN -> R.string.app_language_russian
+    AppLanguage.ENGLISH -> R.string.app_language_english
+}
+
 @Composable
 private fun <T> ChoiceSetting(
     title: Int,
@@ -229,11 +251,17 @@ private fun TagCoverPreset.label(): Int = when (this) {
 /** A settings page: a top bar with the title and a way back, over [content]. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun SettingsScaffold(title: String, onBack: () -> Unit, content: @Composable (PaddingValues) -> Unit) {
+internal fun SettingsScaffold(
+    title: String,
+    onBack: () -> Unit,
+    snackbarHost: @Composable () -> Unit = {},
+    content: @Composable (PaddingValues) -> Unit,
+) {
     Scaffold(
+        snackbarHost = snackbarHost,
         topBar = {
             TopAppBar(
-                title = { Text(title) },
+                title = { Text(title, modifier = Modifier.testTag(SettingsTags.TITLE)) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(painterResource(R.drawable.ic_back), stringResource(R.string.settings_back))

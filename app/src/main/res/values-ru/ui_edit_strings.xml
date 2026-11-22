@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="ui_edit_mode">Режим редактирования UI</string>
+    <string name="ui_edit_done">Готово</string>
+    <string name="ui_edit_add">Добавить компонент</string>
+    <string name="ui_edit_layers">Слои</string>
+    <string name="ui_edit_reset">Сбросить раскладку</string>
+    <string name="ui_edit_cancel">Отмена</string>
+    <string name="ui_edit_properties">Свойства</string>
+    <string name="ui_edit_hide">Скрыть</string>
+    <string name="ui_edit_forward">Слой выше</string>
+    <string name="ui_edit_backward">Слой ниже</string>
+    <string name="ui_edit_padding">Внутренние отступы (dp)</string>
+    <string name="ui_edit_padding_start">Начало</string>
+    <string name="ui_edit_padding_end">Конец</string>
+    <string name="ui_edit_padding_top">Сверху</string>
+    <string name="ui_edit_padding_bottom">Снизу</string>
+    <string name="ui_edit_foreground">Цвет текста и иконки</string>
+    <string name="ui_edit_background">Цвет фона</string>
+    <string name="ui_edit_theme_color_hint">Цвет темы или #RRGGBB</string>
+    <string name="ui_edit_theme_color">Цвет темы</string>
+    <string name="ui_edit_choose_icon">Выбрать иконку</string>
+    <string name="ui_edit_reset_icon">Штатная иконка</string>
+    <string name="ui_edit_invalid_icon">Выберите иконку PNG, WebP или поддерживаемый SVG.</string>
+    <string name="ui_edit_motion">Анимация нажатия</string>
+    <string name="ui_edit_motion_none">Без анимации</string>
+    <string name="ui_edit_motion_press">Сжатие</string>
+    <string name="ui_edit_motion_bounce">Пружинка</string>
+    <string name="ui_edit_motion_tilt">Покачивание</string>
+    <string name="ui_edit_motion_preview">Предпросмотр анимации</string>
+    <string name="ui_edit_apply">Применить</string>
+</resources>

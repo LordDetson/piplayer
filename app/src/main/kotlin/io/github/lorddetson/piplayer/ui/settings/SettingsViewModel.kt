@@ -14,6 +14,9 @@ import io.github.lorddetson.piplayer.library.Library
 import io.github.lorddetson.piplayer.library.values.LegacyEncoding
 import io.github.lorddetson.piplayer.library.values.LegacyEncodings
 import io.github.lorddetson.piplayer.nativelib.taglib.Id3v1WritePolicy
+import io.github.lorddetson.piplayer.settings.AppLanguage
+import io.github.lorddetson.piplayer.settings.AppLanguageChange
+import io.github.lorddetson.piplayer.settings.AppLanguageSettings
 import io.github.lorddetson.piplayer.settings.Appearance
 import io.github.lorddetson.piplayer.settings.AppearanceSettings
 import io.github.lorddetson.piplayer.settings.CustomTheme
@@ -51,6 +54,8 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /** The Settings screen's state (docs/library.md §3.6). */
 class SettingsViewModel(application: Application) : AndroidViewModel(application) {
@@ -59,6 +64,33 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     private val customThemes = CustomThemesSettings(application)
     private val library = LibrarySettings(application)
     private val tagWriting = TagWritingSettings(application)
+
+    private val languageUpdates = Mutex()
+    private val selectedLanguage = MutableStateFlow(AppLanguageSettings.read(application))
+    internal val languageChoice: StateFlow<AppLanguage> = selectedLanguage
+
+    internal fun refreshLanguage() {
+        selectedLanguage.value = AppLanguageSettings.read(getApplication<Application>())
+    }
+
+    internal fun setLanguage(language: AppLanguage, recreate: () -> Unit, onSaveFailed: suspend () -> Unit) {
+        viewModelScope.launch {
+            val application = getApplication<PiPlayerApplication>()
+            val change = languageUpdates.withLock {
+                AppLanguageSettings.set(application, language).also {
+                    if (it != AppLanguageChange.FAILED) refreshLanguage()
+                }
+            }
+            when (change) {
+                AppLanguageChange.RECREATE -> {
+                    application.applyLegacyLanguage()
+                    recreate()
+                }
+                AppLanguageChange.FAILED -> onSaveFailed()
+                AppLanguageChange.UNCHANGED, AppLanguageChange.APPLIED -> Unit
+            }
+        }
+    }
 
     internal val tagWritingOptions: StateFlow<TagWritingOptions> =
         tagWriting.options.stateIn(viewModelScope, SharingStarted.Eagerly, TagWritingOptions())
@@ -137,6 +169,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                 player = theme.player,
                 miniPlayer = theme.miniPlayer,
                 navigation = theme.navigation,
+                canvases = theme.canvases,
             )) {
                 is ThemeApplyResult.Applied -> {
                     lastThemeImport.value = result.undo

@@ -1,6 +1,5 @@
 package io.github.lorddetson.piplayer.ui.player
 
-import androidx.compose.material3.Icon
 import androidx.compose.material3.IconToggleButton
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
@@ -9,6 +8,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import io.github.lorddetson.piplayer.R
+import io.github.lorddetson.piplayer.ui.customization.UiControlIcon
 
 /** A favorite as Now Playing and the album page show it (docs/library.md §15.2): [checked] and what a tap does. */
 class FavoriteState(val checked: Boolean, val onToggle: () -> Unit)
@@ -17,7 +17,7 @@ class FavoriteState(val checked: Boolean, val onToggle: () -> Unit)
 @Composable
 fun FavoriteButton(state: FavoriteState, modifier: Modifier = Modifier) {
     IconToggleButton(checked = state.checked, onCheckedChange = { state.onToggle() }, modifier = modifier) {
-        Icon(
+        UiControlIcon(
             painterResource(if (state.checked) R.drawable.ic_favorite else R.drawable.ic_favorite_border),
             stringResource(R.string.favorite),
             tint = if (state.checked) MaterialTheme.colorScheme.primary else LocalContentColor.current,

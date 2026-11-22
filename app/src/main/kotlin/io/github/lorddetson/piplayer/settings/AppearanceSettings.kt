@@ -75,6 +75,7 @@ class AppearanceSettings internal constructor(private val file: DataStore<Prefer
             player = nowPlayingPanels.stateOf(preferences).panel,
             miniPlayer = miniPlayerPanels.stateOf(preferences).panel,
             navigation = bottomNavigationLayouts.stateOf(preferences).panel,
+            canvases = UiCanvasSettings.layoutsOf(preferences).takeUnless { it.panels.isEmpty() },
         )
     }
 
@@ -85,14 +86,16 @@ class AppearanceSettings internal constructor(private val file: DataStore<Prefer
         player: NowPlayingPanel? = null,
         miniPlayer: MiniPlayerPanel? = null,
         navigation: BottomNavigationLayout? = null,
+        canvases: UiThemeCanvases? = null,
     ): ThemeApplyResult {
-        if (!CustomThemesSettings.isValid(theme)) return ThemeApplyResult.InvalidTheme
+        if (!CustomThemesSettings.isValid(theme) || canvases?.isValid == false) return ThemeApplyResult.InvalidTheme
         return update(ThemeApplyResult.WriteFailed) { preferences ->
             val previous = appearanceOf(preferences)
             val importedPanel = panel ?: LibraryTabsSettings.panelOf(preferences).layout
             val importedPlayer = player ?: nowPlayingPanels.stateOf(preferences).panel
             val importedMiniPlayer = miniPlayer ?: miniPlayerPanels.stateOf(preferences).panel
             val importedNavigation = navigation ?: bottomNavigationLayouts.stateOf(preferences).panel
+            val importedCanvases = canvases ?: UiCanvasSettings.layoutsOf(preferences)
             if (!CustomThemesSettings.storeTheme(preferences, theme, select = true, replaceExisting = false)) {
                 return@update ThemeApplyResult.InvalidTheme
             }
@@ -100,6 +103,7 @@ class AppearanceSettings internal constructor(private val file: DataStore<Prefer
             nowPlayingPanels.storePanel(preferences, theme.id, importedPlayer)
             miniPlayerPanels.storePanel(preferences, theme.id, importedMiniPlayer)
             bottomNavigationLayouts.storePanel(preferences, theme.id, importedNavigation)
+            UiCanvasSettings.store(preferences, theme.id, importedCanvases)
             preferences[themeLayoutKey(theme.id)] = (layout ?: previous.nowPlayingLayout).stored
             ThemeApplyResult.Applied(ThemeApplyUndo(previous.customTheme?.id, theme.id))
         }

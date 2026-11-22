@@ -6,7 +6,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.FilledIconButton
-import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconToggleButton
 import androidx.compose.material3.LocalContentColor
@@ -29,6 +28,7 @@ import androidx.compose.ui.unit.dp
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import io.github.lorddetson.piplayer.R
+import io.github.lorddetson.piplayer.ui.customization.UiControlIcon
 import io.github.lorddetson.piplayer.covers.PlaceholderColors
 
 /*
@@ -45,11 +45,11 @@ fun PlayPauseButton(player: Player?, modifier: Modifier = Modifier, large: Boole
     val icon = painterResource(if (state.showPlay) R.drawable.ic_player_play else R.drawable.ic_player_pause)
     if (large) {
         FilledIconButton(onClick = state::onClick, enabled = state.isEnabled, modifier = modifier.size(72.dp)) {
-            Icon(icon, contentDescription = label, modifier = Modifier.size(36.dp))
+            UiControlIcon(icon, contentDescription = label, modifier = Modifier.size(36.dp))
         }
     } else {
         IconButton(onClick = state::onClick, enabled = state.isEnabled, modifier = modifier) {
-            Icon(icon, contentDescription = label)
+            UiControlIcon(icon, contentDescription = label)
         }
     }
 }
@@ -60,7 +60,7 @@ fun PlayPauseButton(player: Player?, modifier: Modifier = Modifier, large: Boole
 fun PreviousButton(player: Player?, modifier: Modifier = Modifier) {
     val state = rememberPreviousState(player)
     IconButton(onClick = state::onClick, enabled = state.isEnabled, modifier = modifier.size(56.dp)) {
-        Icon(painterResource(R.drawable.ic_player_previous), stringResource(R.string.player_previous), Modifier.size(36.dp))
+        UiControlIcon(painterResource(R.drawable.ic_player_previous), stringResource(R.string.player_previous), Modifier.size(36.dp))
     }
 }
 
@@ -69,7 +69,7 @@ fun PreviousButton(player: Player?, modifier: Modifier = Modifier) {
 fun NextButton(player: Player?, modifier: Modifier = Modifier) {
     val state = rememberNextState(player)
     IconButton(onClick = state::onClick, enabled = state.isEnabled, modifier = modifier.size(56.dp)) {
-        Icon(painterResource(R.drawable.ic_player_next), stringResource(R.string.player_next), Modifier.size(36.dp))
+        UiControlIcon(painterResource(R.drawable.ic_player_next), stringResource(R.string.player_next), Modifier.size(36.dp))
     }
 }
 
@@ -85,7 +85,7 @@ fun ShuffleButton(player: Player?, modifier: Modifier = Modifier) {
         enabled = state.isEnabled,
         modifier = modifier.semantics { stateDescription = mode },
     ) {
-        Icon(painterResource(R.drawable.ic_player_shuffle), stringResource(R.string.player_shuffle))
+        UiControlIcon(painterResource(R.drawable.ic_player_shuffle), stringResource(R.string.player_shuffle))
     }
 }
 
@@ -110,7 +110,7 @@ fun RepeatButton(player: Player?, modifier: Modifier = Modifier) {
             onClick(label = action, action = null)
         },
     ) {
-        Icon(
+        UiControlIcon(
             painterResource(icon),
             contentDescription = stringResource(R.string.player_repeat),
             tint = if (state.repeatModeState == Player.REPEAT_MODE_OFF) LocalContentColor.current else MaterialTheme.colorScheme.primary,
@@ -136,7 +136,7 @@ fun CoverImage(cover: ImageBitmap?, modifier: Modifier = Modifier, noteSize: Dp 
                 .testTag(PlayerTags.COVER_PLACEHOLDER),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(
+            UiControlIcon(
                 painterResource(R.drawable.ic_player_cover),
                 contentDescription = null,
                 modifier = Modifier.size(noteSize),

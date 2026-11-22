@@ -4,6 +4,7 @@ import androidx.annotation.OptIn
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
@@ -30,6 +31,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -47,6 +49,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalResources
@@ -71,6 +74,11 @@ import io.github.lorddetson.piplayer.R
 import io.github.lorddetson.piplayer.settings.NowPlayingElement
 import io.github.lorddetson.piplayer.settings.NowPlayingLayout
 import io.github.lorddetson.piplayer.settings.NowPlayingRow
+import io.github.lorddetson.piplayer.settings.UiSurface
+import io.github.lorddetson.piplayer.ui.customization.EditableUiPanel
+import io.github.lorddetson.piplayer.ui.customization.UiCanvasComponent
+import io.github.lorddetson.piplayer.ui.customization.UiControlColor
+import io.github.lorddetson.piplayer.ui.customization.UiControlIcon
 import io.github.lorddetson.piplayer.ui.details.PlayingBadge
 import io.github.lorddetson.piplayer.ui.identification.IdentifyButton
 import io.github.lorddetson.piplayer.ui.identification.LocalIdentify
@@ -115,27 +123,37 @@ fun NowPlaying(
         }
     }.toSet()
     val editor = rememberNowPlayingCustomization(available, !minimal || controlsRevealed, { controlsRevealed = true }, onPanelSaveFailed)
-    val button: @Composable (NowPlayingElement) -> Unit = { element ->
-        PlayerElement(editor, element) { press ->
-            when (element) {
-                NowPlayingElement.IDENTIFY -> IdentifyButton(player, press)
-                NowPlayingElement.FAVORITE -> favorite?.let { FavoriteButton(it, press.testTag(PlayerTags.FAVORITE)) }
-                NowPlayingElement.QUEUE -> onOpenQueue?.let { open ->
-                    IconButton(onClick = open, modifier = press) {
-                        Icon(painterResource(R.drawable.ic_queue), stringResource(R.string.queue_open))
-                    }
+    val action: @Composable (NowPlayingElement, Modifier) -> Unit = { element, press ->
+        when (element) {
+            NowPlayingElement.IDENTIFY -> IdentifyButton(player, press)
+            NowPlayingElement.FAVORITE -> favorite?.let { FavoriteButton(it, press.testTag(PlayerTags.FAVORITE)) }
+            NowPlayingElement.QUEUE -> onOpenQueue?.let { open ->
+                IconButton(onClick = open, modifier = press) {
+                    UiControlIcon(painterResource(R.drawable.ic_queue), stringResource(R.string.queue_open))
                 }
-                NowPlayingElement.MORE -> more?.let { TrackMenuButton(it, press) }
-                NowPlayingElement.SHUFFLE -> ShuffleButton(player, press)
-                NowPlayingElement.PREVIOUS -> PreviousButton(player, press)
-                NowPlayingElement.PLAY_PAUSE -> PlayPauseButton(player, press, large = true)
-                NowPlayingElement.NEXT -> NextButton(player, press)
-                NowPlayingElement.REPEAT -> RepeatButton(player, press)
-                NowPlayingElement.TIMER -> SleepTimerButton(controls, press)
-                NowPlayingElement.STOP_AFTER -> StopAfterCurrentButton(controls, press)
-                NowPlayingElement.EQUALIZER -> controls.openEqualizer?.let { EqualizerButton(it, press) }
-                else -> error("The content section only accepts content components")
             }
+            NowPlayingElement.MORE -> more?.let { TrackMenuButton(it, press) }
+            NowPlayingElement.SHUFFLE -> ShuffleButton(player, press)
+            NowPlayingElement.PREVIOUS -> PreviousButton(player, press)
+            NowPlayingElement.PLAY_PAUSE -> PlayPauseButton(player, press, large = true)
+            NowPlayingElement.NEXT -> NextButton(player, press)
+            NowPlayingElement.REPEAT -> RepeatButton(player, press)
+            NowPlayingElement.TIMER -> SleepTimerButton(controls, press)
+            NowPlayingElement.STOP_AFTER -> StopAfterCurrentButton(controls, press)
+            NowPlayingElement.EQUALIZER -> controls.openEqualizer?.let { EqualizerButton(it, press) }
+            else -> error("Expected a playback action")
+        }
+    }
+    val body: @Composable (NowPlayingElement, Modifier, TextAlign) -> Unit = { element, press, textAlign ->
+        when (element) {
+            NowPlayingElement.TRACK_INFO -> TrackHeading(metadata, onOpenArtist, onOpenAlbum, textAlign, press.fillMaxWidth())
+            NowPlayingElement.FORMAT -> Column(press, horizontalAlignment = Alignment.CenterHorizontally) {
+                PlayingBadge(player)
+                Spacer(Modifier.height(4.dp))
+                FormatLineText(player)
+            }
+            NowPlayingElement.SEEK -> SeekBar(player, press.fillMaxWidth())
+            else -> error("Expected a track content component")
         }
     }
     val artwork: @Composable (Modifier) -> Unit = { press ->
@@ -144,29 +162,106 @@ fun NowPlaying(
         }
         CoverImage(cover, size.then(press).clip(RoundedCornerShape(12.dp)), if (expanded) 36.dp else 96.dp, coverName)
     }
+    val collapse: @Composable () -> Unit = {
+        IconButton(onClick = onClose) {
+            Icon(painterResource(R.drawable.ic_player_collapse), stringResource(R.string.player_close_now_playing))
+        }
+    }
     val top = editor.shown(NowPlayingRow.TOP)
     val content = editor.shown(NowPlayingRow.CONTENT)
     val transport = editor.shown(NowPlayingRow.CONTROLS)
     val extras = editor.shown(NowPlayingRow.EXTRAS)
+    val compactPair = expanded && content.take(2) == listOf(NowPlayingElement.COVER, NowPlayingElement.TRACK_INFO)
+    val contentRows = if (compactPair) listOf(content.take(2)) + content.drop(2).map { listOf(it) }
+    else content.map { listOf(it) }
+    val initialRows = (listOf(top) + contentRows + listOf(transport, extras)).filter { it.isNotEmpty() }
+    val components = available.map { element ->
+        val width = when (element) {
+            NowPlayingElement.COVER -> if (expanded) 104.dp else 220.dp
+            NowPlayingElement.PLAY_PAUSE -> 72.dp
+            NowPlayingElement.PREVIOUS, NowPlayingElement.NEXT -> 56.dp
+            NowPlayingElement.TIMER -> 96.dp
+            else -> 48.dp
+        }
+        val height = when (element) {
+            NowPlayingElement.TRACK_INFO -> 88.dp
+            NowPlayingElement.SEEK, NowPlayingElement.FORMAT -> 64.dp
+            else -> width
+        }
+        val trackContent = element.fits(NowPlayingRow.CONTENT)
+        UiCanvasComponent(
+            element.canvasId, element.label, width, height,
+            fillWidth = element in fullWidthElements, customizableIcon = !trackContent,
+        ) {
+            when {
+                element == NowPlayingElement.COVER -> CoverImage(
+                    cover, Modifier.fillMaxSize().clip(RoundedCornerShape(12.dp)),
+                    if (expanded) 36.dp else 72.dp, coverName,
+                )
+                trackContent -> body(element, Modifier, TextAlign.Center)
+                else -> action(element, Modifier.fillMaxSize())
+            }
+        }
+    }
+    BoxWithConstraints(modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface).windowInsetsPadding(contentInsets)) {
+        EditableUiPanel(
+            surface = UiSurface.NOW_PLAYING,
+            themeId = editor.themeId,
+            components = components,
+            initialRows = initialRows.map { row -> row.map { it.canvasId } },
+            height = (maxHeight - 144.dp).coerceAtLeast(96.dp),
+            onSaveFailed = onPanelSaveFailed,
+            canvasChrome = { Row(Modifier.fillMaxWidth().semantics { paneTitle = pane }) { collapse() } },
+        ) {
+            StockNowPlaying(
+                editor, pane, layout, controlsRevealed, { controlsRevealed = !controlsRevealed }, collapse,
+                top, content, transport, extras, compactPair, artwork, body, action,
+            )
+        }
+    }
+}
+
+private val NowPlayingElement.canvasId: String get() = "now:$id"
+
+private val fullWidthElements = setOf(NowPlayingElement.TRACK_INFO, NowPlayingElement.FORMAT, NowPlayingElement.SEEK)
+
+@Composable
+private fun StockNowPlaying(
+    editor: NowPlayingCustomization,
+    pane: String,
+    layout: NowPlayingLayout,
+    controlsRevealed: Boolean,
+    onToggleControls: () -> Unit,
+    collapse: @Composable () -> Unit,
+    top: List<NowPlayingElement>,
+    content: List<NowPlayingElement>,
+    transport: List<NowPlayingElement>,
+    extras: List<NowPlayingElement>,
+    compactPair: Boolean,
+    artwork: @Composable (Modifier) -> Unit,
+    body: @Composable (NowPlayingElement, Modifier, TextAlign) -> Unit,
+    action: @Composable (NowPlayingElement, Modifier) -> Unit,
+) {
+    val minimal = layout == NowPlayingLayout.MINIMAL
+    val expanded = layout == NowPlayingLayout.EXPANDED
+    val button: @Composable (NowPlayingElement) -> Unit = { element ->
+        PlayerElement(editor, element) { press -> action(element, press) }
+    }
     Column(
-        modifier
+        Modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.surface)
             .testTag(PlayerTags.NOW_PLAYING)
             .semantics { paneTitle = pane }
             .verticalScroll(rememberScrollState())
-            .windowInsetsPadding(contentInsets)
             .padding(vertical = 8.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Row(Modifier.fillMaxWidth()) {
-            IconButton(onClick = onClose) {
-                Icon(painterResource(R.drawable.ic_player_collapse), stringResource(R.string.player_close_now_playing))
-            }
+            collapse()
             if (minimal) {
                 Spacer(Modifier.weight(1f))
                 TextButton(
-                    onClick = { controlsRevealed = !controlsRevealed },
+                    onClick = onToggleControls,
                     modifier = Modifier.testTag("now-playing-show-controls"),
                 ) {
                     Text(stringResource(if (controlsRevealed) R.string.player_hide_controls else R.string.player_show_controls))
@@ -183,7 +278,6 @@ fun NowPlaying(
                 top.forEach { button(it) }
             }
         }
-        val compactPair = expanded && content.take(2) == listOf(NowPlayingElement.COVER, NowPlayingElement.TRACK_INFO)
         if (compactPair) {
             Row(
                 modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
@@ -192,7 +286,7 @@ fun NowPlaying(
             ) {
                 PlayerElement(editor, NowPlayingElement.COVER, content = artwork)
                 PlayerElement(editor, NowPlayingElement.TRACK_INFO, Modifier.weight(1f)) { press ->
-                    TrackHeading(metadata, onOpenArtist, onOpenAlbum, TextAlign.Start, press.fillMaxWidth())
+                    body(NowPlayingElement.TRACK_INFO, press, TextAlign.Start)
                 }
             }
         }
@@ -203,17 +297,7 @@ fun NowPlaying(
                 Spacer(Modifier.height(if (expanded) 8.dp else 16.dp))
             }
             PlayerElement(editor, element) { press ->
-                when (element) {
-                    NowPlayingElement.COVER -> artwork(press)
-                    NowPlayingElement.TRACK_INFO -> TrackHeading(metadata, onOpenArtist, onOpenAlbum, TextAlign.Center, press.fillMaxWidth())
-                    NowPlayingElement.FORMAT -> Column(press, horizontalAlignment = Alignment.CenterHorizontally) {
-                        PlayingBadge(player)
-                        Spacer(Modifier.height(4.dp))
-                        FormatLineText(player)
-                    }
-                    NowPlayingElement.SEEK -> SeekBar(player, press.fillMaxWidth())
-                    else -> error("The content section only accepts content components")
-                }
+                if (element == NowPlayingElement.COVER) artwork(press) else body(element, press, TextAlign.Center)
             }
         }
         if (transport.isNotEmpty()) {
@@ -243,7 +327,7 @@ private fun TrackMenuButton(entries: @Composable (close: () -> Unit) -> Unit, mo
     var open by remember { mutableStateOf(false) }
     Box {
         IconButton(onClick = { open = true }, modifier = modifier.testTag(PlayerTags.MORE)) {
-            Icon(painterResource(R.drawable.ic_more), stringResource(R.string.page_menu))
+            UiControlIcon(painterResource(R.drawable.ic_more), stringResource(R.string.page_menu))
         }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) { entries { open = false } }
     }
@@ -265,6 +349,7 @@ private fun TrackHeading(
         Text(
             text = metadata.title?.toString().orEmpty(),
             style = MaterialTheme.typography.headlineSmall,
+            color = UiControlColor(Color.Unspecified),
             textAlign = textAlign,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
@@ -273,7 +358,7 @@ private fun TrackHeading(
         Text(
             text = metadata.artist?.toString() ?: stringResource(R.string.songs_unknown_artist),
             style = MaterialTheme.typography.titleMedium,
-            color = MaterialTheme.colorScheme.primary,
+            color = UiControlColor(MaterialTheme.colorScheme.primary),
             textAlign = textAlign,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
@@ -283,7 +368,7 @@ private fun TrackHeading(
             Text(
                 text = album.toString(),
                 style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = UiControlColor(MaterialTheme.colorScheme.onSurfaceVariant),
                 textAlign = textAlign,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -316,7 +401,7 @@ private fun FormatLineText(player: Player?) {
     Text(
         text = format?.let(FormatSummary::of)?.let { formatLine(it, resources) }.orEmpty(),
         style = MaterialTheme.typography.labelLarge,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        color = UiControlColor(MaterialTheme.colorScheme.onSurfaceVariant),
         minLines = 1,
     )
 }
@@ -345,6 +430,7 @@ private fun SeekBar(player: Player?, modifier: Modifier = Modifier) {
     } else {
         PlayerTime.spoken(positionMs, locale)
     }
+    val sliderColors = SliderDefaults.colors()
     Column(modifier) {
         Slider(
             value = dragged ?: progress.currentPositionProgress,
@@ -354,6 +440,10 @@ private fun SeekBar(player: Player?, modifier: Modifier = Modifier) {
                 dragged = null
             },
             enabled = progress.changingProgressEnabled,
+            colors = sliderColors.copy(
+                thumbColor = UiControlColor(sliderColors.thumbColor),
+                activeTrackColor = UiControlColor(sliderColors.activeTrackColor),
+            ),
             modifier = Modifier
                 .fillMaxWidth()
                 .onSizeChanged { widthPx = it.width }
@@ -364,9 +454,10 @@ private fun SeekBar(player: Player?, modifier: Modifier = Modifier) {
                 },
         )
         Row(Modifier.fillMaxWidth()) {
-            Text(PlayerTime.elapsed(positionMs), style = MaterialTheme.typography.labelMedium)
+            val color = UiControlColor(Color.Unspecified)
+            Text(PlayerTime.elapsed(positionMs), style = MaterialTheme.typography.labelMedium, color = color)
             Spacer(Modifier.weight(1f))
-            Text(PlayerTime.remaining(positionMs, time.durationMs), style = MaterialTheme.typography.labelMedium)
+            Text(PlayerTime.remaining(positionMs, time.durationMs), style = MaterialTheme.typography.labelMedium, color = color)
         }
     }
 }

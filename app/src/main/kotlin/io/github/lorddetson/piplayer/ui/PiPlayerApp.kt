@@ -10,7 +10,11 @@ import io.github.lorddetson.piplayer.library.Library
 import io.github.lorddetson.piplayer.library.lists.LibraryLists
 import io.github.lorddetson.piplayer.library.lists.SongLinks
 import io.github.lorddetson.piplayer.settings.LibrarySettings
+import io.github.lorddetson.piplayer.settings.BottomDestination
 import io.github.lorddetson.piplayer.settings.NowPlayingLayout
+import io.github.lorddetson.piplayer.ui.customization.LocalUiCatalog
+import io.github.lorddetson.piplayer.ui.customization.UiCanvasComponent
+import io.github.lorddetson.piplayer.ui.customization.UiControlIcon
 import io.github.lorddetson.piplayer.ui.library.AlbumPage
 import io.github.lorddetson.piplayer.ui.player.FavoriteState
 import io.github.lorddetson.piplayer.ui.songs.FavoriteActions
@@ -73,6 +77,7 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.consumeWindowInsets
@@ -126,10 +131,18 @@ import io.github.lorddetson.piplayer.R
 import io.github.lorddetson.piplayer.crash.CrashReports
 import io.github.lorddetson.piplayer.ui.crash.CrashPrompt
 import io.github.lorddetson.piplayer.ui.player.EqualizerPanel
+import io.github.lorddetson.piplayer.ui.player.EqualizerButton
 import io.github.lorddetson.piplayer.ui.player.ExtraControls
 import io.github.lorddetson.piplayer.ui.player.MiniPlayer
+import io.github.lorddetson.piplayer.ui.player.NextButton
 import io.github.lorddetson.piplayer.ui.player.NowPlaying
+import io.github.lorddetson.piplayer.ui.player.PlayPauseButton
 import io.github.lorddetson.piplayer.ui.player.PlayerViewModel
+import io.github.lorddetson.piplayer.ui.player.PreviousButton
+import io.github.lorddetson.piplayer.ui.player.RepeatButton
+import io.github.lorddetson.piplayer.ui.player.ShuffleButton
+import io.github.lorddetson.piplayer.ui.player.SleepTimerButton
+import io.github.lorddetson.piplayer.ui.player.StopAfterCurrentButton
 import io.github.lorddetson.piplayer.ui.settings.FoldersScreen
 import io.github.lorddetson.piplayer.ui.settings.SettingsScreen
 import kotlinx.serialization.Serializable
@@ -362,7 +375,37 @@ fun PiPlayerApp(
         playingLinks = null
         playingLinks = currentSongId?.let { linksOf(context, it) }
     }
-    Column(Modifier.fillMaxSize()) {
+    val extraControls = rememberExtraControls(viewModel, player)
+    val canvasCatalog = buildList {
+        BottomDestination.entries.forEach { add(bottomNavigationComponent(it, backStack.firstOrNull(), switchTo)) }
+        add(UiCanvasComponent("library:settings", R.string.settings_open, customizableIcon = true) {
+            IconButton(onClick = { open(SettingsRoute) }) {
+                UiControlIcon(painterResource(R.drawable.ic_settings), stringResource(R.string.settings_open))
+            }
+        })
+        add(UiCanvasComponent("now:queue", R.string.queue_open, customizableIcon = true) {
+            IconButton(onClick = { open(QueueRoute) }) {
+                UiControlIcon(painterResource(R.drawable.ic_queue), stringResource(R.string.queue_open))
+            }
+        })
+        add(UiCanvasComponent("now:previous", R.string.player_previous, customizableIcon = true) { PreviousButton(player) })
+        add(UiCanvasComponent("now:play_pause", R.string.player_element_play_pause, customizableIcon = true) { PlayPauseButton(player) })
+        add(UiCanvasComponent("now:next", R.string.player_next, customizableIcon = true) { NextButton(player) })
+        add(UiCanvasComponent("now:shuffle", R.string.player_shuffle, customizableIcon = true) { ShuffleButton(player) })
+        add(UiCanvasComponent("now:repeat", R.string.player_repeat, customizableIcon = true) { RepeatButton(player) })
+        add(UiCanvasComponent("now:timer", R.string.player_sleep_timer, width = 96.dp, customizableIcon = true) {
+            SleepTimerButton(extraControls, Modifier)
+        })
+        add(UiCanvasComponent("now:stop_after", R.string.player_stop_after_current, customizableIcon = true) {
+            StopAfterCurrentButton(extraControls, Modifier)
+        })
+        extraControls.openEqualizer?.let { equalizer ->
+            add(UiCanvasComponent("now:equalizer", R.string.player_equalizer, customizableIcon = true) {
+                EqualizerButton(equalizer, Modifier)
+            })
+        }
+    }
+    AppCanvasColumn(canvasCatalog) {
         NavDisplay(
             backStack = backStack,
             onBack = { close() },
@@ -475,7 +518,7 @@ fun PiPlayerApp(
                             onClose = { close() },
                             layout = nowPlayingLayout,
                             onPanelSaveFailed = { snackbar.showSnackbar(panelSaveFailed) },
-                            controls = rememberExtraControls(viewModel, player),
+                            controls = extraControls,
                             onOpenArtist = links?.artists?.firstOrNull()?.let {
                                 { openLatest { latest -> latest.artists.firstOrNull()?.let { ArtistRoute(it.key) } } }
                             },
@@ -523,6 +566,13 @@ fun PiPlayerApp(
     }
     if (CrashReports.promptEnabled) CrashPrompt(CrashReports.of(LocalContext.current))
     BatchNotificationExplanation(batchNotifications)
+}
+
+@Composable
+private fun AppCanvasColumn(catalog: List<UiCanvasComponent>, content: @Composable ColumnScope.() -> Unit) {
+    CompositionLocalProvider(LocalUiCatalog provides catalog) {
+        Column(Modifier.fillMaxSize(), content = content)
+    }
 }
 
 /** The bottom bar's places, in their order (TI §8, PIM-18). */

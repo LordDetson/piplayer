@@ -42,9 +42,24 @@ internal fun PanelItemMenu(
     canMove: Boolean = visible.size > 1,
     moveOptions: @Composable () -> Unit = {},
 ) {
+    val enterEdit = LocalUiEditEntry.current
     DropdownMenu(expanded = page != null, onDismissRequest = { setPage(null) }) {
         when (page) {
             PanelMenuPage.ACTIONS -> {
+                if (enterEdit != null) {
+                    val prefix = when (kind) {
+                        PanelItemKind.TAB -> "tab"
+                        PanelItemKind.BUTTON -> "library"
+                        PanelItemKind.PLAYER -> "now"
+                        PanelItemKind.MINI_PLAYER -> "mini"
+                        PanelItemKind.BOTTOM_NAVIGATION -> "nav"
+                    }
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.ui_edit_mode)) },
+                        onClick = { setPage(null); enterEdit(prefix + ":" + id) },
+                        modifier = Modifier.testTag("ui_edit_mode"),
+                    )
+                }
                 if (canMove) {
                     DropdownMenuItem(
                         text = { Text(stringResource(kind.move)) },

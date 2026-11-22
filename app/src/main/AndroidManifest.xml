@@ -32,6 +32,7 @@
         android:fullBackupContent="@xml/backup_rules"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
+        android:localeConfig="@xml/app_locales"
         android:supportsRtl="true"
         android:theme="@style/Theme.PiPlayer"
         android:enableOnBackInvokedCallback="true"
