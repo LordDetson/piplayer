@@ -5,7 +5,6 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
-import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import io.github.lorddetson.piplayer.settings.librarytabs.LibraryPanelLayout
 import io.github.lorddetson.piplayer.settings.librarytabs.LibraryTabsSettings
@@ -20,7 +19,9 @@ data class Appearance(
     val theme: ThemeMode,
     val nowPlayingLayout: NowPlayingLayout,
     val customTheme: CustomTheme? = null,
-)
+) {
+    internal val themeId: String get() = customTheme?.id ?: theme.stored
+}
 
 internal sealed interface ThemeApplyResult {
     data class Applied(val undo: ThemeApplyUndo) : ThemeApplyResult
@@ -29,10 +30,8 @@ internal sealed interface ThemeApplyResult {
 }
 
 internal data class ThemeApplyUndo(
-    val previous: Appearance,
-    val applied: Appearance,
-    val appliedLayoutRevision: Long,
-    val previousSharedLayout: NowPlayingLayout,
+    val previousThemeId: String?,
+    val appliedThemeId: String,
 )
 
 internal enum class ThemeUndoResult { RESTORED, STALE, WRITE_FAILED }
@@ -55,13 +54,11 @@ class AppearanceSettings internal constructor(private val file: DataStore<Prefer
         }
     }
 
-    suspend fun setNowPlayingLayout(layout: NowPlayingLayout) {
+    suspend fun setNowPlayingLayout(layout: NowPlayingLayout, themeId: String? = null) {
         SettingsFiles.edit(file) { preferences ->
-            val themeId = panelThemeId(preferences)
-            if (builtInThemeLayout(themeId) != null) {
-                preferences[themeLayoutKey(themeId)] = layout.stored
-            } else {
-                storeLayout(preferences, layout)
+            val activeThemeId = panelThemeId(preferences)
+            if (themeId == null || themeId == activeThemeId) {
+                preferences[themeLayoutKey(activeThemeId)] = layout.stored
             }
         }
     }
@@ -92,7 +89,6 @@ class AppearanceSettings internal constructor(private val file: DataStore<Prefer
         if (!CustomThemesSettings.isValid(theme)) return ThemeApplyResult.InvalidTheme
         return update(ThemeApplyResult.WriteFailed) { preferences ->
             val previous = appearanceOf(preferences)
-            val previousSharedLayout = sharedLayout(preferences)
             val importedPanel = panel ?: LibraryTabsSettings.panelOf(preferences).layout
             val importedPlayer = player ?: nowPlayingPanels.stateOf(preferences).panel
             val importedMiniPlayer = miniPlayer ?: miniPlayerPanels.stateOf(preferences).panel
@@ -104,27 +100,18 @@ class AppearanceSettings internal constructor(private val file: DataStore<Prefer
             nowPlayingPanels.storePanel(preferences, theme.id, importedPlayer)
             miniPlayerPanels.storePanel(preferences, theme.id, importedMiniPlayer)
             bottomNavigationLayouts.storePanel(preferences, theme.id, importedNavigation)
-            val importedLayout = layout ?: previous.nowPlayingLayout
-            if (layout != null || importedLayout != previousSharedLayout) storeLayout(preferences, importedLayout)
-            ThemeApplyResult.Applied(ThemeApplyUndo(previous, appearanceOf(preferences), layoutRevision(preferences), previousSharedLayout))
+            preferences[themeLayoutKey(theme.id)] = (layout ?: previous.nowPlayingLayout).stored
+            ThemeApplyResult.Applied(ThemeApplyUndo(previous.customTheme?.id, theme.id))
         }
     }
 
     internal suspend fun undoCustomTheme(undo: ThemeApplyUndo): ThemeUndoResult =
         update(ThemeUndoResult.WRITE_FAILED) { preferences ->
-            val current = appearanceOf(preferences)
-            // Check each setting independently so a newer layout or theme choice survives undo.
-            val restoreTheme = current.customTheme == undo.applied.customTheme
-            val restoreLayout = undo.previousSharedLayout != undo.applied.nowPlayingLayout &&
-                sharedLayout(preferences) == undo.applied.nowPlayingLayout &&
-                layoutRevision(preferences) == undo.appliedLayoutRevision
-
-            if (restoreTheme && !CustomThemesSettings.selectTheme(preferences, undo.previous.customTheme?.id)) {
+            if (panelThemeId(preferences) != undo.appliedThemeId) return@update ThemeUndoResult.STALE
+            if (!CustomThemesSettings.selectTheme(preferences, undo.previousThemeId)) {
                 CustomThemesSettings.selectTheme(preferences, null)
             }
-            if (restoreLayout) storeLayout(preferences, undo.previousSharedLayout)
-
-            if (restoreTheme || restoreLayout) ThemeUndoResult.RESTORED else ThemeUndoResult.STALE
+            ThemeUndoResult.RESTORED
         }
 
     private suspend fun <T> update(writeFailure: T, change: (MutablePreferences) -> T): T = try {
@@ -137,33 +124,21 @@ class AppearanceSettings internal constructor(private val file: DataStore<Prefer
 
     internal companion object {
         private val THEME = stringPreferencesKey("theme_mode")
-        private val NOW_PLAYING_LAYOUT = stringPreferencesKey("now_playing_layout")
-        private val LAYOUT_REVISION = longPreferencesKey("now_playing_layout_revision")
+
+        fun builtInTheme(preferences: Preferences): ThemeMode = ThemeMode.fromStored(preferences[THEME])
 
         fun panelThemeId(preferences: Preferences): String = CustomThemesSettings.selectedTheme(preferences)?.id
-            ?: ThemeMode.fromStored(preferences[THEME]).stored
+            ?: builtInTheme(preferences).stored
 
-        private fun layoutRevision(preferences: Preferences): Long = preferences[LAYOUT_REVISION] ?: 0L
-
-        private fun themeLayoutKey(themeId: String) = stringPreferencesKey("now_playing_presentation_$themeId")
-
-        private fun sharedLayout(preferences: Preferences): NowPlayingLayout =
-            NowPlayingLayout.fromStored(preferences[NOW_PLAYING_LAYOUT])
-
-        private fun storeLayout(preferences: MutablePreferences, layout: NowPlayingLayout) {
-            preferences[NOW_PLAYING_LAYOUT] = layout.stored
-            // A later manual choice may return to the same value without reviving an old undo.
-            preferences[LAYOUT_REVISION] = layoutRevision(preferences) + 1L
-        }
+        fun themeLayoutKey(themeId: String) = stringPreferencesKey("now_playing_presentation_$themeId")
 
         private fun appearanceOf(preferences: Preferences): Appearance {
             val custom = CustomThemesSettings.selectedTheme(preferences)
-            val mode = custom?.base ?: ThemeMode.fromStored(preferences[THEME])
-            val preset = if (custom == null) builtInThemeLayout(mode.stored) else null
-            val layout = if (preset == null) sharedLayout(preferences) else {
-                val stored = preferences[themeLayoutKey(mode.stored)]
-                NowPlayingLayout.entries.firstOrNull { it.stored == stored } ?: preset.presentation
-            }
+            val mode = custom?.base ?: builtInTheme(preferences)
+            val themeId = custom?.id ?: mode.stored
+            val stored = preferences[themeLayoutKey(themeId)]
+            val layout = NowPlayingLayout.entries.firstOrNull { it.stored == stored }
+                ?: builtInThemeLayout(themeId)?.presentation ?: NowPlayingLayout.STANDARD
             return Appearance(
                 theme = mode,
                 nowPlayingLayout = layout,

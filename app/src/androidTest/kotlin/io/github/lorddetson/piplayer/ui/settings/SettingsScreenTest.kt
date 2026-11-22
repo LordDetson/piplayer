@@ -173,20 +173,24 @@ class SettingsScreenTest {
     }
 
     @Test
-    fun paletteAndPlayerLayoutAreSavedIndependently() {
+    fun eachThemeKeepsItsOwnPlayerLayout() {
         openSettings()
         choose(R.string.theme_warm_light, ThemeMode.WARM_LIGHT)
         scrollSettingsTo(R.string.settings_now_playing_layout)
         compose.onNodeWithText(text(R.string.settings_now_playing_layout)).performClick()
-        compose.onNodeWithText(text(R.string.now_playing_layout_expanded)).performClick()
+        compose.onNodeWithText(text(R.string.now_playing_layout_minimal)).performClick()
 
         val settings = AppearanceSettings(context)
-        compose.waitUntil(5_000) { settings.read().nowPlayingLayout == NowPlayingLayout.EXPANDED }
+        compose.waitUntil(5_000) { settings.read().nowPlayingLayout == NowPlayingLayout.MINIMAL }
         assertThat(settings.readTheme()).isEqualTo(ThemeMode.WARM_LIGHT)
 
         scrollSettingsTo(R.string.theme_graphite)
         choose(R.string.theme_graphite, ThemeMode.GRAPHITE)
         assertThat(settings.read().nowPlayingLayout).isEqualTo(NowPlayingLayout.EXPANDED)
+
+        scrollSettingsTo(R.string.theme_warm_light)
+        choose(R.string.theme_warm_light, ThemeMode.WARM_LIGHT)
+        assertThat(settings.read().nowPlayingLayout).isEqualTo(NowPlayingLayout.MINIMAL)
     }
 
     private fun scrollSettingsTo(label: Int) {

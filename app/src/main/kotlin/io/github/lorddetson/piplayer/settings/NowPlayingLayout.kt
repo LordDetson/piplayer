@@ -1,6 +1,6 @@
 package io.github.lorddetson.piplayer.settings
 
-/** Built-in presentations of Now Playing, with a shared choice and overrides for complete themes. */
+/** Built-in presentations of Now Playing available in every theme. */
 enum class NowPlayingLayout(val stored: String) {
     STANDARD("standard"),
     MINIMAL("minimal"),

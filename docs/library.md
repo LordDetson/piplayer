@@ -296,8 +296,8 @@ The data model it implements is sketched in track-identification.md §10 (TI bel
   the system bars follow it from the first frame on. Android 12 and later also keep it as the app's night mode, which
   themes the splash screen; on Android 11 the starting window the system shows before the app runs follows the system.
   A new choice that changes what the screen shows creates it again, keeping its state.
-- Now Playing has Standard, Minimal and Expanded layouts. Cover Focus and Control Deck have their own default and
-  saved choice, along with all four customizable panel layouts. The other built-in themes share a presentation choice.
+- Now Playing has Standard, Minimal and Expanded layouts. Each built-in theme defines a default presentation and
+  layouts for the library, Now Playing, mini player and bottom navigation. Changes are saved for the active theme.
   Minimal can reveal its secondary controls on the same screen. Expanded puts compact artwork beside the track
   information and fits more controls in the available height. See [Interface customization](interface-customization.md).
 - Library folders shows each attached volume as a tree of the folders that hold audio, with each folder included,

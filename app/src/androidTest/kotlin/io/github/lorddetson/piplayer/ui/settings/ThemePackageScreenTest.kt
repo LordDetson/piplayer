@@ -134,6 +134,7 @@ class ThemePackageScreenTest {
         assertThat(settings.read().nowPlayingLayout).isEqualTo(NowPlayingLayout.STANDARD)
         compose.onNodeWithTag("saved_theme_${savedTheme.id}").performScrollTo().performClick()
         compose.waitUntil(5_000) { settings.read().customTheme?.id == savedTheme.id }
+        assertThat(settings.read().nowPlayingLayout).isEqualTo(exported.theme.layout)
         assertThat(runBlocking { panel.panel.first().layout }).isEqualTo(exported.theme.panel)
         assertThat(runBlocking { playerPanel.state.first().panel }).isEqualTo(exported.theme.player)
         assertThat(runBlocking { mini.state.first().panel }).isEqualTo(exported.theme.miniPlayer)

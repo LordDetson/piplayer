@@ -5,7 +5,6 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.stringPreferencesKey
-import androidx.datastore.preferences.core.stringSetPreferencesKey
 import io.github.lorddetson.piplayer.settings.AppearanceSettings
 import io.github.lorddetson.piplayer.settings.builtInThemeLayout
 import io.github.lorddetson.piplayer.settings.SettingsFiles
@@ -137,21 +136,16 @@ internal class LibraryTabsSettings(private val file: DataStore<Preferences>) {
     }
 
     companion object {
-        private val ORDER = stringPreferencesKey("library_tab_order")
-        private val HIDDEN = stringSetPreferencesKey("library_hidden_tabs")
-
         fun panelOf(preferences: Preferences): LibraryPanelState {
             val themeId = AppearanceSettings.panelThemeId(preferences)
-            val saved = try {
-                preferences[panelKey(themeId)]?.let { Json.decodeFromString<LibraryPanelDocument>(it).toLayout() }
-            } catch (_: SerializationException) {
-                null
-            }
-            // Read the old shared tabs as the starting layout for themes with no saved panel.
-            val layout = saved ?: builtInThemeLayout(themeId)?.library ?: LibraryPanelLayout(tabs = LibraryTabLayout.fromStored(
-                preferences[ORDER].orEmpty().split(','), preferences[HIDDEN].orEmpty(),
-            ))
+            val layout = savedPanel(preferences, themeId) ?: builtInThemeLayout(themeId)?.library ?: LibraryPanelLayout()
             return LibraryPanelState(themeId, layout)
+        }
+
+        fun savedPanel(preferences: Preferences, themeId: String): LibraryPanelLayout? = try {
+            preferences[panelKey(themeId)]?.let { Json.decodeFromString<LibraryPanelDocument>(it).toLayout() }
+        } catch (_: SerializationException) {
+            null
         }
 
         fun storePanel(preferences: MutablePreferences, themeId: String, layout: LibraryPanelLayout) {

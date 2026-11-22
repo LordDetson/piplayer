@@ -10,10 +10,8 @@ order and their presentation. Now Playing, its buttons and library rows use the 
 existing playback and navigation callbacks. Playback, settings and file operations keep their existing permission
 checks.
 
-System, Light, Dark, AMOLED, Cool graphite and Warm light keep their independent Now Playing layout choice.
-The first three follow system dynamic colors where available. The fixed palettes have previews in Appearance.
-An existing theme selection keeps its stored identifier. The independent layout defaults to Standard when absent
-or unrecognized.
+System, Light and Dark follow system dynamic colors where available. The fixed palettes have previews in Appearance.
+An existing theme selection keeps its stored identifier. Each theme keeps its own Now Playing presentation choice.
 
 | Layout | Now Playing |
 | --- | --- |
@@ -29,12 +27,21 @@ commands. Controls for later M5 features join the appropriate group when their f
 
 | Theme | Colors | Library | Now Playing | Mini player | Bottom navigation |
 | --- | --- | --- | --- | --- | --- |
+| System | Follows the device | Songs, Albums and Artists first. Search leads the top bar. | Standard with the stock order. | Artwork first, progress at the top. | Library, Search and Fix. |
+| Light | Light | Playlists beside Songs. Search leads the top bar. | Standard with Queue first. | Track information first, progress at the top. | Search, Library and Fix. |
+| Dark | Dark | Playlists after Albums. Sort leads the top bar. | Expanded with track actions first. | Play/pause beside artwork, progress at the top. | Fix, Library and Search. |
+| AMOLED | Black | Folders beside Songs. Settings and Search are visible. | Minimal with Favorite first and audio information hidden. | Artwork first, progress hidden. | Library and Fix. |
+| Cool graphite | Cool slate | Artists beside Songs. Settings leads the top bar. | Expanded with Queue first and Equalizer leading the extra actions. | Play/pause first, progress at the top. | Fix, Search and Library. |
+| Warm light | Warm cream | Albums and Songs first. Sort leads the top bar. | Standard with Favorite and Queue first. | Track information first, progress at the bottom. | Search, Fix and Library. |
 | Cover Focus | Dark plum and peach | Albums first. Search and settings are visible. | Minimal presentation with artwork and basic playback. Audio information is hidden. | Artwork first, progress at the bottom. | Library and Search. |
 | Control Deck | Light mint and teal | Songs, Folders and Playlists first. Sort is the first button. | Expanded presentation with Queue beside Next. Equalizer leads the extra actions when available. | Play/pause first, progress at the top. | Library, Fix and Search. |
 
-Choosing a complete theme applies its palette, Now Playing presentation and all four panel layouts. Local edits
-are saved for that theme. Export includes the resulting layouts. Theme packages imported without a presentation
-inherit the current presentation, and undo restores the previous independent choice.
+Choosing a built-in theme applies its palette, Now Playing presentation and all four panel layouts. Local edits
+are saved for that theme. On upgrade, the previous shared presentation and tab edits are copied to the last
+built-in theme that used them (or System if a theme with its own presets is selected) and to existing saved themes
+that still rely on them. Existing theme-specific edits take precedence. Export includes the resulting layouts.
+Theme packages imported without a presentation inherit the current presentation. Undo reselects the previous theme
+and keeps subsequent edits in the imported theme.
 
 ## Imported themes
 
@@ -46,7 +53,7 @@ in manual mode. Saving makes a named theme, and canceling restores the appearanc
 The editor also previews the selected font in English and Russian with the system's font scale. It offers the
 system font, bundled fonts with Cyrillic coverage, and local TrueType or OpenType files (TTF or OTF). Import uses
 the system file picker and keeps a validated copy in app storage. A failed import leaves the previous font selected.
-The theme saves its font and palette together. The Now Playing layout remains a separate preference.
+The theme saves its font and palette together and keeps its own Now Playing layout.
 These controls are tracked by PIM-97 and PIM-98.
 
 Both release builds use the same data package format for sharing themes and supported layouts (PIM-72). Export

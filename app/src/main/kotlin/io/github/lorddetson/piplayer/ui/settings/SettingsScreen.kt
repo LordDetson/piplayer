@@ -156,7 +156,7 @@ fun SettingsScreen(
             ThemeChoice(appearance.theme.takeIf { appearance.customTheme == null }, viewModel::setTheme)
             ChoiceSetting(
                 R.string.settings_now_playing_layout, appearance.nowPlayingLayout, NowPlayingLayout.entries,
-                NowPlayingLayout::label, viewModel::setNowPlayingLayout,
+                NowPlayingLayout::label, { viewModel.setNowPlayingLayout(it, appearance.themeId) },
             )
             ThemePackageSettings(appearance.customTheme, viewModel)
             SectionTitle(stringResource(R.string.settings_about))

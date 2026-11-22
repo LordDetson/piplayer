@@ -5,6 +5,7 @@ import androidx.datastore.preferences.core.mutablePreferencesOf
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import io.github.lorddetson.piplayer.settings.MemoryDataStore
+import io.github.lorddetson.piplayer.settings.ThemeLayoutMigration
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.first
@@ -78,10 +79,11 @@ class LibraryTabsSettingsTest {
 
     @Test
     fun `saved duplicates and missing entries recover a usable order and visibility`() = runBlocking {
-        val file = MemoryDataStore(mutablePreferencesOf(
+        val preferences = mutablePreferencesOf(
             ORDER to "missing,genres,songs,genres,,folders",
             HIDDEN to (standard + "missing").toSet(),
-        ))
+        )
+        val file = MemoryDataStore(ThemeLayoutMigration.migrate(preferences))
         val layout = LibraryTabsSettings(file).layout.first()
 
         assertEquals(listOf("genres", "songs", "folders", "albums", "artists", "playlists"), layout.order)

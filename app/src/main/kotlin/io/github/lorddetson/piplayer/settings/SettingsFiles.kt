@@ -36,9 +36,9 @@ object SettingsFiles {
     const val SETTINGS = "settings"
     const val DEVICE_STATE = "device_state"
 
-    /** `player` (the sleep timer's last choice) moves into `settings`. */
+    /** Moves the timer choice into `settings` and scopes legacy layouts to their themes. */
     fun settingsMigrations(context: Context): List<DataMigration<Preferences>> =
-        listOf(SharedPreferencesMigration(context, "player"))
+        listOf(SharedPreferencesMigration(context, "player"), ThemeLayoutMigration)
 
     /** `playback_controls` (stop after current track) and `songs` (the permission flag) move into `device_state`. */
     fun deviceStateMigrations(context: Context): List<DataMigration<Preferences>> =

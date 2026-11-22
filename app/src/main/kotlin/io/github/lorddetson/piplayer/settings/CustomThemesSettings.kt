@@ -50,7 +50,7 @@ internal data class CustomThemesState(val themes: List<CustomTheme> = emptyList(
 
 internal enum class CustomThemeWrite { STORED, INVALID_THEME, UNKNOWN_THEME, WRITE_FAILED }
 
-/** Named themes and their active ID in the backed-up settings file. The built-in theme and layout keep their keys. */
+/** Named themes and their active ID in the backed-up settings file. */
 internal class CustomThemesSettings(private val file: DataStore<Preferences>) {
     constructor(context: Context) : this(SettingsFiles.settings(context))
 

@@ -171,8 +171,8 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         viewModelScope.launch { appearance.setTheme(mode) }
     }
 
-    fun setNowPlayingLayout(layout: NowPlayingLayout) {
-        viewModelScope.launch { appearance.setNowPlayingLayout(layout) }
+    fun setNowPlayingLayout(layout: NowPlayingLayout, themeId: String) {
+        viewModelScope.launch { appearance.setNowPlayingLayout(layout, themeId) }
     }
 
     val hiddenFiles: StateFlow<HiddenFiles> =
