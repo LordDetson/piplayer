@@ -31,6 +31,7 @@ import io.github.lorddetson.piplayer.ui.customization.PanelItemKind
 import io.github.lorddetson.piplayer.ui.customization.PanelItemMenu
 import io.github.lorddetson.piplayer.ui.customization.PanelMenuPage
 import io.github.lorddetson.piplayer.ui.customization.PanelRestoreButton
+import io.github.lorddetson.piplayer.ui.customization.StockUiSlot
 import io.github.lorddetson.piplayer.ui.customization.UiControlColor
 import io.github.lorddetson.piplayer.ui.customization.UiControlIcon
 
@@ -48,7 +49,7 @@ internal fun LibraryStripTab(
 ) {
     var menu by remember { mutableStateOf<PanelMenuPage?>(null) }
     val openMenu = { menu = PanelMenuPage.ACTIONS }
-    Box {
+    StockUiSlot("tab:$id") {
         LibraryTabFace(id, selected, onClick, onLongClick = openMenu.takeIf { canCustomize })
         PanelItemMenu(menu, { menu = it }, PanelItemKind.TAB, id, layout.visible,
             layout.order.filter(layout.hidden::contains), { builtInTabsById.getValue(it).labelResource },
@@ -112,7 +113,7 @@ internal fun LibraryToolbarButton(
 ) {
     var menu by remember { mutableStateOf<PanelMenuPage?>(null) }
     val openMenu = { menu = PanelMenuPage.ACTIONS }
-    Box {
+    StockUiSlot("library:" + button.id) {
         LibraryToolbarButtonFace(button, onClick, onLongClick = openMenu.takeIf { canCustomize })
         PanelItemMenu(menu, { menu = it }, PanelItemKind.BUTTON, button.id, visible, hidden,
             { LibraryButton.byId.getValue(it).labelResource }, onMove, onHide, onRestore)

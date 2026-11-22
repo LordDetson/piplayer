@@ -64,7 +64,7 @@ class ThemePackageCodecTest {
 
     @Test
     fun `future versions are distinguished from invalid schema markers`() {
-        assertThat(decode(document.replace(":1,", ":7,"))).isEqualTo(ThemePackageRead.UnsupportedVersion)
+        assertThat(decode(document.replace(":1,", ":8,"))).isEqualTo(ThemePackageRead.UnsupportedVersion)
         assertThat(decode(document.replace(":1,", ":6,"))).isEqualTo(ThemePackageRead.Invalid)
         assertThat(decode(document.replace(":1,", ":\"1\","))).isEqualTo(ThemePackageRead.Invalid)
         assertThat(decode(document.replace("\"version\":1,", ""))).isEqualTo(ThemePackageRead.Invalid)

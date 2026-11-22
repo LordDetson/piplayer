@@ -30,6 +30,7 @@ import io.github.lorddetson.piplayer.settings.librarytabs.LibraryTabsSettings
 import io.github.lorddetson.piplayer.ui.GrantAudioPermission
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import org.assertj.core.api.Assertions.assertThat
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.ExternalResource
@@ -80,7 +81,11 @@ class LibraryTabCustomizationTest {
 
     @Test
     fun anEditStartedFromTheToolbarAlsoChangesLibraryTabsAndSurvivesRecreation() {
-        action(R.string.library_sort).performTouchInput { longClick() }
+        val songs = tab(R.string.tab_songs)
+        val sort = action(R.string.library_sort)
+        val originalSongs = songs.fetchSemanticsNode().boundsInRoot
+        val originalSort = sort.fetchSemanticsNode().boundsInRoot
+        sort.performTouchInput { longClick() }
         compose.onNodeWithTag("ui_edit_mode").performClick()
         compose.waitUntilExactlyOneExists(hasTestTag("ui_canvas"), timeoutMillis = 5_000)
         compose.onNodeWithTag("ui_component_tab:albums").performTouchInput { click() }
@@ -89,9 +94,10 @@ class LibraryTabCustomizationTest {
         compose.waitUntilDoesNotExist(hasTestTag("ui_edit_done"), timeoutMillis = 5_000)
 
         compose.activityRule.scenario.recreate()
-        compose.waitUntilExactlyOneExists(hasTestTag("ui_component_tab:songs"), timeoutMillis = 10_000)
-        compose.onNodeWithTag("ui_component_tab:albums").assertDoesNotExist()
-        compose.onNodeWithTag("ui_component_library:sort").assertExists()
+        compose.waitUntilExactlyOneExists(tabMatcher(R.string.tab_songs), timeoutMillis = 10_000)
+        tab(R.string.tab_albums).assertDoesNotExist()
+        assertThat(songs.fetchSemanticsNode().boundsInRoot).isEqualTo(originalSongs)
+        assertThat(sort.fetchSemanticsNode().boundsInRoot).isEqualTo(originalSort)
     }
 
     @Test

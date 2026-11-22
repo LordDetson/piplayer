@@ -221,7 +221,7 @@ fun NowPlaying(
     }
 }
 
-private val NowPlayingElement.canvasId: String get() = "now:$id"
+internal val NowPlayingElement.canvasId: String get() = "now:$id"
 
 private val fullWidthElements = setOf(NowPlayingElement.TRACK_INFO, NowPlayingElement.FORMAT, NowPlayingElement.SEEK)
 

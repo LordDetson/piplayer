@@ -100,6 +100,31 @@ class NowPlayingTest {
         SemanticsMatcher("click label \"$label\"") { it.config.getOrNull(SemanticsActions.OnClick)?.label == label }
 
     @Test
+    fun editingInPlaceAndSavingOneChangeKeepTheOtherControlsWhereTheyWere() =
+        withStockPlayerTheme(context, "now_playing_panel_", "ui_canvas_") {
+            show(playing = true, cover = true, layout = NowPlayingLayout.EXPANDED)
+            val cover = compose.onNodeWithTag(PlayerTags.COVER, useUnmergedTree = true)
+            val pause = compose.onNodeWithContentDescription(text(R.string.player_pause))
+            val originalCover = cover.fetchSemanticsNode().boundsInRoot
+            val originalPause = pause.fetchSemanticsNode().boundsInRoot
+
+            cover.performTouchInput { longClick() }
+            compose.onNodeWithTag("ui_edit_mode").performClick()
+            val editCover = compose.onNodeWithTag("ui_component_now:cover").fetchSemanticsNode().boundsInRoot
+            val editPause = compose.onNodeWithTag("ui_component_now:play_pause").fetchSemanticsNode().boundsInRoot
+            assertThat((editCover.center - originalCover.center).getDistance()).isLessThan(2f)
+            assertThat((editPause.center - originalPause.center).getDistance()).isLessThan(2f)
+
+            compose.onNodeWithTag("ui_resize_now:cover").performTouchInput {
+                swipe(center, center + Offset(65f, 65f), durationMillis = 420)
+            }
+            compose.onNodeWithTag("ui_edit_done").performClick()
+            compose.waitUntil(5_000) { compose.onAllNodes(hasTestTag("ui_edit_done")).fetchSemanticsNodes().isEmpty() }
+            assertThat(cover.fetchSemanticsNode().boundsInRoot.width).isGreaterThan(originalCover.width)
+            assertThat(pause.fetchSemanticsNode().boundsInRoot).isEqualTo(originalPause)
+        }
+
+    @Test
     fun theInlineEditorSavesChangesToTheCurrentThemeDuringPlayback() =
         withStockPlayerTheme(context, "now_playing_panel_", "ui_canvas_") {
             val player = show(playing = true, cover = true, layout = NowPlayingLayout.EXPANDED)

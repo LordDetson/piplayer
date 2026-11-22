@@ -65,13 +65,21 @@ class MiniPlayerTest {
         withStockPlayerTheme(context, "mini_player_panel_", "ui_canvas_") {
             val player = show(listOf(halo), cover = true)
             val cover = compose.onNodeWithTag(PlayerTags.COVER, useUnmergedTree = true)
+            val play = compose.onNodeWithContentDescription(text(R.string.player_play))
+            val originalCover = cover.fetchSemanticsNode().boundsInRoot
+            val originalPlay = play.fetchSemanticsNode().boundsInRoot
             cover.performTouchInput { longClick() }
             compose.onNodeWithTag("ui_edit_mode").performClick()
-            compose.onNodeWithTag("ui_component_mini:cover").performClick()
+            val editingCover = compose.onNodeWithTag("ui_component_mini:cover")
+            val editingPlay = compose.onNodeWithTag("ui_component_mini:play_pause")
+            assertThat((editingCover.fetchSemanticsNode().boundsInRoot.center - originalCover.center).getDistance()).isLessThan(2f)
+            assertThat((editingPlay.fetchSemanticsNode().boundsInRoot.center - originalPlay.center).getDistance()).isLessThan(2f)
+            editingCover.performClick()
             compose.onNodeWithTag("ui_edit_hide").performClick()
             compose.onNodeWithTag("ui_edit_done").performClick()
             compose.waitUntil(5_000) { compose.onAllNodes(hasTestTag("ui_edit_done")).fetchSemanticsNodes().isEmpty() }
             cover.assertDoesNotExist()
+            assertThat(play.fetchSemanticsNode().boundsInRoot).isEqualTo(originalPlay)
             assertThat(compose.runOnUiThread { player.calls }).isEmpty()
 
             val appearance = AppearanceSettings(context)
@@ -80,7 +88,7 @@ class MiniPlayerTest {
             runBlocking { appearance.setTheme(ThemeMode.SYSTEM) }
             compose.waitUntil(5_000) { compose.onAllNodes(hasTestTag(PlayerTags.COVER), useUnmergedTree = true).fetchSemanticsNodes().isEmpty() }
             compose.onNodeWithTag("ui_canvas").assertIsDisplayed()
-            compose.onNodeWithContentDescription(text(R.string.player_play)).performClick()
+            play.performClick()
             assertThat(compose.runOnUiThread { player.calls }).containsExactly(Call.PlayWhenReady(true))
         }
 

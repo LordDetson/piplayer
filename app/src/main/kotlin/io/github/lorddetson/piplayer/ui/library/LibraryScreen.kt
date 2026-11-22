@@ -46,6 +46,7 @@ import androidx.compose.material3.ListItem
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.PrimaryScrollableTabRow
+import androidx.compose.material3.TabRowDefaults
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -79,6 +80,7 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LifecycleStartEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -123,6 +125,8 @@ import io.github.lorddetson.piplayer.covers.CoverRequest
 import io.github.lorddetson.piplayer.ui.covers.CoverActions
 import io.github.lorddetson.piplayer.ui.covers.LibraryCover
 import io.github.lorddetson.piplayer.ui.customization.EditableUiPanel
+import io.github.lorddetson.piplayer.ui.customization.StockUiSlot
+import io.github.lorddetson.piplayer.ui.customization.isStockUiSlotMasked
 import io.github.lorddetson.piplayer.ui.customization.UiCanvasComponent
 import io.github.lorddetson.piplayer.ui.customization.UiControlColor
 import io.github.lorddetson.piplayer.ui.fix.BatchActions
@@ -361,6 +365,7 @@ fun LibraryScreen(host: LibraryHost, onOpenSettings: () -> Unit) {
                         search = search,
                         onSearch = { search = it },
                         onSearching = ::setSearching,
+                        editableTitle = true,
                         customActions = {
                             if (searching && LibraryButton.SEARCH.id !in visibleButtons) closeSearch()
                             for (id in visibleButtons) {
@@ -379,16 +384,26 @@ fun LibraryScreen(host: LibraryHost, onOpenSettings: () -> Unit) {
                     )
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         val stockSelection = tabLayout.selectedTab(activeId)
+                        val stockSelectedIndex = tabLayout.visible.indexOf(stockSelection)
+                        val selectedOnStrip = stockSelection == activeId && !isStockUiSlotMasked("tab:$activeId")
                         PrimaryScrollableTabRow(
-                            selectedTabIndex = tabLayout.visible.indexOf(stockSelection),
+                            selectedTabIndex = stockSelectedIndex,
                             modifier = Modifier.weight(1f).testTag(LibraryTags.TABS),
                             edgePadding = 8.dp,
+                            indicator = {
+                                if (selectedOnStrip) {
+                                    TabRowDefaults.PrimaryIndicator(
+                                        Modifier.tabIndicatorOffset(stockSelectedIndex, matchContentSize = true),
+                                        width = Dp.Unspecified,
+                                    )
+                                }
+                            },
                         ) {
                             tabLayout.visible.forEach { id ->
                                 key(themeId, id) {
                                     LibraryStripTab(
                                         id = id,
-                                        selected = id == stockSelection,
+                                        selected = selectedOnStrip && id == stockSelection,
                                         layout = tabLayout,
                                         canCustomize = themeId != null,
                                         onClick = { selectTab(id) },
@@ -1010,6 +1025,7 @@ internal fun LibraryTopBar(
     sort: @Composable () -> Unit = {},
     titleStyle: FontStyle? = null,
     customActions: (@Composable () -> Unit)? = null,
+    editableTitle: Boolean = false,
     actions: @Composable () -> Unit = {},
 ) {
     TopAppBar(
@@ -1030,7 +1046,10 @@ internal fun LibraryTopBar(
                     modifier = Modifier.fillMaxWidth().focusRequester(focus),
                 )
             } else {
-                Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis, fontStyle = titleStyle, modifier = Modifier.semantics { heading() })
+                val headingText: @Composable () -> Unit = {
+                    Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis, fontStyle = titleStyle, modifier = Modifier.semantics { heading() })
+                }
+                if (editableTitle) StockUiSlot("library:title", content = headingText) else headingText()
             }
         },
         navigationIcon = {

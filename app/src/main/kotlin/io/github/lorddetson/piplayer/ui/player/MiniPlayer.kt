@@ -68,6 +68,7 @@ import io.github.lorddetson.piplayer.ui.customization.PanelItemKind
 import io.github.lorddetson.piplayer.ui.customization.PanelItemMenu
 import io.github.lorddetson.piplayer.ui.customization.PanelMenuPage
 import io.github.lorddetson.piplayer.ui.customization.PanelRestoreButton
+import io.github.lorddetson.piplayer.ui.customization.StockUiSlot
 import io.github.lorddetson.piplayer.ui.customization.UiCanvasComponent
 import io.github.lorddetson.piplayer.ui.customization.UiControlColor
 import io.github.lorddetson.piplayer.ui.customization.customizeOnHold
@@ -230,7 +231,7 @@ private fun MiniPlayerItem(
 ) {
     key(theme, element) {
         var menu by remember { mutableStateOf<PanelMenuPage?>(null) }
-        Box(modifier) {
+        StockUiSlot(element.canvasId, modifier) {
             content(if (theme == null) Modifier else Modifier.customizeOnHold { menu = PanelMenuPage.ACTIONS })
             if (menu != null) {
                 val progress = element == MiniPlayerElement.PROGRESS

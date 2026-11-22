@@ -1,6 +1,5 @@
 package io.github.lorddetson.piplayer.ui.player
 
-import androidx.compose.foundation.layout.Box
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -24,6 +23,7 @@ import io.github.lorddetson.piplayer.ui.customization.PanelItemKind
 import io.github.lorddetson.piplayer.ui.customization.PanelItemMenu
 import io.github.lorddetson.piplayer.ui.customization.PanelMenuPage
 import io.github.lorddetson.piplayer.ui.customization.PanelRestoreButton
+import io.github.lorddetson.piplayer.ui.customization.StockUiSlot
 import io.github.lorddetson.piplayer.ui.customization.customizeOnHold
 import kotlinx.coroutines.launch
 
@@ -76,7 +76,7 @@ internal fun PlayerElement(
 ) {
     key(editor.themeId, element) {
         var menu by remember { mutableStateOf<PanelMenuPage?>(null) }
-        Box(modifier) {
+        StockUiSlot(element.canvasId, modifier) {
             content(if (editor.themeId == null) Modifier else Modifier.customizeOnHold { menu = PanelMenuPage.ACTIONS })
             if (menu != null) {
                 val visible = NowPlayingRow.entries.filter(element::fits).flatMap(editor::shown).map { it.id }

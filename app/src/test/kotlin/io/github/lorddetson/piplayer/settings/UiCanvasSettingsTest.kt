@@ -11,6 +11,25 @@ class UiCanvasSettingsTest {
     private val player = UiCanvasLayout(listOf(cover, play))
 
     @Test
+    fun `changes to a native layout save only deliberate overrides`() {
+        val stockIds = setOf(cover.id, play.id, "now:next")
+        val onlyCoverHidden = player.hide(cover.id).stockOverrides(player, previous = null, stockIds)
+        assertThat(onlyCoverHidden).isEqualTo(UiCanvasLayout(emptyList(), hiddenStock = setOf(cover.id)))
+        val moved = player.move(play.id, 55, 5)
+        val savedMove = moved.stockOverrides(player, previous = null, stockIds)
+        assertThat(savedMove).isEqualTo(UiCanvasLayout(listOf(moved.items.last()), hiddenStock = emptySet()))
+        assertThat(moved.stockOverrides(moved, savedMove, stockIds)).isEqualTo(savedMove)
+        assertThat(player.stockOverrides(player, previous = null, stockIds)).isNull()
+        assertThat(player.raise(cover.id).stockOverrides(player, previous = null, stockIds)?.items?.map(UiCanvasItem::id))
+            .containsExactly(play.id, cover.id)
+        val theme = ThemePackage("Hide cover", ThemeMode.SYSTEM,
+            canvases = UiThemeCanvases(mapOf(UiSurface.NOW_PLAYING to checkNotNull(onlyCoverHidden))))
+        val packageData = ThemePackageCodec.encode(theme)
+        assertThat(packageData.decodeToString()).contains("\"version\":7")
+        assertThat(ThemePackageCodec.decode(packageData.inputStream())).isEqualTo(ThemePackageRead.Loaded(theme))
+    }
+
+    @Test
     fun `a component can overlap another and move between layers`() {
         val moved = player.move(play.id, -540, -100)
         assertThat(moved.items.last().bounds).isEqualTo(UiCanvasBounds(100, 100, 180, 180))

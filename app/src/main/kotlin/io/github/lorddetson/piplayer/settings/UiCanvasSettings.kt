@@ -77,9 +77,34 @@ internal data class UiCanvasItem(
 }
 
 @Serializable
-internal data class UiCanvasLayout(val items: List<UiCanvasItem>) {
+internal data class UiCanvasLayout(val items: List<UiCanvasItem>, val hiddenStock: Set<String>? = null) {
     val isValid: Boolean get() = items.size <= UI_CANVAS_MAX_ITEMS && items.all(UiCanvasItem::isValid) &&
-        items.map(UiCanvasItem::id).distinct().size == items.size
+        items.map(UiCanvasItem::id).distinct().size == items.size &&
+        hiddenStock?.let { hidden ->
+            hidden.size <= UI_CANVAS_MAX_ITEMS && hidden.all { id -> id.length <= 80 && componentId.matches(id) } &&
+                items.none { it.id in hidden }
+        } != false
+
+    /** Save overrides relative to the actual stock view. Untouched components stay in their native layouts. */
+    fun stockOverrides(initial: UiCanvasLayout, previous: UiCanvasLayout?, stockIds: Set<String>): UiCanvasLayout? {
+        val initialById = initial.items.associateBy(UiCanvasItem::id)
+        val beforeOrder = initial.items.mapIndexed { index, item -> item.id to index }.toMap()
+        val previouslyChanged = previous?.items.orEmpty().map(UiCanvasItem::id).toSet()
+        val nowVisible = items.map(UiCanvasItem::id).toSet()
+        val reordered = mutableSetOf<String>()
+        items.forEachIndexed { index, item ->
+            val originalIndex = beforeOrder[item.id] ?: initial.items.size
+            items.subList(0, index).forEach { earlier ->
+                if ((beforeOrder[earlier.id] ?: initial.items.size) > originalIndex) {
+                    reordered += item.id
+                    reordered += earlier.id
+                }
+            }
+        }
+        val overrides = items.filter { it.id in previouslyChanged || it.id in reordered || initialById[it.id] != it }
+        val hidden = (previous?.hiddenStock.orEmpty() + (initialById.keys intersect stockIds)) - nowVisible
+        return if (overrides.isEmpty() && hidden.isEmpty()) null else UiCanvasLayout(overrides, hidden)
+    }
 
     fun add(item: UiCanvasItem): UiCanvasLayout =
         if (!item.isValid || items.size >= UI_CANVAS_MAX_ITEMS || items.any { it.id == item.id }) this else copy(items = items + item)

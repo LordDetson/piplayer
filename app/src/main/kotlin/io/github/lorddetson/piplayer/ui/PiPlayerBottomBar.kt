@@ -25,11 +25,14 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.hideFromAccessibility
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -49,6 +52,8 @@ import io.github.lorddetson.piplayer.ui.customization.UiCanvasComponent
 import io.github.lorddetson.piplayer.ui.customization.UiControlColor
 import io.github.lorddetson.piplayer.ui.customization.UiControlIcon
 import io.github.lorddetson.piplayer.ui.customization.customizeOnHold
+import io.github.lorddetson.piplayer.ui.customization.isStockUiSlotMasked
+import io.github.lorddetson.piplayer.ui.customization.recordStockUiSlot
 import kotlinx.coroutines.launch
 
 object BottomBarTags {
@@ -134,14 +139,22 @@ private fun RowScope.BottomBarItem(
     restore: (String) -> Unit,
 ) {
     var menu by remember { mutableStateOf<PanelMenuPage?>(null) }
-    val hold = if (canCustomize) Modifier.customizeOnHold { menu = PanelMenuPage.ACTIONS } else Modifier
+    val componentId = "nav:" + item.id
+    val masked = isStockUiSlotMasked(componentId)
+    val itemModifier = if (masked) {
+        Modifier.graphicsLayer { alpha = 0f }.clearAndSetSemantics { hideFromAccessibility() }
+    } else {
+        val hold = if (canCustomize) Modifier.customizeOnHold { menu = PanelMenuPage.ACTIONS } else Modifier
+        hold.testTag(item.tag)
+    }
     NavigationBarItem(
         selected = item.route == current,
         onClick = { onSelect(item.route) },
+        enabled = !masked,
         icon = {
             Box {
                 Icon(painterResource(item.icon), contentDescription = null)
-                if (menu != null) {
+                if (!masked && menu != null) {
                     val hide = { edit { it.hide(item) } }
                     PanelItemMenu(
                         menu, { menu = it }, PanelItemKind.BOTTOM_NAVIGATION, item.id, visible, hidden, ::destinationLabel,
@@ -153,7 +166,7 @@ private fun RowScope.BottomBarItem(
             }
         },
         label = { Text(stringResource(item.labelResource)) },
-        modifier = hold.testTag(item.tag),
+        modifier = itemModifier.recordStockUiSlot(componentId),
     )
 }
 

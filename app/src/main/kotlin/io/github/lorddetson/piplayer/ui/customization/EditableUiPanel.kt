@@ -40,10 +40,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
@@ -53,7 +56,14 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntRect
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupPositionProvider
+import androidx.compose.ui.window.PopupProperties
 import androidx.compose.ui.zIndex
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.lorddetson.piplayer.R
@@ -83,7 +93,13 @@ internal data class UiCanvasComponent(
 internal val LocalUiCatalog = staticCompositionLocalOf<List<UiCanvasComponent>> { emptyList() }
 internal val LocalUiEditEntry = staticCompositionLocalOf<((String) -> Unit)?> { null }
 
-private data class EditSession(val initial: UiCanvasLayout, val draft: UiCanvasLayout, val reset: Boolean = false)
+private data class EditSession(
+    val initial: UiCanvasLayout,
+    val draft: UiCanvasLayout,
+    val anchored: Boolean,
+    val previousOverrides: UiCanvasLayout?,
+    val reset: Boolean = false,
+)
 
 @Composable
 internal fun EditableUiPanel(
@@ -105,13 +121,18 @@ internal fun EditableUiPanel(
     val active = record?.takeIf { it.themeId == themeId }
     val persisted = active?.layouts?.panels?.get(surface)
     val catalog = (components + LocalUiCatalog.current).distinctBy(UiCanvasComponent::id).associateBy(UiCanvasComponent::id)
+    val stockIds = initialRows.flatten().distinct()
+    val geometry = remember(themeId, surface) { StockUiGeometry() }
     var session by remember(themeId, surface) { mutableStateOf<EditSession?>(null) }
     var selected by remember(themeId, surface) { mutableStateOf<String?>(null) }
     var saving by remember(themeId, surface) { mutableStateOf(false) }
     var inspecting by remember(themeId, surface) { mutableStateOf(false) }
     val appliedCallback by rememberUpdatedState(onAppliedIds)
-    LaunchedEffect(themeId, active != null, persisted) {
-        if (active != null) appliedCallback(persisted?.items?.map(UiCanvasItem::id))
+    LaunchedEffect(themeId, active != null, persisted, stockIds) {
+        if (active != null) appliedCallback(persisted?.let { saved ->
+            val changed = saved.items.map(UiCanvasItem::id)
+            saved.hiddenStock?.let { hidden -> (stockIds.filterNot(hidden::contains) + changed).distinct() } ?: changed
+        })
     }
     BackHandler(session != null) { if (!saving) { session = null; inspecting = false } }
 
@@ -122,30 +143,74 @@ internal fun EditableUiPanel(
         }
         val canvasWidth = maxWidth
         val start: ((String) -> Unit)? = if (active == null) null else { id ->
-            val initial = persisted ?: defaultCanvas(initialRows, catalog, canvasWidth, height)
-            session = EditSession(initial, initial)
+            val sampled = geometry.snapshot(stockIds)
+            val anchored = persisted?.hiddenStock != null || (persisted == null && sampled.items.isNotEmpty())
+            val previous = persisted.takeIf { anchored }
+            val initial = if (anchored) {
+                val changedIds = previous?.items.orEmpty().map(UiCanvasItem::id).toSet()
+                val hidden = previous?.hiddenStock.orEmpty()
+                UiCanvasLayout(sampled.items.filterNot { it.id in hidden || it.id in changedIds } + previous?.items.orEmpty())
+            } else persisted ?: defaultCanvas(initialRows, catalog, canvasWidth, height)
+            session = EditSession(initial, initial, anchored, previous)
             selected = id.takeIf { sought -> initial.items.any { it.id == sought } }
         }
         val draft = session
         val layout = draft?.draft ?: persisted
         CompositionLocalProvider(LocalUiEditEntry provides start) {
-            if (layout == null) {
-                stock()
-                return@CompositionLocalProvider
-            }
+            val anchored = draft?.anchored ?: (persisted?.hiddenStock != null)
             fun mutate(update: (UiCanvasLayout) -> UiCanvasLayout) {
                 if (!saving) session = session?.let { it.copy(draft = update(it.draft), reset = false) }
             }
-            val selectedItem = layout.items.firstOrNull { it.id == selected }
+            val selectedItem = layout?.items?.firstOrNull { it.id == selected }
             val selectedComponent = catalog[selected]
-            val scroll = if (surface == UiSurface.NOW_PLAYING) Modifier.verticalScroll(rememberScrollState()) else Modifier
-            Column(modifier.fillMaxWidth().then(scroll)) {
-                canvasChrome()
-                if (draft != null) {
+            val stockChanges = when {
+                draft?.reset == true -> null
+                draft?.anchored == true -> draft.draft.stockOverrides(draft.initial, draft.previousOverrides, stockIds.toSet())
+                else -> persisted
+            }
+            val frameSize = geometry.frame
+            val density = LocalDensity.current
+            val drawingWidth = if (anchored) with(density) { frameSize.width.toDp() } else canvasWidth
+            val drawingHeight = if (anchored) with(density) { frameSize.height.toDp() } else height
+
+            Box {
+                if (layout == null || anchored) {
+                    val masked = stockChanges?.hiddenStock.orEmpty() + stockChanges?.items.orEmpty().map(UiCanvasItem::id)
+                    CompositionLocalProvider(LocalStockUiSlots provides StockUiSlots(geometry, masked)) {
+                        Box(Modifier.fillMaxWidth().onGloballyPositioned { geometry.frame = it.boundsInRoot() }) { stock() }
+                    }
+                } else {
+                    val scroll = if (surface == UiSurface.NOW_PLAYING) Modifier.verticalScroll(rememberScrollState()) else Modifier
+                    Column(modifier.fillMaxWidth().then(scroll)) {
+                        canvasChrome()
+                        UiCanvas(layout, catalog, drawingWidth, drawingHeight, draft != null, selectedItem,
+                            select = { selected = it },
+                            move = { id, x, y -> mutate { it.move(id, x, y) } },
+                            resize = { id, x, y -> mutate { it.resize(id, x, y) } },
+                            snap = { id -> mutate { it.snap(id) } },
+                        )
+                    }
+                }
+                if (anchored && layout != null && drawingWidth > 0.dp && drawingHeight > 0.dp) {
+                    val detached = stockChanges?.items.orEmpty().map(UiCanvasItem::id).toSet()
+                    UiCanvas(
+                        layout, catalog, drawingWidth, drawingHeight, draft != null, selectedItem,
+                        select = { selected = it },
+                        move = { id, x, y -> mutate { it.move(id, x, y) } },
+                        resize = { id, x, y -> mutate { it.resize(id, x, y) } },
+                        snap = { id -> mutate { it.snap(id) } },
+                        modifier = Modifier.matchParentSize(),
+                        drawOnly = detached,
+                    )
+                }
+                if (draft != null && layout != null) Popup(
+                    popupPositionProvider = EditorControlsPosition,
+                    properties = PopupProperties(focusable = false, dismissOnBackPress = false, dismissOnClickOutside = false),
+                ) {
                     UiEditorToolbar(
                         layout, catalog, selectedItem, saving,
                         onAdd = { component ->
-                            mutate { it.add(addedItem(component, canvasWidth, height)) }
+                            mutate { it.add(addedItem(component, drawingWidth, drawingHeight)) }
                             selected = component.id
                         },
                         onSelect = { selected = it },
@@ -157,7 +222,8 @@ internal fun EditableUiPanel(
                         },
                         onInspect = { inspecting = true },
                         onReset = {
-                            session = draft.copy(draft = defaultCanvas(initialRows, catalog, canvasWidth, height), reset = true)
+                            val initial = if (anchored) geometry.snapshot(stockIds) else defaultCanvas(initialRows, catalog, canvasWidth, height)
+                            session = EditSession(initial, initial, anchored, previousOverrides = null, reset = true)
                             selected = null
                         },
                         onCancel = { session = null; inspecting = false },
@@ -165,24 +231,21 @@ internal fun EditableUiPanel(
                             if (draft.draft == draft.initial && !draft.reset) session = null
                             else if (themeId != null && !saving) scope.launch {
                                 saving = true
-                                if (settings.save(themeId, surface, draft.draft.takeUnless { draft.reset })) session = null
+                                val changes = if (anchored) stockChanges else draft.draft
+                                if (settings.save(themeId, surface, changes.takeUnless { draft.reset })) session = null
                                 else onSaveFailed()
                                 saving = false
                             }
                         },
                     )
-                } else if (layout.items.none { it.id in catalog }) {
-                    TextButton(onClick = { start?.invoke("") }, enabled = start != null) {
+                }
+                if (layout != null && draft == null && (if (anchored) {
+                    stockIds.all { it in persisted?.hiddenStock.orEmpty() } && persisted?.items.orEmpty().none { it.id in catalog }
+                } else layout.items.none { it.id in catalog })) {
+                    TextButton(onClick = { start?.invoke("") }, enabled = start != null, modifier = Modifier.align(Alignment.CenterEnd)) {
                         Text(stringResource(R.string.ui_edit_mode))
                     }
                 }
-                UiCanvas(
-                    layout, catalog, canvasWidth, height, draft != null, selectedItem,
-                    select = { selected = it },
-                    move = { id, x, y -> mutate { it.move(id, x, y) } },
-                    resize = { id, x, y -> mutate { it.resize(id, x, y) } },
-                    snap = { id -> mutate { it.snap(id) } },
-                )
             }
             if (inspecting && draft != null && selectedItem != null && selectedComponent != null) {
                 key(selectedItem.id) {
@@ -197,6 +260,18 @@ internal fun EditableUiPanel(
                 }
             }
         }
+    }
+}
+
+/** Put editor actions outside compact bars, or along the bottom of the full-screen editor. */
+private object EditorControlsPosition : PopupPositionProvider {
+    override fun calculatePosition(anchorBounds: IntRect, windowSize: IntSize, layoutDirection: LayoutDirection, popupContentSize: IntSize): IntOffset {
+        val preferred = when {
+            anchorBounds.top >= popupContentSize.height -> anchorBounds.top - popupContentSize.height
+            windowSize.height - anchorBounds.bottom >= popupContentSize.height -> anchorBounds.bottom
+            else -> anchorBounds.bottom - popupContentSize.height
+        }
+        return IntOffset(anchorBounds.left, preferred.coerceIn(0, (windowSize.height - popupContentSize.height).coerceAtLeast(0)))
     }
 }
 
@@ -291,13 +366,25 @@ private fun UiCanvas(
     move: (String, Int, Int) -> Unit,
     resize: (String, Int, Int) -> Unit,
     snap: (String) -> Unit,
+    modifier: Modifier = Modifier.fillMaxWidth().height(height),
+    drawOnly: Set<String>? = null,
 ) {
     val accent = MaterialTheme.colorScheme.primary
+    var dragging by remember { mutableStateOf(false) }
     val frameWidth = with(LocalDensity.current) { width.toPx() }
     val frameHeight = with(LocalDensity.current) { height.toPx() }
-    Box(Modifier.fillMaxWidth().height(height).clipToBounds().testTag("ui_canvas")) {
+    Box(modifier.clipToBounds().testTag("ui_canvas")) {
+        if (editing && drawOnly != null) {
+            Box(Modifier.matchParentSize().pointerInput(Unit) {
+                awaitPointerEventScope {
+                    while (true) awaitPointerEvent(PointerEventPass.Initial).changes.forEach { it.consume() }
+                }
+            })
+        }
         layout.items.forEachIndexed { index, item ->
             val component = catalog[item.id] ?: return@forEachIndexed
+            val drawContent = drawOnly == null || item.id in drawOnly
+            if (!editing && !drawContent) return@forEachIndexed
             key(item.id) {
                 val bounds = item.bounds
                 val itemWidth = width * bounds.width.toFraction()
@@ -320,28 +407,31 @@ private fun UiCanvas(
                         .background(background),
                     contentAlignment = Alignment.Center,
                 ) {
-                    val padding = item.padding
-                    val contentFrame = Modifier.fillMaxSize().padding(
-                        start = minOf(padding.start.dp, itemWidth / 2),
-                        top = minOf(padding.top.dp, itemHeight / 2),
-                        end = minOf(padding.end.dp, itemWidth / 2),
-                        bottom = minOf(padding.bottom.dp, itemHeight / 2),
-                    )
-                    CompositionLocalProvider(LocalUiControlStyle provides item.style) {
-                        CanvasComponentContents(component,
-                            contentFrame.then(if (editing) Modifier.clearAndSetSemantics {} else Modifier))
+                    if (drawContent) {
+                        val padding = item.padding
+                        val contentFrame = Modifier.fillMaxSize().padding(
+                            start = minOf(padding.start.dp, itemWidth / 2),
+                            top = minOf(padding.top.dp, itemHeight / 2),
+                            end = minOf(padding.end.dp, itemWidth / 2),
+                            bottom = minOf(padding.bottom.dp, itemHeight / 2),
+                        )
+                        CompositionLocalProvider(LocalUiControlStyle provides item.style) {
+                            CanvasComponentContents(component,
+                                contentFrame.then(if (editing) Modifier.clearAndSetSemantics {} else Modifier))
+                        }
                     }
                     if (editing) {
                         Box(Modifier.matchParentSize()
-                            .border(1.dp, accent.copy(alpha = if (isSelected) 1f else 0.4f))
+                            .then(if (isSelected) Modifier.border(1.dp, accent) else Modifier)
                             .clickable { select(item.id) }
-                            .canvasDrag(item.id, frameWidth, frameHeight, onStart = { select(item.id) },
-                                onDelta = move, onEnd = { snap(item.id) })
+                            .canvasDrag(item.id, frameWidth, frameHeight, onStart = { select(item.id); dragging = true },
+                                onDelta = move, onEnd = { snap(item.id); dragging = false })
                             .semantics { contentDescription = componentLabel }
                             .testTag("ui_component_" + item.id))
                         if (isSelected) {
                             Box(Modifier.align(Alignment.BottomEnd).size(24.dp).background(accent, CircleShape)
-                                .canvasDrag(item.id, frameWidth, frameHeight, onDelta = resize)
+                                .canvasDrag(item.id, frameWidth, frameHeight, onStart = { dragging = true },
+                                    onDelta = resize, onEnd = { dragging = false })
                                 .testTag("ui_resize_" + item.id))
                         }
                     } else if (editEntry != null) {
@@ -356,7 +446,7 @@ private fun UiCanvas(
                 }
             }
         }
-        if (editing && selected != null) {
+        if (editing && dragging && selected != null) {
             val (x, y) = layout.guides(selected.id)
             val bounds = selected.bounds
             Canvas(Modifier.matchParentSize().zIndex((layout.items.size + 1).toFloat())) {
