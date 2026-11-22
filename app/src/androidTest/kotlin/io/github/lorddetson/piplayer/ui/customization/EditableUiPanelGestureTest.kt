@@ -41,7 +41,7 @@ class EditableUiPanelGestureTest {
 
     @Test
     fun groupScalesTogetherAndSavesAlignmentAndPlacementWithTheTheme() =
-        withStockPlayerTheme(TestFiles.targetContext, "ui_group_") {
+        withStockPlayerTheme(TestFiles.targetContext, "ui_canvas_") {
             val surface = UiSurface.MINI_PLAYER
             val first = "fixture:first"
             val second = "fixture:second"

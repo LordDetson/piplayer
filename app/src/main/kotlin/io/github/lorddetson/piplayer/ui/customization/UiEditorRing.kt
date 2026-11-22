@@ -2,11 +2,16 @@ package io.github.lorddetson.piplayer.ui.customization
 
 import androidx.annotation.DrawableRes
 import androidx.annotation.StringRes
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
@@ -14,11 +19,16 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
@@ -37,6 +47,7 @@ import androidx.compose.ui.window.PopupPositionProvider
 import androidx.compose.ui.window.PopupProperties
 import io.github.lorddetson.piplayer.R
 import kotlin.math.PI
+import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.min
 import kotlin.math.roundToInt
@@ -52,7 +63,7 @@ internal data class UiEditorAction(
 )
 
 private val RingButtonSize = 48.dp
-private val RingRadius = 80.dp
+private val RingRadius = 72.dp
 private val RingMargin = 4.dp
 private val RingPopupProperties = PopupProperties(
     focusable = false,
@@ -79,14 +90,29 @@ internal fun UiEditorRing(actions: List<UiEditorAction>, modifier: Modifier = Mo
     val viewport = remember { RingViewport() }
     var preferredCenter by remember { mutableStateOf<Offset?>(null) }
     var expanded by remember { mutableStateOf(true) }
+    var orbitSteps by remember { mutableIntStateOf(0) }
+    val reveal by animateFloatAsState(if (expanded) 1f else 0f, tween(180), label = "Editor ring reveal")
+    val orbit by animateFloatAsState(orbitSteps.toFloat(), tween(230), label = "Editor ring rotation")
+    val swipeThreshold = with(density) { 28.dp.toPx() }
 
-    if (expanded) {
+    if (expanded || reveal > 0f) {
         actions.forEachIndexed { index, action ->
             key(action.tag) {
-                val angle = 2 * PI * index / actions.size - PI / 2
-                val position = RingPosition(geometry, preferredCenter, true, Offset(cos(angle).toFloat(), sin(angle).toFloat()))
+                val angle = -PI / 2 - 2 * PI * (index + orbit) / actions.size
+                val radial = Offset(cos(angle).toFloat(), sin(angle).toFloat())
+                val depth = 1f - radial.x.coerceAtLeast(0f) * 0.47f
+                val position = RingPosition(geometry, preferredCenter, true, radial * (0.38f + reveal * 0.62f))
                 Popup(position, properties = RingPopupProperties) {
-                    RingIconButton(action, Modifier.testTag(action.tag).semantics { if (action.selected) selected = true })
+                    val rotation = if (expanded && actions.size > 1) {
+                        Modifier.orbitSwipe(radial, swipeThreshold) { orbitSteps += it }
+                    } else Modifier
+                    RingIconButton(
+                        action,
+                        Modifier.testTag(action.tag).semantics { if (action.selected) selected = true }.then(rotation),
+                        depth = depth,
+                        reveal = reveal,
+                        interactive = expanded,
+                    )
                 }
             }
         }
@@ -96,7 +122,7 @@ internal fun UiEditorRing(actions: List<UiEditorAction>, modifier: Modifier = Mo
         Box(modifier.testTag("ui_editor_ring")) {
             RingIconButton(
                 action = UiEditorAction(
-                    R.drawable.ic_drag_handle,
+                    R.drawable.ic_ui_edit_pen,
                     if (expanded) R.string.ui_editor_ring_collapse else R.string.ui_editor_ring_expand,
                     "ui_editor_ring_handle",
                 ) {
@@ -111,26 +137,69 @@ internal fun UiEditorRing(actions: List<UiEditorAction>, modifier: Modifier = Mo
                             preferredCenter = geometry.centerIn(viewport.size, current + amount, expanded, direction)
                         }
                     },
+                depth = if (expanded) 1f else 0.8f,
+                isHandle = true,
             )
         }
     }
 }
 
 @Composable
-private fun RingIconButton(action: UiEditorAction, modifier: Modifier) {
+private fun RingIconButton(
+    action: UiEditorAction,
+    modifier: Modifier,
+    depth: Float,
+    reveal: Float = 1f,
+    interactive: Boolean = true,
+    isHandle: Boolean = false,
+) {
     val colors = MaterialTheme.colorScheme
+    val (background, foreground) = when {
+        isHandle && colors.surface.luminance() < 0.5f -> colors.surfaceContainerLow to colors.onSurface
+        isHandle -> colors.inverseSurface to colors.inverseOnSurface
+        action.selected -> colors.primaryContainer to colors.onPrimaryContainer
+        else -> colors.surfaceContainerHighest to colors.onSurface
+    }
+    val opacity = if (isHandle || action.selected) 0.85f else 0.50f + depth * 0.33f
     IconButton(
         modifier = modifier.size(RingButtonSize),
         onClick = action.onClick,
-        enabled = action.enabled,
+        enabled = action.enabled && interactive,
         colors = IconButtonDefaults.iconButtonColors(
-            containerColor = if (action.selected) colors.primaryContainer.copy(alpha = 0.84f) else colors.surfaceContainerHigh.copy(alpha = 0.78f),
-            contentColor = if (action.selected) colors.onPrimaryContainer else colors.onSurface,
-            disabledContainerColor = colors.surfaceContainerHigh.copy(alpha = 0.78f),
-            disabledContentColor = colors.onSurface.copy(alpha = 0.38f),
+            contentColor = foreground,
+            disabledContentColor = foreground.copy(alpha = 0.38f),
         ),
     ) {
-        Icon(painterResource(action.icon), contentDescription = stringResource(action.label))
+        Box(
+            Modifier.size(44.dp * depth).graphicsLayer { alpha = reveal }
+                .background(background.copy(alpha = opacity), CircleShape)
+                .border(1.dp, colors.outlineVariant.copy(alpha = 0.55f), CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(painterResource(action.icon), stringResource(action.label), Modifier.size(21.dp * depth))
+        }
+    }
+}
+
+@Composable
+private fun Modifier.orbitSwipe(radial: Offset, threshold: Float, onTurn: (Int) -> Unit): Modifier {
+    val direction by rememberUpdatedState(radial)
+    val turn by rememberUpdatedState(onTurn)
+    return pointerInput(threshold) {
+        var tangent = Offset.Zero
+        var displacement = 0f
+        detectDragGestures(
+            onDragStart = {
+                tangent = Offset(direction.y, -direction.x)
+                displacement = 0f
+            },
+            onDragEnd = {
+                if (abs(displacement) >= threshold) turn(if (displacement > 0f) 1 else -1)
+            },
+        ) { change, amount ->
+            change.consume()
+            displacement += amount.x * tangent.x + amount.y * tangent.y
+        }
     }
 }
 

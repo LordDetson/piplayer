@@ -80,4 +80,28 @@ class UiEditorRingTest {
         assertThat(actionAfter - handleAfter).isEqualTo(actionBefore - handleBefore)
         assertThat(canvas.fetchSemanticsNode().boundsInRoot).isEqualTo(canvasBefore)
     }
+
+    @Test
+    fun swipingAnOrbitCommandRotatesTheArcAroundTheEditorHandle() {
+        compose.setContent {
+            Box(Modifier.fillMaxSize()) {
+                UiEditorRing(List(8) { index ->
+                    UiEditorAction(R.drawable.ic_add, R.string.ui_edit_add, "orbit_command_" + index) {}
+                })
+            }
+        }
+        val handle = compose.onNodeWithTag("ui_editor_ring_handle")
+        val top = compose.onNodeWithTag("orbit_command_0")
+        val next = compose.onNodeWithTag("orbit_command_1")
+        val handleBefore = handle.fetchSemanticsNode().layoutInfo.coordinates.localToScreen(Offset.Zero)
+        val topBefore = top.fetchSemanticsNode().layoutInfo.coordinates.localToScreen(Offset.Zero)
+
+        top.performTouchInput { swipe(center, center - Offset(66.dp.toPx(), 0f), durationMillis = 400) }
+
+        val topAfter = top.fetchSemanticsNode().layoutInfo.coordinates.localToScreen(Offset.Zero)
+        val nextAfter = next.fetchSemanticsNode().layoutInfo.coordinates.localToScreen(Offset.Zero)
+        assertThat(topAfter.x).isLessThan(topBefore.x - 20f)
+        assertThat(nextAfter.x).isLessThan(topAfter.x)
+        assertThat(handle.fetchSemanticsNode().layoutInfo.coordinates.localToScreen(Offset.Zero)).isEqualTo(handleBefore)
+    }
 }

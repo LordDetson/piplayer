@@ -63,8 +63,9 @@ icons on icon controls. Vector icons keep their shape when resized. The editor s
 shapes and grouped transforms. An icon with unsupported effects or external resources is rejected. A button can
 preview and use a press, bounce or tilt animation. Text components have their own alignment setting.
 
-Drag the center handle to move the editor's command ring over the screen. Tap the handle to collapse or expand
-the ring. Its buttons float above the layout and occupy no space within the panel. Use Group to select several
+Drag the pencil handle to move the editor's command ring over the screen. Tap the handle to collapse or expand
+the ring. Swipe along its arc to rotate commands into the foreground. Its buttons float above the layout and
+occupy no space within the panel. Use Group to select several
 components and confirm the selection. Drag any member to move the group, or drag a corner or edge of the group
 outline to scale its components and spacing together. Editor options can dissolve the selected group.
 
