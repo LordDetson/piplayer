@@ -48,7 +48,7 @@ internal fun UiEditorControls(
 ) {
     var dialog by remember { mutableStateOf<EditorDialog?>(null) }
     var noSpace by remember(dialog) { mutableStateOf(false) }
-    val available = catalog.values.filter { candidate -> layout.items.none { it.id == candidate.id } }
+    val available = catalog.values.filter { candidate -> candidate.addable && layout.items.none { it.id == candidate.id } }
     val selectedId = selected?.id
     val hasSelection = selectedId != null && picked == null && !saving
     UiEditorRing(listOf(

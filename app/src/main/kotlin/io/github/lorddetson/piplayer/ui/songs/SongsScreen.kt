@@ -11,6 +11,7 @@ import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.lazy.grid.LazyGridScope
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
@@ -103,6 +104,8 @@ fun SongsScreen(
     headerItems: Int = 0,
     headerSections: List<String?> = emptyList(),
     onOpenLibrarySettings: (() -> Unit)? = null,
+    allowGrid: Boolean = false,
+    gridHeader: LazyGridScope.() -> Unit = {},
     header: LazyListScope.() -> Unit = {},
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -110,6 +113,7 @@ fun SongsScreen(
     val scanning by viewModel.scanning.collectAsStateWithLifecycle()
     // Every song list selects its songs (docs/library.md §20.1).
     val selected by viewModel.selection.collectAsStateWithLifecycle()
+    val showGrid by viewModel.grid.collectAsStateWithLifecycle()
     val selection = SongSelection(
         selecting = selected != null,
         isSelected = { id -> selected?.selection?.isSelected(id) == true },
@@ -144,6 +148,8 @@ fun SongsScreen(
         scanning = scanning,
         onOpenLibrarySettings = onOpenLibrarySettings,
         selection = selection,
+        grid = allowGrid && showGrid,
+        gridHeader = gridHeader,
     )
 }
 

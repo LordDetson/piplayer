@@ -32,7 +32,9 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.hideFromAccessibility
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -40,6 +42,7 @@ import androidx.navigation3.runtime.NavKey
 import io.github.lorddetson.piplayer.R
 import io.github.lorddetson.piplayer.settings.BottomDestination
 import io.github.lorddetson.piplayer.settings.BottomNavigationLayout
+import io.github.lorddetson.piplayer.settings.UiLabelDisplay
 import io.github.lorddetson.piplayer.settings.PlayerPanelState
 import io.github.lorddetson.piplayer.settings.UiSurface
 import io.github.lorddetson.piplayer.settings.bottomNavigationLayouts
@@ -50,6 +53,7 @@ import io.github.lorddetson.piplayer.ui.customization.PanelMenuPage
 import io.github.lorddetson.piplayer.ui.customization.PanelRestoreButton
 import io.github.lorddetson.piplayer.ui.customization.UiCanvasComponent
 import io.github.lorddetson.piplayer.ui.customization.UiControlColor
+import io.github.lorddetson.piplayer.ui.customization.uiLabelDisplay
 import io.github.lorddetson.piplayer.ui.customization.UiControlTextAlign
 import io.github.lorddetson.piplayer.ui.customization.fillAlignedTextWidth
 import io.github.lorddetson.piplayer.ui.customization.UiControlIcon
@@ -114,19 +118,24 @@ internal fun bottomNavigationComponent(
     onSelect: (NavKey) -> Unit,
     tag: String? = null,
 ): UiCanvasComponent = UiCanvasComponent("nav:${item.id}", item.labelResource, width = 96.dp, height = 60.dp,
-    customizableIcon = true, alignableText = true) {
+    customizableIcon = true, alignableText = true, labelDisplay = true) {
     val selected = item.route == current
     val color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+    val display = uiLabelDisplay("nav:${item.id}")
+    val label = stringResource(item.labelResource)
     Box(
         Modifier.fillMaxSize().then(if (tag == null) Modifier else Modifier.testTag(tag))
-            .selectable(selected = selected, role = Role.Tab, onClick = { onSelect(item.route) }),
+            .selectable(selected = selected, role = Role.Tab, onClick = { onSelect(item.route) })
+            .semantics { if (display == UiLabelDisplay.ICON_ONLY) contentDescription = label },
         contentAlignment = Alignment.Center,
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            UiControlIcon(painterResource(item.icon), contentDescription = null, tint = color)
-            Text(stringResource(item.labelResource), color = UiControlColor(color), style = MaterialTheme.typography.labelMedium,
-                modifier = Modifier.fillAlignedTextWidth(), textAlign = UiControlTextAlign(),
-                maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (display != UiLabelDisplay.TEXT_ONLY) UiControlIcon(painterResource(item.icon), contentDescription = null, tint = color)
+            if (display != UiLabelDisplay.ICON_ONLY) {
+                Text(label, color = UiControlColor(color), style = MaterialTheme.typography.labelMedium,
+                    modifier = Modifier.fillAlignedTextWidth(), textAlign = UiControlTextAlign(),
+                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
         }
     }
 }
@@ -144,12 +153,14 @@ private fun RowScope.BottomBarItem(
 ) {
     var menu by remember { mutableStateOf<PanelMenuPage?>(null) }
     val componentId = "nav:" + item.id
+    val display = uiLabelDisplay(componentId)
+    val label = stringResource(item.labelResource)
     val masked = isStockUiSlotMasked(componentId)
     val itemModifier = if (masked) {
         Modifier.graphicsLayer { alpha = 0f }.clearAndSetSemantics { hideFromAccessibility() }
     } else {
         val hold = if (canCustomize) Modifier.customizeOnHold { menu = PanelMenuPage.ACTIONS } else Modifier
-        hold.testTag(item.tag)
+        hold.testTag(item.tag).semantics { if (display == UiLabelDisplay.ICON_ONLY) contentDescription = label }
     }
     NavigationBarItem(
         selected = item.route == current,
@@ -157,7 +168,7 @@ private fun RowScope.BottomBarItem(
         enabled = !masked,
         icon = {
             Box {
-                Icon(painterResource(item.icon), contentDescription = null)
+                if (display != UiLabelDisplay.TEXT_ONLY) Icon(painterResource(item.icon), contentDescription = null)
                 if (!masked && menu != null) {
                     val hide = { edit { it.hide(item) } }
                     PanelItemMenu(
@@ -169,7 +180,7 @@ private fun RowScope.BottomBarItem(
                 }
             }
         },
-        label = { Text(stringResource(item.labelResource)) },
+        label = if (display == UiLabelDisplay.ICON_ONLY) null else { { Text(label) } },
         modifier = itemModifier.recordStockUiSlot(componentId),
     )
 }

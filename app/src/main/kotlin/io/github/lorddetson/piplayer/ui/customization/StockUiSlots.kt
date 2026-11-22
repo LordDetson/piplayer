@@ -53,25 +53,30 @@ internal val LocalStockUiSlots = staticCompositionLocalOf<StockUiSlots?> { null 
 internal fun isStockUiSlotMasked(id: String): Boolean = id in LocalStockUiSlots.current?.masked.orEmpty()
 
 @Composable
-internal fun Modifier.recordStockUiSlot(id: String): Modifier {
-    val geometry = LocalStockUiSlots.current?.geometry ?: return this
+internal fun Modifier.recordStockUiSlot(id: String, owner: StockUiSlots? = LocalStockUiSlots.current): Modifier {
+    val geometry = owner?.geometry ?: return this
     DisposableEffect(geometry, id) { onDispose { geometry.slots.remove(id) } }
     return onGloballyPositioned { geometry.slots[id] = it.boundsInRoot() }
 }
 
 /** A detached or hidden control reserves the space it had in the stock layout. */
 @Composable
-internal fun StockUiSlot(id: String, modifier: Modifier = Modifier, content: @Composable () -> Unit) {
-    if (LocalStockUiSlots.current == null) {
+internal fun StockUiSlot(
+    id: String,
+    modifier: Modifier = Modifier,
+    owner: StockUiSlots? = LocalStockUiSlots.current,
+    content: @Composable () -> Unit,
+) {
+    if (owner == null) {
         Box(modifier) { content() }
         return
     }
     var size by remember(id) { mutableStateOf(IntSize.Zero) }
-    val masked = isStockUiSlotMasked(id)
+    val masked = id in owner.masked
     val decoration = if (masked && size == IntSize.Zero) {
         Modifier.graphicsLayer { alpha = 0f }.clearAndSetSemantics {}
     } else Modifier
-    Box(modifier.recordStockUiSlot(id).onSizeChanged { size = it }.then(decoration)) {
+    Box(modifier.recordStockUiSlot(id, owner).onSizeChanged { size = it }.then(decoration)) {
         if (masked && size != IntSize.Zero) {
             with(LocalDensity.current) { Spacer(Modifier.size(size.width.toDp(), size.height.toDp())) }
         } else {

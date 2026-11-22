@@ -11,10 +11,14 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
@@ -22,7 +26,6 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
@@ -51,6 +54,8 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -64,19 +69,28 @@ import io.github.lorddetson.piplayer.library.lists.SongQuery
 import io.github.lorddetson.piplayer.library.playlists.M3u
 import io.github.lorddetson.piplayer.library.search.SearchTerms
 import io.github.lorddetson.piplayer.library.search.SearchText
+import io.github.lorddetson.piplayer.settings.ListName
+import io.github.lorddetson.piplayer.settings.ListSorts
+import io.github.lorddetson.piplayer.settings.PlaylistCatalogOrder
+import io.github.lorddetson.piplayer.settings.PlaylistCatalogOrderSettings
+import io.github.lorddetson.piplayer.settings.PlaylistSection
+import io.github.lorddetson.piplayer.ui.library.CollectionTile
 import io.github.lorddetson.piplayer.ui.library.LibraryHost
+import io.github.lorddetson.piplayer.ui.library.rememberCollectionSelection
 import io.github.lorddetson.piplayer.ui.player.QueueTarget
+import io.github.lorddetson.piplayer.ui.selection.RowSelection
+import io.github.lorddetson.piplayer.ui.selection.SelectionCheck
+import io.github.lorddetson.piplayer.ui.selection.selectableRow
 import io.github.lorddetson.piplayer.userdata.PlaylistSummary
 import io.github.lorddetson.piplayer.userdata.UserData
 import io.github.lorddetson.piplayer.userdata.byName
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.catch
-import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -311,50 +325,61 @@ private fun ChooseDialog(onDismiss: () -> Unit, onNew: () -> Unit, onChoose: (Lo
 }
 
 /**
- * The playlists by name (the locale's collator), filtered by a search over their names; null until the first read
- * (docs/library.md §16.3).
+ * The playlists by name (the locale's collator); null until the first read (docs/library.md §16.3).
  */
 class PlaylistsViewModel(application: Application) : AndroidViewModel(application) {
 
-    private val search = MutableStateFlow("")
-
     val state: StateFlow<List<PlaylistSummary>?> =
-        combine(UserData.playlists(application).playlistsFlow(), search) { playlists, query -> shown(playlists, query) }
+        UserData.playlists(application).playlistsFlow().map { it.byName() }
             .flowOn(Dispatchers.Default)
             .catch { emit(emptyList()) }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), null)
-
-    fun setSearch(query: String) {
-        search.value = query
-    }
-
-    private fun shown(playlists: List<PlaylistSummary>, query: String): List<PlaylistSummary> {
-        val terms = SearchTerms.of(query)
-        return playlists
-            .filter { playlist -> terms.isEmpty() || SearchText.of(playlist.name).let { text -> terms.all { it in text } } }
-            .byName()
-    }
 
     private companion object {
         const val STOP_TIMEOUT_MS = 5_000L
     }
 }
 
-/**
- * The Playlists tab (docs/library.md §16.3, §17.2): "New playlist" and "Import", the smart lists with their numbers, then
- * the playlists by name. One composable, so that the browse categories of PIM-64 can show it elsewhere.
- */
+/** The Playlists tab shows manual and smart playlists in independently reorderable sections. */
 @Composable
 fun PlaylistsContent(host: LibraryHost, actions: PlaylistActions, search: String, modifier: Modifier = Modifier) {
     val app = LocalContext.current.applicationContext as Application
     val model = viewModel(key = "playlists") { PlaylistsViewModel(app) }
-    LaunchedEffect(search) { model.setSearch(search) }
     val playlists by model.state.collectAsStateWithLifecycle()
     val smart = viewModel(key = "smart lists") { SmartListsViewModel(app) }
     val counts by smart.counts.collectAsStateWithLifecycle()
-    val smartRows = smartListRows(counts, search)
+    val sorts = remember(app) { ListSorts(app) }
+    val gridFlow = remember(sorts) { sorts.grid(ListName.PLAYLISTS) }
+    val grid by gridFlow.collectAsStateWithLifecycle(initialValue = false)
+    val settings = remember(app) { PlaylistCatalogOrderSettings(app) }
+    val order by settings.order.collectAsStateWithLifecycle(initialValue = PlaylistCatalogOrder())
+    val scope = rememberCoroutineScope()
+    val saveFailed = stringResource(R.string.playlist_failed)
+    fun saveOrder(write: suspend () -> Boolean) = scope.launch {
+        if (!write()) host.snackbar.showSnackbar(saveFailed)
+    }
+    val manuals = remember(playlists) { playlists.orEmpty().associateBy(PlaylistSummary::id) }
+    val manualKeys = remember(manuals) { manuals.keys.toList() }
+    val manualOrder = remember(order, manuals, search) {
+        val terms = SearchTerms.of(search)
+        order.manual(manualKeys).filter { id ->
+            terms.isEmpty() || SearchText.of(manuals.getValue(id).name).let { name -> terms.all { it in name } }
+        }
+    }
+    val smartRows = smartListRows(counts, search).associateBy(SmartListRow::kind)
+    val smartOrder = order.smart(smartRows.keys.toList())
+    val targets: List<QueueTarget.Collection> = remember(order, manualOrder, smartOrder) {
+        order.sections.flatMap { section ->
+            when (section) {
+                PlaylistSection.MANUAL -> manualOrder.map { QueueTarget.Playlist(it) }
+                PlaylistSection.SMART -> smartOrder.map { QueueTarget.Smart(it) }
+            }
+        }
+    }
+    val selection = rememberCollectionSelection(targets, search)
     Column(modifier) {
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+        selection.Actions(host)
+        if (!selection.selecting) Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
             Button(onClick = actions.create, modifier = Modifier.testTag(PlaylistTags.NEW)) {
                 Icon(painterResource(R.drawable.ic_add), contentDescription = null)
                 Text(stringResource(R.string.playlist_new), modifier = Modifier.padding(start = 8.dp))
@@ -363,37 +388,137 @@ fun PlaylistsContent(host: LibraryHost, actions: PlaylistActions, search: String
                 Text(stringResource(R.string.playlist_import))
             }
         }
-        val list = playlists
-        LazyColumn(Modifier.fillMaxSize().testTag(PlaylistTags.LIST)) {
-            smartListItems(smartRows, actions.openSmart)
-            if (smartRows.isNotEmpty()) item(key = "smart lists end") { HorizontalDivider(Modifier.padding(vertical = 4.dp)) }
-            when {
-                list == null -> item(key = "loading") {
-                    Box(Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
-                }
-                // With a search, the smart lists it found are enough of an answer.
-                list.isEmpty() && (search.isBlank() || smartRows.isEmpty()) -> item(key = "none") {
-                    Text(
-                        stringResource(if (search.isBlank()) R.string.playlists_none else R.string.search_nothing_found),
-                        style = MaterialTheme.typography.bodyLarge,
-                        modifier = Modifier.padding(16.dp),
+        LazyVerticalGrid(
+            columns = if (grid) GridCells.Adaptive(152.dp) else GridCells.Fixed(1),
+            modifier = Modifier.fillMaxSize().testTag(PlaylistTags.LIST),
+        ) {
+            for (section in order.sections) {
+                val manual = section == PlaylistSection.MANUAL
+                val visible = if (manual) search.isBlank() || manualOrder.isNotEmpty() else smartRows.isNotEmpty()
+                if (visible) item(key = section.name, span = { GridItemSpan(maxLineSpan) }) {
+                    val isFirst = section == order.sections.first()
+                    PlaylistSectionHeader(
+                        if (manual) R.string.tab_playlists else R.string.smart_lists,
+                        isFirst,
+                        canMove = search.isBlank() && !selection.selecting,
+                        move = { saveOrder { settings.moveSectionToTop(if (isFirst) order.sections.last() else section) } },
                     )
                 }
-                else -> items(list, key = { it.id }) { playlist -> PlaylistRow(playlist, host, actions) }
+                if (manual) {
+                    when {
+                        playlists == null -> item(key = "loading", span = { GridItemSpan(maxLineSpan) }) {
+                            Box(Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+                        }
+                        manualOrder.isEmpty() && (search.isBlank() || smartRows.isEmpty()) ->
+                            item(key = "none", span = { GridItemSpan(maxLineSpan) }) { PlaylistCatalogEmpty(search) }
+                        else -> items(manualOrder.size, key = { manualOrder[it] }) { place ->
+                            val id = manualOrder[place]
+                            val move: (Int) -> Unit = { by -> saveOrder { settings.moveManual(manualKeys, id, by) } }
+                            val moves = movesInSection(place, manualOrder.lastIndex, search.isBlank(), move)
+                            PlaylistRow(manuals.getValue(id), host, actions, grid, selection.row(QueueTarget.Playlist(id)), moves)
+                        }
+                    }
+                } else {
+                    items(smartOrder.size, key = { "smart " + smartOrder[it].token }) { place ->
+                        val kind = smartOrder[place]
+                        val move: (Int) -> Unit = { by -> saveOrder { settings.moveSmart(kind, by) } }
+                        val moves = movesInSection(place, smartOrder.lastIndex, search.isBlank(), move)
+                        SmartCatalogRow(smartRows.getValue(kind), actions, grid, selection.row(QueueTarget.Smart(kind)), moves)
+                    }
+                }
             }
         }
     }
 }
 
 @Composable
-private fun PlaylistRow(playlist: PlaylistSummary, host: LibraryHost, actions: PlaylistActions) {
-    ListItem(
-        headlineContent = { Text(playlist.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-        supportingContent = { Text(pluralStringResource(R.plurals.songs_count, playlist.entries, playlist.entries)) },
-        leadingContent = { Icon(painterResource(R.drawable.ic_playlist), contentDescription = null) },
-        trailingContent = { PlaylistMenuButton(playlist.id, playlist.name, host, actions, withPlay = true) },
-        modifier = Modifier.clickable(onClickLabel = stringResource(R.string.open_playlist), role = Role.Button) { actions.open(playlist.id) },
-    )
+private fun PlaylistSectionHeader(name: Int, first: Boolean, canMove: Boolean, move: () -> Unit) {
+    Row(Modifier.fillMaxWidth().height(48.dp).padding(start = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(stringResource(name), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.titleSmall,
+            modifier = Modifier.weight(1f).semantics { heading() })
+        if (canMove) CatalogMoveMenu(stringResource(name), CatalogMoves(up = move.takeUnless { first }, down = move.takeIf { first }))
+    }
+}
+
+@Composable
+private fun PlaylistCatalogEmpty(search: String) {
+    Text(stringResource(if (search.isBlank()) R.string.playlists_none else R.string.search_nothing_found),
+        style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(16.dp))
+}
+
+private class CatalogMoves(val up: (() -> Unit)? = null, val down: (() -> Unit)? = null)
+
+private fun movesInSection(place: Int, last: Int, enabled: Boolean, move: (Int) -> Unit) = CatalogMoves(
+    up = if (enabled && place > 0) ({ move(-1) }) else null,
+    down = if (enabled && place < last) ({ move(1) }) else null,
+)
+
+@Composable
+private fun CatalogMoveMenu(name: String, moves: CatalogMoves) {
+    if (moves.up == null && moves.down == null) return
+    var open by remember { mutableStateOf(false) }
+    Box {
+        IconButton(onClick = { open = true }) {
+            Icon(painterResource(R.drawable.ic_more), stringResource(R.string.song_menu, name))
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            CatalogMoveItems(moves) { open = false }
+        }
+    }
+}
+
+@Composable
+private fun CatalogMoveItems(moves: CatalogMoves, close: () -> Unit) {
+    for ((label, action) in listOf(R.string.queue_move_up to moves.up, R.string.queue_move_down to moves.down)) {
+        action?.let {
+            DropdownMenuItem(text = { Text(stringResource(label)) }, onClick = { close(); it() })
+        }
+    }
+}
+
+@Composable
+private fun PlaylistRow(playlist: PlaylistSummary, host: LibraryHost, actions: PlaylistActions, grid: Boolean, row: RowSelection, moves: CatalogMoves) {
+    val details = pluralStringResource(R.plurals.songs_count, playlist.entries, playlist.entries)
+    CatalogRow(playlist.name, details, R.drawable.ic_playlist, R.string.open_playlist, grid, row, { actions.open(playlist.id) }) {
+        PlaylistMenuButton(playlist.id, playlist.name, host, actions, withPlay = true, onMoveUp = moves.up, onMoveDown = moves.down)
+    }
+}
+
+@Composable
+private fun SmartCatalogRow(smart: SmartListRow, actions: PlaylistActions, grid: Boolean, row: RowSelection, moves: CatalogMoves) {
+    val details = smart.count?.let { pluralStringResource(R.plurals.songs_count, it, it) }
+    CatalogRow(smart.name, details, smartListIcon(smart.kind), R.string.open_smart_list, grid, row,
+        { actions.openSmart(smart.kind) }, Modifier.testTag(SmartListTags.ROW)) {
+        CatalogMoveMenu(smart.name, moves)
+    }
+}
+
+@Composable
+private fun CatalogRow(
+    name: String,
+    details: String?,
+    icon: Int,
+    openLabel: Int,
+    grid: Boolean,
+    row: RowSelection,
+    open: () -> Unit,
+    modifier: Modifier = Modifier,
+    menu: @Composable () -> Unit,
+) {
+    if (grid) {
+        CollectionTile(name, details, icon, stringResource(openLabel), open, modifier, row, menu)
+    } else {
+        ListItem(
+            headlineContent = { Text(name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+            supportingContent = details?.let { { Text(it) } },
+            leadingContent = { Row(verticalAlignment = Alignment.CenterVertically) {
+                SelectionCheck(row)
+                Icon(painterResource(icon), contentDescription = null)
+            } },
+            trailingContent = menu.takeUnless { row.selecting },
+            modifier = modifier.selectableRow(row, stringResource(openLabel), open),
+        )
+    }
 }
 
 /**
@@ -401,7 +526,16 @@ private fun PlaylistRow(playlist: PlaylistSummary, host: LibraryHost, actions: P
  * "Export" and "Delete".
  */
 @Composable
-internal fun PlaylistMenuButton(id: Long, name: String, host: LibraryHost, actions: PlaylistActions, withPlay: Boolean, description: String? = null) {
+internal fun PlaylistMenuButton(
+    id: Long,
+    name: String,
+    host: LibraryHost,
+    actions: PlaylistActions,
+    withPlay: Boolean,
+    description: String? = null,
+    onMoveUp: (() -> Unit)? = null,
+    onMoveDown: (() -> Unit)? = null,
+) {
     var open by remember { mutableStateOf(false) }
     Box {
         IconButton(onClick = { open = true }) {
@@ -417,6 +551,7 @@ internal fun PlaylistMenuButton(id: Long, name: String, host: LibraryHost, actio
             if (withPlay) item(R.string.playlist_play) { host.play(0, null, SongQuery.playlist(id)) }
             item(R.string.play_next) { host.addToQueue(QueueTarget.Playlist(id), true) }
             item(R.string.add_to_queue) { host.addToQueue(QueueTarget.Playlist(id), false) }
+            CatalogMoveItems(CatalogMoves(onMoveUp, onMoveDown)) { open = false }
             item(R.string.playlist_rename) { actions.rename(id, name) }
             item(R.string.playlist_export) { actions.export(id, name) }
             item(R.string.playlist_delete) { actions.delete(id, name) }

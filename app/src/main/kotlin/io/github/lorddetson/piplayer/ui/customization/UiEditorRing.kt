@@ -137,7 +137,7 @@ internal fun UiEditorRing(actions: List<UiEditorAction>, modifier: Modifier = Mo
                             preferredCenter = geometry.centerIn(viewport.size, current + amount, expanded, direction)
                         }
                     },
-                depth = if (expanded) 1f else 0.8f,
+                depth = 1f,
                 isHandle = true,
             )
         }
@@ -171,12 +171,12 @@ private fun RingIconButton(
         ),
     ) {
         Box(
-            Modifier.size(44.dp * depth).graphicsLayer { alpha = reveal }
+            Modifier.size(44.dp).graphicsLayer { alpha = reveal }
                 .background(background.copy(alpha = opacity), CircleShape)
                 .border(1.dp, colors.outlineVariant.copy(alpha = 0.55f), CircleShape),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(painterResource(action.icon), stringResource(action.label), Modifier.size(21.dp * depth))
+            Icon(painterResource(action.icon), stringResource(action.label), Modifier.size(21.dp))
         }
     }
 }

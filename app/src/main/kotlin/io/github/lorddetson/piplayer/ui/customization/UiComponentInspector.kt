@@ -46,6 +46,8 @@ import io.github.lorddetson.piplayer.settings.UiCanvasItem
 import io.github.lorddetson.piplayer.settings.UiCanvasPadding
 import io.github.lorddetson.piplayer.settings.UiControlMotion
 import io.github.lorddetson.piplayer.settings.UiControlStyle
+import io.github.lorddetson.piplayer.settings.UiLabelDisplay
+import io.github.lorddetson.piplayer.settings.UiTabDirection
 import io.github.lorddetson.piplayer.settings.UiTextAlignment
 import kotlinx.coroutines.launch
 
@@ -65,6 +67,8 @@ internal fun UiComponentInspector(
     var icon by remember { mutableStateOf(item.style.icon) }
     var motion by remember { mutableStateOf(item.style.motion) }
     var textAlignment by remember { mutableStateOf(item.style.textAlignment) }
+    var labelDisplay by remember { mutableStateOf(item.style.labelDisplay) }
+    var tabDirection by remember { mutableStateOf(item.style.tabDirection) }
     var importing by remember { mutableStateOf(false) }
     var importFailed by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
@@ -97,6 +101,32 @@ internal fun UiComponentInspector(
                 }
                 ColorInput(foreground, { foreground = it }, R.string.ui_edit_foreground)
                 ColorInput(background, { background = it }, R.string.ui_edit_background)
+                if (component.labelDisplay) {
+                    Text(stringResource(R.string.ui_edit_label_display), style = MaterialTheme.typography.titleSmall)
+                    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        UiLabelDisplay.entries.forEach { display ->
+                            FilterChip(
+                                selected = labelDisplay == display,
+                                onClick = { labelDisplay = display },
+                                label = { Text(stringResource(display.labelResource)) },
+                                modifier = Modifier.testTag("ui_edit_label_" + display.name.lowercase()),
+                            )
+                        }
+                    }
+                }
+                if (component.tabDirection) {
+                    Text(stringResource(R.string.ui_edit_tab_direction), style = MaterialTheme.typography.titleSmall)
+                    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        UiTabDirection.entries.forEach { direction ->
+                            FilterChip(
+                                selected = tabDirection == direction,
+                                onClick = { tabDirection = direction },
+                                label = { Text(stringResource(direction.label)) },
+                                modifier = Modifier.testTag("ui_edit_tabs_" + direction.name.lowercase()),
+                            )
+                        }
+                    }
+                }
                 if (component.alignableText) {
                     Text(stringResource(R.string.ui_edit_text_alignment), style = MaterialTheme.typography.titleSmall)
                     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -148,7 +178,7 @@ internal fun UiComponentInspector(
                 onClick = {
                     onUpdate(
                         UiCanvasPadding(start.toInt(), top.toInt(), end.toInt(), bottom.toInt()),
-                        UiControlStyle(foreground.parseColor(), background.parseColor(), icon, motion, textAlignment),
+                        UiControlStyle(foreground.parseColor(), background.parseColor(), icon, motion, textAlignment, labelDisplay, tabDirection),
                     )
                 },
                 modifier = Modifier.testTag("ui_edit_apply_properties"),
@@ -215,4 +245,15 @@ private val UiTextAlignment.label: Int get() = when (this) {
     UiTextAlignment.CENTER -> R.string.ui_edit_align_center
     UiTextAlignment.END -> R.string.ui_edit_align_end
     UiTextAlignment.JUSTIFY -> R.string.ui_edit_align_justify
+}
+
+internal val UiLabelDisplay.labelResource: Int get() = when (this) {
+    UiLabelDisplay.ICON_AND_TEXT -> R.string.ui_edit_icon_and_text
+    UiLabelDisplay.ICON_ONLY -> R.string.ui_edit_icon_only
+    UiLabelDisplay.TEXT_ONLY -> R.string.ui_edit_text_only
+}
+
+private val UiTabDirection.label: Int get() = when (this) {
+    UiTabDirection.HORIZONTAL -> R.string.ui_edit_tabs_horizontal
+    UiTabDirection.VERTICAL -> R.string.ui_edit_tabs_vertical
 }

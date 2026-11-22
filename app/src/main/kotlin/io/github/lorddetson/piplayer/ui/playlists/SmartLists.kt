@@ -2,18 +2,14 @@ package io.github.lorddetson.piplayer.ui.playlists
 
 import androidx.lifecycle.createSavedStateHandle
 import android.app.Application
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.LazyListScope
-import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
-import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -29,9 +25,6 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.heading
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -113,7 +106,7 @@ internal fun smartListOrder(kind: ListKind): ListName = when (kind) {
     else -> ListName.MISSING_INFO
 }
 
-private fun smartListIcon(kind: ListKind): Int = when (kind) {
+internal fun smartListIcon(kind: ListKind): Int = when (kind) {
     ListKind.FAVORITES -> R.drawable.ic_favorite
     ListKind.RECENTLY_ADDED -> R.drawable.ic_add
     ListKind.RECENTLY_PLAYED -> R.drawable.ic_queue
@@ -231,32 +224,6 @@ fun smartListRows(counts: Map<ListKind, Int>?, search: String): List<SmartListRo
     val terms = SearchTerms.of(search)
     return ListKind.SMART.map { kind -> SmartListRow(kind, stringResource(smartListName(kind)), counts?.get(kind)) }
         .filter { row -> terms.isEmpty() || SearchText.of(row.name).let { text -> terms.all { it in text } } }
-}
-
-/**
- * The rows of the smart lists, each opening its page with [open]: the Playlists tab shows them above the user's
- * playlists, and PIM-64 can show them where it puts the playlists (docs/library.md §17.2).
- */
-fun LazyListScope.smartListItems(rows: List<SmartListRow>, open: (ListKind) -> Unit) {
-    if (rows.isEmpty()) return
-    item(key = "smart lists heading") {
-        Text(
-            stringResource(R.string.smart_lists),
-            style = MaterialTheme.typography.titleSmall,
-            color = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.padding(start = 16.dp, top = 8.dp, bottom = 4.dp).semantics { heading() },
-        )
-    }
-    items(rows, key = { "smart " + it.kind.token }) { row ->
-        ListItem(
-            headlineContent = { Text(row.name) },
-            supportingContent = row.count?.let { count -> { Text(pluralStringResource(R.plurals.songs_count, count, count)) } },
-            leadingContent = { Icon(painterResource(smartListIcon(row.kind)), contentDescription = null) },
-            modifier = Modifier
-                .clickable(onClickLabel = stringResource(R.string.open_smart_list), role = Role.Button) { open(row.kind) }
-                .testTag(SmartListTags.ROW),
-        )
-    }
 }
 
 /**

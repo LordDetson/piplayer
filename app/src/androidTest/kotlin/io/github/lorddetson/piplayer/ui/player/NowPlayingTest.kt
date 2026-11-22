@@ -46,6 +46,11 @@ import io.github.lorddetson.piplayer.TestFiles
 import io.github.lorddetson.piplayer.settings.NowPlayingLayout
 import io.github.lorddetson.piplayer.settings.AppearanceSettings
 import io.github.lorddetson.piplayer.settings.ThemeMode
+import io.github.lorddetson.piplayer.settings.UiCanvasBounds
+import io.github.lorddetson.piplayer.settings.UiCanvasItem
+import io.github.lorddetson.piplayer.settings.UiCanvasLayout
+import io.github.lorddetson.piplayer.settings.UiCanvasSettings
+import io.github.lorddetson.piplayer.settings.UiSurface
 import io.github.lorddetson.piplayer.ui.player.TestPlayer.Call
 import io.github.lorddetson.piplayer.ui.player.TestPlayer.TestSong
 import io.github.lorddetson.piplayer.ui.theme.PiPlayerTheme
@@ -98,6 +103,56 @@ class NowPlayingTest {
 
     private fun hasClickLabel(label: String) =
         SemanticsMatcher("click label \"$label\"") { it.config.getOrNull(SemanticsActions.OnClick)?.label == label }
+
+    @Test
+    fun editorSeparatesSongAndAudioFieldsAndCanHideOneAudioField() =
+        withStockPlayerTheme(context, "now_playing_panel_", "ui_canvas_") {
+            show(cover = true, layout = NowPlayingLayout.EXPANDED)
+            compose.onNodeWithTag(PlayerTags.COVER, useUnmergedTree = true).performTouchInput { longClick() }
+            compose.onNodeWithTag("ui_edit_mode").performClick()
+
+            for (id in listOf("title", "artist", "album", "audio_codec", "audio_bit_depth", "audio_sample_rate")) {
+                compose.onNodeWithTag("ui_component_now:$id").assertIsDisplayed()
+            }
+            compose.onNodeWithTag("ui_component_now:track_info").assertDoesNotExist()
+            compose.onNodeWithTag("ui_component_now:format").assertDoesNotExist()
+            compose.onNodeWithTag("ui_edit_add").performClick()
+            compose.onNodeWithTag("ui_add_now:audio_channels").performScrollTo().performClick()
+            compose.onNodeWithTag("ui_component_now:audio_channels").assertIsDisplayed()
+            compose.onNodeWithTag("ui_component_now:audio_sample_rate").performClick()
+            compose.onNodeWithTag("ui_edit_hide").performClick()
+            compose.onNodeWithTag("ui_edit_done").performClick()
+            compose.waitUntil(5_000) { compose.onAllNodes(hasTestTag("ui_edit_done")).fetchSemanticsNodes().isEmpty() }
+            compose.onNodeWithText("96 kHz").assertDoesNotExist()
+            compose.onNodeWithText("FLAC").assertIsDisplayed()
+            compose.onNodeWithText(text(R.string.format_stereo)).assertIsDisplayed()
+            compose.onNodeWithText("Halo").assertIsDisplayed()
+        }
+
+    @Test
+    fun aSavedFormatBlockStillRendersAndCanBeHiddenWithoutRestoringItsFields() =
+        withStockPlayerTheme(context, "now_playing_panel_", "ui_canvas_") {
+            val block = UiCanvasItem("now:format", UiCanvasBounds(0, 450, 600, 100))
+            runBlocking {
+                check(UiCanvasSettings(context).save(ThemeMode.SYSTEM.stored, UiSurface.NOW_PLAYING,
+                    UiCanvasLayout(listOf(block), hiddenStock = emptySet())))
+            }
+            show(layout = NowPlayingLayout.EXPANDED)
+            val legacyBlock = compose.onNodeWithTag("ui_component_now:format")
+            compose.waitUntil(5_000) {
+                compose.onAllNodes(hasTestTag("ui_component_now:format")).fetchSemanticsNodes().size == 1
+            }
+            compose.onNodeWithText("FLAC · 24 bit · 96 kHz").assertIsDisplayed()
+            legacyBlock.performTouchInput { longClick() }
+            compose.onNodeWithTag("ui_edit_mode").performClick()
+            compose.onNodeWithTag("ui_edit_hide").performClick()
+            compose.onNodeWithTag("ui_edit_done").performClick()
+            compose.waitUntil(5_000) { compose.onAllNodes(hasTestTag("ui_edit_done")).fetchSemanticsNodes().isEmpty() }
+
+            legacyBlock.assertDoesNotExist()
+            compose.onNodeWithText("FLAC").assertDoesNotExist()
+            compose.onNodeWithText("Halo").assertIsDisplayed()
+        }
 
     @Test
     fun editingInPlaceAndSavingOneChangeKeepTheOtherControlsWhereTheyWere() =
@@ -265,7 +320,9 @@ class NowPlayingTest {
             val labelCenter = compose.onNodeWithText(label).fetchSemanticsNode().boundsInRoot.center.x
             assertThat(kotlin.math.abs(labelCenter - titleCenter)).isLessThanOrEqualTo(1.5f)
         }
-        compose.onNodeWithText("FLAC · 24 bit · 96 kHz").assertIsDisplayed()
+        for (value in listOf("FLAC", "24 bit", "96 kHz")) {
+            compose.onNodeWithText(value).assertIsDisplayed()
+        }
         compose.onNodeWithText("1:02").assertIsDisplayed()
         compose.onNodeWithText("-2:43").assertIsDisplayed()
         compose.onNodeWithTag(PlayerTags.NOW_PLAYING)

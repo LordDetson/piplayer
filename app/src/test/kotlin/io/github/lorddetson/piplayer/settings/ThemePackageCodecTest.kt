@@ -64,10 +64,25 @@ class ThemePackageCodecTest {
 
     @Test
     fun `future versions are distinguished from invalid schema markers`() {
-        assertThat(decode(document.replace(":1,", ":9,"))).isEqualTo(ThemePackageRead.UnsupportedVersion)
+        assertThat(decode(document.replace(":1,", ":10,"))).isEqualTo(ThemePackageRead.UnsupportedVersion)
         assertThat(decode(document.replace(":1,", ":6,"))).isEqualTo(ThemePackageRead.Invalid)
         assertThat(decode(document.replace(":1,", ":\"1\","))).isEqualTo(ThemePackageRead.Invalid)
         assertThat(decode(document.replace("\"version\":1,", ""))).isEqualTo(ThemePackageRead.Invalid)
+    }
+
+    @Test
+    fun `version nine transfers workspace positions and display preferences`() {
+        val source = """{"version":9,"name":"Workspace","base":"system","canvases":{
+            "panels":{"LIBRARY_WORKSPACE":{"items":[{"id":"workspace:tabs",
+            "bounds":{"x":30,"y":150,"width":300,"height":750},"style":{"tabDirection":"VERTICAL"}}],"hiddenStock":[]},
+            "LIBRARY":{"items":[{"id":"tab:songs","bounds":{"x":0,"y":0,"width":300,"height":80},
+            "style":{"labelDisplay":"ICON_ONLY"}}],"hiddenStock":[]}}}}"""
+        val loaded = decode(source)
+        assertThat(loaded).isInstanceOf(ThemePackageRead.Loaded::class.java)
+        val encoded = ThemePackageCodec.encode((loaded as ThemePackageRead.Loaded).theme)
+        assertThat(encoded.decodeToString()).contains("\"version\":9", "\"VERTICAL\"", "\"ICON_ONLY\"")
+        assertThat(ThemePackageCodec.decode(encoded.inputStream())).isEqualTo(loaded)
+        assertThat(decode(source.replace("\"version\":9", "\"version\":8"))).isEqualTo(ThemePackageRead.Invalid)
     }
 
     @Test

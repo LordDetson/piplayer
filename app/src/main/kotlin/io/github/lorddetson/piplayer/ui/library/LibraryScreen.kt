@@ -16,15 +16,19 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.LazyGridScope
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.background
 import android.app.Application
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
@@ -48,8 +52,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.PrimaryScrollableTabRow
 import androidx.compose.material3.TabRowDefaults
 import androidx.compose.material3.RadioButton
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
@@ -57,6 +59,7 @@ import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -101,7 +104,11 @@ import io.github.lorddetson.piplayer.library.lists.SongSort
 import io.github.lorddetson.piplayer.library.songs.Song
 import io.github.lorddetson.piplayer.settings.ListName
 import io.github.lorddetson.piplayer.settings.ListOrder
+import io.github.lorddetson.piplayer.settings.ListSorts
 import io.github.lorddetson.piplayer.settings.UiSurface
+import io.github.lorddetson.piplayer.settings.UiCanvasSettings
+import io.github.lorddetson.piplayer.settings.UiCanvasState
+import io.github.lorddetson.piplayer.settings.UiTabDirection
 import io.github.lorddetson.piplayer.settings.librarytabs.BuiltInLibraryTab as LibraryTab
 import io.github.lorddetson.piplayer.settings.librarytabs.LibraryButton
 import io.github.lorddetson.piplayer.settings.librarytabs.LibraryPanelLayout
@@ -116,6 +123,9 @@ import io.github.lorddetson.piplayer.ui.songs.Scanning
 import io.github.lorddetson.piplayer.ui.songs.SongMenu
 import io.github.lorddetson.piplayer.ui.songs.SelectionFavorites
 import io.github.lorddetson.piplayer.ui.player.QueueTarget
+import io.github.lorddetson.piplayer.ui.selection.RowSelection
+import io.github.lorddetson.piplayer.ui.selection.SelectionCheck
+import io.github.lorddetson.piplayer.ui.selection.selectableRow
 import io.github.lorddetson.piplayer.ui.songs.SongsScreen
 import io.github.lorddetson.piplayer.ui.songs.SongsState
 import io.github.lorddetson.piplayer.ui.songs.SongsViewModel
@@ -126,6 +136,10 @@ import io.github.lorddetson.piplayer.ui.covers.CoverActions
 import io.github.lorddetson.piplayer.ui.covers.LibraryCover
 import io.github.lorddetson.piplayer.ui.customization.EditableUiPanel
 import io.github.lorddetson.piplayer.ui.customization.StockUiSlot
+import io.github.lorddetson.piplayer.ui.customization.StockUiSlots
+import io.github.lorddetson.piplayer.ui.customization.LocalUiControlStyle
+import io.github.lorddetson.piplayer.ui.customization.LocalUiLabelDisplays
+import io.github.lorddetson.piplayer.ui.customization.LocalStockUiSlots
 import io.github.lorddetson.piplayer.ui.customization.isStockUiSlotMasked
 import io.github.lorddetson.piplayer.ui.customization.UiCanvasComponent
 import io.github.lorddetson.piplayer.ui.customization.UiControlColor
@@ -192,13 +206,18 @@ class LibraryHost(
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun LibraryScreen(host: LibraryHost, onOpenSettings: () -> Unit) {
+internal fun LibraryScreen(host: LibraryHost, chrome: LibraryWorkspaceChrome? = null, onOpenSettings: () -> Unit) {
     val app = LocalContext.current.applicationContext as Application
     val access = rememberAudioAccess()
     var tabName by rememberSaveable { mutableStateOf(LibraryTab.SONGS.id) }
     val tabsSettings = remember(app) { LibraryTabsSettings(app) }
     val storedPanel by tabsSettings.panel.collectAsStateWithLifecycle<LibraryPanelState?>(initialValue = null)
     val themeId = storedPanel?.themeId
+    val canvasSettings = remember(app) { UiCanvasSettings(app) }
+    val canvasSettingsState by canvasSettings.state.collectAsStateWithLifecycle<UiCanvasState?>(initialValue = null)
+    val storedHeader = canvasSettingsState?.takeIf { it.themeId == themeId }?.layouts?.panels?.get(UiSurface.LIBRARY)
+    val headerLabels = storedHeader?.labelDisplays.orEmpty()
+    val headerStyles = storedHeader?.items.orEmpty().associate { it.id to it.style }
     val panel = storedPanel?.layout ?: LibraryPanelLayout()
     val tabLayout = panel.tabs
     var appliedCanvasIds by remember(themeId) { mutableStateOf<List<String>?>(null) }
@@ -265,9 +284,14 @@ fun LibraryScreen(host: LibraryHost, onOpenSettings: () -> Unit) {
         folders.setSearch(search)
     }
 
+    val sorts = remember(app) { ListSorts(app) }
+    val playlistGrid = remember(sorts) { sorts.grid(ListName.PLAYLISTS) }
     val sortControl: @Composable (LibrarySortAnchor) -> Unit = { anchor ->
         when (tab) {
-            LibraryTab.SONGS -> SortButton(ListName.SONGS, songs.order.collectAsStateWithLifecycle().value, songs::setOrder, anchor = anchor)
+            LibraryTab.SONGS -> SortButton(
+                ListName.SONGS, songs.order.collectAsStateWithLifecycle().value, songs::setOrder,
+                grid = songs.grid.collectAsStateWithLifecycle().value, onGrid = songs::setGrid, anchor = anchor,
+            )
             LibraryTab.ALBUMS -> SortButton(
                 ListName.ALBUMS, albums.order.collectAsStateWithLifecycle().value, albums::setOrder,
                 grid = albums.grid.collectAsStateWithLifecycle().value, onGrid = albums::setGrid, anchor = anchor,
@@ -276,14 +300,23 @@ fun LibraryScreen(host: LibraryHost, onOpenSettings: () -> Unit) {
                 ListName.ARTISTS, artists.order.collectAsStateWithLifecycle().value, artists::setOrder,
                 grid = artists.grid.collectAsStateWithLifecycle().value, onGrid = artists::setGrid, anchor = anchor,
             )
-            LibraryTab.FOLDERS -> SortButton(ListName.FOLDERS, folders.order.collectAsStateWithLifecycle().value, folders::setOrder, anchor = anchor)
-            // Playlists sort by name only (docs/library.md §16.3).
-            LibraryTab.PLAYLISTS -> Unit
-            LibraryTab.GENRES -> SortButton(ListName.GENRES, genres.order.collectAsStateWithLifecycle().value, genres::setOrder, anchor = anchor)
+            LibraryTab.FOLDERS -> SortButton(
+                ListName.FOLDERS, folders.order.collectAsStateWithLifecycle().value, folders::setOrder,
+                grid = folders.grid.collectAsStateWithLifecycle().value, onGrid = folders::setGrid, anchor = anchor,
+            )
+            LibraryTab.PLAYLISTS -> SortButton(
+                ListName.PLAYLISTS, ListOrder(ListName.PLAYLISTS.defaultField), {},
+                grid = playlistGrid.collectAsStateWithLifecycle(initialValue = false).value,
+                onGrid = { grid -> tabEditScope.launch { sorts.setGrid(ListName.PLAYLISTS, grid) } }, anchor = anchor,
+            )
+            LibraryTab.GENRES -> SortButton(
+                ListName.GENRES, genres.order.collectAsStateWithLifecycle().value, genres::setOrder,
+                grid = genres.grid.collectAsStateWithLifecycle().value, onGrid = genres::setGrid, anchor = anchor,
+            )
         }
     }
     val buttons = panel.buttons
-    val visibleButtons = buttons.visible.filter { tab != LibraryTab.PLAYLISTS || it != LibraryButton.SORT.id }
+    val visibleButtons = buttons.visible
     val hiddenButtons = buttons.order.filter(buttons.hidden::contains)
     val restoreButton: (String) -> Unit = { id ->
         if (themeId != null) writeTabs { setButtonVisible(id, true, themeId) }
@@ -310,7 +343,7 @@ fun LibraryScreen(host: LibraryHost, onOpenSettings: () -> Unit) {
             }
         })
         for ((id, entry) in builtInTabsById) {
-            add(UiCanvasComponent("tab:$id", entry.labelResource, width = 96.dp, alignableText = true) {
+            add(UiCanvasComponent("tab:$id", entry.labelResource, width = 112.dp, alignableText = true, labelDisplay = true) {
                 LibraryTabFace(id, id == activeId, { selectTab(id) }, Modifier.fillMaxSize(), horizontalPadding = 4.dp)
             })
         }
@@ -318,11 +351,7 @@ fun LibraryScreen(host: LibraryHost, onOpenSettings: () -> Unit) {
             add(UiCanvasComponent("library:${button.id}", button.labelResource, customizableIcon = true) {
                 when (button) {
                     LibraryButton.SEARCH -> LibraryToolbarButtonFace(button, { setSearching(!searching) }, Modifier.fillMaxSize())
-                    LibraryButton.SORT -> if (tab == LibraryTab.PLAYLISTS) {
-                        LibraryToolbarButtonFace(button, {}, Modifier.fillMaxSize(), enabled = false)
-                    } else {
-                        sortControl { open -> LibraryToolbarButtonFace(button, open, Modifier.fillMaxSize()) }
-                    }
+                    LibraryButton.SORT -> sortControl { open -> LibraryToolbarButtonFace(button, open, Modifier.fillMaxSize()) }
                     LibraryButton.SETTINGS -> LibraryToolbarButtonFace(button, onOpenSettings, Modifier.fillMaxSize())
                 }
             })
@@ -330,158 +359,212 @@ fun LibraryScreen(host: LibraryHost, onOpenSettings: () -> Unit) {
     }
     val canvasRows = listOf(listOf("library:title") + buttons.visible.map { "library:$it" }) +
         tabLayout.visible.map { "tab:$it" }.chunked(3)
-    Scaffold(
-        topBar = {
-            EditableUiPanel(
-                surface = UiSurface.LIBRARY,
-                themeId = themeId,
-                components = canvasComponents,
-                initialRows = canvasRows,
-                height = 184.dp,
-                modifier = Modifier.fillMaxWidth().windowInsetsPadding(TopAppBarDefaults.windowInsets).testTag(LibraryTags.TABS),
-                onSaveFailed = { host.snackbar.showSnackbar(tabSaveFailed) },
-                onAppliedIds = {
-                    appliedCanvasIds = it
-                    canvasLoaded = true
-                },
-                canvasChrome = {
-                    if (selecting != null && selected != null) {
-                        SongsSelectionBar(host, selecting, selected)
-                    } else if (searching) {
-                        LibraryTopBar(
-                            title = stringResource(R.string.app_name),
-                            onBack = null,
-                            searching = true,
-                            search = search,
-                            onSearch = { search = it },
-                            onSearching = ::setSearching,
-                            customActions = closeSearch,
-                        )
+    val toolbar: @Composable () -> Unit = {
+        val floating = LocalStockUiSlots.current == null
+        val placedButtons = appliedCanvasIds
+        val toolbarButtons = if (floating && placedButtons != null) {
+            placedButtons.map { it.removePrefix("library:") }.filter(LibraryButton.byId::containsKey)
+        } else visibleButtons
+        if (selecting != null && selected != null) SongsSelectionBar(host, selecting, selected) else LibraryTopBar(
+            title = stringResource(R.string.app_name),
+            onBack = null,
+            searching = searching,
+            search = search,
+            onSearch = { search = it },
+            onSearching = ::setSearching,
+            editableTitle = true,
+            customActions = {
+                if (searching && LibraryButton.SEARCH.id !in toolbarButtons) closeSearch()
+                for (id in toolbarButtons) {
+                    key(themeId, id) {
+                        val style = if (floating) headerStyles["library:$id"] ?: LocalUiControlStyle.current else LocalUiControlStyle.current
+                        CompositionLocalProvider(LocalUiControlStyle provides style) {
+                            when (LibraryButton.byId.getValue(id)) {
+                                LibraryButton.SEARCH -> if (searching) closeSearch() else {
+                                    toolbarButton(LibraryButton.SEARCH) { setSearching(true) }
+                                }
+                                LibraryButton.SORT -> sortControl { open -> toolbarButton(LibraryButton.SORT, open) }
+                                LibraryButton.SETTINGS -> toolbarButton(LibraryButton.SETTINGS, onOpenSettings)
+                            }
+                        }
                     }
-                },
-            ) {
-                Column {
-                    if (selecting != null && selected != null) SongsSelectionBar(host, selecting, selected) else LibraryTopBar(
-                        title = stringResource(R.string.app_name),
-                        onBack = null,
-                        searching = searching,
-                        search = search,
-                        onSearch = { search = it },
-                        onSearching = ::setSearching,
-                        editableTitle = true,
-                        customActions = {
-                            if (searching && LibraryButton.SEARCH.id !in visibleButtons) closeSearch()
-                            for (id in visibleButtons) {
-                                key(themeId, id) {
-                                    when (LibraryButton.byId.getValue(id)) {
-                                        LibraryButton.SEARCH -> if (searching) closeSearch() else {
-                                            toolbarButton(LibraryButton.SEARCH) { setSearching(true) }
+                }
+                DebugEntry()
+            },
+        )
+    }
+    val strip: @Composable () -> Unit = {
+        val vertical = LocalUiControlStyle.current.tabDirection == UiTabDirection.VERTICAL
+        val floating = LocalStockUiSlots.current == null
+        val stripLayout = if (floating && !placedTabs.isNullOrEmpty()) {
+            LibraryTabLayout.fromStored(placedTabs, tabLayout.order.toSet() - placedTabs.toSet())
+        } else tabLayout
+        val stockSelection = stripLayout.selectedTab(activeId)
+        val stockSelectedIndex = stripLayout.visible.indexOf(stockSelection)
+        val selectedOnStrip = stockSelection == activeId && !isStockUiSlotMasked("tab:$activeId")
+        val tabItems: @Composable () -> Unit = {
+            stripLayout.visible.forEach { id ->
+                key(themeId, id) {
+                    val style = if (floating) headerStyles["tab:$id"] ?: LocalUiControlStyle.current else LocalUiControlStyle.current
+                    CompositionLocalProvider(LocalUiControlStyle provides style) {
+                        LibraryStripTab(
+                            id = id,
+                            selected = selectedOnStrip && id == stockSelection,
+                            layout = stripLayout,
+                            canCustomize = themeId != null,
+                            onClick = { selectTab(id) },
+                            onMove = { target -> writeTabs { moveToTab(id, target, themeId) } },
+                            onHide = { writeTabs { setVisible(id, false, themeId) } },
+                            onRestore = { target -> writeTabs { setVisible(target, true, themeId) } },
+                            vertical = vertical,
+                            onLabelDisplay = themeId?.let { theme ->
+                                { display ->
+                                    tabEditScope.launch {
+                                        if (!canvasSettings.setLabelDisplay(theme, UiSurface.LIBRARY, "tab:$id", display)) {
+                                            host.snackbar.showSnackbar(tabSaveFailed)
                                         }
-                                        LibraryButton.SORT -> sortControl { open -> toolbarButton(LibraryButton.SORT, open) }
-                                        LibraryButton.SETTINGS -> toolbarButton(LibraryButton.SETTINGS, onOpenSettings)
                                     }
                                 }
-                            }
-                            DebugEntry()
-                        },
-                    )
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        val stockSelection = tabLayout.selectedTab(activeId)
-                        val stockSelectedIndex = tabLayout.visible.indexOf(stockSelection)
-                        val selectedOnStrip = stockSelection == activeId && !isStockUiSlotMasked("tab:$activeId")
-                        PrimaryScrollableTabRow(
-                            selectedTabIndex = stockSelectedIndex,
-                            modifier = Modifier.weight(1f).testTag(LibraryTags.TABS),
-                            edgePadding = 8.dp,
-                            indicator = {
-                                if (selectedOnStrip) {
-                                    TabRowDefaults.PrimaryIndicator(
-                                        Modifier.tabIndicatorOffset(stockSelectedIndex, matchContentSize = true),
-                                        width = Dp.Unspecified,
-                                    )
-                                }
                             },
-                        ) {
-                            tabLayout.visible.forEach { id ->
-                                key(themeId, id) {
-                                    LibraryStripTab(
-                                        id = id,
-                                        selected = selectedOnStrip && id == stockSelection,
-                                        layout = tabLayout,
-                                        canCustomize = themeId != null,
-                                        onClick = { selectTab(id) },
-                                        onMove = { target -> writeTabs { moveToTab(id, target, themeId) } },
-                                        onHide = { writeTabs { setVisible(id, false, themeId) } },
-                                        onRestore = { target -> writeTabs { setVisible(target, true, themeId) } },
-                                    )
-                                }
-                            }
-                        }
-                        if (hiddenButtons.isNotEmpty()) key(themeId) { RestoreLibraryButtons(hiddenButtons, restoreButton) }
-                        IconButton(onClick = { editingTabs = true }, enabled = themeId != null) {
-                            Icon(painterResource(R.drawable.ic_more_vert), stringResource(R.string.library_tabs_manage))
-                        }
-                    }
-                    if (editingTabs && themeId != null) {
-                        LibraryTabEditor(
-                            layout = tabLayout,
-                            settings = tabsSettings,
-                            scope = tabEditScope,
-                            onDismiss = { editingTabs = false },
-                            onSaveFailed = { host.snackbar.showSnackbar(tabSaveFailed) },
                         )
                     }
                 }
             }
-        },
-        // The mini player now hangs above the bottom bar at the app's root, with it on the three top-level places
-        // (PIM-18, docs/library.md §6.1); the pages keep their own (docs/library.md §6.1).
-        snackbarHost = { SnackbarHost(host.snackbar) },
-    ) { padding ->
-        val modifier = Modifier.padding(padding).fillMaxSize()
-        // The empty states of the tabs (docs/library.md §14.1).
-        val scanning by songs.scanning.collectAsStateWithLifecycle()
-        val empty = TabEmptyStates(scanning, onOpenSettings)
-        when (tab) {
-            LibraryTab.SONGS -> SongsScreen(
-                access = access,
-                viewModel = songs,
-                onSongClick = { row, song, list -> host.play(row, song, list) },
-                modifier = modifier,
-                currentSongId = host.currentSongId,
-                menu = host.menu,
-                emptyText = if (search.isBlank()) null else stringResource(R.string.search_nothing_found),
-                onOpenLibrarySettings = onOpenSettings,
-            )
-            LibraryTab.ALBUMS -> {
-                val favoritesOnly by albums.favoritesOnly.collectAsStateWithLifecycle()
-                Groups(
-                    access, albums, modifier, search, empty,
-                    sections = { list -> list.map { it.section } },
-                    tiles = { list -> albumTiles(list, host) },
-                    header = { FavoritesChip(favoritesOnly, albums::setFavoritesOnly) },
-                    emptyText = if (favoritesOnly) stringResource(R.string.favorite_albums_none) else null,
-                ) { list -> albumItems(list, host) }
+        }
+        Row(verticalAlignment = if (vertical) Alignment.Top else Alignment.CenterVertically) {
+            if (vertical) {
+                Column(Modifier.weight(1f).heightIn(max = 288.dp).verticalScroll(rememberScrollState())
+                    .testTag(LibraryTags.TABS)) { tabItems() }
+            } else {
+                PrimaryScrollableTabRow(
+                    selectedTabIndex = stockSelectedIndex,
+                    modifier = Modifier.weight(1f).testTag(LibraryTags.TABS),
+                    edgePadding = 8.dp,
+                    indicator = {
+                        if (selectedOnStrip) {
+                            TabRowDefaults.PrimaryIndicator(
+                                Modifier.tabIndicatorOffset(stockSelectedIndex, matchContentSize = true),
+                                width = Dp.Unspecified,
+                            )
+                        }
+                    },
+                ) { tabItems() }
             }
-            LibraryTab.ARTISTS -> Groups(
-                access, artists, modifier, search, empty,
-                sections = { list -> list.map { it.section } },
-                tiles = { list -> artistTiles(list, host) },
-            ) { list -> artistItems(list, host) }
-            LibraryTab.FOLDERS -> FolderContent(access, folders, folder = null, host, modifier, search, empty, onSongs = { folderSongs = it })
-            LibraryTab.PLAYLISTS -> host.playlists?.let { PlaylistsContent(host, it, search, modifier) }
-            // No grid: genres have no cover (docs/library.md §19.2).
-            LibraryTab.GENRES -> Groups(
-                access, genres, modifier, search, empty,
-                sections = { list -> list.map { it.section } },
-                tiles = {},
-            ) { list -> genreItems(list, host) }
+            if (hiddenButtons.isNotEmpty()) key(themeId) { RestoreLibraryButtons(hiddenButtons, restoreButton) }
+            IconButton(onClick = { editingTabs = true }, enabled = themeId != null) {
+                Icon(painterResource(R.drawable.ic_more_vert), stringResource(R.string.library_tabs_manage))
+            }
+        }
+        if (editingTabs && themeId != null) {
+            LibraryTabEditor(
+                layout = tabLayout,
+                settings = tabsSettings,
+                scope = tabEditScope,
+                onDismiss = { editingTabs = false },
+                onSaveFailed = { host.snackbar.showSnackbar(tabSaveFailed) },
+            )
+        }
+    }
+    val header: @Composable (StockUiSlots?) -> Unit = { owner ->
+        val outerHidden = owner?.masked.orEmpty()
+        EditableUiPanel(
+            surface = UiSurface.LIBRARY,
+            themeId = themeId,
+            components = canvasComponents,
+            initialRows = canvasRows,
+            height = 184.dp,
+            modifier = Modifier.fillMaxWidth().windowInsetsPadding(TopAppBarDefaults.windowInsets).testTag(LibraryTags.TABS),
+            onSaveFailed = { host.snackbar.showSnackbar(tabSaveFailed) },
+            hiddenByParent = canvasComponents.map { it.id }.filterTo(mutableSetOf()) {
+                ("workspace:tabs" in outerHidden && it.startsWith("tab:")) ||
+                    ("workspace:toolbar" in outerHidden && it.startsWith("library:"))
+            },
+            onAppliedIds = {
+                appliedCanvasIds = it
+                canvasLoaded = true
+            },
+            canvasChrome = {
+                if (selecting != null && selected != null) {
+                    SongsSelectionBar(host, selecting, selected)
+                } else if (searching) {
+                    LibraryTopBar(
+                        title = stringResource(R.string.app_name),
+                        onBack = null,
+                        searching = true,
+                        search = search,
+                        onSearch = { search = it },
+                        onSearching = ::setSearching,
+                        customActions = closeSearch,
+                    )
+                }
+            },
+        ) {
+            Column {
+                StockUiSlot("workspace:toolbar", owner = owner, content = toolbar)
+                StockUiSlot("workspace:tabs", owner = owner, content = strip)
+            }
+        }
+    }
+    CompositionLocalProvider(LocalUiLabelDisplays provides headerLabels) {
+        LibraryWorkspace(
+            themeId = themeId,
+            snackbar = host.snackbar,
+            onSaveFailed = { host.snackbar.showSnackbar(tabSaveFailed) },
+            chrome = chrome,
+            toolbar = toolbar,
+            tabs = strip,
+            header = header,
+        ) { modifier ->
+            // The empty states of the tabs (docs/library.md §14.1).
+            val scanning by songs.scanning.collectAsStateWithLifecycle()
+            val empty = TabEmptyStates(scanning, onOpenSettings)
+            when (tab) {
+                LibraryTab.SONGS -> SongsScreen(
+                    access = access,
+                    viewModel = songs,
+                    onSongClick = { row, song, list -> host.play(row, song, list) },
+                    modifier = modifier,
+                    currentSongId = host.currentSongId,
+                    menu = host.menu,
+                    emptyText = if (search.isBlank()) null else stringResource(R.string.search_nothing_found),
+                    onOpenLibrarySettings = onOpenSettings,
+                    allowGrid = true,
+                )
+                LibraryTab.ALBUMS -> {
+                    val favoritesOnly by albums.favoritesOnly.collectAsStateWithLifecycle()
+                    Groups(
+                        access, albums, modifier, search, empty,
+                        sections = { list -> list.map { it.section } },
+                        tiles = { list -> albumTiles(list, host) },
+                        header = { FavoritesChip(favoritesOnly, albums::setFavoritesOnly) },
+                        emptyText = if (favoritesOnly) stringResource(R.string.favorite_albums_none) else null,
+                    ) { list -> albumItems(list, host) }
+                }
+                LibraryTab.ARTISTS -> ArtistsContent(access, artists, host, modifier, search, empty)
+                LibraryTab.FOLDERS -> FolderContent(access, folders, folder = null, host, modifier, search, empty, onSongs = { folderSongs = it })
+                LibraryTab.PLAYLISTS -> host.playlists?.let { PlaylistsContent(host, it, search, modifier) }
+                LibraryTab.GENRES -> Groups(
+                    access, genres, modifier, search, empty,
+                    sections = { list -> list.map { it.section } },
+                    tiles = { list -> genreTiles(list, host) },
+                ) { list -> genreItems(list, host) }
+            }
         }
     }
 }
 
 private fun LazyListScope.genreItems(genres: List<GenreGroup>, host: LibraryHost) {
     items(genres, key = { "genre " + it.key }) { genre -> GenreRow(genre, host) }
+}
+
+private fun LazyGridScope.genreTiles(genres: List<GenreGroup>, host: LibraryHost) {
+    items(genres, key = { "genre " + it.key }) { genre ->
+        val name = genreName(genre)
+        CollectionTile(name, pluralStringResource(R.plurals.songs_count, genre.songs, genre.songs), R.drawable.ic_genre,
+            stringResource(R.string.open_genre), { host.openGenre(genre.key) }, Modifier.testTag(GenreTags.ROW)) {
+            QueueMenuButton(stringResource(R.string.song_menu, name), queue(host, QueueTarget.Genre(genre.key)))
+        }
+    }
 }
 
 /** "Unknown genre" in italics, so that a real genre of that name is never taken for it (docs/library.md §19.2). */
@@ -622,8 +705,33 @@ private fun LazyGridScope.albumTiles(albums: List<AlbumGroup>, host: LibraryHost
     items(albums, key = { "album " + it.key }) { album -> AlbumTile(album, host) }
 }
 
-private fun LazyGridScope.artistTiles(artists: List<ArtistGroup>, host: LibraryHost) {
-    items(artists, key = { "artist " + it.key }) { artist -> ArtistTile(artist, host) }
+@Composable
+private fun ArtistsContent(
+    access: AudioAccess,
+    viewModel: ArtistsViewModel,
+    host: LibraryHost,
+    modifier: Modifier,
+    search: String,
+    empty: TabEmptyStates,
+) {
+    val state by viewModel.state.collectAsStateWithLifecycle()
+    val targets = (state as? GroupsState.Loaded)?.value.orEmpty().takeIf { access.granted }.orEmpty()
+        .map { QueueTarget.Artist(it.key) }
+    val selection = rememberCollectionSelection(targets, search)
+    Column(modifier) {
+        selection.Actions(host)
+        Groups(
+            access, viewModel, Modifier.weight(1f).fillMaxWidth(), search, empty,
+            sections = { list -> list.map { it.section } },
+            tiles = { list -> artistTiles(list, host, selection) },
+        ) { list -> artistItems(list, host, selection) }
+    }
+}
+
+private fun LazyGridScope.artistTiles(artists: List<ArtistGroup>, host: LibraryHost, selection: CollectionSelection? = null) {
+    items(artists, key = { "artist " + it.key }) { artist ->
+        ArtistTile(artist, host, selection?.row(QueueTarget.Artist(artist.key)))
+    }
 }
 
 /** An album in a grid: its cover as a square (docs/library.md §13.5), its title, then its artist and year. */
@@ -643,10 +751,10 @@ internal fun AlbumTile(album: AlbumGroup, host: LibraryHost) {
 
 /** An artist in a grid: a circle with their cover or else their letter, their name, then their numbers of albums and songs. */
 @Composable
-internal fun ArtistTile(artist: ArtistGroup, host: LibraryHost) {
+internal fun ArtistTile(artist: ArtistGroup, host: LibraryHost, row: RowSelection? = null) {
     val counts = pluralStringResource(R.plurals.albums_count, artist.albums, artist.albums) + " · " +
         pluralStringResource(R.plurals.songs_count, artist.songs, artist.songs)
-    Tile(artist.name, counts, stringResource(R.string.open_artist), queue(host, QueueTarget.Artist(artist.key)), { host.openArtist(artist.key) }) {
+    Tile(artist.name, counts, stringResource(R.string.open_artist), queue(host, QueueTarget.Artist(artist.key)), { host.openArtist(artist.key) }, row) {
         LibraryCover(CoverRequest.Artist(artist.key), null, Modifier.fillMaxWidth().aspectRatio(1f), shape = CircleShape) { modifier ->
             Box(contentAlignment = Alignment.Center, modifier = modifier.background(MaterialTheme.colorScheme.primaryContainer)) {
                 Text(
@@ -667,21 +775,25 @@ private fun Tile(
     clickLabel: String,
     menu: QueueMenu,
     onClick: () -> Unit,
+    row: RowSelection? = null,
     picture: @Composable () -> Unit,
 ) {
     Column(
         modifier = Modifier
             .clip(RoundedCornerShape(12.dp))
-            .clickable(onClickLabel = clickLabel, role = Role.Button, onClick = onClick)
+            .selectableRow(row, clickLabel, onClick)
             .padding(8.dp),
     ) {
-        picture()
+        Box {
+            picture()
+            if (row?.selecting == true) Box(Modifier.align(Alignment.TopEnd)) { SelectionCheck(row) }
+        }
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 8.dp)) {
             Column(Modifier.weight(1f)) {
                 Text(title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(details, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
-            QueueMenuButton(stringResource(R.string.song_menu, title), menu)
+            if (row?.selecting != true) QueueMenuButton(stringResource(R.string.song_menu, title), menu)
         }
     }
 }
@@ -690,11 +802,12 @@ private fun LazyListScope.albumItems(albums: List<AlbumGroup>, host: LibraryHost
     items(albums, key = { "album " + it.key }) { album -> AlbumRow(album, host) }
 }
 
-private fun LazyListScope.artistItems(artists: List<ArtistGroup>, host: LibraryHost) {
+private fun LazyListScope.artistItems(artists: List<ArtistGroup>, host: LibraryHost, selection: CollectionSelection? = null) {
     items(artists, key = { "artist " + it.key }) { artist ->
         val counts = pluralStringResource(R.plurals.albums_count, artist.albums, artist.albums) + " · " +
             pluralStringResource(R.plurals.songs_count, artist.songs, artist.songs)
-        GroupRow(artist.name, counts, stringResource(R.string.open_artist), queue(host, QueueTarget.Artist(artist.key)), leading = {
+        val target = QueueTarget.Artist(artist.key)
+        GroupRow(artist.name, counts, stringResource(R.string.open_artist), queue(host, target), row = selection?.row(target), leading = {
             LibraryCover(CoverRequest.Artist(artist.key), null, size = 48.dp, shape = CircleShape) { modifier ->
                 Box(modifier, contentAlignment = Alignment.Center) { Icon(painterResource(R.drawable.ic_artist), contentDescription = null) }
             }
@@ -819,15 +932,16 @@ private fun GroupRow(
     details: String?,
     clickLabel: String,
     menu: QueueMenu? = null,
+    row: RowSelection? = null,
     leading: @Composable () -> Unit,
     onClick: () -> Unit,
 ) {
     ListItem(
         headlineContent = { Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
         supportingContent = details?.let { { Text(it, maxLines = 1, overflow = TextOverflow.Ellipsis) } },
-        leadingContent = leading,
-        trailingContent = menu?.let { { QueueMenuButton(stringResource(R.string.song_menu, title), it) } },
-        modifier = Modifier.clickable(onClickLabel = clickLabel, role = Role.Button, onClick = onClick),
+        leadingContent = { Row(verticalAlignment = Alignment.CenterVertically) { SelectionCheck(row); leading() } },
+        trailingContent = menu?.takeUnless { row?.selecting == true }?.let { { QueueMenuButton(stringResource(R.string.song_menu, title), it) } },
+        modifier = Modifier.selectableRow(row, clickLabel, onClick),
     )
 }
 
@@ -861,62 +975,98 @@ internal fun FolderContent(
         is GroupsState.Loaded -> state.value
     }
     if (!page.exists) return Empty(stringResource(R.string.folder_not_found), modifier)
-    val internal = stringResource(R.string.internal_storage)
-    val folderItems: LazyListScope.() -> Unit = {
-        items(page.entries, key = { "folder " + it.volume + "/" + it.relativePath }) { entry ->
-            val name = if (entry.relativePath.isEmpty()) volumeName(entry.volume, internal) else entry.name
-            val details = pluralStringResource(R.plurals.songs_count, entry.songs, entry.songs)
-            GroupRow(name, if (page.searching) entry.relativePath + " · " + details else details,
-                stringResource(R.string.open_folder), folderMenu(host, entry.volume, entry.relativePath),
-                leading = { Icon(painterResource(R.drawable.ic_folder), contentDescription = null) }) {
-                host.openFolder(entry.volume, entry.relativePath)
-            }
-        }
-    }
     val at = page.folder ?: folder
-    if (at == null) {
+    val songs = if (at == null) null else viewModel(key = "folder songs " + at.key) {
+        SongsViewModel(app, SongQuery.folder(at.volume, at.relativePath), ListName.FOLDERS, createSavedStateHandle())
+    }
+    val targets = page.entries.map { QueueTarget.Folder(it.volume, it.relativePath) }
+    val selection = rememberCollectionSelection(targets, search, onStart = { songs?.endSelection() })
+    val selectedSongs = songs?.selection?.collectAsStateWithLifecycle()?.value
+    LaunchedEffect(selectedSongs != null) { if (selectedSongs != null) selection.end() }
+    val grid by viewModel.grid.collectAsStateWithLifecycle()
+    val internal = stringResource(R.string.internal_storage)
+    val row: @Composable (FolderEntry) -> Unit = { entry ->
+        val name = if (entry.relativePath.isEmpty()) volumeName(entry.volume, internal) else entry.name
+        val count = pluralStringResource(R.plurals.songs_count, entry.songs, entry.songs)
+        val details = if (page.searching) entry.relativePath + " · " + count else count
+        val menu = folderMenu(host, entry.volume, entry.relativePath)
+        val selected = selection.row(QueueTarget.Folder(entry.volume, entry.relativePath))
+        val openLabel = stringResource(R.string.open_folder)
+        val open = { host.openFolder(entry.volume, entry.relativePath) }
+        if (grid) CollectionTile(name, details, R.drawable.ic_folder, openLabel, open, row = selected) {
+            QueueMenuButton(stringResource(R.string.song_menu, name), menu)
+        } else GroupRow(name, details, openLabel, menu, row = selected,
+            leading = { Icon(painterResource(R.drawable.ic_folder), contentDescription = null) }, onClick = open)
+    }
+    val folderItems: LazyListScope.() -> Unit = {
+        items(page.entries, key = ::folderEntryKey) { row(it) }
+    }
+    val folderTiles: LazyGridScope.() -> Unit = {
+        items(page.entries, key = ::folderEntryKey) { row(it) }
+    }
+    if (at == null || songs == null) {
         // A top of volumes: no songs of its own.
         if (page.entries.isEmpty()) {
             if (search.isBlank() && empty != null) return NoMusic(empty.openSettings, modifier)
             return Empty(stringResource(if (search.isBlank()) R.string.list_empty else R.string.search_nothing_found), modifier)
         }
-        return Box(modifier.fillMaxSize()) {
-            val listState = rememberLazyListState()
-            LazyColumn(Modifier.fillMaxSize().testTag(LibraryTags.LIST), state = listState) { folderItems() }
-            ScrollThumb(listState, { page.entries.getOrNull(it)?.section }, Modifier.align(Alignment.TopEnd))
+        return Column(modifier.fillMaxSize()) {
+            selection.Actions(host)
+            Box(Modifier.weight(1f).fillMaxWidth()) {
+                val listTag = Modifier.fillMaxSize().testTag(LibraryTags.LIST)
+                val labels = { item: Int -> page.entries.getOrNull(item)?.section }
+                if (grid) {
+                    val state = rememberLazyGridState()
+                    LazyVerticalGrid(GridCells.Adaptive(TILE_MIN_WIDTH), listTag, state = state, content = folderTiles)
+                    ScrollThumb(state, labels, Modifier.align(Alignment.TopEnd))
+                } else {
+                    val state = rememberLazyListState()
+                    LazyColumn(listTag, state = state, content = folderItems)
+                    ScrollThumb(state, labels, Modifier.align(Alignment.TopEnd))
+                }
+            }
         }
-    }
-    val songs = viewModel(key = "folder songs " + at.key) {
-        SongsViewModel(app, SongQuery.folder(at.volume, at.relativePath), ListName.FOLDERS, createSavedStateHandle())
     }
     shownSongs = songs
     LaunchedEffect(songs, search) { songs.setSearch(search) }
     val order by songs.order.collectAsStateWithLifecycle()
     val songsState by songs.state.collectAsStateWithLifecycle()
     val playAll = page.entries.isNotEmpty() || (songsState as? SongsState.Loaded)?.songs?.isNotEmpty() == true
-    SongsScreen(
-        access = access,
-        viewModel = songs,
-        onSongClick = { row, song, list -> host.play(row, song, list) },
-        modifier = modifier,
-        currentSongId = host.currentSongId,
-        menu = host.menu,
-        listTag = LibraryTags.LIST,
-        emptyText = stringResource(if (search.isBlank()) R.string.list_empty else R.string.search_nothing_found),
-        headerItems = page.entries.size + if (playAll) 1 else 0,
-        headerSections = (if (playAll) listOf(null) else emptyList()) + page.entries.map { it.section },
-    ) {
-        if (playAll) item(key = "play all") {
+    val playAllButton: @Composable () -> Unit = {
             Button(
                 onClick = {
                     host.play(0, null, SongQuery.tree(at.volume, at.relativePath).copy(sort = SongSort.of(order.field) ?: SongSort.FILE_NAME, reversed = order.reversed, search = search.trim()))
                 },
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
             ) { Text(stringResource(R.string.folder_play_all)) }
+    }
+    Column(modifier) {
+        selection.Actions(host)
+        val showPlayAll = playAll && !selection.selecting
+        SongsScreen(
+            access = access,
+            viewModel = songs,
+            onSongClick = { row, song, list -> host.play(row, song, list) },
+            modifier = Modifier.weight(1f).fillMaxWidth(),
+            currentSongId = host.currentSongId,
+            menu = host.menu,
+            listTag = LibraryTags.LIST,
+            emptyText = stringResource(if (search.isBlank()) R.string.list_empty else R.string.search_nothing_found),
+            headerItems = page.entries.size + if (showPlayAll) 1 else 0,
+            headerSections = (if (showPlayAll) listOf(null) else emptyList()) + page.entries.map { it.section },
+            allowGrid = true,
+            gridHeader = {
+                if (showPlayAll) item(key = "play all", span = { GridItemSpan(maxLineSpan) }) { playAllButton() }
+                folderTiles()
+            },
+        ) {
+            if (showPlayAll) item(key = "play all") { playAllButton() }
+            folderItems()
         }
-        folderItems()
     }
 }
+
+private fun folderEntryKey(entry: FolderEntry) = "folder ${entry.volume}/${entry.relativePath}"
 
 private fun volumeName(volume: String, internal: String) = if (volume == FolderLevels.PRIMARY) internal else volume
 
@@ -985,7 +1135,7 @@ internal fun SortButton(
                 }
                 HorizontalDivider()
             }
-            DropdownMenuItem(
+            if (list != ListName.PLAYLISTS) DropdownMenuItem(
                 text = { Text(stringResource(R.string.sort_reverse)) },
                 leadingIcon = { Checkbox(checked = order.reversed, onCheckedChange = null) },
                 modifier = Modifier.checkbox(order.reversed),

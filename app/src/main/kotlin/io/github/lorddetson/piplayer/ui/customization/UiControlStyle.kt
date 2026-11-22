@@ -43,6 +43,7 @@ import io.github.lorddetson.piplayer.settings.UiControlMotion
 import io.github.lorddetson.piplayer.settings.UiControlStyle
 import io.github.lorddetson.piplayer.settings.UiIconAsset
 import io.github.lorddetson.piplayer.settings.UiIconFormat
+import io.github.lorddetson.piplayer.settings.UiLabelDisplay
 import io.github.lorddetson.piplayer.settings.UiTextAlignment
 import java.io.ByteArrayOutputStream
 import java.io.IOException
@@ -53,6 +54,11 @@ import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
 
 internal val LocalUiControlStyle = staticCompositionLocalOf { UiControlStyle() }
+internal val LocalUiLabelDisplays = staticCompositionLocalOf<Map<String, UiLabelDisplay>> { emptyMap() }
+
+@Composable
+internal fun uiLabelDisplay(id: String): UiLabelDisplay =
+    LocalUiLabelDisplays.current[id] ?: LocalUiControlStyle.current.labelDisplay
 
 @Composable
 internal fun UiControlColor(default: Color): Color =

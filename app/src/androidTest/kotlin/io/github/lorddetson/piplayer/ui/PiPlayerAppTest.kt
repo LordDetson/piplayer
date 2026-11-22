@@ -11,6 +11,7 @@ import android.os.Bundle
 import android.provider.MediaStore
 import androidx.activity.BackEventCompat
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.semantics.SemanticsActions
@@ -35,7 +36,9 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipe
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.core.view.ViewCompat
@@ -63,6 +66,9 @@ import io.github.lorddetson.piplayer.playback.PlaybackTesting.waitUntil
 import io.github.lorddetson.piplayer.playback.QueueIds
 import io.github.lorddetson.piplayer.settings.AppearanceSettings
 import io.github.lorddetson.piplayer.settings.ThemeMode
+import io.github.lorddetson.piplayer.settings.UiCanvasSettings
+import io.github.lorddetson.piplayer.settings.UiSurface
+import io.github.lorddetson.piplayer.settings.UiTabDirection
 import io.github.lorddetson.piplayer.playback.SongSourceRule
 import io.github.lorddetson.piplayer.ui.player.EqualizerPanel
 import io.github.lorddetson.piplayer.ui.player.PlayerTags
@@ -75,6 +81,7 @@ import io.github.lorddetson.piplayer.ui.library.LibraryTags
 import io.github.lorddetson.piplayer.ui.songs.SongsTags
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.flow.first
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.After
 import org.junit.Assume.assumeTrue
@@ -216,6 +223,36 @@ class PiPlayerAppTest {
     private fun gesture(progress: Float) = BackEventCompat(10f, 800f, progress, BackEventCompat.EDGE_LEFT)
 
     @Test
+    fun libraryWorkspaceEditsTheListAndBarsOnTheSameCanvas() =
+        withStockPlayerTheme(context, "ui_canvas_") {
+            playAndPause("Alpha")
+            compose.onNodeWithTag(BottomBarTags.FIX).performTouchInput { longClick() }
+            compose.onNodeWithTag("ui_edit_library_workspace").performClick()
+
+            listOf("toolbar", "tabs", "content", "mini_player", "navigation").forEach { component ->
+                compose.onNodeWithTag("ui_component_workspace:" + component).assertExists()
+            }
+            compose.onNodeWithTag("ui_component_workspace:tabs").performClick()
+            compose.onNodeWithTag("ui_edit_inspect").performClick()
+            compose.onNodeWithTag("ui_edit_tabs_vertical").performScrollTo().performClick()
+            compose.onNodeWithTag("ui_edit_apply_properties").performClick()
+
+            val content = compose.onNodeWithTag("ui_component_workspace:content")
+            val oldHeight = content.fetchSemanticsNode().boundsInRoot.height
+            content.performClick()
+            compose.onNodeWithTag("ui_resize_workspace:content:top").performTouchInput {
+                swipe(center, center + Offset(0f, 32.dp.toPx()), durationMillis = 420)
+            }
+            assertThat(content.fetchSemanticsNode().boundsInRoot.height).isLessThan(oldHeight)
+            compose.onNodeWithTag("ui_edit_done").performClick()
+            compose.waitUntilDoesNotExist(hasTestTag("ui_edit_done"), timeoutMillis = 5_000)
+            val saved = runBlocking { UiCanvasSettings(context).state.first().layouts.panels.getValue(UiSurface.LIBRARY_WORKSPACE) }
+            assertThat(saved.items.first { it.id == "workspace:tabs" }.style.tabDirection).isEqualTo(UiTabDirection.VERTICAL)
+            assertThat(saved.items.any { it.id == "workspace:content" }).isTrue()
+            compose.onNode(hasText("Alpha") and inSongList).assertIsDisplayed()
+        }
+
+    @Test
     fun theBottomBarCanEnterFreeEditAndItsButtonsStillNavigateAfterSaving() =
         withStockPlayerTheme(context, "bottom_navigation_", "ui_canvas_") {
             compose.onNodeWithTag(BottomBarTags.FIX).performTouchInput { longClick() }
@@ -293,7 +330,9 @@ class PiPlayerAppTest {
         openNowPlaying()
 
         compose.onNodeWithText("Album 1").assertIsDisplayed()
-        compose.waitUntilExactlyOneExists(hasText("MP3 · 128 kbit/s · 44.1 kHz"), timeoutMillis = 10_000)
+        listOf("MP3", "128 kbit/s", "44.1 kHz").forEach { field ->
+            compose.waitUntilExactlyOneExists(hasText(field) and inNowPlaying, timeoutMillis = 10_000)
+        }
         back { it.onBackPressed() }
         compose.waitUntilDoesNotExist(hasTestTag(PlayerTags.NOW_PLAYING), timeoutMillis = 5_000)
         compose.onNodeWithTag(PlayerTags.MINI_PLAYER).assertIsDisplayed()

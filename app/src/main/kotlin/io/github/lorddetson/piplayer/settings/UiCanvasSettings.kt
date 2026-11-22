@@ -21,7 +21,7 @@ private const val THEME_ICON_BUDGET = 192_000
 private val componentId = Regex("[a-z][a-z0-9_.-]*:[a-z0-9_.-]+")
 
 @Serializable
-internal enum class UiSurface { LIBRARY, NOW_PLAYING, MINI_PLAYER, BOTTOM_NAVIGATION }
+internal enum class UiSurface { LIBRARY, NOW_PLAYING, MINI_PLAYER, BOTTOM_NAVIGATION, LIBRARY_WORKSPACE }
 
 @Serializable
 internal data class UiCanvasBounds(val x: Int, val y: Int, val width: Int, val height: Int) {
@@ -56,12 +56,20 @@ internal enum class UiControlMotion { NONE, PRESS, BOUNCE, TILT }
 internal enum class UiTextAlignment { DEFAULT, START, CENTER, END, JUSTIFY }
 
 @Serializable
+internal enum class UiLabelDisplay { ICON_AND_TEXT, ICON_ONLY, TEXT_ONLY }
+
+@Serializable
+internal enum class UiTabDirection { HORIZONTAL, VERTICAL }
+
+@Serializable
 internal data class UiControlStyle(
     val foreground: Int? = null,
     val background: Int? = null,
     val icon: UiIconAsset? = null,
     val motion: UiControlMotion = UiControlMotion.NONE,
     val textAlignment: UiTextAlignment = UiTextAlignment.DEFAULT,
+    val labelDisplay: UiLabelDisplay = UiLabelDisplay.ICON_AND_TEXT,
+    val tabDirection: UiTabDirection = UiTabDirection.HORIZONTAL,
 ) {
     val isValid: Boolean get() = listOfNotNull(foreground, background).all { it in 0..0xffffff } && icon?.isValid != false
 }
@@ -86,6 +94,7 @@ internal data class UiCanvasLayout(
     val groups: List<Set<String>> = emptyList(),
     val snapping: Boolean = true,
     val placement: UiPlacementMode = UiPlacementMode.OVERLAP,
+    val labelDisplays: Map<String, UiLabelDisplay> = emptyMap(),
 ) {
     val isValid: Boolean get() {
         val ids = items.map(UiCanvasItem::id).toSet()
@@ -95,6 +104,7 @@ internal data class UiCanvasLayout(
             hidden.size <= UI_CANVAS_MAX_ITEMS && hidden.all(::validComponentId) && ids.none { it in hidden } &&
             groups.all { it.size >= 2 } && grouped.size <= UI_CANVAS_MAX_ITEMS && grouped.distinct().size == grouped.size &&
             grouped.all { it !in hidden && (it in ids || hiddenStock != null && validComponentId(it)) } &&
+            labelDisplays.size <= UI_CANVAS_MAX_ITEMS && labelDisplays.keys.all(::validComponentId) &&
             (placement == UiPlacementMode.OVERLAP || !items.hasOverlappingBounds())
     }
 
@@ -123,7 +133,7 @@ internal data class UiCanvasLayout(
         val saved = copy(items = overrides, hiddenStock = hidden, groups = groups.mapNotNull { group ->
             (group intersect available).takeIf { it.size >= 2 }
         })
-        return saved.takeIf { overrides.isNotEmpty() || hidden.isNotEmpty() || it.hasAdvancedOptions }
+        return saved.takeIf { overrides.isNotEmpty() || hidden.isNotEmpty() || it.hasAdvancedOptions || it.labelDisplays.isNotEmpty() }
     }
 
     fun add(item: UiCanvasItem): UiCanvasLayout {
@@ -192,6 +202,10 @@ internal data class UiCanvasLayout(
 
     fun withStyle(id: String, style: UiControlStyle) = if (style.isValid) change(id) { it.copy(style = style) } else this
 
+    fun withLabelDisplay(id: String, display: UiLabelDisplay): UiCanvasLayout = copy(
+        labelDisplays = if (display == UiLabelDisplay.ICON_AND_TEXT) labelDisplays - id else labelDisplays + (id to display),
+    )
+
     fun snap(id: String): UiCanvasLayout {
         if (!snapping) return this
         val target = boundsOf(members(id)) ?: return this
@@ -256,6 +270,11 @@ private fun validComponentId(id: String) = id.length <= 80 && componentId.matche
 
 @Serializable
 internal data class UiThemeCanvases(val panels: Map<UiSurface, UiCanvasLayout> = emptyMap()) {
+    val hasWorkspaceOptions: Boolean get() = UiSurface.LIBRARY_WORKSPACE in panels || panels.values.any { panel ->
+        panel.labelDisplays.isNotEmpty() ||
+            panel.items.any { it.style.labelDisplay != UiLabelDisplay.ICON_AND_TEXT || it.style.tabDirection != UiTabDirection.HORIZONTAL }
+    }
+
     val isValid: Boolean get() = panels.values.all(UiCanvasLayout::isValid) &&
         panels.values.sumOf { panel -> panel.items.sumOf { it.style.icon?.payload?.length ?: 0 } } <= THEME_ICON_BUDGET
 }
@@ -269,12 +288,28 @@ internal class UiCanvasSettings(private val file: DataStore<Preferences>) {
         UiCanvasState(AppearanceSettings.panelThemeId(preferences), layoutsOf(preferences))
     }.distinctUntilChanged()
 
-    suspend fun save(themeId: String, surface: UiSurface, layout: UiCanvasLayout?): Boolean {
-        if (layout?.isValid == false) return false
+    suspend fun save(themeId: String, surface: UiSurface, layout: UiCanvasLayout?): Boolean =
+        update(themeId, surface) { layout }
+
+    suspend fun setLabelDisplay(themeId: String, surface: UiSurface, id: String, display: UiLabelDisplay): Boolean =
+        update(themeId, surface) { old ->
+            val layout = old ?: UiCanvasLayout(emptyList(), hiddenStock = emptySet())
+            val itemStyle = layout.items.firstOrNull { it.id == id }?.style
+            val labels = layout.withLabelDisplay(id, display)
+            val changed = if (itemStyle == null) labels else labels.withStyle(id, itemStyle.copy(labelDisplay = UiLabelDisplay.ICON_AND_TEXT))
+            changed.takeUnless { old == null && it.labelDisplays.isEmpty() }
+        }
+
+    private suspend fun update(
+        themeId: String,
+        surface: UiSurface,
+        change: (UiCanvasLayout?) -> UiCanvasLayout?,
+    ): Boolean {
         var applied = false
         val saved = SettingsFiles.edit(file) { preferences ->
             if (AppearanceSettings.panelThemeId(preferences) == themeId) {
                 val panels = layoutsOf(preferences).panels
+                val layout = change(panels[surface])
                 val updated = UiThemeCanvases(if (layout == null) panels - surface else panels + (surface to layout))
                 if (updated.isValid) {
                     store(preferences, themeId, updated)

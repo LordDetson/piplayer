@@ -3,6 +3,9 @@ package io.github.lorddetson.piplayer.ui.library
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -20,6 +23,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
@@ -27,6 +31,9 @@ import androidx.compose.ui.unit.dp
 import io.github.lorddetson.piplayer.R
 import io.github.lorddetson.piplayer.settings.librarytabs.LibraryButton
 import io.github.lorddetson.piplayer.settings.librarytabs.LibraryTabLayout
+import io.github.lorddetson.piplayer.settings.UiLabelDisplay
+import io.github.lorddetson.piplayer.settings.librarytabs.BuiltInLibraryTab
+import io.github.lorddetson.piplayer.ui.customization.uiLabelDisplay
 import io.github.lorddetson.piplayer.ui.customization.PanelItemKind
 import io.github.lorddetson.piplayer.ui.customization.PanelItemMenu
 import io.github.lorddetson.piplayer.ui.customization.PanelMenuPage
@@ -48,14 +55,17 @@ internal fun LibraryStripTab(
     onMove: (String) -> Unit,
     onHide: () -> Unit,
     onRestore: (String) -> Unit,
+    vertical: Boolean = false,
+    onLabelDisplay: ((UiLabelDisplay) -> Unit)? = null,
 ) {
     var menu by remember { mutableStateOf<PanelMenuPage?>(null) }
     val openMenu = { menu = PanelMenuPage.ACTIONS }
     StockUiSlot("tab:$id") {
-        LibraryTabFace(id, selected, onClick, onLongClick = openMenu.takeIf { canCustomize })
+        val row = if (vertical) Modifier.fillMaxWidth().heightIn(min = 48.dp) else Modifier.heightIn(min = 48.dp)
+        LibraryTabFace(id, selected, onClick, row, onLongClick = openMenu.takeIf { canCustomize })
         PanelItemMenu(menu, { menu = it }, PanelItemKind.TAB, id, layout.visible,
             layout.order.filter(layout.hidden::contains), { builtInTabsById.getValue(it).labelResource },
-            onMove, onHide.takeIf { layout.visible.size > 1 }, onRestore)
+            onMove, onHide.takeIf { layout.visible.size > 1 }, onRestore, onLabelDisplay = onLabelDisplay)
     }
 }
 
@@ -69,25 +79,43 @@ internal fun LibraryTabFace(
     onLongClick: (() -> Unit)? = null,
     horizontalPadding: Dp = 16.dp,
 ) {
+    val tab = builtInTabsById.getValue(id)
+    val label = stringResource(tab.labelResource)
+    val display = uiLabelDisplay("tab:$id")
+    val color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
     Box(
         modifier.combinedClickable(
             role = Role.Tab,
             onClick = onClick,
             onLongClickLabel = stringResource(R.string.library_tab_customize),
             onLongClick = onLongClick,
-        ).semantics { this.selected = selected }.padding(horizontal = horizontalPadding, vertical = 4.dp),
+        ).semantics {
+            this.selected = selected
+            if (display == UiLabelDisplay.ICON_ONLY) contentDescription = label
+        }.padding(horizontal = horizontalPadding, vertical = 4.dp),
         contentAlignment = Alignment.Center,
     ) {
-        Text(
-            stringResource(builtInTabsById.getValue(id).labelResource),
-            style = MaterialTheme.typography.titleSmall,
-            color = UiControlColor(if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant),
-            modifier = Modifier.fillAlignedTextWidth(),
-            textAlign = UiControlTextAlign(),
-            maxLines = 1,
-        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (display != UiLabelDisplay.TEXT_ONLY) {
+                UiControlIcon(painterResource(tab.icon), null, Modifier.size(18.dp), tint = color)
+            }
+            if (display != UiLabelDisplay.ICON_ONLY) {
+                Text(label, style = MaterialTheme.typography.titleSmall, color = UiControlColor(color),
+                    modifier = Modifier.fillAlignedTextWidth(), textAlign = UiControlTextAlign(), maxLines = 1)
+            }
+        }
     }
 }
+
+private val BuiltInLibraryTab.icon: Int
+    get() = when (this) {
+        BuiltInLibraryTab.SONGS -> R.drawable.ic_library
+        BuiltInLibraryTab.ALBUMS -> R.drawable.ic_album
+        BuiltInLibraryTab.ARTISTS -> R.drawable.ic_artist
+        BuiltInLibraryTab.FOLDERS -> R.drawable.ic_folder
+        BuiltInLibraryTab.PLAYLISTS -> R.drawable.ic_playlist
+        BuiltInLibraryTab.GENRES -> R.drawable.ic_genre
+    }
 
 internal val LibraryButton.labelResource: Int
     get() = when (this) {

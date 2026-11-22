@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="ui_edit_library_workspace">Edit the library screen</string>
+    <string name="ui_edit_workspace_toolbar">Library controls</string>
+    <string name="ui_edit_workspace_tabs">Library tabs</string>
+    <string name="ui_edit_workspace_content">Tab content</string>
+    <string name="ui_edit_workspace_mini_player">Mini player</string>
+    <string name="ui_edit_workspace_navigation">Navigation bar</string>
+    <string name="ui_edit_label_display">Icon and label visibility</string>
+    <string name="ui_edit_icon_and_text">Icon and text</string>
+    <string name="ui_edit_icon_only">Icon only</string>
+    <string name="ui_edit_text_only">Text only</string>
+    <string name="ui_edit_tab_direction">Tab direction</string>
+    <string name="ui_edit_tabs_horizontal">Horizontal</string>
+    <string name="ui_edit_tabs_vertical">Vertical</string>
+</resources>

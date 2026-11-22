@@ -15,7 +15,14 @@ class ListSortsTest {
         assertThat(ListSorts.orderOf(empty, ListName.GENRE_PAGE)).isEqualTo(ListOrder("artist"))
         assertThat(ListName.GENRES.id).isEqualTo("genres")
         assertThat(ListName.GENRE_PAGE.id).isEqualTo("genre_page")
-        assertThat(ListName.GENRES.offersGrid).isFalse()
+    }
+
+    @Test
+    fun `all sortable library tabs can show a grid without changing their default orders`() {
+        assertThat(listOf(ListName.SONGS, ListName.ALBUMS, ListName.ARTISTS, ListName.FOLDERS, ListName.PLAYLISTS, ListName.GENRES))
+            .allMatch(ListName::offersGrid)
+        assertThat(ListName.ALBUM_PAGE.offersGrid).isFalse()
+        assertThat(ListName.ARTIST_PAGE.offersGrid).isFalse()
     }
 
     @Test

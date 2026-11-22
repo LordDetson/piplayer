@@ -101,6 +101,22 @@ class LibraryTabCustomizationTest {
     }
 
     @Test
+    fun aTabCanHideItsTextAndRemainAccessibleAfterRecreation() {
+        val songs = tab(R.string.tab_songs)
+        songs.performTouchInput { longClick() }
+        compose.onNodeWithTag("ui_edit_tab_label").performClick()
+        compose.onNodeWithTag("ui_tab_label_icon_only").performClick()
+        compose.waitUntilDoesNotExist(tabMatcher(R.string.tab_songs), timeoutMillis = 5_000)
+        compose.activityRule.scenario.recreate()
+        val iconOnly = hasAnyAncestor(hasTestTag(LibraryTags.TABS)) and hasContentDescription(text(R.string.tab_songs))
+        compose.waitUntilExactlyOneExists(iconOnly, timeoutMillis = 10_000)
+        compose.onNode(iconOnly).assertIsSelected().performTouchInput { longClick() }
+        compose.onNodeWithTag("ui_edit_tab_label").performClick()
+        compose.onNodeWithTag("ui_tab_label_icon_and_text").performClick()
+        compose.waitUntilAtLeastOneExists(tabMatcher(R.string.tab_songs), timeoutMillis = 5_000)
+    }
+
+    @Test
     fun toolbarButtonsMoveHideAndReturnWithoutOpeningSettings() {
         val search = action(R.string.library_search)
         val sort = action(R.string.library_sort)

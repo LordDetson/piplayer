@@ -1123,18 +1123,23 @@ class PlaybackSessionCallback(
     private fun addToQueue(args: Bundle): ListenableFuture<SessionResult> {
         val ids = args.getLongArray(EXTRA_SONG_IDS)
         val request = args.getString(EXTRA_REQUEST)?.let(QueueRequest::parse)
-        if (ids == null && request == null) return Futures.immediateFuture(SessionResult(SessionError.ERROR_BAD_VALUE))
+        val collections = collectionRequests(args.getStringArrayList(EXTRA_COLLECTIONS))
+        if (ids == null && request == null && collections.isNullOrEmpty()) {
+            return Futures.immediateFuture(SessionResult(SessionError.ERROR_BAD_VALUE))
+        }
         val next = args.getBoolean(EXTRA_NEXT)
         // An "all except" selection names the songs it leaves out of the list (library.md §20.6).
         val excluded = args.getLongArray(EXTRA_EXCLUDED)?.toHashSet().orEmpty()
         val result = SettableFuture.create<SessionResult>()
         expansion.execute {
             try {
-                val songs = if (ids != null) {
-                    val found = SongList.songsById(context, ids.toList())
-                    ids.toList().mapNotNull(found::get)
-                } else {
-                    SongList.load(context, query = requireNotNull(request).list).filter { it.id !in excluded }
+                val songs = when {
+                    ids != null -> {
+                        val found = SongList.songsById(context, ids.toList())
+                        ids.toList().mapNotNull(found::get)
+                    }
+                    collections != null -> collectionSongs(collections) { SongList.load(context, query = it) }
+                    else -> SongList.load(context, query = requireNotNull(request).list).filter { it.id !in excluded }
                 }
                 if (songs.isEmpty()) {
                     result.set(SessionResult(SessionError.ERROR_BAD_VALUE))
@@ -1342,7 +1347,10 @@ class PlaybackSessionCallback(
     private fun playSongs(args: Bundle): ListenableFuture<SessionResult> {
         val ids = args.getLongArray(EXTRA_SONG_IDS)
         val request = args.getString(EXTRA_REQUEST)?.let(QueueRequest::parse)
-        if (ids == null && request == null) return Futures.immediateFuture(SessionResult(SessionError.ERROR_BAD_VALUE))
+        val collections = collectionRequests(args.getStringArrayList(EXTRA_COLLECTIONS))
+        if (ids == null && request == null && collections.isNullOrEmpty()) {
+            return Futures.immediateFuture(SessionResult(SessionError.ERROR_BAD_VALUE))
+        }
         val excluded = args.getLongArray(EXTRA_EXCLUDED)?.toHashSet().orEmpty()
         // The user changed the queue: a restore or an open still on its way must not overwrite it.
         val token = restoreGeneration.incrementAndGet()
@@ -1357,6 +1365,8 @@ class PlaybackSessionCallback(
                 if (ids != null) {
                     val found = SongList.songsById(context, ids.toList())
                     songs = ids.toList().mapNotNull(found::get)
+                } else if (collections != null) {
+                    songs = collectionSongs(collections) { SongList.load(context, query = it) }
                 } else {
                     val list = SongList.load(context, query = requireNotNull(request).list)
                     songs = list.filter { it.id !in excluded }
@@ -1507,6 +1517,9 @@ class PlaybackSessionCallback(
 
         /** The media ID of a queue request (§2.3) whose list is added; its start is ignored. */
         const val EXTRA_REQUEST = "io.github.lorddetson.piplayer.playback.REQUEST"
+
+        /** Ordered requests for the selected collections. Their songs are loaded only in the playback service. */
+        const val EXTRA_COLLECTIONS = "io.github.lorddetson.piplayer.playback.COLLECTIONS"
 
         const val EXTRA_NEXT = "io.github.lorddetson.piplayer.playback.NEXT"
 

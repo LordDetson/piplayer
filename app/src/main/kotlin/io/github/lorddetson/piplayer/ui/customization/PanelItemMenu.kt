@@ -16,8 +16,17 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import io.github.lorddetson.piplayer.R
+import io.github.lorddetson.piplayer.settings.UiLabelDisplay
 
-internal enum class PanelMenuPage { ACTIONS, MOVE, ADD }
+internal enum class PanelMenuPage { ACTIONS, MOVE, ADD, LABEL }
+
+internal fun workspaceSlotFor(id: String): String? = when (id.substringBefore(':')) {
+    "tab" -> "workspace:tabs"
+    "library" -> "workspace:toolbar"
+    "mini" -> "workspace:mini_player"
+    "nav" -> "workspace:navigation"
+    else -> null
+}
 
 internal enum class PanelItemKind(val tag: String, val move: Int, val hide: Int, val add: Int) {
     TAB("library_tab", R.string.library_tab_move, R.string.library_tab_hide, R.string.library_tab_add),
@@ -40,24 +49,44 @@ internal fun PanelItemMenu(
     onHide: (() -> Unit)?,
     onRestore: (String) -> Unit,
     canMove: Boolean = visible.size > 1,
+    onLabelDisplay: ((UiLabelDisplay) -> Unit)? = null,
     moveOptions: @Composable () -> Unit = {},
 ) {
     val enterEdit = LocalUiEditEntry.current
+    val workspace = LocalLibraryWorkspaceEntry.current
     DropdownMenu(expanded = page != null, onDismissRequest = { setPage(null) }) {
         when (page) {
             PanelMenuPage.ACTIONS -> {
-                if (enterEdit != null) {
-                    val prefix = when (kind) {
-                        PanelItemKind.TAB -> "tab"
-                        PanelItemKind.BUTTON -> "library"
-                        PanelItemKind.PLAYER -> "now"
-                        PanelItemKind.MINI_PLAYER -> "mini"
-                        PanelItemKind.BOTTOM_NAVIGATION -> "nav"
-                    }
+                val prefix = when (kind) {
+                    PanelItemKind.TAB -> "tab"
+                    PanelItemKind.BUTTON -> "library"
+                    PanelItemKind.PLAYER -> "now"
+                    PanelItemKind.MINI_PLAYER -> "mini"
+                    PanelItemKind.BOTTOM_NAVIGATION -> "nav"
+                }
+                if (enterEdit != null && enterEdit !== workspace) {
                     DropdownMenuItem(
                         text = { Text(stringResource(R.string.ui_edit_mode)) },
                         onClick = { setPage(null); enterEdit(prefix + ":" + id) },
                         modifier = Modifier.testTag("ui_edit_mode"),
+                    )
+                }
+                val workspaceSlot = workspaceSlotFor(prefix + ":" + id)
+                if (workspace != null && workspaceSlot != null) {
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.ui_edit_library_workspace)) },
+                        onClick = {
+                            setPage(null)
+                            workspace(workspaceSlot)
+                        },
+                        modifier = Modifier.testTag("ui_edit_library_workspace"),
+                    )
+                }
+                if (onLabelDisplay != null) {
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.ui_edit_label_display)) },
+                        onClick = { setPage(PanelMenuPage.LABEL) },
+                        modifier = Modifier.testTag("ui_edit_tab_label"),
                     )
                 }
                 if (canMove) {
@@ -82,6 +111,16 @@ internal fun PanelItemMenu(
                     onClick = { setPage(PanelMenuPage.ADD) },
                     enabled = hidden.isNotEmpty(),
                     modifier = Modifier.testTag("${kind.tag}_add"),
+                )
+            }
+            PanelMenuPage.LABEL -> UiLabelDisplay.entries.forEach { display ->
+                DropdownMenuItem(
+                    text = { Text(stringResource(display.labelResource)) },
+                    onClick = {
+                        onLabelDisplay?.invoke(display)
+                        setPage(null)
+                    },
+                    modifier = Modifier.testTag("ui_tab_label_" + display.name.lowercase()),
                 )
             }
             PanelMenuPage.MOVE -> {

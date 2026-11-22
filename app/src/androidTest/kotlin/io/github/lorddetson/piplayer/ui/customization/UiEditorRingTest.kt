@@ -10,6 +10,8 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.assertContentDescriptionEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithContentDescription
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
@@ -26,6 +28,31 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class UiEditorRingTest {
     @get:Rule val compose = createComposeRule()
+
+    @Test
+    fun allOrbitGlyphsKeepTheSameSizeAcrossRotationAndCollapse() {
+        compose.setContent {
+            Box(Modifier.fillMaxSize()) {
+                UiEditorRing(List(8) { index ->
+                    UiEditorAction(R.drawable.ic_add, R.string.ui_edit_add, "equal_command_" + index) {}
+                })
+            }
+        }
+        fun commandWidths() = compose.onAllNodesWithContentDescription(
+            TestFiles.targetContext.getString(R.string.ui_edit_add), useUnmergedTree = true,
+        ).fetchSemanticsNodes().map { it.boundsInRoot.width }
+        fun handleWidth(label: Int) = compose.onNodeWithContentDescription(
+            TestFiles.targetContext.getString(label), useUnmergedTree = true,
+        ).fetchSemanticsNode().boundsInRoot.width
+        val expanded = handleWidth(R.string.ui_editor_ring_collapse)
+        assertThat(commandWidths()).hasSize(8).containsOnly(expanded)
+        compose.onNodeWithTag("equal_command_0").performTouchInput {
+            swipe(center, center - Offset(66.dp.toPx(), 0f), durationMillis = 400)
+        }
+        assertThat(commandWidths()).containsOnly(expanded)
+        compose.onNodeWithTag("ui_editor_ring_handle").performClick()
+        assertThat(handleWidth(R.string.ui_editor_ring_expand)).isEqualTo(expanded)
+    }
 
     @Test
     fun editorActionsCollapseWithoutResizingTheCanvas() {

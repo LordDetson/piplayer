@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="format_stereo">stereo</string>
+    <string name="player_metadata_badge">Metadata status</string>
+</resources>

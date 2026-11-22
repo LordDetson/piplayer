@@ -47,6 +47,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Color
@@ -56,6 +57,7 @@ import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.paneTitle
@@ -76,11 +78,13 @@ import io.github.lorddetson.piplayer.settings.NowPlayingLayout
 import io.github.lorddetson.piplayer.settings.NowPlayingRow
 import io.github.lorddetson.piplayer.settings.UiSurface
 import io.github.lorddetson.piplayer.ui.customization.EditableUiPanel
+import io.github.lorddetson.piplayer.ui.customization.StockUiSlot
 import io.github.lorddetson.piplayer.ui.customization.UiCanvasComponent
 import io.github.lorddetson.piplayer.ui.customization.UiControlColor
 import io.github.lorddetson.piplayer.ui.customization.UiControlTextAlign
 import io.github.lorddetson.piplayer.ui.customization.fillAlignedTextWidth
 import io.github.lorddetson.piplayer.ui.customization.UiControlIcon
+import io.github.lorddetson.piplayer.ui.customization.isStockUiSlotMasked
 import io.github.lorddetson.piplayer.ui.details.PlayingBadge
 import io.github.lorddetson.piplayer.ui.identification.IdentifyButton
 import io.github.lorddetson.piplayer.ui.identification.LocalIdentify
@@ -109,6 +113,8 @@ fun NowPlaying(
     onPanelSaveFailed: suspend () -> Unit = {},
 ) {
     val metadata = rememberCurrentItemState(player).mediaMetadata
+    val format = rememberAudioFormat(player)
+    val unknownArtist = stringResource(R.string.songs_unknown_artist)
     val pane = stringResource(R.string.player_now_playing)
     var controlsRevealed by rememberSaveable(layout) { mutableStateOf(false) }
     val minimal = layout == NowPlayingLayout.MINIMAL
@@ -146,13 +152,14 @@ fun NowPlaying(
             else -> error("Expected a playback action")
         }
     }
-    val body: @Composable (NowPlayingElement, Modifier, TextAlign) -> Unit = { element, press, textAlign ->
+    val body: @Composable (NowPlayingElement, Modifier, TextAlign, Boolean) -> Unit = { element, press, textAlign, split ->
         when (element) {
-            NowPlayingElement.TRACK_INFO -> TrackHeading(metadata, onOpenArtist, onOpenAlbum, textAlign, press.fillMaxWidth())
+            NowPlayingElement.TRACK_INFO -> TrackHeading(metadata, unknownArtist, onOpenArtist, onOpenAlbum,
+                textAlign, press.fillMaxWidth(), split)
             NowPlayingElement.FORMAT -> Column(press, horizontalAlignment = Alignment.CenterHorizontally) {
-                PlayingBadge(player)
+                if (split) StockUiSlot(PLAYING_BADGE_ID) { PlayingBadge(player) } else PlayingBadge(player)
                 Spacer(Modifier.height(4.dp))
-                FormatLineText(player)
+                AudioFormatReadout(format, split)
             }
             NowPlayingElement.SEEK -> SeekBar(player, press.fillMaxWidth())
             else -> error("Expected a track content component")
@@ -177,7 +184,7 @@ fun NowPlaying(
     val contentRows = if (compactPair) listOf(content.take(2)) + content.drop(2).map { listOf(it) }
     else content.map { listOf(it) }
     val initialRows = (listOf(top) + contentRows + listOf(transport, extras)).filter { it.isNotEmpty() }
-    val components = available.map { element ->
+    val standardComponents = available.map { element ->
         val width = when (element) {
             NowPlayingElement.COVER -> if (expanded) 104.dp else 220.dp
             NowPlayingElement.PLAY_PAUSE -> 72.dp
@@ -195,25 +202,44 @@ fun NowPlaying(
             element.canvasId, element.label, width, height,
             fillWidth = element in fullWidthElements, customizableIcon = !trackContent,
             alignableText = element in fullWidthElements || element == NowPlayingElement.TIMER,
+            addable = element != NowPlayingElement.TRACK_INFO && element != NowPlayingElement.FORMAT,
         ) {
             when {
                 element == NowPlayingElement.COVER -> CoverImage(
                     cover, Modifier.fillMaxSize().clip(RoundedCornerShape(12.dp)),
                     if (expanded) 36.dp else 72.dp, coverName,
                 )
-                trackContent -> body(element, Modifier, TextAlign.Center)
+                trackContent -> body(element, Modifier, TextAlign.Center, false)
                 else -> action(element, Modifier.fillMaxSize())
             }
         }
+    }
+    val trackComponents = TrackField.entries.map { field ->
+        UiCanvasComponent(field.nowPlayingId, field.label,
+            height = if (field == TrackField.TITLE) 36.dp else 24.dp, fillWidth = true, alignableText = true) {
+            field.value(metadata, unknownArtist)?.let { value ->
+                TrackFieldText(field, value, onOpenArtist, onOpenAlbum, TextAlign.Center)
+            }
+        }
+    }
+    val audioComponents = AudioFormatField.entries.map { field ->
+        UiCanvasComponent(field.canvasId, field.label, width = 96.dp, height = 24.dp, alignableText = true) {
+            val value = format?.let { field.value(it, LocalResources.current, includeStereo = true) }
+            if (value != null) FormatText(value)
+        }
+    }
+    val badgeComponent = UiCanvasComponent(PLAYING_BADGE_ID, R.string.player_metadata_badge, width = 72.dp, height = 48.dp) {
+        PlayingBadge(player)
     }
     BoxWithConstraints(modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface).windowInsetsPadding(contentInsets)) {
         EditableUiPanel(
             surface = UiSurface.NOW_PLAYING,
             themeId = editor.themeId,
-            components = components,
-            initialRows = initialRows.map { row -> row.map { it.canvasId } },
+            components = standardComponents + trackComponents + audioComponents + badgeComponent,
+            initialRows = initialRows.map { row -> row.flatMap { it.stockCanvasIds() } },
             height = (maxHeight - 144.dp).coerceAtLeast(96.dp),
             onSaveFailed = onPanelSaveFailed,
+            legacyStockIds = setOf(NowPlayingElement.TRACK_INFO.canvasId, NowPlayingElement.FORMAT.canvasId),
             canvasChrome = { Row(Modifier.fillMaxWidth().semantics { paneTitle = pane }) { collapse() } },
         ) {
             StockNowPlaying(
@@ -227,6 +253,13 @@ fun NowPlaying(
 internal val NowPlayingElement.canvasId: String get() = "now:$id"
 
 private val fullWidthElements = setOf(NowPlayingElement.TRACK_INFO, NowPlayingElement.FORMAT, NowPlayingElement.SEEK)
+private const val PLAYING_BADGE_ID = "now:audio_badge"
+
+private fun NowPlayingElement.stockCanvasIds(): List<String> = when (this) {
+    NowPlayingElement.TRACK_INFO -> TrackField.entries.map { it.nowPlayingId }
+    NowPlayingElement.FORMAT -> listOf(PLAYING_BADGE_ID) + AudioFormatField.entries.map(AudioFormatField::canvasId)
+    else -> listOf(canvasId)
+}
 
 @Composable
 private fun StockNowPlaying(
@@ -242,7 +275,7 @@ private fun StockNowPlaying(
     extras: List<NowPlayingElement>,
     compactPair: Boolean,
     artwork: @Composable (Modifier) -> Unit,
-    body: @Composable (NowPlayingElement, Modifier, TextAlign) -> Unit,
+    body: @Composable (NowPlayingElement, Modifier, TextAlign, Boolean) -> Unit,
     action: @Composable (NowPlayingElement, Modifier) -> Unit,
 ) {
     val minimal = layout == NowPlayingLayout.MINIMAL
@@ -289,7 +322,7 @@ private fun StockNowPlaying(
             ) {
                 PlayerElement(editor, NowPlayingElement.COVER, content = artwork)
                 PlayerElement(editor, NowPlayingElement.TRACK_INFO, Modifier.weight(1f)) { press ->
-                    body(NowPlayingElement.TRACK_INFO, press, TextAlign.Start)
+                    body(NowPlayingElement.TRACK_INFO, press, TextAlign.Start, true)
                 }
             }
         }
@@ -300,7 +333,7 @@ private fun StockNowPlaying(
                 Spacer(Modifier.height(if (expanded) 8.dp else 16.dp))
             }
             PlayerElement(editor, element) { press ->
-                if (element == NowPlayingElement.COVER) artwork(press) else body(element, press, TextAlign.Center)
+                if (element == NowPlayingElement.COVER) artwork(press) else body(element, press, TextAlign.Center, true)
             }
         }
         if (transport.isNotEmpty()) {
@@ -340,46 +373,54 @@ private fun TrackMenuButton(entries: @Composable (close: () -> Unit) -> Unit, mo
 @Composable
 private fun TrackHeading(
     metadata: MediaMetadata,
+    unknownArtist: String,
     onOpenArtist: (() -> Unit)?,
     onOpenAlbum: (() -> Unit)?,
     textAlign: TextAlign,
     modifier: Modifier,
+    split: Boolean,
 ) {
-    val alignment = UiControlTextAlign(textAlign)
     Column(
         modifier,
         horizontalAlignment = if (textAlign == TextAlign.Center) Alignment.CenterHorizontally else Alignment.Start,
     ) {
-        Text(
-            text = metadata.title?.toString().orEmpty(),
-            style = MaterialTheme.typography.headlineSmall,
-            color = UiControlColor(Color.Unspecified),
-            textAlign = alignment,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.fillMaxWidth().semantics { heading() },
-        )
-        Text(
-            text = metadata.artist?.toString() ?: stringResource(R.string.songs_unknown_artist),
-            style = MaterialTheme.typography.titleMedium,
-            color = UiControlColor(MaterialTheme.colorScheme.primary),
-            textAlign = alignment,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.fillAlignedTextWidth().opens(onOpenArtist, R.string.open_artist),
-        )
-        metadata.albumTitle?.let { album ->
-            Text(
-                text = album.toString(),
-                style = MaterialTheme.typography.bodyLarge,
-                color = UiControlColor(MaterialTheme.colorScheme.onSurfaceVariant),
-                textAlign = alignment,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.fillAlignedTextWidth().opens(onOpenAlbum, R.string.open_album),
-            )
+        for (field in TrackField.entries) {
+            val value = field.value(metadata, unknownArtist) ?: continue
+            if (split) StockUiSlot(field.nowPlayingId) {
+                TrackFieldText(field, value, onOpenArtist, onOpenAlbum, textAlign)
+            } else TrackFieldText(field, value, onOpenArtist, onOpenAlbum, textAlign)
         }
     }
+}
+
+@Composable
+private fun TrackFieldText(
+    field: TrackField,
+    value: String,
+    onOpenArtist: (() -> Unit)?,
+    onOpenAlbum: (() -> Unit)?,
+    alignment: TextAlign,
+) {
+    val typography = MaterialTheme.typography
+    val colors = MaterialTheme.colorScheme
+    val title = field == TrackField.TITLE
+    val style = when (field) {
+        TrackField.TITLE -> typography.headlineSmall
+        TrackField.ARTIST -> typography.titleMedium
+        TrackField.ALBUM -> typography.bodyLarge
+    }
+    val color = when (field) {
+        TrackField.TITLE -> Color.Unspecified
+        TrackField.ARTIST -> colors.primary
+        TrackField.ALBUM -> colors.onSurfaceVariant
+    }
+    val modifier = when (field) {
+        TrackField.TITLE -> Modifier.fillMaxWidth().semantics { heading() }
+        TrackField.ARTIST -> Modifier.fillAlignedTextWidth().opens(onOpenArtist, R.string.open_artist)
+        TrackField.ALBUM -> Modifier.fillAlignedTextWidth().opens(onOpenAlbum, R.string.open_album)
+    }
+    Text(value, modifier = modifier, style = style, color = UiControlColor(color),
+        textAlign = UiControlTextAlign(alignment), maxLines = if (title) 2 else 1, overflow = TextOverflow.Ellipsis)
 }
 
 /** The bars and cutouts, the side areas of the back gesture, and at least a margin of 24 dp at the sides. */
@@ -388,9 +429,8 @@ private val contentInsets: WindowInsets
         .union(WindowInsets.systemGestures.only(WindowInsetsSides.Horizontal))
         .union(WindowInsets(left = 24.dp, right = 24.dp))
 
-/** The format of the audio track that plays, once the player knows it (§3.5). */
 @Composable
-private fun FormatLineText(player: Player?) {
+private fun rememberAudioFormat(player: Player?): FormatSummary? {
     var format by remember(player) { mutableStateOf(player?.currentTracks?.let(::selectedAudioFormat)) }
     DisposableEffect(player) {
         val listener = object : Player.Listener {
@@ -401,13 +441,46 @@ private fun FormatLineText(player: Player?) {
         player?.addListener(listener)
         onDispose { player?.removeListener(listener) }
     }
+    return format?.let(FormatSummary::of)
+}
+
+/** Keep the compact line in the stock panel while recording each visible field's bounds. */
+@Composable
+private fun AudioFormatReadout(format: FormatSummary?, split: Boolean) {
     val resources = LocalResources.current
+    if (format == null || !split) {
+        FormatText(format?.let { formatLine(it, resources) }.orEmpty())
+        return
+    }
+    val fields = AudioFormatField.entries.mapNotNull { field ->
+        field.value(format, resources)?.let { field to it }
+    }
+    FlowRow(horizontalArrangement = Arrangement.Center) {
+        var precedingFieldVisible = false
+        fields.forEachIndexed { index, (field, value) ->
+            val separatorVisible = precedingFieldVisible
+            if (!isStockUiSlotMasked(field.canvasId)) precedingFieldVisible = true
+            StockUiSlot(field.canvasId) {
+                Row {
+                    if (index > 0) FormatText(
+                        AUDIO_FORMAT_SEPARATOR,
+                        Modifier.alpha(if (separatorVisible) 1f else 0f).clearAndSetSemantics {},
+                    )
+                    FormatText(value)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun FormatText(value: String, modifier: Modifier = Modifier) {
     Text(
-        text = format?.let(FormatSummary::of)?.let { formatLine(it, resources) }.orEmpty(),
+        text = value,
         style = MaterialTheme.typography.labelLarge,
         color = UiControlColor(MaterialTheme.colorScheme.onSurfaceVariant),
         textAlign = UiControlTextAlign(),
-        modifier = Modifier.fillAlignedTextWidth(),
+        modifier = modifier.fillAlignedTextWidth(),
         minLines = 1,
     )
 }

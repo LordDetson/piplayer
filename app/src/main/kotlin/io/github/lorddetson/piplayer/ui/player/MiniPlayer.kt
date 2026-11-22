@@ -96,6 +96,7 @@ fun MiniPlayer(
     val item = rememberCurrentItemState(player)
     if (player == null || item.mediaItem == null) return
     val metadata = item.mediaMetadata
+    val unknownArtist = stringResource(R.string.songs_unknown_artist)
     val app = LocalContext.current.applicationContext
     val settings = remember(app) { miniPlayerPanels.forContext(app) }
     val state by settings.state.collectAsStateWithLifecycle<PlayerPanelState<MiniPlayerPanel>?>(initialValue = null)
@@ -113,26 +114,14 @@ fun MiniPlayer(
     val artwork: @Composable (Modifier) -> Unit = { press ->
         CoverImage(cover, press.clip(RoundedCornerShape(6.dp)), placeholderName = coverName)
     }
-    val details: @Composable (Modifier) -> Unit = { press ->
+    val details: @Composable (Modifier, Boolean) -> Unit = { press, split ->
         Column(press.fillMaxWidth()) {
-            Text(
-                text = metadata.title?.toString().orEmpty(),
-                style = MaterialTheme.typography.titleMedium,
-                color = UiControlColor(Color.Unspecified),
-                modifier = Modifier.fillAlignedTextWidth(),
-                textAlign = UiControlTextAlign(),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                text = metadata.artist?.toString() ?: stringResource(R.string.songs_unknown_artist),
-                style = MaterialTheme.typography.bodyMedium,
-                color = UiControlColor(MaterialTheme.colorScheme.onSurfaceVariant),
-                modifier = Modifier.fillAlignedTextWidth(),
-                textAlign = UiControlTextAlign(),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            for (field in TrackField.entries) {
+                if (!split && field == TrackField.ALBUM) continue
+                val value = field.value(metadata, unknownArtist) ?: continue
+                if (split) StockUiSlot(field.miniPlayerId) { MiniTrackFieldText(field, value) }
+                else MiniTrackFieldText(field, value)
+            }
         }
     }
     val openLabel = stringResource(R.string.player_open_now_playing)
@@ -141,8 +130,9 @@ fun MiniPlayer(
         UiCanvasComponent(MiniPlayerElement.COVER.canvasId, R.string.player_element_cover) {
             artwork(Modifier.fillMaxSize().then(openTrack))
         },
-        UiCanvasComponent(MiniPlayerElement.TRACK_INFO.canvasId, R.string.player_element_track, fillWidth = true, alignableText = true) {
-            details(openTrack)
+        UiCanvasComponent(MiniPlayerElement.TRACK_INFO.canvasId, R.string.player_element_track,
+            fillWidth = true, alignableText = true, addable = false) {
+            details(openTrack, false)
         },
         UiCanvasComponent(MiniPlayerElement.PLAY_PAUSE.canvasId, R.string.player_element_play_pause, customizableIcon = true) {
             PlayPauseButton(player, Modifier.fillMaxSize())
@@ -152,8 +142,19 @@ fun MiniPlayer(
                 ProgressLine(player, item.durationMs)
             }
         },
-    )
-    val trackRow = listOf(panel.visible.map { it.canvasId })
+    ) + TrackField.entries.map { field ->
+        UiCanvasComponent(field.miniPlayerId, field.label, height = 24.dp, fillWidth = true, alignableText = true) {
+            field.value(metadata, unknownArtist)?.let { value ->
+                Box(Modifier.fillMaxSize().then(openTrack), contentAlignment = Alignment.CenterStart) {
+                    MiniTrackFieldText(field, value)
+                }
+            }
+        }
+    }
+    val trackRow = listOf(panel.visible.flatMap { element ->
+        if (element == MiniPlayerElement.TRACK_INFO) TrackField.entries.map { it.miniPlayerId }
+        else listOf(element.canvasId)
+    })
     val progressRow = listOf(listOf(MiniPlayerElement.PROGRESS.canvasId))
     val initialRows = when {
         MiniPlayerElement.PROGRESS in panel.hidden -> trackRow
@@ -182,6 +183,7 @@ fun MiniPlayer(
                 initialRows = initialRows.filter { it.isNotEmpty() },
                 height = 104.dp,
                 onSaveFailed = { snackbar?.showSnackbar(saveFailed) },
+                legacyStockIds = setOf(MiniPlayerElement.TRACK_INFO.canvasId),
                 canvasChrome = {
                     IconButton(onClick = onOpen) {
                         Icon(painterResource(R.drawable.ic_player_collapse), openLabel, Modifier.rotate(180f))
@@ -204,7 +206,7 @@ fun MiniPlayer(
                             MiniPlayerItem(element, theme, panel, hidden, ::edit, ::restore, width) { press ->
                                 when (element) {
                                     MiniPlayerElement.COVER -> artwork(press.size(48.dp))
-                                    MiniPlayerElement.TRACK_INFO -> details(press)
+                                    MiniPlayerElement.TRACK_INFO -> details(press, true)
                                     MiniPlayerElement.PLAY_PAUSE -> PlayPauseButton(player, press)
                                     MiniPlayerElement.PROGRESS -> error("Progress belongs at the edge of the mini player")
                                 }
@@ -220,6 +222,27 @@ fun MiniPlayer(
             }
         }
     }
+}
+
+@Composable
+private fun MiniTrackFieldText(field: TrackField, value: String) {
+    val typography = MaterialTheme.typography
+    val title = field == TrackField.TITLE
+    val style = when (field) {
+        TrackField.TITLE -> typography.titleMedium
+        TrackField.ARTIST -> typography.bodyMedium
+        TrackField.ALBUM -> typography.bodySmall
+    }
+    val color = if (title) Color.Unspecified else MaterialTheme.colorScheme.onSurfaceVariant
+    Text(
+        text = value,
+        style = style,
+        color = UiControlColor(color),
+        modifier = Modifier.fillAlignedTextWidth(),
+        textAlign = UiControlTextAlign(),
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+    )
 }
 
 private val MiniPlayerElement.canvasId: String get() = "mini:$id"

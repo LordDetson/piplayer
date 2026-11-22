@@ -61,6 +61,27 @@ class MiniPlayerTest {
         SemanticsMatcher("click label \"$label\"") { it.config.getOrNull(SemanticsActions.OnClick)?.label == label }
 
     @Test
+    fun editorKeepsMiniPlayerTitleArtistAndAlbumIndependent() =
+        withStockPlayerTheme(context, "mini_player_panel_", "ui_canvas_") {
+            show(listOf(halo.copy(album = "Sasha Fierce")), cover = true)
+            compose.onNodeWithTag(PlayerTags.COVER, useUnmergedTree = true).performTouchInput { longClick() }
+            compose.onNodeWithTag("ui_edit_mode").performClick()
+
+            for (id in listOf("title", "artist", "album")) {
+                compose.onNodeWithTag("ui_component_mini:$id").assertIsDisplayed()
+            }
+            compose.onNodeWithTag("ui_component_mini:track_info").assertDoesNotExist()
+            compose.onNodeWithTag("ui_component_mini:album").performClick()
+            compose.onNodeWithTag("ui_edit_hide").performClick()
+            compose.onNodeWithTag("ui_edit_done").performClick()
+            compose.waitUntil(5_000) { compose.onAllNodes(hasTestTag("ui_edit_done")).fetchSemanticsNodes().isEmpty() }
+            compose.onNodeWithText("Sasha Fierce", useUnmergedTree = true).assertDoesNotExist()
+            compose.onNodeWithText("Halo", useUnmergedTree = true).assertIsDisplayed()
+            compose.onNodeWithText("Beyoncé", useUnmergedTree = true).assertIsDisplayed()
+            assertThat(opened).isFalse()
+        }
+
+    @Test
     fun theInlineEditorKeepsItsOwnLayoutAndTheTransportControlStillWorks() =
         withStockPlayerTheme(context, "mini_player_panel_", "ui_canvas_") {
             val player = show(listOf(halo), cover = true)

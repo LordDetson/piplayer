@@ -38,6 +38,7 @@ import androidx.compose.ui.BiasAbsoluteAlignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
@@ -66,6 +67,7 @@ import io.github.lorddetson.piplayer.settings.UiCanvasItem
 import io.github.lorddetson.piplayer.settings.UiCanvasLayout
 import io.github.lorddetson.piplayer.settings.UiCanvasSettings
 import io.github.lorddetson.piplayer.settings.UiCanvasState
+import io.github.lorddetson.piplayer.settings.UiLabelDisplay
 import io.github.lorddetson.piplayer.settings.UiPlacementMode
 import io.github.lorddetson.piplayer.settings.UiResizeEdge
 import io.github.lorddetson.piplayer.settings.UiSurface
@@ -81,11 +83,17 @@ internal data class UiCanvasComponent(
     val fillWidth: Boolean = false,
     val customizableIcon: Boolean = false,
     val alignableText: Boolean = false,
+    val labelDisplay: Boolean = false,
+    val tabDirection: Boolean = false,
+    val preserveGestures: Boolean = false,
+    val scaleBlock: Boolean = false,
+    val addable: Boolean = true,
     val content: @Composable () -> Unit,
 )
 
 internal val LocalUiCatalog = staticCompositionLocalOf<List<UiCanvasComponent>> { emptyList() }
 internal val LocalUiEditEntry = staticCompositionLocalOf<((String) -> Unit)?> { null }
+internal val LocalLibraryWorkspaceEntry = staticCompositionLocalOf<((String) -> Unit)?> { null }
 
 private data class EditSession(
     val initial: UiCanvasLayout,
@@ -105,6 +113,8 @@ internal fun EditableUiPanel(
     modifier: Modifier = Modifier,
     onSaveFailed: suspend () -> Unit = {},
     onAppliedIds: (List<String>?) -> Unit = {},
+    legacyStockIds: Set<String> = emptySet(),
+    hiddenByParent: Set<String> = emptySet(),
     canvasChrome: @Composable () -> Unit = {},
     stock: @Composable () -> Unit,
 ) {
@@ -159,7 +169,16 @@ internal fun EditableUiPanel(
         }
         val draft = session
         val layout = draft?.draft ?: persisted
-        CompositionLocalProvider(LocalUiEditEntry provides start) {
+        val workspaceEntry = if (surface == UiSurface.LIBRARY_WORKSPACE) start else LocalLibraryWorkspaceEntry.current
+        val inheritedLabels = LocalUiLabelDisplays.current
+        val labels = if (surface == UiSurface.LIBRARY) {
+            inheritedLabels.filterKeys { !it.startsWith("tab:") } + layout?.labelDisplays.orEmpty()
+        } else inheritedLabels + layout?.labelDisplays.orEmpty()
+        CompositionLocalProvider(
+            LocalUiEditEntry provides start,
+            LocalLibraryWorkspaceEntry provides workspaceEntry,
+            LocalUiLabelDisplays provides labels,
+        ) {
             val anchored = draft?.anchored ?: (persisted?.hiddenStock != null)
             fun mutate(update: (UiCanvasLayout) -> UiCanvasLayout) {
                 if (!saving) session = session?.let {
@@ -198,7 +217,7 @@ internal fun EditableUiPanel(
             val selectedComponent = catalog[selected]
             val stockChanges = when {
                 draft?.reset == true -> null
-                draft?.anchored == true -> draft.draft.stockOverrides(draft.initial, draft.previousOverrides, stockIds.toSet())
+                draft?.anchored == true -> draft.draft.stockOverrides(draft.initial, draft.previousOverrides, stockIds.toSet() + legacyStockIds)
                 else -> persisted
             }
             val frameSize = geometry.frame
@@ -219,6 +238,7 @@ internal fun EditableUiPanel(
                         UiCanvas(layout, catalog, drawingWidth, drawingHeight, draft != null, selectedItem, picked,
                             dragging = gestureBase != null, blocked = blocked,
                             select = ::select, onStart = ::beginTransform, transform = ::transform, onEnd = ::endTransform,
+                            hiddenByParent = hiddenByParent,
                         )
                     }
                 }
@@ -230,6 +250,8 @@ internal fun EditableUiPanel(
                         select = ::select, onStart = ::beginTransform, transform = ::transform, onEnd = ::endTransform,
                         modifier = Modifier.matchParentSize(),
                         drawOnly = detached,
+                        stockGeometry = geometry,
+                        hiddenByParent = hiddenByParent,
                     )
                 }
                 if (draft != null && layout != null) {
@@ -294,11 +316,19 @@ internal fun EditableUiPanel(
             }
             if (inspecting && draft != null && selectedItem != null && selectedComponent != null) {
                 key(selectedItem.id) {
+                    val labelDisplay = labels[selectedItem.id] ?: selectedItem.style.labelDisplay
                     UiComponentInspector(
-                        selectedItem, selectedComponent,
+                        selectedItem.copy(style = selectedItem.style.copy(labelDisplay = labelDisplay)), selectedComponent,
                         onDismiss = { inspecting = false },
                         onUpdate = { padding, style ->
-                            mutate { it.withPadding(selectedItem.id, padding).withStyle(selectedItem.id, style) }
+                            mutate {
+                                val update = it.withPadding(selectedItem.id, padding)
+                                if (selectedComponent.labelDisplay) {
+                                    update.withLabelDisplay(selectedItem.id, style.labelDisplay).withStyle(
+                                        selectedItem.id, style.copy(labelDisplay = UiLabelDisplay.ICON_AND_TEXT),
+                                    )
+                                } else update.withStyle(selectedItem.id, style)
+                            }
                             inspecting = false
                         },
                     )
@@ -325,6 +355,8 @@ private fun UiCanvas(
     onEnd: () -> Unit,
     modifier: Modifier = Modifier.fillMaxWidth().height(height),
     drawOnly: Set<String>? = null,
+    stockGeometry: StockUiGeometry? = null,
+    hiddenByParent: Set<String> = emptySet(),
 ) {
     val accent = MaterialTheme.colorScheme.primary
     val selectionColor = if (blocked) MaterialTheme.colorScheme.error else accent
@@ -339,6 +371,7 @@ private fun UiCanvas(
             })
         }
         layout.items.forEachIndexed { index, item ->
+            if (item.id in hiddenByParent) return@forEachIndexed
             val component = catalog[item.id] ?: return@forEachIndexed
             val drawContent = drawOnly == null || item.id in drawOnly
             if (!editing && !drawContent) return@forEachIndexed
@@ -348,9 +381,13 @@ private fun UiCanvas(
                 val itemHeight = height * bounds.height.toFraction()
                 val background = item.style.background?.let { Color(it or 0xff000000.toInt()) } ?: Color.Transparent
                 val editEntry = LocalUiEditEntry.current
+                val workspaceEntry = LocalLibraryWorkspaceEntry.current
+                val workspaceSlot = workspaceSlotFor(item.id)
                 var menu by remember { mutableStateOf(false) }
                 val componentLabel = stringResource(component.label)
-                val activation = if (!editing && editEntry != null) Modifier.customizeOnHold { menu = true } else Modifier
+                val activation = if (!editing && editEntry != null && !component.preserveGestures) {
+                    Modifier.customizeOnHold { menu = true }
+                } else Modifier
                 val motion = if (!editing) Modifier.uiControlMotion(item.style.motion) else Modifier
                 Box(
                     Modifier.absoluteOffset(width * bounds.x.toFraction(), height * bounds.y.toFraction())
@@ -373,7 +410,8 @@ private fun UiCanvas(
                         )
                         CompositionLocalProvider(LocalUiControlStyle provides item.style) {
                             CanvasComponentContents(component,
-                                contentFrame.then(if (editing) Modifier.clearAndSetSemantics {} else Modifier))
+                                contentFrame.then(if (editing) Modifier.clearAndSetSemantics {} else Modifier),
+                                stockGeometry?.slots?.get(item.id))
                         }
                     }
                     if (editing) {
@@ -394,6 +432,13 @@ private fun UiCanvas(
                                 onClick = { menu = false; editEntry(item.id) },
                                 modifier = Modifier.testTag("ui_edit_mode"),
                             )
+                            if (workspaceEntry != null && workspaceSlot != null && editEntry !== workspaceEntry) {
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.ui_edit_library_workspace)) },
+                                    onClick = { menu = false; workspaceEntry(workspaceSlot) },
+                                    modifier = Modifier.testTag("ui_edit_library_workspace"),
+                                )
+                            }
                         }
                     }
                 }
@@ -456,8 +501,8 @@ private fun ResizeFrame(
 
 /** Measure button chrome at its design size, then scale its drawing and hit region together. */
 @Composable
-private fun CanvasComponentContents(component: UiCanvasComponent, modifier: Modifier) {
-    if (!component.customizableIcon) {
+private fun CanvasComponentContents(component: UiCanvasComponent, modifier: Modifier, stockBounds: Rect?) {
+    if (!component.customizableIcon && !component.scaleBlock) {
         Box(modifier, contentAlignment = Alignment.Center) { component.content() }
         return
     }
@@ -466,8 +511,9 @@ private fun CanvasComponentContents(component: UiCanvasComponent, modifier: Modi
     }) { children, constraints ->
         val width = constraints.maxWidth
         val height = constraints.maxHeight
-        val designWidth = component.width.roundToPx().coerceAtLeast(1)
-        val designHeight = component.height.roundToPx().coerceAtLeast(1)
+        val design = stockBounds?.takeIf { component.scaleBlock && !it.isEmpty }
+        val designWidth = (design?.width?.roundToInt() ?: if (component.scaleBlock) width else component.width.roundToPx()).coerceAtLeast(1)
+        val designHeight = (design?.height?.roundToInt() ?: component.height.roundToPx()).coerceAtLeast(1)
         val button = children.single().measure(Constraints.fixed(designWidth, designHeight))
         val scale = minOf(width.toFloat() / designWidth, height.toFloat() / designHeight)
         layout(width, height) {

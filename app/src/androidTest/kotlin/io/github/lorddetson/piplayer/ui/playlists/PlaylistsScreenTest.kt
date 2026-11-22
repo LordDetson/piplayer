@@ -9,11 +9,13 @@ import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isDialog
+import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTouchInput
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.github.lorddetson.piplayer.MainActivity
 import io.github.lorddetson.piplayer.R
@@ -30,10 +32,14 @@ import io.github.lorddetson.piplayer.playback.PlaybackTesting.connectController
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.onMain
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.stopAndRelease
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.waitUntil
+import io.github.lorddetson.piplayer.settings.PlaylistCatalogOrderSettings
+import io.github.lorddetson.piplayer.settings.SettingsFiles
 import io.github.lorddetson.piplayer.ui.GrantAudioPermission
 import io.github.lorddetson.piplayer.ui.library.LibraryTags
+import io.github.lorddetson.piplayer.ui.selection.SelectionTags
 import io.github.lorddetson.piplayer.userdata.NewEntry
 import io.github.lorddetson.piplayer.userdata.UserData
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.Rule
@@ -120,6 +126,88 @@ class PlaylistsScreenTest {
         val id = playlists.create("Mix")
         Library.playlists(context).addFiles(id, mediaStoreIds.map { fileId(it) })
         id
+    }
+
+    @Test
+    fun manualPlaylistsAreAboveSmartListsByDefault() {
+        songsPlaylist(1)
+        tab(R.string.tab_playlists)
+        val manual = hasText("Mix") and hasAnyAncestor(hasTestTag(PlaylistTags.LIST))
+        val smart = hasText(text(R.string.smart_favorites)) and hasAnyAncestor(hasTestTag(PlaylistTags.LIST))
+        compose.waitUntilAtLeastOneExists(manual, timeoutMillis = 10_000)
+        compose.waitUntilAtLeastOneExists(smart, timeoutMillis = 10_000)
+        assertThat(compose.onNode(manual).fetchSemanticsNode().boundsInRoot.top)
+            .isLessThan(compose.onNode(smart).fetchSemanticsNode().boundsInRoot.top)
+    }
+
+    @Test
+    fun selectedPlaylistsCanReplaceOrAppendToTheQueueInDisplayOrderWithoutRepeatsWithinTheSelection() {
+        songsPlaylist(2, 1)
+        runBlocking {
+            val encore = playlists.create("Encore")
+            Library.playlists(context).addFiles(encore, listOf(fileId(3), fileId(2)))
+        }
+        tab(R.string.tab_playlists)
+        val inList = hasAnyAncestor(hasTestTag(PlaylistTags.LIST))
+        val mixRow = hasText("Mix") and inList
+        compose.waitUntilAtLeastOneExists(mixRow, timeoutMillis = 10_000)
+        compose.waitUntilAtLeastOneExists(hasText("Encore") and inList, timeoutMillis = 10_000)
+        fun selectBoth() {
+            compose.onNode(mixRow).performTouchInput { longClick() }
+            compose.waitUntilAtLeastOneExists(hasTestTag(SelectionTags.MENU), timeoutMillis = 10_000)
+            tap(hasText("Encore") and inList)
+            tap(hasTestTag(SelectionTags.MENU))
+        }
+        selectBoth()
+        tap(hasText(text(R.string.selection_replace_queue)))
+        val controller = connectController()
+        try {
+            controller.awaitState("selected playlists replace the queue in display order") {
+                List(mediaItemCount) { getMediaItemAt(it).mediaMetadata.title?.toString() } == listOf("Charlie", "Bravo", "Alpha")
+            }
+            selectBoth()
+            tap(hasText(text(R.string.add_to_queue)))
+            controller.awaitState("selection appends without repeating tracks inside the new batch") {
+                List(mediaItemCount) { getMediaItemAt(it).mediaMetadata.title?.toString() } ==
+                    listOf("Charlie", "Bravo", "Alpha", "Charlie", "Bravo", "Alpha")
+            }
+        } finally {
+            controller.stopAndRelease()
+        }
+    }
+
+    @Test
+    fun movingSectionsAndListsUpdatesTheSavedCatalogOrder() {
+        val mix = songsPlaylist(1)
+        val encore = runBlocking { playlists.create("Encore") }
+        val file = SettingsFiles.settings(context)
+        val keyFirst = PlaylistCatalogOrderSettings.smartFirstKey
+        val keyManual = PlaylistCatalogOrderSettings.manualKey
+        val keySmart = PlaylistCatalogOrderSettings.smartKey
+        val previous = runBlocking { file.data.first() }
+        try {
+            runBlocking { SettingsFiles.edit(file) { it.remove(keyFirst); it.remove(keyManual); it.remove(keySmart) } }
+            tab(R.string.tab_playlists)
+            tap(hasContentDescription(text(R.string.song_menu, "Mix")))
+            tap(hasText(text(R.string.queue_move_up)))
+            compose.waitUntil(10_000) { runBlocking { file.data.first()[keyManual] } == "$mix,$encore" }
+
+            tap(hasContentDescription(text(R.string.song_menu, text(R.string.smart_lists))))
+            tap(hasText(text(R.string.queue_move_up)))
+            compose.waitUntil(10_000) { runBlocking { file.data.first()[keyFirst] } == true }
+
+            tap(hasContentDescription(text(R.string.song_menu, text(R.string.smart_favorites))))
+            tap(hasText(text(R.string.queue_move_down)))
+            compose.waitUntil(10_000) { runBlocking { file.data.first()[keySmart] }.orEmpty().startsWith("added,favorites,") }
+        } finally {
+            runBlocking {
+                SettingsFiles.edit(file) { target ->
+                    previous[keyFirst]?.let { target[keyFirst] = it } ?: target.remove(keyFirst)
+                    previous[keyManual]?.let { target[keyManual] = it } ?: target.remove(keyManual)
+                    previous[keySmart]?.let { target[keySmart] = it } ?: target.remove(keySmart)
+                }
+            }
+        }
     }
 
     @Test

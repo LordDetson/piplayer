@@ -64,8 +64,8 @@ shapes and grouped transforms. An icon with unsupported effects or external reso
 preview and use a press, bounce or tilt animation. Text components have their own alignment setting.
 
 Drag the pencil handle to move the editor's command ring over the screen. Tap the handle to collapse or expand
-the ring. Swipe along its arc to rotate commands into the foreground. Its buttons float above the layout and
-occupy no space within the panel. Use Group to select several
+the ring. Swipe along its arc to rotate commands into the foreground. Every ring button has the same visual size.
+They float above the layout and occupy no space within the panel. Use Group to select several
 components and confirm the selection. Drag any member to move the group, or drag a corner or edge of the group
 outline to scale its components and spacing together. Editor options can dissolve the selected group.
 
@@ -76,6 +76,16 @@ keeps the last position without overlaps. The active theme stores these choices 
 A version 8 theme package transfers groups, snap and placement options, and text alignment with existing layout
 overrides. Version 7 packages retain native overrides. Version 6 packages retain their saved positions. Earlier
 versions keep their existing fields.
+
+Long press a library tab, toolbar action, mini player control or navigation button and choose Edit the library
+screen. The toolbar, tab strip, tab content, mini player and navigation bar share one movable, resizable canvas.
+The active theme stores this canvas for the library screen. Set the tab strip to horizontal or vertical in its
+properties. A tab or navigation button can show its icon and label, its icon only, or its label only. Icon-only
+controls keep their accessible names. Theme package version 9 transfers the library canvas and label choices.
+
+The title, album and artist can be positioned and styled independently in Now Playing and the mini player.
+Now Playing also offers individual blocks for the codec, bitrate, bit depth, sample rate and channel count.
+Saved themes with the earlier combined blocks retain those blocks until they are changed or reset.
 
 ## Imported themes
 

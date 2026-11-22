@@ -10,17 +10,18 @@ import kotlinx.coroutines.flow.map
 
 /** The kinds of lists whose order the user chooses (docs/library.md §6.3); [id] names them in the settings file. */
 enum class ListName(val id: String, val fields: List<String>, val offersGrid: Boolean = false) {
-    SONGS("songs", listOf("title", "artist", "album", "length")),
+    SONGS("songs", listOf("title", "artist", "album", "length"), offersGrid = true),
     ALBUMS("albums", listOf("title", "artist", "year"), offersGrid = true),
     ARTISTS("artists", listOf("name", "songs"), offersGrid = true),
+    PLAYLISTS("playlists", listOf("name"), offersGrid = true),
 
     /** The Folders tab and folder pages: subfolders by name, songs by file name or title. */
-    FOLDERS("folders", listOf("file", "title")),
+    FOLDERS("folders", listOf("file", "title"), offersGrid = true),
     ALBUM_PAGE("album_page", listOf("track")),
     ARTIST_PAGE("artist_page", listOf("year", "title")),
 
     /** The Genres tab and the genre pages (docs/library.md §19.2, §19.3). */
-    GENRES("genres", listOf("name", "songs")),
+    GENRES("genres", listOf("name", "songs"), offersGrid = true),
     GENRE_PAGE("genre_page", listOf("artist", "title", "album", "length")),
 
     /** The smart lists (docs/library.md §17.1), each with its own order; the three lists of 100 in their own order only. */

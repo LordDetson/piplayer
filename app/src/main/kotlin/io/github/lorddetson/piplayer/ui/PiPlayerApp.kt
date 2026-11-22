@@ -24,6 +24,7 @@ import io.github.lorddetson.piplayer.ui.library.FolderPage
 import io.github.lorddetson.piplayer.ui.library.GenrePage
 import io.github.lorddetson.piplayer.ui.library.LibraryHost
 import io.github.lorddetson.piplayer.ui.library.LibraryScreen
+import io.github.lorddetson.piplayer.ui.library.LibraryWorkspaceChrome
 import io.github.lorddetson.piplayer.ui.fix.BatchActions
 import io.github.lorddetson.piplayer.ui.fix.FixScreen
 import io.github.lorddetson.piplayer.ui.fix.BatchTagWriteScreen
@@ -421,7 +422,17 @@ fun PiPlayerApp(
                         snackbarHost = { SnackbarHost(host.snackbar) },
                         onTryDemo = { open(DemoRoute) },
                     ) {
-                        LibraryScreen(host, onOpenSettings = { if (backStack.lastOrNull() != SettingsRoute) backStack.add(SettingsRoute) })
+                        LibraryScreen(
+                            host,
+                            chrome = LibraryWorkspaceChrome(
+                                miniPlayer = {
+                                    MiniPlayer(host.player, host.cover, onOpen = host.openNowPlaying, coverName = host.coverName,
+                                        bottomInset = false, snackbar = host.snackbar)
+                                },
+                                navigation = { PiPlayerBottomBar(backStack.firstOrNull(), switchTo, snackbar) },
+                            ),
+                            onOpenSettings = { if (backStack.lastOrNull() != SettingsRoute) backStack.add(SettingsRoute) },
+                        )
                     }
                 }
                 entry<SearchRoute> { SearchScreen(host) }
@@ -552,7 +563,8 @@ fun PiPlayerApp(
         )
         // The bottom bar of the three top-level places, the mini player above it (PIM-18, docs/playback.md §3.1).
         // Onboarding keeps the mini player for a file opened from another app, without the bar (docs/library.md §14.1).
-        if (backStack.lastOrNull() in TOP_LEVEL_PLACES) {
+        val current = backStack.lastOrNull()
+        if (current in TOP_LEVEL_PLACES && (current != SongsRoute || onboarding.showing)) {
             MiniPlayer(
                 host.player,
                 host.cover,

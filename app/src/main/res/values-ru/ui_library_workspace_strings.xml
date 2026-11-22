@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="ui_edit_library_workspace">Настроить весь экран медиатеки</string>
+    <string name="ui_edit_workspace_toolbar">Кнопки медиатеки</string>
+    <string name="ui_edit_workspace_tabs">Вкладки медиатеки</string>
+    <string name="ui_edit_workspace_content">Содержимое вкладки</string>
+    <string name="ui_edit_workspace_mini_player">Мини-плеер</string>
+    <string name="ui_edit_workspace_navigation">Панель навигации</string>
+    <string name="ui_edit_label_display">Видимость иконки и подписи</string>
+    <string name="ui_edit_icon_and_text">Иконка и текст</string>
+    <string name="ui_edit_icon_only">Только иконка</string>
+    <string name="ui_edit_text_only">Только текст</string>
+    <string name="ui_edit_tab_direction">Направление вкладок</string>
+    <string name="ui_edit_tabs_horizontal">Горизонтально</string>
+    <string name="ui_edit_tabs_vertical">Вертикально</string>
+</resources>

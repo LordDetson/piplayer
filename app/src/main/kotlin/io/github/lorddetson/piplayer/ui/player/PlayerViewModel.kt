@@ -28,10 +28,12 @@ import io.github.lorddetson.piplayer.playback.PlaybackExtras
 import io.github.lorddetson.piplayer.playback.PlaybackSessionCallback
 import io.github.lorddetson.piplayer.playback.QueueRequest
 import io.github.lorddetson.piplayer.playback.writeTagsWithPlaybackPaused
+import io.github.lorddetson.piplayer.library.lists.ListKind
 import io.github.lorddetson.piplayer.library.lists.SongQuery
 import io.github.lorddetson.piplayer.library.lists.SongSort
 import io.github.lorddetson.piplayer.settings.ListName
 import io.github.lorddetson.piplayer.settings.ListSorts
+import io.github.lorddetson.piplayer.ui.playlists.smartListOrder
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -241,6 +243,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
                 putBoolean(PlaybackSessionCallback.EXTRA_NEXT, next)
                 when (target) {
                     is QueueTarget.Songs -> putLongArray(PlaybackSessionCallback.EXTRA_SONG_IDS, target.ids.toLongArray())
+                    is QueueTarget.Collections -> putStringArrayList(PlaybackSessionCallback.EXTRA_COLLECTIONS, requestsOf(target))
                     else -> putString(PlaybackSessionCallback.EXTRA_REQUEST, QueueRequest(NO_SONG, 0, queryOf(target)).mediaId)
                 }
                 // An "all except" selection: the list without the songs left out (docs/library.md §20.6).
@@ -278,6 +281,9 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
      */
     private suspend fun queryOf(target: QueueTarget): SongQuery = QueueTarget.queryOf(getApplication(), target)
 
+    private suspend fun requestsOf(target: QueueTarget.Collections): ArrayList<String> =
+        target.targets.mapTo(ArrayList(target.targets.size)) { QueueRequest(NO_SONG, 0, queryOf(it)).mediaId }
+
     /** Removes the queue entry at [row] that shows [mediaId], with "Undo" in the message (docs/playback.md §9.2). */
     fun removeFromQueue(row: Int, mediaId: String, title: String) {
         val args = Bundle().apply {
@@ -310,6 +316,15 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
      */
     fun playSelection(target: QueueTarget) {
         when {
+            target is QueueTarget.Collections -> {
+                viewModelScope.launch {
+                    val args = Bundle().apply {
+                        putStringArrayList(PlaybackSessionCallback.EXTRA_COLLECTIONS, requestsOf(target))
+                    }
+                    connection.whenConnected { sendCustomCommand(PlaybackSessionCallback.PLAY_SONGS_COMMAND, args) }
+                }
+                return
+            }
             target is QueueTarget.Selected && target.excluded.isEmpty() -> return play(0, null, target.query)
             target is QueueTarget.Playlist -> return play(0, null, SongQuery.playlist(target.id))
             target !is QueueTarget.Songs && target !is QueueTarget.Selected -> return
@@ -433,17 +448,25 @@ class PlayerMessage(val text: String, val actionLabel: String? = null, val actio
 
 /** What "Play next" and "Add to queue" add (docs/playback.md §9.1). */
 sealed interface QueueTarget {
+    sealed interface Collection : QueueTarget
+
+    data class Collections(val targets: List<Collection>) : QueueTarget
+
     data class Songs(val ids: List<Long>) : QueueTarget
 
     data class Album(val key: String) : QueueTarget
 
-    data class Artist(val key: String) : QueueTarget
+    data class Artist(val key: String) : Collection
 
     /** A folder with all its subfolders. */
-    data class Folder(val volume: String, val relativePath: String) : QueueTarget
+    data class Folder(val volume: String, val relativePath: String) : Collection
 
     /** A playlist's available entries in order (docs/library.md §16.3). */
-    data class Playlist(val id: Long) : QueueTarget
+    data class Playlist(val id: Long) : Collection
+
+    data class Smart(val kind: ListKind) : Collection {
+        init { require(kind.smart) }
+    }
 
     /** A genre's songs by its key, `!none` for the songs without one (docs/library.md §19.2). */
     data class Genre(val key: String) : QueueTarget
@@ -466,8 +489,10 @@ sealed interface QueueTarget {
                 is Folder -> SongQuery.tree(target.volume, target.relativePath) to ListName.FOLDERS
                 is Genre -> SongQuery.genre(target.key) to ListName.GENRE_PAGE
                 is Playlist -> return SongQuery.playlist(target.id)
+                is Smart -> SongQuery.smart(target.kind) to smartListOrder(target.kind)
                 is Songs -> return SongQuery.SONGS
                 is Selected -> return target.query
+                is Collections -> error("Several collections do not have a single song query")
             }
             val order = ListSorts(context).order(list).first()
             return query.copy(sort = SongSort.of(order.field) ?: query.sort, reversed = order.reversed)

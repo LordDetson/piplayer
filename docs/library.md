@@ -1030,12 +1030,14 @@ Instrumented tests on the API 30 emulator:
 
 ### 11.3 List or grid
 
-- The sort menus of the Albums and Artists tabs have "Show as grid". The choice is kept per tab in the settings file
-  that is backed up (§3.2); a list is the default. The albums of an artist page follow the Albums tab.
+- The sort menu on each library tab offers "Show as grid". The choice is kept per tab in the settings file that is
+  backed up (§3.2). A list is the default. The albums of an artist page follow the Albums tab, and folder pages follow
+  the Folders tab.
 - A grid has columns at least 150 dp wide, two on a phone held upright; an artist page's albums take as many columns as
   the Albums tab. An album's tile is a square with its cover (§13.5), its title, then its artist and year; an
   artist's tile is a circle with their cover, or else their letter, their name, then the numbers of albums and songs. A tile
-  has the menu of its row (step 9: play next, add to queue) beside its title. The thumb works over grids too.
+  has the menu of its row beside its title. Song tiles show the track's cover. Folder, genre and playlist tiles use
+  the icon from their list row. The thumb works over grids too on tabs that provide it in the list view.
 
 ### 11.4 Checks
 
@@ -1740,9 +1742,11 @@ Decision: an entry never points at a file. It refers to a track identity (§8.1)
 
 ### 16.3 Screens
 
-- The Playlists list is a tab; since PIM-64 it comes after Artists (§19.2). Its content is one composable. It starts with "New playlist" and "Import" and lists the playlists by name (the collator of the
-  locale), each with its number of songs; the top bar's search filters them by name, and the tab has no sort. With none
-  it says "No playlists yet".
+- The Playlists tab comes after Artists (§19.2). "New playlist" and "Import" appear above the manual and smart sections.
+  Manual playlists appear first by default, in name order until reordered. The section menu moves either section above
+  or below the other, and a playlist menu can move its row within the section. The order is saved in settings.
+  The top bar's search filters the names in both sections, and its sort menu can switch between a list and a grid.
+  With no manual playlists the tab says "No playlists yet".
 - "New playlist" and "Rename" open a dialog with a name field; its confirm button stays off while the name is blank.
 - A playlist row's menu has "Play", "Play next", "Add to queue", "Rename", "Export" and "Delete". Decision: "Delete" asks
   for a confirmation that names the playlist and says that its songs stay in the library; there is no undo.
@@ -1903,11 +1907,9 @@ Every smart list is a list of the library: it holds visible songs only (§3.5), 
 
 ### 17.2 Where they show
 
-- Decision: at the top of the Playlists tab (§16.3), under "New playlist" and "Import" and above the user's playlists, the
-  heading "Smart lists" and one row per smart list in the order of §17.1 with its number of songs; the top bar's search
-  filters them by name too. For
-  Songs missing information the number follows the chips. The rows are one composable, so that PIM-64 can show them where
-  it puts the playlists among the browse categories.
+- "Smart lists" appears below the manual section by default (§16.3). Each smart list shows its number of songs and starts
+  in the order of §17.1. A row can move within the section without changing how the smart list orders its songs.
+  The top bar's search filters the names. For Songs missing information the number follows the chips.
 - A tap opens the list's page: the top bar with back, the list's name, search and sort; under it the number of songs,
   "Play" and "Shuffle" (and for Songs missing information the chips); then the songs. Decision: while the page shows the
   first page of its list ahead of the whole list (§1.4), the number is not shown and "Shuffle" is off, since both stand
@@ -1976,7 +1978,7 @@ Instrumented tests on the API 30 emulator:
   from its request after the process died; a queue of Recently played and of Most played whose current song is counted
   again before the process dies comes back with the order of the tap.
 - The tag pass gives a file it could not read the reasons of its index values, and a sync that renames it keeps them.
-- On the screen: the smart lists at the top of the Playlists tab with their numbers, a number that follows a new favorite;
+- On the screen, the smart lists follow the manual playlists by default and show their numbers, which reflect new favorites.
   a page that plays from a row, "Play" and "Shuffle"; the chips of Songs missing information and the reasons of its rows;
   an own cover set from the app that takes a song off an open page of Songs missing information and lowers its number.
 
@@ -2368,10 +2370,13 @@ open choices to the recommendations (14.11.2026); they are marked "decision".
 - Decision: the song rows of every song list: the Songs tab (also while its search is open), album, artist, genre and
   folder pages, the songs the Folders tab shows itself (a volume's root shown as the tab, also with a search, §6.1), the
   smart list pages (§17.2), the playlist page (§16.3) and the queue screen (playback.md §9.2). A page selects only its
-  songs: the albums of an artist page, the subfolders of a folder page or of the Folders tab, disc headers, "Play all,
-  with subfolders", the chips and the buttons of a page's header ("Play", "Shuffle") are never selected.
-- Decision: rows of albums, artists, genres, folders and playlists are not selected in M2b; their menus already act on
-  all their songs (playback.md §9.1).
+  songs. Album groups on an artist page, disc headers, "Play all, with subfolders", chips and page header buttons remain
+  outside song selection.
+- In addition, a long press selects a manual playlist, smart list, folder or artist from the open collection list. A tap
+  toggles a collection in that selection. The actions can add its songs to the queue or replace the queue. Selected
+  collections are expanded in display order with each collection's own track order, and folders include descendants.
+  If a track is present more than once in the result, PiPlayer keeps its first occurrence. Adding preserves the existing
+  queue. Song selection and folder selection are independent, and entering either clears the other.
 - Now Playing, the mini player and the controller tree (playback.md §10, Android Auto) have no selection. Nothing that a
   controller sees changes: no node, no command available to it, no item of the tree (§20.7).
 

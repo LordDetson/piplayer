@@ -88,6 +88,12 @@ class SongsViewModel(
     /** The order chosen for this kind of list. */
     val order: StateFlow<ListOrder> get() = mutableOrder
     private val mutableOrder = MutableStateFlow(ListOrder(list.defaultField))
+    val grid: StateFlow<Boolean> = ListSorts(application).grid(list)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(), initialValue = false)
+
+    fun setGrid(show: Boolean) {
+        viewModelScope.launch { ListSorts(getApplication()).setGrid(list, show) }
+    }
     private val search = MutableStateFlow("")
 
     /** The list's key: for Songs missing information the chosen reasons, which the page changes (docs/library.md §17.1). */

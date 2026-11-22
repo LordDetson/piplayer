@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -14,6 +15,12 @@ import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyGridScope
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.itemsIndexed
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -33,6 +40,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -156,6 +164,8 @@ fun SongsContent(
     scanning: Boolean = false,
     onOpenLibrarySettings: (() -> Unit)? = null,
     selection: SongSelection? = null,
+    grid: Boolean = false,
+    gridHeader: LazyGridScope.() -> Unit = {},
     header: LazyListScope.() -> Unit = {},
 ) {
     when (state) {
@@ -177,29 +187,36 @@ fun SongsContent(
             )
         } else {
             val list = rememberLazyListState()
+            val tiles = if (grid) rememberLazyGridState() else null
             // Disc headers only on album pages, which are small; other lists stay one run of rows.
             val discRows = remember(state.songs, discHeaders) { if (discHeaders) discRows(state.songs) else null }
             val withDiscs = discRows != null
-            LaunchedEffect(list) {
-                snapshotFlow { list.layoutInfo.visibleItemsInfo.firstNotNullOfOrNull { it.key as? Long } }.collect(onFirstVisibleSong)
+            LaunchedEffect(list, tiles) {
+                snapshotFlow {
+                    if (tiles == null) list.layoutInfo.visibleItemsInfo.firstNotNullOfOrNull { it.key as? Long }
+                    else tiles.layoutInfo.visibleItemsInfo.firstNotNullOfOrNull { it.key as? Long }
+                }.collect(onFirstVisibleSong)
             }
             // Another order or search starts at the top; a sort anew after the tag pass keeps its song (scrollTo).
             var shownQuery by remember { mutableStateOf(state.query) }
             LaunchedEffect(state.query) {
                 if (state.query != shownQuery) {
                     shownQuery = state.query
-                    list.scrollToItem(0)
+                    if (tiles == null) list.scrollToItem(0) else tiles.scrollToItem(0)
                 }
             }
             LaunchedEffect(state.scrollTo) {
                 val song = state.scrollTo ?: return@LaunchedEffect
                 val row = state.songs.indexOfFirst { it.id == song }
-                if (row >= 0) list.scrollToItem(row + headerItems + if (withDiscs) discsBefore(state.songs, row) else 0)
+                if (row >= 0) {
+                    if (tiles == null) list.scrollToItem(row + headerItems + if (withDiscs) discsBefore(state.songs, row) else 0)
+                    else tiles.scrollToItem(row + headerItems)
+                }
                 onScrolled()
             }
             // Over the list, so that its coming and going moves no row.
             Box(modifier.fillMaxSize()) {
-                LazyColumn(Modifier.fillMaxSize().testTag(listTag), state = list) {
+                if (tiles == null) LazyColumn(Modifier.fillMaxSize().testTag(listTag), state = list) {
                     header()
                     if (state.songs.isEmpty()) {
                         item(key = "empty") {
@@ -228,19 +245,27 @@ fun SongsContent(
                             }
                         }
                     }
+                } else LazyVerticalGrid(GridCells.Adaptive(152.dp), Modifier.fillMaxSize().testTag(listTag), state = tiles) {
+                    gridHeader()
+                    if (state.songs.isEmpty()) item(key = "empty", span = { GridItemSpan(maxLineSpan) }) {
+                        Text(emptyText ?: stringResource(R.string.songs_empty), style = MaterialTheme.typography.bodyLarge,
+                            modifier = Modifier.padding(16.dp))
+                    }
+                    itemsIndexed(state.songs, key = { _, song -> song.id }) { row, song ->
+                        SongTile(song, song.id == currentSongId, menu, selection) { onSongClick(row, song) }
+                    }
                 }
-                ScrollThumb(
-                    list,
-                    label = { item ->
-                        if (item < headerItems) {
-                            headerSections.getOrNull(item)
-                        } else {
-                            val row = item - headerItems
-                            if (discRows == null) state.songs.getOrNull(row)?.section else (discRows.getOrNull(row) as? DiscRow.Song)?.song?.section
-                        }
-                    },
-                    modifier = Modifier.align(Alignment.TopEnd),
-                )
+                val label: (Int) -> String? = { item ->
+                    if (item < headerItems) {
+                        headerSections.getOrNull(item)
+                    } else {
+                        val row = item - headerItems
+                        if (discRows == null || tiles != null) state.songs.getOrNull(row)?.section
+                        else (discRows.getOrNull(row) as? DiscRow.Song)?.song?.section
+                    }
+                }
+                if (tiles == null) ScrollThumb(list, label, Modifier.align(Alignment.TopEnd))
+                else ScrollThumb(tiles, label, Modifier.align(Alignment.TopEnd))
                 if (passProgress.running && passProgress.total >= MIN_FILES_FOR_PROGRESS) {
                     val description = stringResource(R.string.songs_tag_progress, passProgress.done, passProgress.total)
                     LinearProgressIndicator(
@@ -253,6 +278,30 @@ fun SongsContent(
                     )
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun SongTile(song: Song, playing: Boolean, menu: SongMenu?, selection: SongSelection?, onClick: () -> Unit) {
+    val shape = RoundedCornerShape(12.dp)
+    val artist = song.artist ?: stringResource(R.string.songs_unknown_artist)
+    val playingText = stringResource(R.string.song_playing)
+    val row = selection?.let { RowSelection(it.selecting, it.selecting && it.isSelected(song.id)) { it.toggle(song.id) } }
+    Column(Modifier.clip(shape).selectableRow(row, stringResource(R.string.songs_play), onClick)
+        .semantics { if (playing && row?.selecting != true) stateDescription = playingText }.padding(8.dp)) {
+        Box {
+            LibraryCover(CoverRequest.Track(song.id), song.album, Modifier.fillMaxWidth().aspectRatio(1f), shape = shape)
+            if (row?.selecting == true) Box(Modifier.align(Alignment.TopEnd)) { SelectionCheck(row) }
+        }
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f).padding(top = 4.dp)) {
+                Text(song.title, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                    color = if (playing) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
+                Text("$artist · ${formatDuration(song.durationMs)}", style = MaterialTheme.typography.bodySmall,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            if (menu != null && row?.selecting != true) SongMenuButton(song, menu)
         }
     }
 }
