@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import io.github.lorddetson.piplayer.settings.librarytabs.LibraryPanelLayout
@@ -19,6 +20,7 @@ data class Appearance(
     val theme: ThemeMode,
     val nowPlayingLayout: NowPlayingLayout,
     val customTheme: CustomTheme? = null,
+    val nowPlayingMoodBackground: Boolean = true,
 ) {
     internal val themeId: String get() = customTheme?.id ?: theme.stored
 }
@@ -61,6 +63,10 @@ class AppearanceSettings internal constructor(private val file: DataStore<Prefer
                 preferences[themeLayoutKey(activeThemeId)] = layout.stored
             }
         }
+    }
+
+    suspend fun setNowPlayingMoodBackground(enabled: Boolean) {
+        SettingsFiles.edit(file) { it[MOOD_BACKGROUND] = enabled }
     }
 
     internal suspend fun exportThemePackage(defaultName: (ThemeMode) -> String): ThemePackage {
@@ -128,6 +134,7 @@ class AppearanceSettings internal constructor(private val file: DataStore<Prefer
 
     internal companion object {
         private val THEME = stringPreferencesKey("theme_mode")
+        private val MOOD_BACKGROUND = booleanPreferencesKey("now_playing_mood_background")
 
         fun builtInTheme(preferences: Preferences): ThemeMode = ThemeMode.fromStored(preferences[THEME])
 
@@ -147,6 +154,7 @@ class AppearanceSettings internal constructor(private val file: DataStore<Prefer
                 theme = mode,
                 nowPlayingLayout = layout,
                 customTheme = custom,
+                nowPlayingMoodBackground = preferences[MOOD_BACKGROUND] ?: true,
             )
         }
     }

@@ -11,6 +11,7 @@ import androidx.media3.inspector.MediaExtractorCompat
 import java.io.FileDescriptor
 import java.io.IOException
 import java.nio.ByteBuffer
+import kotlin.coroutines.cancellation.CancellationException
 
 /** Why a file could not be decoded. */
 sealed class DecodingException(message: String, cause: Throwable? = null) : IOException(message, cause) {
@@ -47,8 +48,8 @@ sealed class DecodingException(message: String, cause: Throwable? = null) : IOEx
  * Android 13+ a float request would break the platform's trimming of MP3 and AAC encoder delay), but every PCM encoding
  * it reports is accepted. The caller owns [fd]: it must stay open until [decode] returns, is read through but not
  * closed, and must not be used by another extractor at the same time. A descriptor that is not a regular file (a pipe)
- * is first copied by [copies]; [cancelled] stops that copy, and [checkError] says at its end whether the writer
- * failed (`ParcelFileDescriptor.checkError` of [fd]'s descriptor), which makes the copy, and so decoding, fail. It has
+ * is first copied by [copies]. [cancelled] stops the copy or decoding between buffers. At the end of a copy [checkError]
+ * reports whether the writer failed (`ParcelFileDescriptor.checkError` of [fd]'s descriptor), which also fails decoding. It has
  * no default, so that no caller leaves out the check by omission: a truncated pipe would decode, shorter.
  */
 class MediaCodecPcmSource(
@@ -59,8 +60,10 @@ class MediaCodecPcmSource(
     private val checkError: () -> Unit,
 ) : PcmSource {
 
-    override fun decode(consumer: (pcm: ByteBuffer, format: PcmFormat) -> Boolean): SourceInfo =
-        copies.readable(fd, cancelled, checkError) { readable -> decode(readable, consumer) }
+    override fun decode(consumer: (pcm: ByteBuffer, format: PcmFormat) -> Boolean): SourceInfo {
+        checkCancelled()
+        return copies.readable(fd, cancelled, checkError) { readable -> decode(readable, consumer) }
+    }
 
     /** Decodes [readable], which can be read at random positions: [fd] itself or its copy. */
     @OptIn(UnstableApi::class)
@@ -72,6 +75,7 @@ class MediaCodecPcmSource(
             } catch (e: IOException) {
                 throw DecodingException.Failed("The file could not be read: ${e.message}", e)
             }
+            checkCancelled()
             val track = (0 until extractor.trackCount).firstOrNull { index ->
                 extractor.getTrackFormat(index).getString(MediaFormat.KEY_MIME)?.startsWith("audio/") == true
             } ?: throw DecodingException.NoAudioTrack()
@@ -161,6 +165,7 @@ class MediaCodecPcmSource(
         var lastQueuedUs = Long.MIN_VALUE
         var putOutUs = Long.MIN_VALUE
         while (true) try {
+            checkCancelled()
             var progress = false
             while (!inputDone) {
                 if (held >= 0) {
@@ -190,6 +195,7 @@ class MediaCodecPcmSource(
                 }
             }
             while (true) {
+                checkCancelled()
                 val index = codec.dequeueOutputBuffer(info, if (progress) 0 else TIMEOUT_US)
                 if (index == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
                     progress = true
@@ -227,7 +233,7 @@ class MediaCodecPcmSource(
         } catch (e: IllegalStateException) {
             // A codec error arrives as CodecException, or (Android 11) as a plain IllegalStateException from the next
             // call. What the consumer throws (cancellation included) is not the decoder's and goes on as it is.
-            if (inConsumer || received == 0) throw e
+            if (e is CancellationException || inConsumer || received == 0) throw e
             val detail = (e as? MediaCodec.CodecException)?.diagnosticInfo ?: e.message
             return "The decoder failed after $received buffers: $detail"
         }
@@ -236,9 +242,14 @@ class MediaCodecPcmSource(
     /** Hands the container's PCM on as it is, one sample (a block of frames) at a time. */
     private fun readPcm(samples: SampleReader, format: PcmFormat, consumer: (ByteBuffer, PcmFormat) -> Boolean) {
         val buffer = ByteBuffer.allocate(MAX_PCM_SAMPLE_SIZE)
-        while (samples.read(buffer) >= 0) {
-            if (!consumer(buffer, format)) return
+        while (true) {
+            checkCancelled()
+            if (samples.read(buffer) < 0 || !consumer(buffer, format)) return
         }
+    }
+
+    private fun checkCancelled() {
+        if (cancelled()) throw CancellationException("The decode was cancelled")
     }
 
     /**

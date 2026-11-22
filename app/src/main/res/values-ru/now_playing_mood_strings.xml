@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="settings_now_playing_mood_background">Фон по настроению музыки</string>
+    <string name="settings_now_playing_mood_background_summary">Фон экрана «Сейчас играет» меняется по темпу и интенсивности музыки. Анализ выполняется на устройстве.</string>
+</resources>

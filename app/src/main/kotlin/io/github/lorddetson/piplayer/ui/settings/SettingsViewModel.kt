@@ -208,6 +208,10 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         viewModelScope.launch { appearance.setNowPlayingLayout(layout, themeId) }
     }
 
+    fun setNowPlayingMoodBackground(enabled: Boolean) {
+        viewModelScope.launch { appearance.setNowPlayingMoodBackground(enabled) }
+    }
+
     val hiddenFiles: StateFlow<HiddenFiles> =
         library.hiddenFiles.stateIn(viewModelScope, SharingStarted.Eagerly, library.readHiddenFiles())
 

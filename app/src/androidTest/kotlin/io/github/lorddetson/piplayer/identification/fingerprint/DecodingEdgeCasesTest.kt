@@ -2,6 +2,7 @@ package io.github.lorddetson.piplayer.identification.fingerprint
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.github.lorddetson.piplayer.TestFiles
+import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -15,14 +16,27 @@ class DecodingEdgeCasesTest {
 
     private class Decoded(val info: SourceInfo, val formats: List<PcmFormat>, val seconds: Double)
 
-    private fun <T> withSource(name: String, block: (PcmSource) -> T): T {
+    private fun <T> withSource(name: String, cancelled: () -> Boolean = { false }, block: (PcmSource) -> T): T {
         val file = TestFiles.copy("decoding/$name")
         return try {
             TestFiles.open(file).use { pfd ->
-                block(MediaCodecPcmSource(TestFiles.targetContext, pfd.fileDescriptor, checkError = pfd::checkError))
+                block(MediaCodecPcmSource(TestFiles.targetContext, pfd.fileDescriptor, cancelled, checkError = pfd::checkError))
             }
         } finally {
             file.delete()
+        }
+    }
+
+    @Test
+    fun cancellationStopsAfterOutputHasStartedInBothDecodeRoutes() {
+        for (fixture in listOf("mp3-44100-stereo.mp3", "wav-48000-24bit-stereo.wav")) {
+            var output = 0
+            assertThatThrownBy {
+                withSource(fixture, cancelled = { output > 0 }) { source ->
+                    source.decode { _, _ -> output++; true }
+                }
+            }.isInstanceOf(CancellationException::class.java)
+            assertThat(output).isEqualTo(1)
         }
     }
 

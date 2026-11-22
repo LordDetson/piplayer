@@ -223,6 +223,23 @@ class PiPlayerAppTest {
     private fun gesture(progress: Float) = BackEventCompat(10f, 800f, progress, BackEventCompat.EDGE_LEFT)
 
     @Test
+    fun swipingNowPlayingUsesTheRealQueueInBothDirections() {
+        playAndPause("Alpha")
+        openNowPlaying()
+        val art = compose.onNode((cover or hasTestTag(PlayerTags.COVER_PLACEHOLDER)) and inNowPlaying)
+        art.performTouchInput {
+            swipe(Offset(width * 0.82f, centerY), Offset(width * 0.18f, centerY), durationMillis = 340)
+        }
+        controller.waitUntil("A left swipe advances to Bravo") { mediaMetadata.title == "Bravo" }
+        compose.waitUntilExactlyOneExists(hasText("Bravo") and inNowPlaying, timeoutMillis = 5_000)
+        art.performTouchInput {
+            swipe(Offset(width * 0.18f, centerY), Offset(width * 0.82f, centerY), durationMillis = 340)
+        }
+        controller.waitUntil("A right swipe returns to Alpha") { mediaMetadata.title == "Alpha" }
+        compose.waitUntilExactlyOneExists(hasText("Alpha") and inNowPlaying, timeoutMillis = 5_000)
+    }
+
+    @Test
     fun libraryWorkspaceEditsTheListAndBarsOnTheSameCanvas() =
         withStockPlayerTheme(context, "ui_canvas_") {
             playAndPause("Alpha")

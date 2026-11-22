@@ -115,6 +115,7 @@ internal fun EditableUiPanel(
     onAppliedIds: (List<String>?) -> Unit = {},
     legacyStockIds: Set<String> = emptySet(),
     hiddenByParent: Set<String> = emptySet(),
+    viewModeModifier: Modifier = Modifier,
     canvasChrome: @Composable () -> Unit = {},
     stock: @Composable () -> Unit,
 ) {
@@ -225,7 +226,7 @@ internal fun EditableUiPanel(
             val drawingWidth = if (anchored) with(density) { frameSize.width.toDp() } else canvasWidth
             val drawingHeight = if (anchored) with(density) { frameSize.height.toDp() } else height
 
-            Box {
+            Box(if (draft == null) viewModeModifier else Modifier) {
                 if (layout == null || anchored) {
                     val masked = stockChanges?.hiddenStock.orEmpty() + stockChanges?.items.orEmpty().map(UiCanvasItem::id)
                     CompositionLocalProvider(LocalStockUiSlots provides StockUiSlots(geometry, masked)) {

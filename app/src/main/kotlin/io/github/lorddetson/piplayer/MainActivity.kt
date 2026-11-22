@@ -57,7 +57,12 @@ class MainActivity : ComponentActivity() {
                 // Test tags double as resource IDs, so that the checks of the release build find elements by them
                 // (docs/library.md §2.2).
                 Box(Modifier.fillMaxSize().semantics { testTagsAsResourceId = true }) {
-                    PiPlayerApp(playerViewModel, nowPlayingLayout = appearance.nowPlayingLayout, backStack = backStack)
+                    PiPlayerApp(
+                        playerViewModel,
+                        nowPlayingLayout = appearance.nowPlayingLayout,
+                        backStack = backStack,
+                        nowPlayingMoodBackground = appearance.nowPlayingMoodBackground,
+                    )
                 }
             }
         }

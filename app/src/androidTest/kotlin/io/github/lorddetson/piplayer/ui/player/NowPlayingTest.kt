@@ -105,6 +105,51 @@ class NowPlayingTest {
         SemanticsMatcher("click label \"$label\"") { it.config.getOrNull(SemanticsActions.OnClick)?.label == label }
 
     @Test
+    fun swipingTheCoverChangesTracksInBothDirectionsWithoutRestartingTheCurrentOne() =
+        withStockPlayerTheme(context, "now_playing_panel_", "ui_canvas_") {
+            val player = show(listOf(halo, other), cover = true)
+            val cover = compose.onNodeWithTag(PlayerTags.COVER, useUnmergedTree = true)
+            cover.performTouchInput { swipe(Offset(width * 0.85f, center.y), Offset(width * 0.15f, center.y)) }
+            compose.onNodeWithText(other.title).assertIsDisplayed()
+            compose.runOnUiThread { player.positionMs = 42_000 }
+            cover.performTouchInput { swipe(Offset(width * 0.15f, center.y), Offset(width * 0.85f, center.y)) }
+            compose.onNodeWithText(halo.title).assertIsDisplayed()
+            assertThat(compose.runOnUiThread { player.calls.toList() }).containsExactly(
+                Call.Seek(1, C.TIME_UNSET, Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM),
+                Call.Seek(0, C.TIME_UNSET, Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM),
+            )
+        }
+
+    @Test
+    fun swipingVerticallyOrPastTheStartKeepsTheCurrentTrack() =
+        withStockPlayerTheme(context, "now_playing_panel_", "ui_canvas_") {
+            val player = show(listOf(halo, other), cover = true)
+            val cover = compose.onNodeWithTag(PlayerTags.COVER, useUnmergedTree = true)
+            cover.performTouchInput { swipe(Offset(width * 0.15f, center.y), Offset(width * 0.85f, center.y)) }
+            cover.performTouchInput { swipe(Offset(center.x, height * 0.8f), Offset(center.x, height * 0.2f)) }
+            assertThat(compose.runOnUiThread { player.calls.toList() }).isEmpty()
+        }
+
+    @Test
+    fun draggingTheSeekSliderOrAnEditedCoverNeverSkipsTracks() =
+        withStockPlayerTheme(context, "now_playing_panel_", "ui_canvas_") {
+            val player = show(listOf(halo, other), cover = true, layout = NowPlayingLayout.EXPANDED)
+            compose.onNodeWithTag(PlayerTags.SEEK_BAR).performScrollTo().performTouchInput {
+                swipe(Offset(width * 0.28f, center.y), Offset(width * 0.68f, center.y), durationMillis = 300)
+            }
+            val seek = compose.runOnUiThread { player.calls.toList().single() } as Call.Seek
+            assertThat(seek.mediaItemIndex).isEqualTo(0)
+            assertThat(seek.command).isEqualTo(Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM)
+
+            compose.onNodeWithTag(PlayerTags.COVER, useUnmergedTree = true).performScrollTo().performTouchInput { longClick() }
+            compose.onNodeWithTag("ui_edit_mode").performClick()
+            compose.onNodeWithTag("ui_component_now:cover").performTouchInput {
+                swipe(Offset(width * 0.86f, center.y), Offset(width * 0.12f, center.y))
+            }
+            assertThat(compose.runOnUiThread { player.calls.toList() }).containsExactly(seek)
+        }
+
+    @Test
     fun editorSeparatesSongAndAudioFieldsAndCanHideOneAudioField() =
         withStockPlayerTheme(context, "now_playing_panel_", "ui_canvas_") {
             show(cover = true, layout = NowPlayingLayout.EXPANDED)

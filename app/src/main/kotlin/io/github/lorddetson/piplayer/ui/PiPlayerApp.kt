@@ -253,6 +253,7 @@ fun PiPlayerApp(
     viewModel: PlayerViewModel = viewModel(),
     nowPlayingLayout: NowPlayingLayout = NowPlayingLayout.STANDARD,
     backStack: MutableList<NavKey> = rememberNavBackStack(SongsRoute),
+    nowPlayingMoodBackground: Boolean = true,
 ) {
     val player by viewModel.player.collectAsStateWithLifecycle()
     val cover by viewModel.cover.collectAsStateWithLifecycle()
@@ -528,6 +529,7 @@ fun PiPlayerApp(
                             cover,
                             onClose = { close() },
                             layout = nowPlayingLayout,
+                            moodBackground = nowPlayingMoodBackground,
                             onPanelSaveFailed = { snackbar.showSnackbar(panelSaveFailed) },
                             controls = extraControls,
                             onOpenArtist = links?.artists?.firstOrNull()?.let {

@@ -174,6 +174,13 @@ fun SettingsScreen(
                 R.string.settings_now_playing_layout, appearance.nowPlayingLayout, NowPlayingLayout.entries,
                 NowPlayingLayout::label, { viewModel.setNowPlayingLayout(it, appearance.themeId) },
             )
+            SwitchRow(
+                stringResource(R.string.settings_now_playing_mood_background),
+                stringResource(R.string.settings_now_playing_mood_background_summary),
+                appearance.nowPlayingMoodBackground,
+                viewModel::setNowPlayingMoodBackground,
+                Modifier.testTag("now_playing_mood_background"),
+            )
             ThemePackageSettings(appearance.customTheme, viewModel)
             SectionTitle(stringResource(R.string.settings_about))
             onOpenDemo?.let {
@@ -297,10 +304,10 @@ internal fun TextRow(title: String, summary: String, onClick: () -> Unit) {
 }
 
 @Composable
-private fun SwitchRow(title: String, summary: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+private fun SwitchRow(title: String, summary: String, checked: Boolean, onChange: (Boolean) -> Unit, modifier: Modifier = Modifier) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .toggleable(value = checked, role = Role.Switch, onValueChange = onChange)
             .padding(horizontal = 24.dp, vertical = 12.dp),

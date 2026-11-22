@@ -1,7 +1,6 @@
 package io.github.lorddetson.piplayer.ui.player
 
 import androidx.annotation.OptIn
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -111,8 +110,14 @@ fun NowPlaying(
     more: (@Composable (close: () -> Unit) -> Unit)? = null,
     layout: NowPlayingLayout = NowPlayingLayout.STANDARD,
     onPanelSaveFailed: suspend () -> Unit = {},
+    moodBackground: Boolean = true,
 ) {
-    val metadata = rememberCurrentItemState(player).mediaMetadata
+    val item = rememberCurrentItemState(player)
+    val metadata = item.mediaMetadata
+    val moodBackdrop = rememberMoodBackdrop(item.mediaItem, moodBackground)
+    val swipe = rememberNowPlayingTrackSwipe(player)
+    val swipeMotion = rememberTrackSwipeMotion(swipe)
+    val protectedTouch = Modifier.guardTrackSwipe(swipe)
     val format = rememberAudioFormat(player)
     val unknownArtist = stringResource(R.string.songs_unknown_artist)
     val pane = stringResource(R.string.player_now_playing)
@@ -131,7 +136,8 @@ fun NowPlaying(
         }
     }.toSet()
     val editor = rememberNowPlayingCustomization(available, !minimal || controlsRevealed, { controlsRevealed = true }, onPanelSaveFailed)
-    val action: @Composable (NowPlayingElement, Modifier) -> Unit = { element, press ->
+    val action: @Composable (NowPlayingElement, Modifier) -> Unit = { element, input ->
+        val press = input.then(protectedTouch)
         when (element) {
             NowPlayingElement.IDENTIFY -> IdentifyButton(player, press)
             NowPlayingElement.FAVORITE -> favorite?.let { FavoriteButton(it, press.testTag(PlayerTags.FAVORITE)) }
@@ -155,13 +161,13 @@ fun NowPlaying(
     val body: @Composable (NowPlayingElement, Modifier, TextAlign, Boolean) -> Unit = { element, press, textAlign, split ->
         when (element) {
             NowPlayingElement.TRACK_INFO -> TrackHeading(metadata, unknownArtist, onOpenArtist, onOpenAlbum,
-                textAlign, press.fillMaxWidth(), split)
+                textAlign, press.fillMaxWidth(), split, swipeMotion)
             NowPlayingElement.FORMAT -> Column(press, horizontalAlignment = Alignment.CenterHorizontally) {
                 if (split) StockUiSlot(PLAYING_BADGE_ID) { PlayingBadge(player) } else PlayingBadge(player)
                 Spacer(Modifier.height(4.dp))
                 AudioFormatReadout(format, split)
             }
-            NowPlayingElement.SEEK -> SeekBar(player, press.fillMaxWidth())
+            NowPlayingElement.SEEK -> SeekBar(player, press.fillMaxWidth().then(protectedTouch))
             else -> error("Expected a track content component")
         }
     }
@@ -169,10 +175,10 @@ fun NowPlaying(
         val size = if (expanded) Modifier.size(104.dp) else {
             Modifier.widthIn(max = if (minimal) 320.dp else 480.dp).fillMaxWidth().aspectRatio(1f)
         }
-        CoverImage(cover, size.then(press).clip(RoundedCornerShape(12.dp)), if (expanded) 36.dp else 96.dp, coverName)
+        CoverImage(cover, size.then(press).then(swipeMotion).clip(RoundedCornerShape(12.dp)), if (expanded) 36.dp else 96.dp, coverName)
     }
     val collapse: @Composable () -> Unit = {
-        IconButton(onClick = onClose) {
+        IconButton(onClick = onClose, modifier = protectedTouch) {
             Icon(painterResource(R.drawable.ic_player_collapse), stringResource(R.string.player_close_now_playing))
         }
     }
@@ -206,7 +212,7 @@ fun NowPlaying(
         ) {
             when {
                 element == NowPlayingElement.COVER -> CoverImage(
-                    cover, Modifier.fillMaxSize().clip(RoundedCornerShape(12.dp)),
+                    cover, Modifier.fillMaxSize().then(swipeMotion).clip(RoundedCornerShape(12.dp)),
                     if (expanded) 36.dp else 72.dp, coverName,
                 )
                 trackContent -> body(element, Modifier, TextAlign.Center, false)
@@ -218,7 +224,7 @@ fun NowPlaying(
         UiCanvasComponent(field.nowPlayingId, field.label,
             height = if (field == TrackField.TITLE) 36.dp else 24.dp, fillWidth = true, alignableText = true) {
             field.value(metadata, unknownArtist)?.let { value ->
-                TrackFieldText(field, value, onOpenArtist, onOpenAlbum, TextAlign.Center)
+                TrackFieldText(field, value, onOpenArtist, onOpenAlbum, TextAlign.Center, swipeMotion)
             }
         }
     }
@@ -231,7 +237,7 @@ fun NowPlaying(
     val badgeComponent = UiCanvasComponent(PLAYING_BADGE_ID, R.string.player_metadata_badge, width = 72.dp, height = 48.dp) {
         PlayingBadge(player)
     }
-    BoxWithConstraints(modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface).windowInsetsPadding(contentInsets)) {
+    BoxWithConstraints(modifier.fillMaxSize().then(moodBackdrop).windowInsetsPadding(contentInsets)) {
         EditableUiPanel(
             surface = UiSurface.NOW_PLAYING,
             themeId = editor.themeId,
@@ -240,6 +246,7 @@ fun NowPlaying(
             height = (maxHeight - 144.dp).coerceAtLeast(96.dp),
             onSaveFailed = onPanelSaveFailed,
             legacyStockIds = setOf(NowPlayingElement.TRACK_INFO.canvasId, NowPlayingElement.FORMAT.canvasId),
+            viewModeModifier = if (player == null) Modifier else Modifier.nowPlayingTrackSwipe(swipe),
             canvasChrome = { Row(Modifier.fillMaxWidth().semantics { paneTitle = pane }) { collapse() } },
         ) {
             StockNowPlaying(
@@ -379,6 +386,7 @@ private fun TrackHeading(
     textAlign: TextAlign,
     modifier: Modifier,
     split: Boolean,
+    titleMotion: Modifier,
 ) {
     Column(
         modifier,
@@ -387,8 +395,8 @@ private fun TrackHeading(
         for (field in TrackField.entries) {
             val value = field.value(metadata, unknownArtist) ?: continue
             if (split) StockUiSlot(field.nowPlayingId) {
-                TrackFieldText(field, value, onOpenArtist, onOpenAlbum, textAlign)
-            } else TrackFieldText(field, value, onOpenArtist, onOpenAlbum, textAlign)
+                TrackFieldText(field, value, onOpenArtist, onOpenAlbum, textAlign, titleMotion)
+            } else TrackFieldText(field, value, onOpenArtist, onOpenAlbum, textAlign, titleMotion)
         }
     }
 }
@@ -400,6 +408,7 @@ private fun TrackFieldText(
     onOpenArtist: (() -> Unit)?,
     onOpenAlbum: (() -> Unit)?,
     alignment: TextAlign,
+    titleMotion: Modifier,
 ) {
     val typography = MaterialTheme.typography
     val colors = MaterialTheme.colorScheme
@@ -415,7 +424,7 @@ private fun TrackFieldText(
         TrackField.ALBUM -> colors.onSurfaceVariant
     }
     val modifier = when (field) {
-        TrackField.TITLE -> Modifier.fillMaxWidth().semantics { heading() }
+        TrackField.TITLE -> Modifier.fillMaxWidth().then(titleMotion).semantics { heading() }
         TrackField.ARTIST -> Modifier.fillAlignedTextWidth().opens(onOpenArtist, R.string.open_artist)
         TrackField.ALBUM -> Modifier.fillAlignedTextWidth().opens(onOpenAlbum, R.string.open_album)
     }

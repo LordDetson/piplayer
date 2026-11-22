@@ -326,6 +326,13 @@ large queue, and a song from an SD card if there is one.
   file (§3.4). No artist shows "Unknown artist", as in the list; no album shows nothing. An unknown length shows
   "--:--" and the seek bar cannot be moved.
 - The seek bar follows playback smoothly. Dragging it shows the new position and seeks when the finger lifts.
+- Swiping left across Now Playing skips to the next track. Swiping right opens the previous track. Both gestures
+  follow the playback order and keep the current track when there is no item in that direction. The new artwork and title slide
+  in when a swipe switches tracks. The seek bar, other interactive controls and the layout editor keep their own
+  gestures. The animation follows the system animation scale.
+- The music mood background uses a short excerpt from a readable local audio file. Its tempo and intensity set a
+  soft tint and move the background gradient during the transition. Streams and unreadable files use the theme
+  surface color. The Appearance switch turns this effect off. The transition follows the system animation scale.
 - The content scrolls when it does not fit, in landscape or at large font scales; adaptive layouts come in M5.
 
 ### 3.4 Cover

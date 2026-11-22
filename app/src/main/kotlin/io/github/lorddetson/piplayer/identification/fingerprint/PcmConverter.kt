@@ -81,6 +81,23 @@ object PcmConverter {
         PcmEncoding.PCM_FLOAT -> pcm.getFloat()
     }
 
+    /** Mean square amplitude across the channels of each frame, with no phase cancellation. */
+    internal fun toFramePower(buffer: ByteBuffer, format: PcmFormat): FloatArray {
+        require(buffer.remaining() % format.bytesPerFrame == 0)
+        val pcm = buffer.duplicate().order(ByteOrder.LITTLE_ENDIAN)
+        return FloatArray(pcm.remaining() / format.bytesPerFrame) {
+            var sum = 0f
+            repeat(format.channelCount) {
+                val level = sample(pcm, format.encoding)
+                if (level.isFinite()) {
+                    val normalized = level.coerceIn(-1f, 1f)
+                    sum += normalized * normalized
+                }
+            }
+            sum / format.channelCount
+        }
+    }
+
     /** 16-bit samples: rounded to the nearest step and clipped to the 16-bit range; NaN becomes silence. */
     fun toPcm16(samples: FloatArray, offset: Int = 0, length: Int = samples.size - offset): ShortArray {
         Objects.checkFromIndexSize(offset, length, samples.size)

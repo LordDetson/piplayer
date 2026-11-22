@@ -43,6 +43,14 @@ class PcmConverterTest {
     }
 
     @Test
+    fun `frame power keeps the intensity of opposite phase channels`() {
+        val input = pcm16(16_384, -16_384, 0, -32_768)
+        val power = PcmConverter.toFramePower(input, format(2, PcmEncoding.PCM_16BIT))
+        assertThat(power).containsExactly(0.25f, 0.5f)
+        assertThat(input.position()).isZero()
+    }
+
+    @Test
     fun `5_1 is averaged over all six channels`() {
         // One frame with only the left surround channel (fifth in the decoder's order) set.
         val mono = PcmConverter.toMono(pcmFloat(0f, 0f, 0f, 0f, 0.6f, 0f), format(6, PcmEncoding.PCM_FLOAT))

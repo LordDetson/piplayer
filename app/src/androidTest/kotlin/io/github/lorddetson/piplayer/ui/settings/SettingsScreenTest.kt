@@ -8,6 +8,8 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assertIsOff
+import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasTestTag
@@ -19,6 +21,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.test.espresso.Espresso
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.github.lorddetson.piplayer.MainActivity
@@ -105,6 +108,27 @@ class SettingsScreenTest {
         Espresso.pressBack()
 
         compose.waitUntilExactlyOneExists(androidx.compose.ui.test.hasTestTag(SongsTags.LIST), timeoutMillis = 5_000)
+    }
+
+    @Test
+    fun moodBackgroundCanBeTurnedOffAndKeepsThatChoiceAfterRecreation() {
+        val file = SettingsFiles.settings(context)
+        val key = booleanPreferencesKey("now_playing_mood_background")
+        val previous = runBlocking { file.data.first()[key] }
+        try {
+            runBlocking { SettingsFiles.edit(file) { it.remove(key) } }
+            openSettings()
+            compose.onNodeWithTag("now_playing_mood_background").performScrollTo().assertIsOn().performClick()
+            compose.waitUntil(5_000) { runBlocking { file.data.first()[key] } == false }
+            compose.activityRule.scenario.recreate()
+            compose.onNodeWithTag("now_playing_mood_background").performScrollTo().assertIsOff()
+        } finally {
+            runBlocking {
+                SettingsFiles.edit(file) { preferences ->
+                    if (previous == null) preferences.remove(key) else preferences[key] = previous
+                }
+            }
+        }
     }
 
     /**
