@@ -26,6 +26,8 @@ import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.dp
 import io.github.lorddetson.piplayer.R
 import io.github.lorddetson.piplayer.ui.customization.UiControlColor
+import io.github.lorddetson.piplayer.ui.customization.UiControlTextAlign
+import androidx.compose.ui.text.style.TextAlign
 import io.github.lorddetson.piplayer.ui.customization.UiControlIcon
 import kotlinx.coroutines.delay
 
@@ -55,7 +57,12 @@ internal fun SleepTimerButton(controls: ExtraControls, modifier: Modifier) {
         },
     ) {
         UiControlIcon(painterResource(R.drawable.ic_player_timer), contentDescription = null)
-        if (left != null) Text(PlayerTime.clock(left), modifier = Modifier.padding(start = 8.dp), color = UiControlColor(Color.Unspecified))
+        if (left != null) {
+            val alignment = UiControlTextAlign()
+            val labelWidth = if (alignment == TextAlign.Unspecified) Modifier else Modifier.weight(1f)
+            Text(PlayerTime.clock(left), modifier = labelWidth.padding(start = 8.dp),
+                color = UiControlColor(Color.Unspecified), textAlign = alignment)
+        }
     }
 
     if (timerOpen) {

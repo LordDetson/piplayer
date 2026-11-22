@@ -44,6 +44,7 @@ internal object ThemePackageCodec {
     private const val NAVIGATION_VERSION = 5
     private const val CANVAS_VERSION = 6
     private const val ANCHORED_CANVAS_VERSION = 7
+    private const val ADVANCED_CANVAS_VERSION = 8
     private const val MAX_NAME_LENGTH = 80
 
     fun encode(theme: ThemePackage): ByteArray {
@@ -58,6 +59,7 @@ internal object ThemePackageCodec {
         require(navigation == null || navigation.toLayout() == theme.navigation)
         require(theme.canvases?.isValid != false)
         val version = when {
+            theme.canvases?.panels?.values?.any(UiCanvasLayout::hasAdvancedOptions) == true -> ADVANCED_CANVAS_VERSION
             theme.canvases?.panels?.values?.any { it.hiddenStock != null } == true -> ANCHORED_CANVAS_VERSION
             theme.canvases != null -> CANVAS_VERSION
             navigation != null -> NAVIGATION_VERSION
@@ -92,7 +94,7 @@ internal object ThemePackageCodec {
             val parsed = Json.parseToJsonElement(text) as? JsonObject ?: return ThemePackageRead.Invalid
             val version = (parsed["version"] as? JsonPrimitive)?.takeUnless { it.isString }?.intOrNull
                 ?: return ThemePackageRead.Invalid
-            if (version !in PALETTE_VERSION..ANCHORED_CANVAS_VERSION) return ThemePackageRead.UnsupportedVersion
+            if (version !in PALETTE_VERSION..ADVANCED_CANVAS_VERSION) return ThemePackageRead.UnsupportedVersion
             if (version < CANVAS_VERSION && length > LEGACY_MAX_BYTES) return ThemePackageRead.TooLarge
             if (version < CANVAS_VERSION && !hasBoundedStructure(text, legacy = true)) return ThemePackageRead.Invalid
             if (!hasVersionFields(version, parsed)) return ThemePackageRead.Invalid
@@ -113,7 +115,9 @@ internal object ThemePackageCodec {
                 document.canvases?.takeIf(UiThemeCanvases::isValid) ?: return ThemePackageRead.Invalid
             } else null
             val hasAnchors = canvases?.panels?.values?.any { it.hiddenStock != null } == true
-            if ((version == ANCHORED_CANVAS_VERSION) != hasAnchors) return ThemePackageRead.Invalid
+            val hasAdvancedOptions = canvases?.panels?.values?.any(UiCanvasLayout::hasAdvancedOptions) == true
+            if (version < ADVANCED_CANVAS_VERSION && (version == ANCHORED_CANVAS_VERSION) != hasAnchors) return ThemePackageRead.Invalid
+            if ((version == ADVANCED_CANVAS_VERSION) != hasAdvancedOptions) return ThemePackageRead.Invalid
             ThemePackageRead.Loaded(ThemePackage(document.name, base, document.palette, layout, panel, player, miniPlayer, navigation, canvases))
         } catch (_: CharacterCodingException) {
             ThemePackageRead.Invalid

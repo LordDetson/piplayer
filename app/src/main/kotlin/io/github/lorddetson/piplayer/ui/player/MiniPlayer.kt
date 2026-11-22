@@ -71,6 +71,8 @@ import io.github.lorddetson.piplayer.ui.customization.PanelRestoreButton
 import io.github.lorddetson.piplayer.ui.customization.StockUiSlot
 import io.github.lorddetson.piplayer.ui.customization.UiCanvasComponent
 import io.github.lorddetson.piplayer.ui.customization.UiControlColor
+import io.github.lorddetson.piplayer.ui.customization.UiControlTextAlign
+import io.github.lorddetson.piplayer.ui.customization.fillAlignedTextWidth
 import io.github.lorddetson.piplayer.ui.customization.customizeOnHold
 import kotlinx.coroutines.launch
 
@@ -117,6 +119,8 @@ fun MiniPlayer(
                 text = metadata.title?.toString().orEmpty(),
                 style = MaterialTheme.typography.titleMedium,
                 color = UiControlColor(Color.Unspecified),
+                modifier = Modifier.fillAlignedTextWidth(),
+                textAlign = UiControlTextAlign(),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -124,6 +128,8 @@ fun MiniPlayer(
                 text = metadata.artist?.toString() ?: stringResource(R.string.songs_unknown_artist),
                 style = MaterialTheme.typography.bodyMedium,
                 color = UiControlColor(MaterialTheme.colorScheme.onSurfaceVariant),
+                modifier = Modifier.fillAlignedTextWidth(),
+                textAlign = UiControlTextAlign(),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -135,7 +141,7 @@ fun MiniPlayer(
         UiCanvasComponent(MiniPlayerElement.COVER.canvasId, R.string.player_element_cover) {
             artwork(Modifier.fillMaxSize().then(openTrack))
         },
-        UiCanvasComponent(MiniPlayerElement.TRACK_INFO.canvasId, R.string.player_element_track, fillWidth = true) {
+        UiCanvasComponent(MiniPlayerElement.TRACK_INFO.canvasId, R.string.player_element_track, fillWidth = true, alignableText = true) {
             details(openTrack)
         },
         UiCanvasComponent(MiniPlayerElement.PLAY_PAUSE.canvasId, R.string.player_element_play_pause, customizableIcon = true) {

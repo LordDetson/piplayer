@@ -78,6 +78,8 @@ import io.github.lorddetson.piplayer.settings.UiSurface
 import io.github.lorddetson.piplayer.ui.customization.EditableUiPanel
 import io.github.lorddetson.piplayer.ui.customization.UiCanvasComponent
 import io.github.lorddetson.piplayer.ui.customization.UiControlColor
+import io.github.lorddetson.piplayer.ui.customization.UiControlTextAlign
+import io.github.lorddetson.piplayer.ui.customization.fillAlignedTextWidth
 import io.github.lorddetson.piplayer.ui.customization.UiControlIcon
 import io.github.lorddetson.piplayer.ui.details.PlayingBadge
 import io.github.lorddetson.piplayer.ui.identification.IdentifyButton
@@ -192,6 +194,7 @@ fun NowPlaying(
         UiCanvasComponent(
             element.canvasId, element.label, width, height,
             fillWidth = element in fullWidthElements, customizableIcon = !trackContent,
+            alignableText = element in fullWidthElements || element == NowPlayingElement.TIMER,
         ) {
             when {
                 element == NowPlayingElement.COVER -> CoverImage(
@@ -342,6 +345,7 @@ private fun TrackHeading(
     textAlign: TextAlign,
     modifier: Modifier,
 ) {
+    val alignment = UiControlTextAlign(textAlign)
     Column(
         modifier,
         horizontalAlignment = if (textAlign == TextAlign.Center) Alignment.CenterHorizontally else Alignment.Start,
@@ -350,7 +354,7 @@ private fun TrackHeading(
             text = metadata.title?.toString().orEmpty(),
             style = MaterialTheme.typography.headlineSmall,
             color = UiControlColor(Color.Unspecified),
-            textAlign = textAlign,
+            textAlign = alignment,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.fillMaxWidth().semantics { heading() },
@@ -359,20 +363,20 @@ private fun TrackHeading(
             text = metadata.artist?.toString() ?: stringResource(R.string.songs_unknown_artist),
             style = MaterialTheme.typography.titleMedium,
             color = UiControlColor(MaterialTheme.colorScheme.primary),
-            textAlign = textAlign,
+            textAlign = alignment,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.opens(onOpenArtist, R.string.open_artist),
+            modifier = Modifier.fillAlignedTextWidth().opens(onOpenArtist, R.string.open_artist),
         )
         metadata.albumTitle?.let { album ->
             Text(
                 text = album.toString(),
                 style = MaterialTheme.typography.bodyLarge,
                 color = UiControlColor(MaterialTheme.colorScheme.onSurfaceVariant),
-                textAlign = textAlign,
+                textAlign = alignment,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.opens(onOpenAlbum, R.string.open_album),
+                modifier = Modifier.fillAlignedTextWidth().opens(onOpenAlbum, R.string.open_album),
             )
         }
     }
@@ -402,6 +406,8 @@ private fun FormatLineText(player: Player?) {
         text = format?.let(FormatSummary::of)?.let { formatLine(it, resources) }.orEmpty(),
         style = MaterialTheme.typography.labelLarge,
         color = UiControlColor(MaterialTheme.colorScheme.onSurfaceVariant),
+        textAlign = UiControlTextAlign(),
+        modifier = Modifier.fillAlignedTextWidth(),
         minLines = 1,
     )
 }
@@ -455,9 +461,14 @@ private fun SeekBar(player: Player?, modifier: Modifier = Modifier) {
         )
         Row(Modifier.fillMaxWidth()) {
             val color = UiControlColor(Color.Unspecified)
-            Text(PlayerTime.elapsed(positionMs), style = MaterialTheme.typography.labelMedium, color = color)
-            Spacer(Modifier.weight(1f))
-            Text(PlayerTime.remaining(positionMs, time.durationMs), style = MaterialTheme.typography.labelMedium, color = color)
+            val alignment = UiControlTextAlign()
+            val customized = alignment != TextAlign.Unspecified
+            val timeWidth = if (customized) Modifier.weight(1f) else Modifier
+            Text(PlayerTime.elapsed(positionMs), modifier = timeWidth, style = MaterialTheme.typography.labelMedium,
+                color = color, textAlign = alignment)
+            if (!customized) Spacer(Modifier.weight(1f))
+            Text(PlayerTime.remaining(positionMs, time.durationMs), modifier = timeWidth,
+                style = MaterialTheme.typography.labelMedium, color = color, textAlign = alignment)
         }
     }
 }

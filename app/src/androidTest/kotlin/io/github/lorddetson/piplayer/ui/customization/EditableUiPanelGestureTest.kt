@@ -13,6 +13,7 @@ import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipe
 import androidx.compose.ui.unit.dp
@@ -22,11 +23,14 @@ import io.github.lorddetson.piplayer.TestFiles
 import io.github.lorddetson.piplayer.settings.ThemeMode
 import io.github.lorddetson.piplayer.settings.UI_CANVAS_UNITS
 import io.github.lorddetson.piplayer.settings.UiCanvasSettings
+import io.github.lorddetson.piplayer.settings.UiPlacementMode
 import io.github.lorddetson.piplayer.settings.UiSurface
+import io.github.lorddetson.piplayer.settings.UiTextAlignment
 import io.github.lorddetson.piplayer.ui.player.withStockPlayerTheme
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.within
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -34,6 +38,62 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class EditableUiPanelGestureTest {
     @get:Rule val compose = createComposeRule()
+
+    @Test
+    fun groupScalesTogetherAndSavesAlignmentAndPlacementWithTheTheme() =
+        withStockPlayerTheme(TestFiles.targetContext, "ui_group_") {
+            val surface = UiSurface.MINI_PLAYER
+            val first = "fixture:first"
+            val second = "fixture:second"
+            val entry = "fixture_group_entry"
+            compose.setContent {
+                Box(Modifier.width(280.dp)) {
+                    EditableUiPanel(
+                        surface = surface,
+                        themeId = ThemeMode.SYSTEM.stored,
+                        components = listOf(first, second).map { id ->
+                            UiCanvasComponent(id, R.string.player_element_track, width = 64.dp, alignableText = true) {
+                                Text(id, modifier = Modifier.fillAlignedTextWidth(), textAlign = UiControlTextAlign())
+                            }
+                        },
+                        initialRows = listOf(listOf(first, second)),
+                        height = 160.dp,
+                    ) {
+                        val start = LocalUiEditEntry.current
+                        if (start != null) {
+                            Button(onClick = { start(first) }, modifier = Modifier.testTag(entry)) { Text("Edit") }
+                        }
+                    }
+                }
+            }
+            compose.waitUntil(5_000) { compose.onAllNodes(hasTestTag(entry)).fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithTag(entry).performClick()
+            compose.onNodeWithTag("ui_edit_inspect").performClick()
+            compose.onNodeWithTag("ui_edit_align_end").performScrollTo().performClick()
+            compose.onNodeWithTag("ui_edit_apply_properties").performClick()
+            compose.onNodeWithTag("ui_edit_group").performClick()
+            compose.onNodeWithTag("ui_component_" + second).performClick()
+            compose.onNodeWithTag("ui_edit_group").performClick()
+            compose.onNodeWithTag("ui_edit_snap").performClick()
+            compose.onNodeWithTag("ui_edit_options").performClick()
+            compose.onNodeWithTag("ui_edit_placement_push").performClick()
+            compose.onNodeWithTag("ui_edit_close_options").performClick()
+            val before = compose.onNodeWithTag("ui_component_" + first).fetchSemanticsNode().boundsInRoot
+            compose.onNodeWithTag("ui_resize_" + second + ":right").performTouchInput {
+                swipe(center, center + Offset(before.width, 0f), durationMillis = 400)
+            }
+            val after = compose.onNodeWithTag("ui_component_" + first).fetchSemanticsNode().boundsInRoot
+            assertThat(after.width).isGreaterThan(before.width)
+            compose.onNodeWithTag("ui_edit_done").performClick()
+            compose.waitUntil(5_000) { compose.onAllNodes(hasTestTag("ui_edit_done")).fetchSemanticsNodes().isEmpty() }
+
+            val saved = runBlocking { UiCanvasSettings(TestFiles.targetContext).state.first().layouts.panels.getValue(surface) }
+            assertThat(saved.groups).containsExactly(setOf(first, second))
+            assertThat(saved.snapping).isFalse()
+            assertThat(saved.placement).isEqualTo(UiPlacementMode.PUSH)
+            assertThat(saved.items.first().style.textAlignment).isEqualTo(UiTextAlignment.END)
+            assertThat(saved.items[0].bounds.width).isCloseTo(saved.items[1].bounds.width, within(1))
+        }
 
     @Test
     fun draggingAndResizingSaveTheGeometryAndKeepTheLiveActionSilentUntilDone() =
@@ -67,6 +127,9 @@ class EditableUiPanelGestureTest {
             }
             compose.waitUntil(5_000) { compose.onAllNodes(hasTestTag(entryTag)).fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithTag(entryTag).performClick()
+            compose.onNodeWithTag("ui_editor_ring_handle").assertExists()
+            compose.onNodeWithTag("ui_resize_fixture:play:top_left").assertExists()
+            compose.onNodeWithTag("ui_resize_fixture:play:left").assertExists()
             val component = compose.onNodeWithTag("ui_component_$componentId")
             val initial = component.fetchSemanticsNode().boundsInRoot
             val frame = compose.onNodeWithTag("ui_canvas").fetchSemanticsNode().boundsInRoot

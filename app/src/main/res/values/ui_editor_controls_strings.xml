@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="ui_edit_group">Group components</string>
+    <string name="ui_edit_finish_group">Create group</string>
+    <string name="ui_edit_cancel_group">Cancel group selection</string>
+    <string name="ui_edit_ungroup">Ungroup</string>
+    <string name="ui_edit_snap">Snap to guides and components</string>
+    <string name="ui_edit_options">Editor options</string>
+    <string name="ui_edit_placement">Component placement</string>
+    <string name="ui_edit_push">Move neighbors aside</string>
+    <string name="ui_edit_overlap">Allow overlap</string>
+    <string name="ui_edit_no_space">There is not enough room.</string>
+    <string name="ui_edit_text_alignment">Text alignment</string>
+    <string name="ui_edit_align_default">Default</string>
+    <string name="ui_edit_align_start">Start</string>
+    <string name="ui_edit_align_center">Center</string>
+    <string name="ui_edit_align_end">End</string>
+    <string name="ui_edit_align_justify">Justify</string>
+</resources>

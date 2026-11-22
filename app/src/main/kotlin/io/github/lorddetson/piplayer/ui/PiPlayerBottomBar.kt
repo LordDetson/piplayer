@@ -50,6 +50,8 @@ import io.github.lorddetson.piplayer.ui.customization.PanelMenuPage
 import io.github.lorddetson.piplayer.ui.customization.PanelRestoreButton
 import io.github.lorddetson.piplayer.ui.customization.UiCanvasComponent
 import io.github.lorddetson.piplayer.ui.customization.UiControlColor
+import io.github.lorddetson.piplayer.ui.customization.UiControlTextAlign
+import io.github.lorddetson.piplayer.ui.customization.fillAlignedTextWidth
 import io.github.lorddetson.piplayer.ui.customization.UiControlIcon
 import io.github.lorddetson.piplayer.ui.customization.customizeOnHold
 import io.github.lorddetson.piplayer.ui.customization.isStockUiSlotMasked
@@ -111,7 +113,8 @@ internal fun bottomNavigationComponent(
     current: NavKey?,
     onSelect: (NavKey) -> Unit,
     tag: String? = null,
-): UiCanvasComponent = UiCanvasComponent("nav:${item.id}", item.labelResource, width = 96.dp, height = 60.dp, customizableIcon = true) {
+): UiCanvasComponent = UiCanvasComponent("nav:${item.id}", item.labelResource, width = 96.dp, height = 60.dp,
+    customizableIcon = true, alignableText = true) {
     val selected = item.route == current
     val color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
     Box(
@@ -122,6 +125,7 @@ internal fun bottomNavigationComponent(
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             UiControlIcon(painterResource(item.icon), contentDescription = null, tint = color)
             Text(stringResource(item.labelResource), color = UiControlColor(color), style = MaterialTheme.typography.labelMedium,
+                modifier = Modifier.fillAlignedTextWidth(), textAlign = UiControlTextAlign(),
                 maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }

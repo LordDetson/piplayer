@@ -393,7 +393,7 @@ fun PiPlayerApp(
         add(UiCanvasComponent("now:next", R.string.player_next, customizableIcon = true) { NextButton(player) })
         add(UiCanvasComponent("now:shuffle", R.string.player_shuffle, customizableIcon = true) { ShuffleButton(player) })
         add(UiCanvasComponent("now:repeat", R.string.player_repeat, customizableIcon = true) { RepeatButton(player) })
-        add(UiCanvasComponent("now:timer", R.string.player_sleep_timer, width = 96.dp, customizableIcon = true) {
+        add(UiCanvasComponent("now:timer", R.string.player_sleep_timer, width = 96.dp, customizableIcon = true, alignableText = true) {
             SleepTimerButton(extraControls, Modifier)
         })
         add(UiCanvasComponent("now:stop_after", R.string.player_stop_after_current, customizableIcon = true) {

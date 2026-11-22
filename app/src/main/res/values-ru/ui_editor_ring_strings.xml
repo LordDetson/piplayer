@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="ui_editor_ring_expand">Развернуть команды редактора</string>
+    <string name="ui_editor_ring_collapse">Свернуть команды редактора</string>
+</resources>

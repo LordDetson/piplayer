@@ -10,7 +10,6 @@ import kotlinx.coroutines.flow.map
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
-import kotlin.math.abs
 
 /** Geometry is in thousandths of the safe panel area. Insets are logical dp. */
 internal const val UI_CANVAS_UNITS = 1_000
@@ -18,7 +17,6 @@ internal const val UI_CANVAS_MIN_SIZE = 20
 internal const val UI_CANVAS_MAX_INSET = 48
 internal const val UI_CANVAS_MAX_ITEMS = 32
 internal const val UI_ICON_MAX_PAYLOAD = 14_000
-private const val ALIGNMENT_TOLERANCE = 9
 private const val THEME_ICON_BUDGET = 192_000
 private val componentId = Regex("[a-z][a-z0-9_.-]*:[a-z0-9_.-]+")
 
@@ -32,11 +30,9 @@ internal data class UiCanvasBounds(val x: Int, val y: Int, val width: Int, val h
     val horizontalAnchors: List<Int> get() = listOf(x, x + width / 2, x + width)
     val verticalAnchors: List<Int> get() = listOf(y, y + height / 2, y + height)
 
-    fun move(dx: Int, dy: Int) = copy(x = (x + dx).coerceIn(0, UI_CANVAS_UNITS - width), y = (y + dy).coerceIn(0, UI_CANVAS_UNITS - height))
-
-    fun resize(dw: Int, dh: Int) = copy(
-        width = (width + dw).coerceIn(UI_CANVAS_MIN_SIZE, UI_CANVAS_UNITS - x),
-        height = (height + dh).coerceIn(UI_CANVAS_MIN_SIZE, UI_CANVAS_UNITS - y),
+    fun move(dx: Int, dy: Int) = copy(
+        x = x + dx.coerceIn(-x, UI_CANVAS_UNITS - x - width),
+        y = y + dy.coerceIn(-y, UI_CANVAS_UNITS - y - height),
     )
 }
 
@@ -57,11 +53,15 @@ internal data class UiIconAsset(val format: UiIconFormat, val payload: String) {
 internal enum class UiControlMotion { NONE, PRESS, BOUNCE, TILT }
 
 @Serializable
+internal enum class UiTextAlignment { DEFAULT, START, CENTER, END, JUSTIFY }
+
+@Serializable
 internal data class UiControlStyle(
     val foreground: Int? = null,
     val background: Int? = null,
     val icon: UiIconAsset? = null,
     val motion: UiControlMotion = UiControlMotion.NONE,
+    val textAlignment: UiTextAlignment = UiTextAlignment.DEFAULT,
 ) {
     val isValid: Boolean get() = listOfNotNull(foreground, background).all { it in 0..0xffffff } && icon?.isValid != false
 }
@@ -73,17 +73,33 @@ internal data class UiCanvasItem(
     val padding: UiCanvasPadding = UiCanvasPadding(),
     val style: UiControlStyle = UiControlStyle(),
 ) {
-    val isValid: Boolean get() = id.length <= 80 && componentId.matches(id) && bounds.isValid && padding.isValid && style.isValid
+    val isValid: Boolean get() = validComponentId(id) && bounds.isValid && padding.isValid && style.isValid
 }
 
 @Serializable
-internal data class UiCanvasLayout(val items: List<UiCanvasItem>, val hiddenStock: Set<String>? = null) {
-    val isValid: Boolean get() = items.size <= UI_CANVAS_MAX_ITEMS && items.all(UiCanvasItem::isValid) &&
-        items.map(UiCanvasItem::id).distinct().size == items.size &&
-        hiddenStock?.let { hidden ->
-            hidden.size <= UI_CANVAS_MAX_ITEMS && hidden.all { id -> id.length <= 80 && componentId.matches(id) } &&
-                items.none { it.id in hidden }
-        } != false
+internal enum class UiPlacementMode { OVERLAP, PUSH }
+
+@Serializable
+internal data class UiCanvasLayout(
+    val items: List<UiCanvasItem>,
+    val hiddenStock: Set<String>? = null,
+    val groups: List<Set<String>> = emptyList(),
+    val snapping: Boolean = true,
+    val placement: UiPlacementMode = UiPlacementMode.OVERLAP,
+) {
+    val isValid: Boolean get() {
+        val ids = items.map(UiCanvasItem::id).toSet()
+        val hidden = hiddenStock.orEmpty()
+        val grouped = groups.flatten()
+        return items.size <= UI_CANVAS_MAX_ITEMS && items.all(UiCanvasItem::isValid) && ids.size == items.size &&
+            hidden.size <= UI_CANVAS_MAX_ITEMS && hidden.all(::validComponentId) && ids.none { it in hidden } &&
+            groups.all { it.size >= 2 } && grouped.size <= UI_CANVAS_MAX_ITEMS && grouped.distinct().size == grouped.size &&
+            grouped.all { it !in hidden && (it in ids || hiddenStock != null && validComponentId(it)) } &&
+            (placement == UiPlacementMode.OVERLAP || !items.hasOverlappingBounds())
+    }
+
+    val hasAdvancedOptions: Boolean get() = groups.isNotEmpty() || !snapping || placement != UiPlacementMode.OVERLAP ||
+        items.any { it.style.textAlignment != UiTextAlignment.DEFAULT }
 
     /** Save overrides relative to the actual stock view. Untouched components stay in their native layouts. */
     fun stockOverrides(initial: UiCanvasLayout, previous: UiCanvasLayout?, stockIds: Set<String>): UiCanvasLayout? {
@@ -102,18 +118,71 @@ internal data class UiCanvasLayout(val items: List<UiCanvasItem>, val hiddenStoc
             }
         }
         val overrides = items.filter { it.id in previouslyChanged || it.id in reordered || initialById[it.id] != it }
-        val hidden = (previous?.hiddenStock.orEmpty() + (initialById.keys intersect stockIds)) - nowVisible
-        return if (overrides.isEmpty() && hidden.isEmpty()) null else UiCanvasLayout(overrides, hidden)
+        val hidden = (previous?.hiddenStock.orEmpty() + hiddenStock.orEmpty() + (initialById.keys intersect stockIds)) - nowVisible
+        val available = (nowVisible + stockIds) - hidden
+        val saved = copy(items = overrides, hiddenStock = hidden, groups = groups.mapNotNull { group ->
+            (group intersect available).takeIf { it.size >= 2 }
+        })
+        return saved.takeIf { overrides.isNotEmpty() || hidden.isNotEmpty() || it.hasAdvancedOptions }
     }
 
-    fun add(item: UiCanvasItem): UiCanvasLayout =
-        if (!item.isValid || items.size >= UI_CANVAS_MAX_ITEMS || items.any { it.id == item.id }) this else copy(items = items + item)
+    fun add(item: UiCanvasItem): UiCanvasLayout {
+        if (!item.isValid || items.size >= UI_CANVAS_MAX_ITEMS || items.any { it.id == item.id }) return this
+        val updated = copy(items = items + item, hiddenStock = hiddenStock?.minus(item.id))
+        return updated.resolvePlacement(updated.items, setOf(item.id), dx = 0, dy = 0) ?: this
+    }
 
-    fun hide(id: String) = copy(items = items.filterNot { it.id == id })
+    fun members(id: String): Set<String> = groups.firstOrNull { id in it } ?: setOf(id)
 
-    fun move(id: String, dx: Int, dy: Int) = change(id) { it.copy(bounds = it.bounds.move(dx, dy)) }
+    fun group(ids: Set<String>): UiCanvasLayout {
+        val known = items.map(UiCanvasItem::id).toSet() + groups.flatten()
+        if (ids.size < 2 || !known.containsAll(ids)) return this
+        val selected = ids.flatMap(::members).toSet()
+        val updated = groups.filterNot { group -> group.any { it in selected } } + listOf(selected)
+        return if (updated.sumOf { it.size } <= UI_CANVAS_MAX_ITEMS) copy(groups = updated) else this
+    }
 
-    fun resize(id: String, dw: Int, dh: Int) = change(id) { it.copy(bounds = it.bounds.resize(dw, dh)) }
+    fun ungroup(id: String) = copy(groups = groups.filterNot { id in it })
+
+    fun hide(id: String): UiCanvasLayout {
+        if (items.none { it.id == id }) return this
+        val selected = members(id)
+        val unmeasured = selected - items.map(UiCanvasItem::id).toSet()
+        return copy(
+            items = items.filterNot { it.id in selected },
+            groups = groups.filterNot { id in it },
+            hiddenStock = if (unmeasured.isEmpty()) hiddenStock else hiddenStock.orEmpty() + unmeasured,
+        )
+    }
+
+    fun boundsOf(ids: Set<String>): UiCanvasBounds? {
+        val selected = items.filter { it.id in ids }
+        return selected.takeIf { it.isNotEmpty() && it.size == ids.size }?.map(UiCanvasItem::bounds)?.canvasBounds()
+    }
+
+    fun move(id: String, dx: Int, dy: Int): UiCanvasLayout {
+        val selected = members(id)
+        val bounds = boundsOf(selected) ?: return this
+        val moved = bounds.move(dx, dy)
+        return reshape(selected, bounds, moved, moved.x - bounds.x, moved.y - bounds.y)
+    }
+
+    fun resize(id: String, dw: Int, dh: Int) = resize(id, UiResizeEdge.BOTTOM_RIGHT, dw, dh)
+
+    fun resize(id: String, edge: UiResizeEdge, dx: Int, dy: Int): UiCanvasLayout {
+        val selected = members(id)
+        val bounds = boundsOf(selected) ?: return this
+        val resized = bounds.resize(edge, dx, dy)
+        val horizontalDelta = if (edge.horizontal < 0) resized.x - bounds.x else resized.right - bounds.right
+        val verticalDelta = if (edge.vertical < 0) resized.y - bounds.y else resized.bottom - bounds.bottom
+        return reshape(selected, bounds, resized, horizontalDelta, verticalDelta)
+    }
+
+    fun withPlacement(mode: UiPlacementMode): UiCanvasLayout {
+        if (placement == mode) return this
+        val updated = copy(placement = mode)
+        return updated.resolvePlacement(items, emptySet(), dx = 0, dy = 0) ?: this
+    }
 
     fun raise(id: String) = moveLayer(id, 1)
 
@@ -124,35 +193,66 @@ internal data class UiCanvasLayout(val items: List<UiCanvasItem>, val hiddenStoc
     fun withStyle(id: String, style: UiControlStyle) = if (style.isValid) change(id) { it.copy(style = style) } else this
 
     fun snap(id: String): UiCanvasLayout {
-        val target = items.firstOrNull { it.id == id }?.bounds ?: return this
+        if (!snapping) return this
+        val target = boundsOf(members(id)) ?: return this
         val (horizontal, vertical) = guides(id)
-        val dx = alignmentOffset(target.horizontalAnchors, horizontal, target.x, target.width)
-        val dy = alignmentOffset(target.verticalAnchors, vertical, target.y, target.height)
+        val dx = alignmentOffset(target.horizontalAnchors, horizontal, -target.x..(UI_CANVAS_UNITS - target.right))
+        val dy = alignmentOffset(target.verticalAnchors, vertical, -target.y..(UI_CANVAS_UNITS - target.bottom))
         return move(id, dx, dy)
     }
 
+    fun snapResize(id: String, edge: UiResizeEdge): UiCanvasLayout {
+        if (!snapping) return this
+        val target = boundsOf(members(id)) ?: return this
+        val (horizontal, vertical) = guides(id)
+        return resize(id, edge,
+            resizeAlignmentOffset(edge.horizontal, horizontal, target.x, target.right),
+            resizeAlignmentOffset(edge.vertical, vertical, target.y, target.bottom))
+    }
+
     fun guides(id: String): Pair<List<Int>, List<Int>> {
-        val others = items.filterNot { it.id == id }.map(UiCanvasItem::bounds)
+        if (!snapping) return emptyList<Int>() to emptyList()
+        val selected = members(id)
+        val others = items.filterNot { it.id in selected }.map(UiCanvasItem::bounds)
         val panelEdges = listOf(0, UI_CANVAS_UNITS / 2, UI_CANVAS_UNITS)
         return (panelEdges + others.flatMap(UiCanvasBounds::horizontalAnchors)).distinct() to
             (panelEdges + others.flatMap(UiCanvasBounds::verticalAnchors)).distinct()
     }
 
-    private fun alignmentOffset(edges: List<Int>, guides: List<Int>, start: Int, size: Int): Int =
-        edges.flatMap { edge -> guides.map { it - edge } }.asSequence()
-            .filter { abs(it) <= ALIGNMENT_TOLERANCE && start + it in 0..(UI_CANVAS_UNITS - size) }
-            .minByOrNull(::abs) ?: 0
+    private fun reshape(
+        selected: Set<String>, original: UiCanvasBounds, resized: UiCanvasBounds, dx: Int, dy: Int,
+    ): UiCanvasLayout {
+        if (original == resized) return this
+        val updated = items.map { item ->
+            if (item.id in selected) item.copy(bounds = item.bounds.scaleWithin(original, resized)) else item
+        }
+        if (updated.any { !it.bounds.isValid }) return this
+        return resolvePlacement(updated, selected, dx, dy) ?: this
+    }
+
+    private fun resolvePlacement(updated: List<UiCanvasItem>, selected: Set<String>, dx: Int, dy: Int): UiCanvasLayout? =
+        if (placement == UiPlacementMode.OVERLAP || !updated.hasOverlappingBounds()) copy(items = updated)
+        else pushCanvasItems(updated, groups, selected, dx, dy)?.let { copy(items = it) }
 
     private fun moveLayer(id: String, step: Int): UiCanvasLayout {
-        val from = items.indexOfFirst { it.id == id }
-        val to = from + step
-        if (from < 0 || to !in items.indices) return this
-        return copy(items = items.toMutableList().apply { add(to, removeAt(from)) })
+        if (items.none { it.id == id }) return this
+        val selected = members(id)
+        val boundary = if (step > 0) items.indexOfLast { it.id in selected } else items.indexOfFirst { it.id in selected }
+        val siblingIds = items.getOrNull(boundary + step)?.let { members(it.id) }
+        val rest = items.filterNot { it.id in selected }
+        val insertAt = when {
+            siblingIds == null -> if (step > 0) rest.size else 0
+            step > 0 -> rest.indexOfLast { it.id in siblingIds } + 1
+            else -> rest.indexOfFirst { it.id in siblingIds }
+        }
+        return copy(items = rest.toMutableList().apply { addAll(insertAt, items.filter { it.id in selected }) })
     }
 
     private fun change(id: String, update: (UiCanvasItem) -> UiCanvasItem) =
         copy(items = items.map { if (it.id == id) update(it) else it })
 }
+
+private fun validComponentId(id: String) = id.length <= 80 && componentId.matches(id)
 
 @Serializable
 internal data class UiThemeCanvases(val panels: Map<UiSurface, UiCanvasLayout> = emptyMap()) {

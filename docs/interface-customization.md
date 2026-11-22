@@ -61,9 +61,20 @@ from the selected theme.
 Properties supports foreground and background colors and stock or imported PNG, WebP and standalone static SVG
 icons on icon controls. Vector icons keep their shape when resized. The editor supports SVG paths, ordinary
 shapes and grouped transforms. An icon with unsupported effects or external resources is rejected. A button can
-preview and use a press, bounce or tilt animation. A version 7 theme package transfers native layout overrides,
-including positions, sizes, spacing, layers, icon data and animations. Version 6 packages retain their saved
-positions. Earlier versions keep their existing fields.
+preview and use a press, bounce or tilt animation. Text components have their own alignment setting.
+
+Drag the center handle to move the editor's command ring over the screen. Tap the handle to collapse or expand
+the ring. Its buttons float above the layout and occupy no space within the panel. Use Group to select several
+components and confirm the selection. Drag any member to move the group, or drag a corner or edge of the group
+outline to scale its components and spacing together. Editor options can dissolve the selected group.
+
+The snap button toggles alignment with panel guides and neighboring components. In Editor options, choose whether
+components can overlap or should move neighbors aside. In the second mode, a drag or resize that runs out of room
+keeps the last position without overlaps. The active theme stores these choices separately for each panel.
+
+A version 8 theme package transfers groups, snap and placement options, and text alignment with existing layout
+overrides. Version 7 packages retain native overrides. Version 6 packages retain their saved positions. Earlier
+versions keep their existing fields.
 
 ## Imported themes
 

@@ -129,6 +129,8 @@ import io.github.lorddetson.piplayer.ui.customization.StockUiSlot
 import io.github.lorddetson.piplayer.ui.customization.isStockUiSlotMasked
 import io.github.lorddetson.piplayer.ui.customization.UiCanvasComponent
 import io.github.lorddetson.piplayer.ui.customization.UiControlColor
+import io.github.lorddetson.piplayer.ui.customization.UiControlTextAlign
+import io.github.lorddetson.piplayer.ui.customization.fillAlignedTextWidth
 import io.github.lorddetson.piplayer.ui.fix.BatchActions
 import io.github.lorddetson.piplayer.identification.entry.BatchRequest
 import io.github.lorddetson.piplayer.ui.playlists.PlaylistActions
@@ -300,14 +302,15 @@ fun LibraryScreen(host: LibraryHost, onOpenSettings: () -> Unit) {
         }
     }
     val canvasComponents = buildList {
-        add(UiCanvasComponent("library:title", R.string.app_name, width = 128.dp) {
+        add(UiCanvasComponent("library:title", R.string.app_name, width = 128.dp, alignableText = true) {
             Box(Modifier.fillMaxSize().padding(start = 12.dp), contentAlignment = Alignment.CenterStart) {
                 Text(stringResource(R.string.app_name), color = UiControlColor(LocalContentColor.current),
+                    modifier = Modifier.fillAlignedTextWidth(), textAlign = UiControlTextAlign(),
                     style = MaterialTheme.typography.titleLarge, maxLines = 1)
             }
         })
         for ((id, entry) in builtInTabsById) {
-            add(UiCanvasComponent("tab:$id", entry.labelResource, width = 96.dp) {
+            add(UiCanvasComponent("tab:$id", entry.labelResource, width = 96.dp, alignableText = true) {
                 LibraryTabFace(id, id == activeId, { selectTab(id) }, Modifier.fillMaxSize(), horizontalPadding = 4.dp)
             })
         }

@@ -13,6 +13,7 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalContentColor
@@ -34,6 +35,7 @@ import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import io.github.lorddetson.piplayer.R
 import io.github.lorddetson.piplayer.settings.UI_ICON_MAX_PAYLOAD
@@ -41,6 +43,7 @@ import io.github.lorddetson.piplayer.settings.UiControlMotion
 import io.github.lorddetson.piplayer.settings.UiControlStyle
 import io.github.lorddetson.piplayer.settings.UiIconAsset
 import io.github.lorddetson.piplayer.settings.UiIconFormat
+import io.github.lorddetson.piplayer.settings.UiTextAlignment
 import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.io.InputStream
@@ -54,6 +57,20 @@ internal val LocalUiControlStyle = staticCompositionLocalOf { UiControlStyle() }
 @Composable
 internal fun UiControlColor(default: Color): Color =
     LocalUiControlStyle.current.foreground?.opaqueColor() ?: default
+
+@Composable
+internal fun UiControlTextAlign(default: TextAlign = TextAlign.Unspecified): TextAlign =
+    when (LocalUiControlStyle.current.textAlignment) {
+        UiTextAlignment.DEFAULT -> default
+        UiTextAlignment.START -> TextAlign.Start
+        UiTextAlignment.CENTER -> TextAlign.Center
+        UiTextAlignment.END -> TextAlign.End
+        UiTextAlignment.JUSTIFY -> TextAlign.Justify
+    }
+
+@Composable
+internal fun Modifier.fillAlignedTextWidth(): Modifier =
+    if (LocalUiControlStyle.current.textAlignment == UiTextAlignment.DEFAULT) this else fillMaxWidth()
 
 @Composable
 internal fun UiControlIcon(

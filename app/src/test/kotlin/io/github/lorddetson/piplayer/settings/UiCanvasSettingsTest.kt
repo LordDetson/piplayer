@@ -62,6 +62,90 @@ class UiCanvasSettingsTest {
     }
 
     @Test
+    fun `a group moves scales changes layer and hides as one selection`() {
+        val selected = setOf(cover.id, play.id)
+        val next = UiCanvasItem("now:next", UiCanvasBounds(840, 100, 100, 100))
+        val grouped = player.add(next).group(selected)
+        assertThat(grouped.members(play.id)).isEqualTo(selected)
+        assertThat(grouped.move(play.id, 500, -150).boundsOf(selected))
+            .isEqualTo(UiCanvasBounds(280, 0, 720, 500))
+        val scaled = grouped.resize(play.id, UiResizeEdge.TOP_LEFT, -72, -50)
+        assertThat(scaled.boundsOf(selected)).isEqualTo(UiCanvasBounds(28, 50, 792, 550))
+        assertThat(scaled.items[0].bounds).isEqualTo(UiCanvasBounds(28, 50, 550, 550))
+        assertThat(scaled.items[1].bounds).isEqualTo(UiCanvasBounds(622, 160, 198, 198))
+        assertThat(scaled.raise(cover.id).items.map(UiCanvasItem::id)).containsExactly(next.id, cover.id, play.id)
+        assertThat(scaled.hide(play.id).items).containsExactly(next)
+        assertThat(scaled.ungroup(play.id).hide(play.id).items).containsExactly(scaled.items[0], next)
+    }
+
+    @Test
+    fun `an edge holds opposite edges fixed and snaps only the edge dragged`() {
+        val resized = player.resize(play.id, UiResizeEdge.LEFT, -37, 120)
+        assertThat(resized.items.last().bounds).isEqualTo(UiCanvasBounds(603, 200, 217, 180))
+        assertThat(resized.snapResize(play.id, UiResizeEdge.LEFT).items.last().bounds)
+            .isEqualTo(UiCanvasBounds(600, 200, 220, 180))
+        assertThat(resized.copy(snapping = false).snapResize(play.id, UiResizeEdge.LEFT))
+            .isEqualTo(resized.copy(snapping = false))
+        val grouped = player.group(setOf(cover.id, play.id)).move(play.id, -97, -96)
+        assertThat(grouped.snap(play.id).boundsOf(grouped.members(play.id)))
+            .isEqualTo(UiCanvasBounds(0, 0, 720, 500))
+        assertThat(grouped.copy(snapping = false).snap(play.id)).isEqualTo(grouped.copy(snapping = false))
+    }
+
+    @Test
+    fun `pushing moves touching neighbors and their groups while leaving independent items fixed`() {
+        val first = UiCanvasItem("test:first", UiCanvasBounds(0, 0, 200, 200))
+        val second = UiCanvasItem("test:second", UiCanvasBounds(200, 0, 200, 200))
+        val third = UiCanvasItem("test:third", UiCanvasBounds(400, 0, 200, 200))
+        val fourth = UiCanvasItem("test:fourth", UiCanvasBounds(425, 200, 150, 200))
+        val independent = UiCanvasItem("test:independent", UiCanvasBounds(0, 600, 100, 100))
+        val layout = UiCanvasLayout(listOf(first, second, third, fourth, independent))
+            .group(setOf(third.id, fourth.id)).withPlacement(UiPlacementMode.PUSH)
+        val moved = layout.move(first.id, 100, 0)
+        assertThat(moved.items.map { it.bounds.x }).containsExactly(100, 300, 500, 525, 0)
+        val resized = moved.resize(first.id, UiResizeEdge.RIGHT, 50, 0)
+        assertThat(resized.items.map { it.bounds.x }).containsExactly(100, 350, 550, 575, 0)
+    }
+
+    @Test
+    fun `pushing keeps the last valid layout when there is no room and mode change is atomic`() {
+        val left = UiCanvasItem("test:left", UiCanvasBounds(0, 0, 500, 1000))
+        val right = UiCanvasItem("test:right", UiCanvasBounds(500, 0, 500, 1000))
+        val layout = UiCanvasLayout(listOf(left, right)).withPlacement(UiPlacementMode.PUSH)
+        assertThat(layout.move(left.id, 10, 0)).isEqualTo(layout)
+        assertThat(layout.resize(left.id, UiResizeEdge.RIGHT, 10, 0)).isEqualTo(layout)
+        assertThat(layout.add(UiCanvasItem("test:full", UiCanvasBounds(0, 0, 1000, 1000)))).isEqualTo(layout)
+        val overlapping = UiCanvasLayout(listOf(left.copy(bounds = UiCanvasBounds(0, 0, 600, 1000)), right))
+        assertThat(overlapping.withPlacement(UiPlacementMode.PUSH)).isEqualTo(overlapping)
+        val recoverable = UiCanvasLayout(listOf(left, right.copy(bounds = UiCanvasBounds(490, 0, 500, 1000))))
+        assertThat(recoverable.withPlacement(UiPlacementMode.PUSH)).isEqualTo(layout)
+    }
+
+    @Test
+    fun `a sparse theme package transfers groups preferences and text alignment`() {
+        val selected = setOf(cover.id, play.id)
+        val grouped = player.group(selected).copy(snapping = false, placement = UiPlacementMode.PUSH)
+            .withStyle(play.id, UiControlStyle(textAlignment = UiTextAlignment.END))
+        val sparse = checkNotNull(grouped.stockOverrides(player, previous = null, selected))
+        assertThat(sparse.items.map(UiCanvasItem::id)).containsExactly(play.id)
+        assertThat(sparse.members(play.id)).isEqualTo(selected)
+        assertThat(sparse.isValid).isTrue()
+        val theme = ThemePackage("Grouped player", ThemeMode.DARK,
+            canvases = UiThemeCanvases(mapOf(UiSurface.NOW_PLAYING to sparse)))
+        val bytes = ThemePackageCodec.encode(theme)
+        assertThat(bytes.decodeToString()).contains("\"version\":8")
+        assertThat(ThemePackageCodec.decode(bytes.inputStream())).isEqualTo(ThemePackageRead.Loaded(theme))
+        assertThat(ThemePackageCodec.decode(bytes.decodeToString().replace("\"version\":8", "\"version\":7").byteInputStream()))
+            .isEqualTo(ThemePackageRead.Invalid)
+
+        val sampled = sparse.copy(hiddenStock = null)
+        assertThat(sampled.move(play.id, 10, 0)).isEqualTo(sampled)
+        val hidden = sampled.hide(play.id).stockOverrides(sampled, sparse, selected)
+        assertThat(hidden?.hiddenStock).isEqualTo(selected)
+        assertThat(hidden?.groups).isEmpty()
+    }
+
+    @Test
     fun `theme changes and resets keep saved layers for each surface independently`() = runBlocking<Unit> {
         val file = MemoryDataStore()
         val appearance = AppearanceSettings(file)

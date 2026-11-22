@@ -46,6 +46,7 @@ import io.github.lorddetson.piplayer.settings.UiCanvasItem
 import io.github.lorddetson.piplayer.settings.UiCanvasPadding
 import io.github.lorddetson.piplayer.settings.UiControlMotion
 import io.github.lorddetson.piplayer.settings.UiControlStyle
+import io.github.lorddetson.piplayer.settings.UiTextAlignment
 import kotlinx.coroutines.launch
 
 @Composable
@@ -63,6 +64,7 @@ internal fun UiComponentInspector(
     var background by remember { mutableStateOf(item.style.background.hex()) }
     var icon by remember { mutableStateOf(item.style.icon) }
     var motion by remember { mutableStateOf(item.style.motion) }
+    var textAlignment by remember { mutableStateOf(item.style.textAlignment) }
     var importing by remember { mutableStateOf(false) }
     var importFailed by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
@@ -95,6 +97,19 @@ internal fun UiComponentInspector(
                 }
                 ColorInput(foreground, { foreground = it }, R.string.ui_edit_foreground)
                 ColorInput(background, { background = it }, R.string.ui_edit_background)
+                if (component.alignableText) {
+                    Text(stringResource(R.string.ui_edit_text_alignment), style = MaterialTheme.typography.titleSmall)
+                    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        UiTextAlignment.entries.forEach { alignment ->
+                            FilterChip(
+                                selected = textAlignment == alignment,
+                                onClick = { textAlignment = alignment },
+                                label = { Text(stringResource(alignment.label)) },
+                                modifier = Modifier.testTag("ui_edit_align_" + alignment.name.lowercase()),
+                            )
+                        }
+                    }
+                }
                 if (component.customizableIcon) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         TextButton(
@@ -133,7 +148,7 @@ internal fun UiComponentInspector(
                 onClick = {
                     onUpdate(
                         UiCanvasPadding(start.toInt(), top.toInt(), end.toInt(), bottom.toInt()),
-                        UiControlStyle(foreground.parseColor(), background.parseColor(), icon, motion),
+                        UiControlStyle(foreground.parseColor(), background.parseColor(), icon, motion, textAlignment),
                     )
                 },
                 modifier = Modifier.testTag("ui_edit_apply_properties"),
@@ -192,4 +207,12 @@ private val UiControlMotion.label: Int get() = when (this) {
     UiControlMotion.PRESS -> R.string.ui_edit_motion_press
     UiControlMotion.BOUNCE -> R.string.ui_edit_motion_bounce
     UiControlMotion.TILT -> R.string.ui_edit_motion_tilt
+}
+
+private val UiTextAlignment.label: Int get() = when (this) {
+    UiTextAlignment.DEFAULT -> R.string.ui_edit_align_default
+    UiTextAlignment.START -> R.string.ui_edit_align_start
+    UiTextAlignment.CENTER -> R.string.ui_edit_align_center
+    UiTextAlignment.END -> R.string.ui_edit_align_end
+    UiTextAlignment.JUSTIFY -> R.string.ui_edit_align_justify
 }

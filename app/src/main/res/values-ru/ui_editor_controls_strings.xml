@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="ui_edit_group">Сгруппировать компоненты</string>
+    <string name="ui_edit_finish_group">Создать группу</string>
+    <string name="ui_edit_cancel_group">Отменить выбор для группы</string>
+    <string name="ui_edit_ungroup">Разгруппировать</string>
+    <string name="ui_edit_snap">Привязка к направляющим и компонентам</string>
+    <string name="ui_edit_options">Параметры редактора</string>
+    <string name="ui_edit_placement">Размещение компонентов</string>
+    <string name="ui_edit_push">Сдвигать соседние компоненты</string>
+    <string name="ui_edit_overlap">Разрешить наложение</string>
+    <string name="ui_edit_no_space">Недостаточно места.</string>
+    <string name="ui_edit_text_alignment">Выравнивание текста</string>
+    <string name="ui_edit_align_default">По умолчанию</string>
+    <string name="ui_edit_align_start">По началу строки</string>
+    <string name="ui_edit_align_center">По центру</string>
+    <string name="ui_edit_align_end">По концу строки</string>
+    <string name="ui_edit_align_justify">По ширине</string>
+</resources>

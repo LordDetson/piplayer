@@ -6,11 +6,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.absoluteOffset
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -19,7 +17,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
@@ -37,6 +34,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.BiasAbsoluteAlignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
@@ -56,14 +54,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.Constraints
-import androidx.compose.ui.unit.IntOffset
-import androidx.compose.ui.unit.IntRect
-import androidx.compose.ui.unit.IntSize
-import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Popup
-import androidx.compose.ui.window.PopupPositionProvider
-import androidx.compose.ui.window.PopupProperties
 import androidx.compose.ui.zIndex
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.lorddetson.piplayer.R
@@ -75,6 +66,8 @@ import io.github.lorddetson.piplayer.settings.UiCanvasItem
 import io.github.lorddetson.piplayer.settings.UiCanvasLayout
 import io.github.lorddetson.piplayer.settings.UiCanvasSettings
 import io.github.lorddetson.piplayer.settings.UiCanvasState
+import io.github.lorddetson.piplayer.settings.UiPlacementMode
+import io.github.lorddetson.piplayer.settings.UiResizeEdge
 import io.github.lorddetson.piplayer.settings.UiSurface
 import kotlinx.coroutines.launch
 import kotlin.math.abs
@@ -87,6 +80,7 @@ internal data class UiCanvasComponent(
     val height: Dp = 48.dp,
     val fillWidth: Boolean = false,
     val customizableIcon: Boolean = false,
+    val alignableText: Boolean = false,
     val content: @Composable () -> Unit,
 )
 
@@ -127,6 +121,9 @@ internal fun EditableUiPanel(
     var selected by remember(themeId, surface) { mutableStateOf<String?>(null) }
     var saving by remember(themeId, surface) { mutableStateOf(false) }
     var inspecting by remember(themeId, surface) { mutableStateOf(false) }
+    var picked by remember(themeId, surface) { mutableStateOf<Set<String>?>(null) }
+    var gestureBase by remember(themeId, surface) { mutableStateOf<UiCanvasLayout?>(null) }
+    var blocked by remember(themeId, surface) { mutableStateOf(false) }
     val appliedCallback by rememberUpdatedState(onAppliedIds)
     LaunchedEffect(themeId, active != null, persisted, stockIds) {
         if (active != null) appliedCallback(persisted?.let { saved ->
@@ -149,17 +146,53 @@ internal fun EditableUiPanel(
             val initial = if (anchored) {
                 val changedIds = previous?.items.orEmpty().map(UiCanvasItem::id).toSet()
                 val hidden = previous?.hiddenStock.orEmpty()
-                UiCanvasLayout(sampled.items.filterNot { it.id in hidden || it.id in changedIds } + previous?.items.orEmpty())
+                (previous ?: UiCanvasLayout(emptyList())).copy(
+                    items = sampled.items.filterNot { it.id in hidden || it.id in changedIds } + previous?.items.orEmpty(),
+                    hiddenStock = null,
+                )
             } else persisted ?: defaultCanvas(initialRows, catalog, canvasWidth, height)
             session = EditSession(initial, initial, anchored, previous)
             selected = id.takeIf { sought -> initial.items.any { it.id == sought } }
+            picked = null
+            gestureBase = null
+            blocked = false
         }
         val draft = session
         val layout = draft?.draft ?: persisted
         CompositionLocalProvider(LocalUiEditEntry provides start) {
             val anchored = draft?.anchored ?: (persisted?.hiddenStock != null)
             fun mutate(update: (UiCanvasLayout) -> UiCanvasLayout) {
-                if (!saving) session = session?.let { it.copy(draft = update(it.draft), reset = false) }
+                if (!saving) session = session?.let {
+                    val updated = update(it.draft)
+                    if (updated == it.draft) it else it.copy(draft = updated, reset = false)
+                }
+            }
+            fun select(id: String) {
+                selected = id
+                val selection = picked ?: return
+                val members = layout?.members(id).orEmpty()
+                picked = if (selection.containsAll(members)) selection - members else selection + members
+            }
+            fun beginTransform(id: String) {
+                selected = id
+                gestureBase = session?.draft
+                blocked = false
+            }
+            fun transform(id: String, edge: UiResizeEdge?, x: Int, y: Int) {
+                val base = gestureBase ?: return
+                val result = if (edge == null) base.move(id, x, y) else base.resize(id, edge, x, y)
+                blocked = base.placement == UiPlacementMode.PUSH && (x != 0 || y != 0) && result == base
+                if (!blocked) mutate {
+                    when {
+                        result == base -> base
+                        edge == null -> result.snap(id)
+                        else -> result.snapResize(id, edge)
+                    }
+                }
+            }
+            fun endTransform() {
+                gestureBase = null
+                blocked = false
             }
             val selectedItem = layout?.items?.firstOrNull { it.id == selected }
             val selectedComponent = catalog[selected]
@@ -183,37 +216,49 @@ internal fun EditableUiPanel(
                     val scroll = if (surface == UiSurface.NOW_PLAYING) Modifier.verticalScroll(rememberScrollState()) else Modifier
                     Column(modifier.fillMaxWidth().then(scroll)) {
                         canvasChrome()
-                        UiCanvas(layout, catalog, drawingWidth, drawingHeight, draft != null, selectedItem,
-                            select = { selected = it },
-                            move = { id, x, y -> mutate { it.move(id, x, y) } },
-                            resize = { id, x, y -> mutate { it.resize(id, x, y) } },
-                            snap = { id -> mutate { it.snap(id) } },
+                        UiCanvas(layout, catalog, drawingWidth, drawingHeight, draft != null, selectedItem, picked,
+                            dragging = gestureBase != null, blocked = blocked,
+                            select = ::select, onStart = ::beginTransform, transform = ::transform, onEnd = ::endTransform,
                         )
                     }
                 }
                 if (anchored && layout != null && drawingWidth > 0.dp && drawingHeight > 0.dp) {
                     val detached = stockChanges?.items.orEmpty().map(UiCanvasItem::id).toSet()
                     UiCanvas(
-                        layout, catalog, drawingWidth, drawingHeight, draft != null, selectedItem,
-                        select = { selected = it },
-                        move = { id, x, y -> mutate { it.move(id, x, y) } },
-                        resize = { id, x, y -> mutate { it.resize(id, x, y) } },
-                        snap = { id -> mutate { it.snap(id) } },
+                        layout, catalog, drawingWidth, drawingHeight, draft != null, selectedItem, picked,
+                        dragging = gestureBase != null, blocked = blocked,
+                        select = ::select, onStart = ::beginTransform, transform = ::transform, onEnd = ::endTransform,
                         modifier = Modifier.matchParentSize(),
                         drawOnly = detached,
                     )
                 }
-                if (draft != null && layout != null) Popup(
-                    popupPositionProvider = EditorControlsPosition,
-                    properties = PopupProperties(focusable = false, dismissOnBackPress = false, dismissOnClickOutside = false),
-                ) {
-                    UiEditorToolbar(
-                        layout, catalog, selectedItem, saving,
+                if (draft != null && layout != null) {
+                    UiEditorControls(
+                        layout, catalog, selectedItem, picked, saving,
                         onAdd = { component ->
                             mutate { it.add(addedItem(component, drawingWidth, drawingHeight)) }
-                            selected = component.id
+                            val added = session?.draft?.items?.any { it.id == component.id } == true
+                            if (added) selected = component.id
+                            added
                         },
-                        onSelect = { selected = it },
+                        onSelect = ::select,
+                        onGroup = {
+                            val selection = picked
+                            if (selection == null) picked = selected?.let(layout::members).orEmpty()
+                            else {
+                                if (selection.size >= 2) {
+                                    mutate { it.group(selection) }
+                                    selected = selected?.takeIf(selection::contains) ?: selection.first()
+                                }
+                                picked = null
+                            }
+                        },
+                        onUngroup = { id -> mutate { it.ungroup(id) } },
+                        onSnap = { mutate { it.copy(snapping = !it.snapping) } },
+                        onPlacement = { mode ->
+                            mutate { it.withPlacement(mode) }
+                            session?.draft?.placement == mode
+                        },
                         onRaise = { id -> mutate { it.raise(id) } },
                         onLower = { id -> mutate { it.lower(id) } },
                         onHide = { id ->
@@ -263,97 +308,6 @@ internal fun EditableUiPanel(
     }
 }
 
-/** Put editor actions outside compact bars, or along the bottom of the full-screen editor. */
-private object EditorControlsPosition : PopupPositionProvider {
-    override fun calculatePosition(anchorBounds: IntRect, windowSize: IntSize, layoutDirection: LayoutDirection, popupContentSize: IntSize): IntOffset {
-        val preferred = when {
-            anchorBounds.top >= popupContentSize.height -> anchorBounds.top - popupContentSize.height
-            windowSize.height - anchorBounds.bottom >= popupContentSize.height -> anchorBounds.bottom
-            else -> anchorBounds.bottom - popupContentSize.height
-        }
-        return IntOffset(anchorBounds.left, preferred.coerceIn(0, (windowSize.height - popupContentSize.height).coerceAtLeast(0)))
-    }
-}
-
-@Composable
-private fun UiEditorToolbar(
-    layout: UiCanvasLayout,
-    catalog: Map<String, UiCanvasComponent>,
-    selected: UiCanvasItem?,
-    saving: Boolean,
-    onAdd: (UiCanvasComponent) -> Unit,
-    onSelect: (String) -> Unit,
-    onRaise: (String) -> Unit,
-    onLower: (String) -> Unit,
-    onHide: (String) -> Unit,
-    onInspect: () -> Unit,
-    onReset: () -> Unit,
-    onCancel: () -> Unit,
-    onDone: () -> Unit,
-) {
-    var adding by remember { mutableStateOf(false) }
-    var selectingLayer by remember { mutableStateOf(false) }
-    val available = catalog.values.filter { candidate -> layout.items.none { it.id == candidate.id } }
-    Column(Modifier.background(MaterialTheme.colorScheme.surfaceContainerHigh)) {
-        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = onDone, enabled = !saving, modifier = Modifier.testTag("ui_edit_done")) {
-                Text(stringResource(R.string.ui_edit_done))
-            }
-            Box {
-                TextButton(onClick = { adding = true }, enabled = !saving && available.isNotEmpty() && layout.items.size < UI_CANVAS_MAX_ITEMS) {
-                    Text(stringResource(R.string.ui_edit_add))
-                }
-                DropdownMenu(expanded = adding, onDismissRequest = { adding = false }) {
-                    available.forEach { item ->
-                        DropdownMenuItem(
-                            text = { Text(stringResource(item.label)) },
-                            onClick = { adding = false; onAdd(item) },
-                            modifier = Modifier.testTag("ui_add_" + item.id),
-                        )
-                    }
-                }
-            }
-            Box {
-                TextButton(onClick = { selectingLayer = true }, enabled = !saving && layout.items.isNotEmpty()) {
-                    Text(stringResource(R.string.ui_edit_layers))
-                }
-                DropdownMenu(expanded = selectingLayer, onDismissRequest = { selectingLayer = false }) {
-                    layout.items.asReversed().forEach { item ->
-                        catalog[item.id]?.let { component ->
-                            DropdownMenuItem(
-                                text = { Text(stringResource(component.label)) },
-                                onClick = { selectingLayer = false; onSelect(item.id) },
-                                modifier = Modifier.testTag("ui_layer_" + item.id),
-                            )
-                        }
-                    }
-                }
-            }
-            TextButton(onClick = onReset, enabled = !saving, modifier = Modifier.testTag("ui_edit_reset")) {
-                Text(stringResource(R.string.ui_edit_reset))
-            }
-            TextButton(onClick = onCancel, enabled = !saving) { Text(stringResource(R.string.ui_edit_cancel)) }
-        }
-        if (selected != null) {
-            val index = layout.items.indexOf(selected)
-            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically) {
-                TextButton(onClick = onInspect, enabled = !saving, modifier = Modifier.testTag("ui_edit_inspect")) {
-                    Text(stringResource(R.string.ui_edit_properties))
-                }
-                TextButton(onClick = { onHide(selected.id) }, enabled = !saving, modifier = Modifier.testTag("ui_edit_hide")) {
-                    Text(stringResource(R.string.ui_edit_hide))
-                }
-                TextButton(onClick = { onRaise(selected.id) }, enabled = !saving && index < layout.items.lastIndex) {
-                    Text(stringResource(R.string.ui_edit_forward))
-                }
-                TextButton(onClick = { onLower(selected.id) }, enabled = !saving && index > 0) {
-                    Text(stringResource(R.string.ui_edit_backward))
-                }
-            }
-        }
-    }
-}
-
 @Composable
 private fun UiCanvas(
     layout: UiCanvasLayout,
@@ -362,15 +316,18 @@ private fun UiCanvas(
     height: Dp,
     editing: Boolean,
     selected: UiCanvasItem?,
+    picked: Set<String>?,
+    dragging: Boolean,
+    blocked: Boolean,
     select: (String) -> Unit,
-    move: (String, Int, Int) -> Unit,
-    resize: (String, Int, Int) -> Unit,
-    snap: (String) -> Unit,
+    onStart: (String) -> Unit,
+    transform: (String, UiResizeEdge?, Int, Int) -> Unit,
+    onEnd: () -> Unit,
     modifier: Modifier = Modifier.fillMaxWidth().height(height),
     drawOnly: Set<String>? = null,
 ) {
     val accent = MaterialTheme.colorScheme.primary
-    var dragging by remember { mutableStateOf(false) }
+    val selectionColor = if (blocked) MaterialTheme.colorScheme.error else accent
     val frameWidth = with(LocalDensity.current) { width.toPx() }
     val frameHeight = with(LocalDensity.current) { height.toPx() }
     Box(modifier.clipToBounds().testTag("ui_canvas")) {
@@ -389,7 +346,6 @@ private fun UiCanvas(
                 val bounds = item.bounds
                 val itemWidth = width * bounds.width.toFraction()
                 val itemHeight = height * bounds.height.toFraction()
-                val isSelected = item.id == selected?.id
                 val background = item.style.background?.let { Color(it or 0xff000000.toInt()) } ?: Color.Transparent
                 val editEntry = LocalUiEditEntry.current
                 var menu by remember { mutableStateOf(false) }
@@ -421,19 +377,16 @@ private fun UiCanvas(
                         }
                     }
                     if (editing) {
+                        val drag = if (picked == null) Modifier.canvasDrag(
+                            item.id, frameWidth, frameHeight, onStart = { onStart(item.id) },
+                            onDelta = { x, y -> transform(item.id, null, x, y) }, onEnd = onEnd,
+                        ) else Modifier
                         Box(Modifier.matchParentSize()
-                            .then(if (isSelected) Modifier.border(1.dp, accent) else Modifier)
+                            .then(if (picked?.contains(item.id) == true) Modifier.border(2.dp, accent) else Modifier)
                             .clickable { select(item.id) }
-                            .canvasDrag(item.id, frameWidth, frameHeight, onStart = { select(item.id); dragging = true },
-                                onDelta = move, onEnd = { snap(item.id); dragging = false })
+                            .then(drag)
                             .semantics { contentDescription = componentLabel }
                             .testTag("ui_component_" + item.id))
-                        if (isSelected) {
-                            Box(Modifier.align(Alignment.BottomEnd).size(24.dp).background(accent, CircleShape)
-                                .canvasDrag(item.id, frameWidth, frameHeight, onStart = { dragging = true },
-                                    onDelta = resize, onEnd = { dragging = false })
-                                .testTag("ui_resize_" + item.id))
-                        }
                     } else if (editEntry != null) {
                         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                             DropdownMenuItem(
@@ -446,19 +399,57 @@ private fun UiCanvas(
                 }
             }
         }
-        if (editing && dragging && selected != null) {
-            val (x, y) = layout.guides(selected.id)
-            val bounds = selected.bounds
-            Canvas(Modifier.matchParentSize().zIndex((layout.items.size + 1).toFloat())) {
-                x.filter { guide -> bounds.horizontalAnchors.any { abs(guide - it) <= 9 } }.forEach {
-                    val at = size.width * it.toFraction()
-                    drawLine(accent, Offset(at, 0f), Offset(at, size.height), strokeWidth = 1.dp.toPx())
-                }
-                y.filter { guide -> bounds.verticalAnchors.any { abs(guide - it) <= 9 } }.forEach {
-                    val at = size.height * it.toFraction()
-                    drawLine(accent, Offset(0f, at), Offset(size.width, at), strokeWidth = 1.dp.toPx())
+        val bounds = selected?.let { layout.boundsOf(layout.members(it.id)) }
+        if (editing && picked == null && selected != null && bounds != null) {
+            val frameZ = (layout.items.size + 1).toFloat()
+            ResizeFrame(selected.id, bounds, width, height, Modifier.zIndex(frameZ), selectionColor,
+                onStart = { onStart(selected.id) },
+                onDelta = { edge, dx, dy -> transform(selected.id, edge, dx, dy) }, onEnd = onEnd)
+            if (dragging && layout.snapping) {
+                val (x, y) = layout.guides(selected.id)
+                Canvas(Modifier.matchParentSize().zIndex(frameZ)) {
+                    x.filter { guide -> bounds.horizontalAnchors.any { abs(guide - it) <= 9 } }.forEach {
+                        val at = size.width * it.toFraction()
+                        drawLine(accent, Offset(at, 0f), Offset(at, size.height), strokeWidth = 1.dp.toPx())
+                    }
+                    y.filter { guide -> bounds.verticalAnchors.any { abs(guide - it) <= 9 } }.forEach {
+                        val at = size.height * it.toFraction()
+                        drawLine(accent, Offset(0f, at), Offset(size.width, at), strokeWidth = 1.dp.toPx())
+                    }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun ResizeFrame(
+    id: String,
+    bounds: UiCanvasBounds,
+    width: Dp,
+    height: Dp,
+    modifier: Modifier,
+    color: Color,
+    onStart: () -> Unit,
+    onDelta: (UiResizeEdge, Int, Int) -> Unit,
+    onEnd: () -> Unit,
+) {
+    val frameWidth = width * bounds.width.toFraction()
+    val frameHeight = height * bounds.height.toFraction()
+    val hit = minOf(20.dp, frameWidth / 3, frameHeight / 3)
+    val density = LocalDensity.current
+    val widthPx = with(density) { width.toPx() }
+    val heightPx = with(density) { height.toPx() }
+    Box(modifier.absoluteOffset(width * bounds.x.toFraction(), height * bounds.y.toFraction())
+        .size(frameWidth, frameHeight).border(1.dp, color)) {
+        UiResizeEdge.entries.forEach { edge ->
+            val targetWidth = if (edge.horizontal == 0) frameWidth - hit * 2 else hit
+            val targetHeight = if (edge.vertical == 0) frameHeight - hit * 2 else hit
+            val alignment = BiasAbsoluteAlignment(edge.horizontal.toFloat(), edge.vertical.toFloat())
+            val suffix = if (edge == UiResizeEdge.BOTTOM_RIGHT) "" else ":" + edge.name.lowercase()
+            Box(Modifier.align(alignment).size(targetWidth, targetHeight)
+                .canvasDrag(id + suffix, widthPx, heightPx, onStart, { x, y -> onDelta(edge, x, y) }, onEnd)
+                .testTag("ui_resize_" + id + suffix))
         }
     }
 }
@@ -500,25 +491,22 @@ private fun Modifier.canvasDrag(
     width: Float,
     height: Float,
     onStart: () -> Unit = {},
-    onDelta: (String, Int, Int) -> Unit,
+    onDelta: (Int, Int) -> Unit,
     onEnd: () -> Unit = {},
 ): Modifier {
     val start by rememberUpdatedState(onStart)
     val delta by rememberUpdatedState(onDelta)
     val end by rememberUpdatedState(onEnd)
     return pointerInput(id, width, height) {
-        var leftover = Offset.Zero
+        var displacement = Offset.Zero
         detectDragGestures(
-            onDragStart = { leftover = Offset.Zero; start() },
+            onDragStart = { displacement = Offset.Zero; start() },
             onDragEnd = { end() },
             onDragCancel = { end() },
         ) { change, amount ->
             change.consume()
-            leftover += Offset(amount.x / width * UI_CANVAS_UNITS, amount.y / height * UI_CANVAS_UNITS)
-            val x = leftover.x.roundToInt()
-            val y = leftover.y.roundToInt()
-            leftover -= Offset(x.toFloat(), y.toFloat())
-            if (x != 0 || y != 0) delta(id, x, y)
+            displacement += Offset(amount.x / width * UI_CANVAS_UNITS, amount.y / height * UI_CANVAS_UNITS)
+            delta(displacement.x.roundToInt(), displacement.y.roundToInt())
         }
     }
 }

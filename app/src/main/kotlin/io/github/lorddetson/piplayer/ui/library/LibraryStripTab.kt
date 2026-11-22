@@ -33,6 +33,8 @@ import io.github.lorddetson.piplayer.ui.customization.PanelMenuPage
 import io.github.lorddetson.piplayer.ui.customization.PanelRestoreButton
 import io.github.lorddetson.piplayer.ui.customization.StockUiSlot
 import io.github.lorddetson.piplayer.ui.customization.UiControlColor
+import io.github.lorddetson.piplayer.ui.customization.UiControlTextAlign
+import io.github.lorddetson.piplayer.ui.customization.fillAlignedTextWidth
 import io.github.lorddetson.piplayer.ui.customization.UiControlIcon
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -80,6 +82,8 @@ internal fun LibraryTabFace(
             stringResource(builtInTabsById.getValue(id).labelResource),
             style = MaterialTheme.typography.titleSmall,
             color = UiControlColor(if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant),
+            modifier = Modifier.fillAlignedTextWidth(),
+            textAlign = UiControlTextAlign(),
             maxLines = 1,
         )
     }
