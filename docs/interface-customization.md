@@ -3,6 +3,17 @@
 Accepted on 20 November 2026. Tracks PIM-70 and informs PIM-71 through PIM-75. Built-in palettes and layouts are
 tracked by PIM-91 and PIM-92.
 
+## Configuration as Code
+
+App settings, themes, layouts and gestures use declarative configuration. Portable configuration uses readable,
+versioned JSON with stable identifiers. Exports should produce predictable diffs in Git. Validate an import against
+its schema and the effective layout before applying it as one change.
+
+The theme package already carries palettes and layouts. Version 10 adds saved gesture assignments, recorded paths
+and animation keyframes (PIM-111). The app's editor remains the ordinary way to change those values.
+PIM-112 tracks a portable configuration file for general app settings, including a preview and tests for migration
+and application on a clean install.
+
 ## Rendering model
 
 PiPlayer renders its own Compose components. The appearance model selects app-defined component identifiers, their
