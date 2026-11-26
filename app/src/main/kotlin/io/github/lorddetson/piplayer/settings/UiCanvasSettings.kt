@@ -18,6 +18,7 @@ internal const val UI_CANVAS_MAX_INSET = 48
 internal const val UI_CANVAS_MAX_ITEMS = 32
 internal const val UI_ICON_MAX_PAYLOAD = 14_000
 private const val THEME_ICON_BUDGET = 192_000
+private const val THEME_GESTURE_BUDGET = 224 * 1024
 private val componentId = Regex("[a-z][a-z0-9_.-]*:[a-z0-9_.-]+")
 
 @Serializable
@@ -266,17 +267,23 @@ internal data class UiCanvasLayout(
         copy(items = items.map { if (it.id == id) update(it) else it })
 }
 
-private fun validComponentId(id: String) = id.length <= 80 && componentId.matches(id)
+internal fun validComponentId(id: String) = id.length <= 80 && componentId.matches(id)
 
 @Serializable
-internal data class UiThemeCanvases(val panels: Map<UiSurface, UiCanvasLayout> = emptyMap()) {
+internal data class UiThemeCanvases(
+    val panels: Map<UiSurface, UiCanvasLayout> = emptyMap(),
+    val gestures: UiGestureProfile = UiGestureProfile(),
+) {
+    val isEmpty: Boolean get() = panels.isEmpty() && gestures.isEmpty
+
     val hasWorkspaceOptions: Boolean get() = UiSurface.LIBRARY_WORKSPACE in panels || panels.values.any { panel ->
         panel.labelDisplays.isNotEmpty() ||
             panel.items.any { it.style.labelDisplay != UiLabelDisplay.ICON_AND_TEXT || it.style.tabDirection != UiTabDirection.HORIZONTAL }
     }
 
     val isValid: Boolean get() = panels.values.all(UiCanvasLayout::isValid) &&
-        panels.values.sumOf { panel -> panel.items.sumOf { it.style.icon?.payload?.length ?: 0 } } <= THEME_ICON_BUDGET
+        panels.values.sumOf { panel -> panel.items.sumOf { it.style.icon?.payload?.length ?: 0 } } <= THEME_ICON_BUDGET &&
+        gestures.isValid && (gestures.isEmpty || Json.encodeToString(gestures).encodeToByteArray().size <= THEME_GESTURE_BUDGET)
 }
 
 internal data class UiCanvasState(val themeId: String, val layouts: UiThemeCanvases)
@@ -291,6 +298,26 @@ internal class UiCanvasSettings(private val file: DataStore<Preferences>) {
     suspend fun save(themeId: String, surface: UiSurface, layout: UiCanvasLayout?): Boolean =
         update(themeId, surface) { layout }
 
+    suspend fun saveGestures(
+        themeId: String,
+        surface: UiSurface,
+        layout: UiCanvasLayout?,
+        profile: UiGestureProfile,
+        environment: UiGestureEnvironment,
+        expected: UiGestureProfile? = null,
+    ): Boolean = apply(themeId) { before ->
+        if (expected != null && before.gestures != expected) return@apply null
+        val oldPresets = before.gestures.presets.associateBy(UiGesturePreset::id)
+        val newPresets = profile.presets.associateBy(UiGesturePreset::id)
+        val referencesElsewhere = before.gestures.surfaces.filterKeys { it != surface }.values
+            .flatMap(UiSurfaceGestures::slots).mapNotNull { it.gesture.presetId }
+        if (referencesElsewhere.any { oldPresets[it]?.points != newPresets[it]?.points }) return@apply null
+        val draft = before.gestures.copy(presets = profile.presets)
+            .editSurface(surface, profile.surfaces[surface] ?: UiSurfaceGestures())
+        if (draft.validate(surface, environment, before.gestures) != null) return@apply null
+        before.withPanel(surface, layout).copy(gestures = draft.prune(surface, environment, before.gestures))
+    }
+
     suspend fun setLabelDisplay(themeId: String, surface: UiSurface, id: String, display: UiLabelDisplay): Boolean =
         update(themeId, surface) { old ->
             val layout = old ?: UiCanvasLayout(emptyList(), hiddenStock = emptySet())
@@ -304,14 +331,14 @@ internal class UiCanvasSettings(private val file: DataStore<Preferences>) {
         themeId: String,
         surface: UiSurface,
         change: (UiCanvasLayout?) -> UiCanvasLayout?,
-    ): Boolean {
+    ): Boolean = apply(themeId) { before -> before.withPanel(surface, change(before.panels[surface])) }
+
+    private suspend fun apply(themeId: String, change: (UiThemeCanvases) -> UiThemeCanvases?): Boolean {
         var applied = false
         val saved = SettingsFiles.edit(file) { preferences ->
             if (AppearanceSettings.panelThemeId(preferences) == themeId) {
-                val panels = layoutsOf(preferences).panels
-                val layout = change(panels[surface])
-                val updated = UiThemeCanvases(if (layout == null) panels - surface else panels + (surface to layout))
-                if (updated.isValid) {
+                val updated = change(layoutsOf(preferences))
+                if (updated?.isValid == true) {
                     store(preferences, themeId, updated)
                     applied = true
                 }
@@ -319,6 +346,9 @@ internal class UiCanvasSettings(private val file: DataStore<Preferences>) {
         }
         return saved != null && applied
     }
+
+    private fun UiThemeCanvases.withPanel(surface: UiSurface, layout: UiCanvasLayout?) =
+        copy(panels = if (layout == null) panels - surface else panels + (surface to layout))
 
     companion object {
         fun layoutsOf(preferences: Preferences): UiThemeCanvases = try {
@@ -329,7 +359,7 @@ internal class UiCanvasSettings(private val file: DataStore<Preferences>) {
         }
 
         fun store(preferences: MutablePreferences, themeId: String, canvases: UiThemeCanvases) {
-            if (canvases.panels.isEmpty()) preferences.remove(key(themeId))
+            if (canvases.isEmpty) preferences.remove(key(themeId))
             else preferences[key(themeId)] = Json.encodeToString(canvases)
         }
 

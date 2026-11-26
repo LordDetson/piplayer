@@ -46,6 +46,7 @@ internal object ThemePackageCodec {
     private const val ANCHORED_CANVAS_VERSION = 7
     private const val ADVANCED_CANVAS_VERSION = 8
     private const val WORKSPACE_VERSION = 9
+    private const val GESTURE_VERSION = 10
     private const val MAX_NAME_LENGTH = 80
 
     fun encode(theme: ThemePackage): ByteArray {
@@ -60,6 +61,7 @@ internal object ThemePackageCodec {
         require(navigation == null || navigation.toLayout() == theme.navigation)
         require(theme.canvases?.isValid != false)
         val version = when {
+            theme.canvases?.gestures?.isEmpty == false -> GESTURE_VERSION
             theme.canvases?.hasWorkspaceOptions == true -> WORKSPACE_VERSION
             theme.canvases?.panels?.values?.any(UiCanvasLayout::hasAdvancedOptions) == true -> ADVANCED_CANVAS_VERSION
             theme.canvases?.panels?.values?.any { it.hiddenStock != null } == true -> ANCHORED_CANVAS_VERSION
@@ -72,7 +74,7 @@ internal object ThemePackageCodec {
         }
         return Json.encodeToString(
             Document(version, theme.name, theme.base.stored, theme.palette, theme.layout?.stored, panel, player, miniPlayer, navigation, theme.canvases),
-        ).encodeToByteArray()
+        ).encodeToByteArray().also { require(it.size <= MAX_BYTES) }
     }
 
     /** The caller owns the stream. The byte limit also applies to providers with no reported file size. */
@@ -96,9 +98,10 @@ internal object ThemePackageCodec {
             val parsed = Json.parseToJsonElement(text) as? JsonObject ?: return ThemePackageRead.Invalid
             val version = (parsed["version"] as? JsonPrimitive)?.takeUnless { it.isString }?.intOrNull
                 ?: return ThemePackageRead.Invalid
-            if (version !in PALETTE_VERSION..WORKSPACE_VERSION) return ThemePackageRead.UnsupportedVersion
+            if (version !in PALETTE_VERSION..GESTURE_VERSION) return ThemePackageRead.UnsupportedVersion
             if (version < CANVAS_VERSION && length > LEGACY_MAX_BYTES) return ThemePackageRead.TooLarge
-            if (version < CANVAS_VERSION && !hasBoundedStructure(text, legacy = true)) return ThemePackageRead.Invalid
+            if (version < CANVAS_VERSION && !hasBoundedStructure(text, maxDepth = 2, allowArrays = false)) return ThemePackageRead.Invalid
+            if (version in CANVAS_VERSION until GESTURE_VERSION && !hasBoundedStructure(text, maxDepth = 9)) return ThemePackageRead.Invalid
             if (!hasVersionFields(version, parsed)) return ThemePackageRead.Invalid
 
             val palette = parsed["palette"] as? JsonObject
@@ -120,7 +123,14 @@ internal object ThemePackageCodec {
             val hasAdvancedOptions = canvases?.panels?.values?.any(UiCanvasLayout::hasAdvancedOptions) == true
             if (version < ADVANCED_CANVAS_VERSION && (version == ANCHORED_CANVAS_VERSION) != hasAnchors) return ThemePackageRead.Invalid
             if (version < WORKSPACE_VERSION && (version == ADVANCED_CANVAS_VERSION) != hasAdvancedOptions) return ThemePackageRead.Invalid
-            if ((version == WORKSPACE_VERSION) != (canvases?.hasWorkspaceOptions == true)) return ThemePackageRead.Invalid
+            if (version < GESTURE_VERSION && (version == WORKSPACE_VERSION) != (canvases?.hasWorkspaceOptions == true)) {
+                return ThemePackageRead.Invalid
+            }
+            val hasGestureField = (parsed["canvases"] as? JsonObject)?.containsKey("gestures") == true
+            if ((version == GESTURE_VERSION) != hasGestureField ||
+                (version == GESTURE_VERSION) != (canvases?.gestures?.isEmpty == false)
+            ) return ThemePackageRead.Invalid
+            if (canvases != null && hidesLibraryGestureReplacement(canvases, panel)) return ThemePackageRead.Invalid
             ThemePackageRead.Loaded(ThemePackage(document.name, base, document.palette, layout, panel, player, miniPlayer, navigation, canvases))
         } catch (_: CharacterCodingException) {
             ThemePackageRead.Invalid
@@ -131,6 +141,55 @@ internal object ThemePackageCodec {
 
     private fun validName(name: String): Boolean = name.length <= MAX_NAME_LENGTH && name.isNotBlank() &&
         name.none(Char::isISOControl) && Charsets.UTF_8.newEncoder().canEncode(name)
+
+    /** The workspace can hide a whole library strip before its gestures are mounted. */
+    internal fun hidesLibraryGestureReplacement(canvases: UiThemeCanvases, legacy: LibraryPanelLayout?): Boolean {
+        val workspace = canvases.panels[UiSurface.LIBRARY_WORKSPACE] ?: return false
+        val library = canvases.gestures.surfaces[UiSurface.LIBRARY] ?: return false
+        val placed = workspace.items.mapTo(mutableSetOf(), UiCanvasItem::id)
+        val hidden = workspace.hiddenStock
+        val child = canvases.panels[UiSurface.LIBRARY]
+        val childPlaced = child?.items.orEmpty().mapTo(mutableSetOf(), UiCanvasItem::id)
+        fun isVisible(component: String): Boolean {
+            val kind = component.substringBefore(':')
+            val block = when (kind) {
+                "tab" -> "workspace:tabs"
+                "library" -> "workspace:toolbar"
+                else -> return true
+            }
+            if (block !in placed && (hidden == null || block in hidden)) return false
+            if (component in childPlaced) return true
+            if (child != null && child.hiddenStock?.contains(component) != false) return false
+            val legacyHidden = if (kind == "tab") legacy?.tabs?.hidden else legacy?.buttons?.hidden
+            return component.substringAfter(':') !in legacyHidden.orEmpty()
+        }
+        val muted = library.unbound.mapNotNull { slot ->
+            val component = slot.target.members.singleOrNull() ?: return@mapNotNull null
+            val action = when (slot.gesture.builtIn) {
+                UiBuiltInGesture.TAP -> UiGestureActionId.STOCK_CLICK
+                UiBuiltInGesture.LONG_PRESS -> UiGestureActionId.CONTEXT_MENU
+                else -> return@mapNotNull null
+            }
+            UiGestureBinding(slot, UiGestureAction(action, targetId = component))
+        }
+        val reassigned = library.bindings.mapNotNull { binding ->
+            val component = binding.action.targetId ?: return@mapNotNull null
+            val kind = when (binding.action.id) {
+                UiGestureActionId.STOCK_CLICK -> UiBuiltInGesture.TAP
+                UiGestureActionId.CONTEXT_MENU -> UiBuiltInGesture.LONG_PRESS
+                else -> return@mapNotNull null
+            }
+            val slot = UiGestureSlot(UiGestureTarget.component(component), UiGesture.builtIn(kind))
+            UiGestureBinding(slot, binding.action)
+        }
+        val stock = (muted + reassigned).distinctBy(UiGestureBinding::slot)
+        val components = (library.bindings + stock).flatMapTo(mutableSetOf()) { it.slot.target.members }
+        val visible = components.filterTo(mutableSetOf(), ::isVisible)
+        if (visible == components) return false
+        val groups = child?.groups.orEmpty()
+        val environment = UiGestureEnvironment(visible, groups, stock)
+        return canvases.gestures.validate(UiSurface.LIBRARY, environment) is UiGestureProblem.MissingActions
+    }
 
     private fun hasVersionFields(version: Int, parsed: JsonObject): Boolean =
         listOf(PANEL_VERSION to "panel", PLAYER_VERSION to "player", MINI_PLAYER_VERSION to "miniPlayer",
@@ -144,8 +203,7 @@ internal object ThemePackageCodec {
             }
 
     /** Bound nesting before asking the JSON parser to build a tree. */
-    private fun hasBoundedStructure(text: String, legacy: Boolean = false): Boolean {
-        val maxDepth = if (legacy) 2 else 9
+    private fun hasBoundedStructure(text: String, maxDepth: Int = 12, allowArrays: Boolean = true): Boolean {
         var depth = 0
         var inString = false
         var escaped = false
@@ -159,7 +217,7 @@ internal object ThemePackageCodec {
             } else {
                 when (character) {
                     '"' -> inString = true
-                    '{', '[' -> if ((legacy && character == '[') || ++depth > maxDepth) return false
+                    '{', '[' -> if ((!allowArrays && character == '[') || ++depth > maxDepth) return false
                     '}', ']' -> if (--depth < 0) return false
                 }
             }

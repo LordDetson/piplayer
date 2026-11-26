@@ -1,5 +1,7 @@
 package io.github.lorddetson.piplayer.settings
 
+import io.github.lorddetson.piplayer.settings.librarytabs.LibraryButtonLayout
+import io.github.lorddetson.piplayer.settings.librarytabs.LibraryPanelLayout
 import java.io.IOException
 import java.io.InputStream
 import org.assertj.core.api.Assertions.assertThat
@@ -64,10 +66,46 @@ class ThemePackageCodecTest {
 
     @Test
     fun `future versions are distinguished from invalid schema markers`() {
-        assertThat(decode(document.replace(":1,", ":10,"))).isEqualTo(ThemePackageRead.UnsupportedVersion)
+        assertThat(decode(document.replace(":1,", ":11,"))).isEqualTo(ThemePackageRead.UnsupportedVersion)
         assertThat(decode(document.replace(":1,", ":6,"))).isEqualTo(ThemePackageRead.Invalid)
         assertThat(decode(document.replace(":1,", ":\"1\","))).isEqualTo(ThemePackageRead.Invalid)
         assertThat(decode(document.replace("\"version\":1,", ""))).isEqualTo(ThemePackageRead.Invalid)
+    }
+
+    @Test
+    fun `workspace cannot hide the last gesture for a reassigned library menu in an import`() {
+        val source = UiGestureSlot(UiGestureTarget.component("tab:songs"), UiGesture.builtIn(UiBuiltInGesture.LONG_PRESS))
+        val original = UiGestureAction(UiGestureActionId.CONTEXT_MENU, targetId = "tab:songs")
+        val replacement = UiGestureSlot(UiGestureTarget.component("tab:artists"), UiGesture.builtIn(UiBuiltInGesture.SWIPE_UP))
+        val workspace = UiCanvasLayout(emptyList(), hiddenStock = setOf("workspace:tabs"))
+        fun importWith(
+            alternative: UiGestureSlot,
+            assign: Boolean,
+            childLayout: UiCanvasLayout? = null,
+            legacyPanel: LibraryPanelLayout? = null,
+        ): ThemePackageRead {
+            val bindings = if (assign) UiSurfaceGestures().assign(UiGestureBinding(source, UiGestureAction(UiGestureActionId.VOLUME_UP)))
+                else UiSurfaceGestures().unbind(source)
+            val gestures = UiGestureProfile().editSurface(UiSurface.LIBRARY,
+                bindings.assign(UiGestureBinding(alternative, original)))
+            val panels = buildMap {
+                put(UiSurface.LIBRARY_WORKSPACE, workspace)
+                childLayout?.let { put(UiSurface.LIBRARY, it) }
+            }
+            val theme = ThemePackage("Workspace", ThemeMode.SYSTEM, panel = legacyPanel,
+                canvases = UiThemeCanvases(panels, gestures))
+            return ThemePackageCodec.decode(ThemePackageCodec.encode(theme).inputStream())
+        }
+
+        assertThat(importWith(replacement, assign = false)).isEqualTo(ThemePackageRead.Invalid)
+        assertThat(importWith(replacement, assign = true)).isEqualTo(ThemePackageRead.Invalid)
+        val toolbar = replacement.copy(target = UiGestureTarget.component("library:search"))
+        assertThat(importWith(toolbar, assign = false)).isInstanceOf(ThemePackageRead.Loaded::class.java)
+        assertThat(importWith(toolbar, assign = false,
+            childLayout = UiCanvasLayout(emptyList(), hiddenStock = setOf("library:search"))))
+            .isEqualTo(ThemePackageRead.Invalid)
+        val legacyHidden = LibraryPanelLayout(buttons = LibraryButtonLayout.DEFAULT.copy(hidden = setOf("search")))
+        assertThat(importWith(toolbar, assign = false, legacyPanel = legacyHidden)).isEqualTo(ThemePackageRead.Invalid)
     }
 
     @Test

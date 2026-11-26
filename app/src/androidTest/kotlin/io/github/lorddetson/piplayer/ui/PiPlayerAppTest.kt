@@ -65,18 +65,30 @@ import io.github.lorddetson.piplayer.playback.PlaybackTesting.stopAndRelease
 import io.github.lorddetson.piplayer.playback.PlaybackTesting.waitUntil
 import io.github.lorddetson.piplayer.playback.QueueIds
 import io.github.lorddetson.piplayer.settings.AppearanceSettings
+import io.github.lorddetson.piplayer.settings.SettingsFiles
 import io.github.lorddetson.piplayer.settings.ThemeMode
+import io.github.lorddetson.piplayer.settings.UiBuiltInGesture
+import io.github.lorddetson.piplayer.settings.UiCanvasBounds
+import io.github.lorddetson.piplayer.settings.UiCanvasItem
+import io.github.lorddetson.piplayer.settings.UiCanvasLayout
 import io.github.lorddetson.piplayer.settings.UiCanvasSettings
+import io.github.lorddetson.piplayer.settings.UiGestureAction
+import io.github.lorddetson.piplayer.settings.UiGestureActionId
+import io.github.lorddetson.piplayer.settings.UiGestureProfile
 import io.github.lorddetson.piplayer.settings.UiSurface
+import io.github.lorddetson.piplayer.settings.UiSurfaceGestures
 import io.github.lorddetson.piplayer.settings.UiTabDirection
+import io.github.lorddetson.piplayer.settings.UiThemeCanvases
 import io.github.lorddetson.piplayer.playback.SongSourceRule
 import io.github.lorddetson.piplayer.ui.player.EqualizerPanel
 import io.github.lorddetson.piplayer.ui.player.PlayerTags
+import io.github.lorddetson.piplayer.ui.player.QueueTags
 import io.github.lorddetson.piplayer.ui.player.TimerChoice
 import io.github.lorddetson.piplayer.ui.player.TimerChoiceStore
 import io.github.lorddetson.piplayer.ui.player.withStockPlayerTheme
 import io.github.lorddetson.piplayer.ui.search.SearchTags
 import io.github.lorddetson.piplayer.ui.fix.FixTags
+import io.github.lorddetson.piplayer.ui.customization.stockGesture
 import io.github.lorddetson.piplayer.ui.library.LibraryTags
 import io.github.lorddetson.piplayer.ui.songs.SongsTags
 import java.util.concurrent.TimeUnit
@@ -240,6 +252,25 @@ class PiPlayerAppTest {
     }
 
     @Test
+    fun releasingTheQueuePreviewKeepsNowPlayingUnderTheQueue() {
+        playAndPause("Alpha")
+        openNowPlaying()
+        val art = compose.onNode((cover or hasTestTag(PlayerTags.COVER_PLACEHOLDER)) and inNowPlaying)
+        art.performTouchInput {
+            down(center)
+            moveTo(center + Offset(0f, height * 0.45f))
+        }
+        compose.onNodeWithTag(QueueTags.LIST).assertDoesNotExist()
+        art.performTouchInput { up() }
+        compose.waitUntilExactlyOneExists(hasTestTag(QueueTags.LIST), timeoutMillis = 5_000)
+        compose.onNodeWithTag(QueueTags.LIST).assertIsDisplayed()
+        assertThat(onMain { controller.mediaMetadata.title.toString() }).isEqualTo("Alpha")
+        back { it.onBackPressed() }
+        compose.onNodeWithTag(PlayerTags.NOW_PLAYING).assertIsDisplayed()
+        compose.onNodeWithTag(QueueTags.LIST).assertDoesNotExist()
+    }
+
+    @Test
     fun libraryWorkspaceEditsTheListAndBarsOnTheSameCanvas() =
         withStockPlayerTheme(context, "ui_canvas_") {
             playAndPause("Alpha")
@@ -284,6 +315,33 @@ class PiPlayerAppTest {
             compose.onNodeWithTag(BottomBarTags.LIBRARY).assertIsSelected()
             compose.onNodeWithTag(BottomBarTags.SEARCH).performClick()
             compose.waitUntilExactlyOneExists(hasTestTag(SearchTags.FIELD), timeoutMillis = 5_000)
+        }
+
+    @Test
+    fun aBorrowedQueueButtonCanRunItsOriginalActionFromAReboundGesture() =
+        withStockPlayerTheme(context, "bottom_navigation_", "ui_canvas_") {
+            val surface = UiSurface.BOTTOM_NAVIGATION
+            val borrowedQueue = "now:queue"
+            val binding = stockGesture(
+                borrowedQueue, UiBuiltInGesture.SWIPE_UP,
+                UiGestureAction(UiGestureActionId.STOCK_CLICK, targetId = borrowedQueue),
+            )
+            val profile = UiGestureProfile().editSurface(surface, UiSurfaceGestures().assign(binding))
+            val layout = UiCanvasLayout(
+                listOf(UiCanvasItem(borrowedQueue, UiCanvasBounds(800, 0, 190, 180))),
+                hiddenStock = emptySet(),
+            )
+            runBlocking {
+                SettingsFiles.edit(SettingsFiles.settings(context)) {
+                    UiCanvasSettings.store(it, ThemeMode.SYSTEM.stored, UiThemeCanvases(mapOf(surface to layout), profile))
+                }
+            }
+            val button = "ui_component_$borrowedQueue"
+            compose.waitUntilExactlyOneExists(hasTestTag(button), timeoutMillis = 5_000)
+            compose.onNodeWithTag(button).performTouchInput {
+                swipe(Offset(center.x, height * 0.8f), Offset(center.x, -height * 0.8f))
+            }
+            compose.waitUntilExactlyOneExists(hasTestTag(QueueTags.LIST), timeoutMillis = 5_000)
         }
 
     @Test

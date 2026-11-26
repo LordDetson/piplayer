@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -45,7 +46,12 @@ internal class StockUiGeometry {
     }
 }
 
-internal data class StockUiSlots(val geometry: StockUiGeometry, val masked: Set<String>)
+internal data class StockUiSlots(
+    val geometry: StockUiGeometry,
+    val masked: Set<String>,
+    val gestureRuntime: UiGestureRuntime? = null,
+    val hidden: Set<String> = emptySet(),
+)
 
 internal val LocalStockUiSlots = staticCompositionLocalOf<StockUiSlots?> { null }
 
@@ -65,22 +71,32 @@ internal fun StockUiSlot(
     id: String,
     modifier: Modifier = Modifier,
     owner: StockUiSlots? = LocalStockUiSlots.current,
+    onClick: (() -> Unit)? = null,
+    onHold: (() -> Unit)? = null,
+    externalHold: Boolean = false,
     content: @Composable () -> Unit,
 ) {
-    if (owner == null) {
-        Box(modifier) { content() }
-        return
-    }
+    val runtime = owner?.gestureRuntime?.takeUnless { it.surface == io.github.lorddetson.piplayer.settings.UiSurface.LIBRARY_WORKSPACE &&
+        (id.startsWith("tab:") || id.startsWith("library:")) } ?: uiGestureRuntimeForStock(id)
+    val ancestors = LocalUiGestureAncestors.current
     var size by remember(id) { mutableStateOf(IntSize.Zero) }
-    val masked = id in owner.masked
+    val masked = id in owner?.masked.orEmpty()
+    val workspace = id.startsWith("workspace:")
+    val hold = onHold
+    val input = if (masked) Modifier else Modifier.uiGestureTarget(id, runtime, onClick, hold, preserveMovement = workspace)
+    val nativeHold = if (!masked && !externalHold && hold != null && stockHoldUsesNative(id, runtime)) {
+        Modifier.customizeOnHold(onHold = hold)
+    } else Modifier
     val decoration = if (masked && size == IntSize.Zero) {
         Modifier.graphicsLayer { alpha = 0f }.clearAndSetSemantics {}
     } else Modifier
-    Box(modifier.recordStockUiSlot(id, owner).onSizeChanged { size = it }.then(decoration)) {
+    Box(modifier.recordStockUiSlot(id, owner).onSizeChanged { size = it }.then(input).then(nativeHold).then(decoration)) {
         if (masked && size != IntSize.Zero) {
             with(LocalDensity.current) { Spacer(Modifier.size(size.width.toDp(), size.height.toDp())) }
         } else {
-            content()
+            CompositionLocalProvider(
+                LocalUiGestureAncestors provides (ancestors + listOfNotNull(runtime?.let { it to id })),
+            ) { content() }
         }
     }
 }

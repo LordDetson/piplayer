@@ -81,7 +81,7 @@ class AppearanceSettings internal constructor(private val file: DataStore<Prefer
             player = nowPlayingPanels.stateOf(preferences).panel,
             miniPlayer = miniPlayerPanels.stateOf(preferences).panel,
             navigation = bottomNavigationLayouts.stateOf(preferences).panel,
-            canvases = UiCanvasSettings.layoutsOf(preferences).takeUnless { it.panels.isEmpty() },
+            canvases = UiCanvasSettings.layoutsOf(preferences).takeUnless(UiThemeCanvases::isEmpty),
         )
     }
 
@@ -101,7 +101,10 @@ class AppearanceSettings internal constructor(private val file: DataStore<Prefer
             val importedPlayer = player ?: nowPlayingPanels.stateOf(preferences).panel
             val importedMiniPlayer = miniPlayer ?: miniPlayerPanels.stateOf(preferences).panel
             val importedNavigation = navigation ?: bottomNavigationLayouts.stateOf(preferences).panel
-            val importedCanvases = canvases ?: UiCanvasSettings.layoutsOf(preferences)
+            val importedCanvases = canvases ?: UiCanvasSettings.layoutsOf(preferences).copy(gestures = UiGestureProfile())
+            if (ThemePackageCodec.hidesLibraryGestureReplacement(importedCanvases, importedPanel)) {
+                return@update ThemeApplyResult.InvalidTheme
+            }
             if (!CustomThemesSettings.storeTheme(preferences, theme, select = true, replaceExisting = false)) {
                 return@update ThemeApplyResult.InvalidTheme
             }

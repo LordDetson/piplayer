@@ -13,7 +13,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.MotionDurationScale
@@ -27,26 +26,41 @@ import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.launch
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
 internal enum class TrackSwipeDirection(val incomingSide: Float) { PREVIOUS(-1f), NEXT(1f) }
 
+internal data class TrackSwipeEntry(val index: Int, val item: MediaItem)
+
+internal data class TrackSwipeNeighbors(
+    val revision: Int,
+    val occurrence: Int,
+    val currentIndex: Int,
+    val previous: TrackSwipeEntry?,
+    val next: TrackSwipeEntry?,
+) {
+    fun adjacent(direction: TrackSwipeDirection) = when (direction) {
+        TrackSwipeDirection.PREVIOUS -> previous
+        TrackSwipeDirection.NEXT -> next
+    }
+}
+
 @OptIn(UnstableApi::class)
-internal class NowPlayingTrackSwipe(
-    private val player: Player?,
-    private val scope: CoroutineScope,
-) : Player.Listener {
+internal class NowPlayingTrackSwipe(private val player: Player?) : Player.Listener {
     data class Transition(val direction: TrackSwipeDirection, val sequence: Int)
-    private data class Skip(val direction: TrackSwipeDirection, val index: Int, val mediaId: String, val deadlineMs: Long)
+    private data class Skip(
+        val direction: TrackSwipeDirection, val index: Int, val mediaId: String, val deadlineMs: Long, val animate: Boolean,
+    )
 
     private var pending: Skip? = null
     private var sequence = 0
+    private var timelineRevision = 0
+    private var trackOccurrence = 0
     private var guardedDown: PointerInputChange? = null
+    var neighbors by mutableStateOf(readNeighbors())
+        private set
     var transition by mutableStateOf<Transition?>(null)
         private set
 
@@ -57,33 +71,54 @@ internal class NowPlayingTrackSwipe(
     fun isGuarded(down: PointerInputChange): Boolean =
         guardedDown?.let { it.id == down.id && it.uptimeMillis == down.uptimeMillis } == true
 
-    fun skip(direction: TrackSwipeDirection) {
-        val target = player ?: return
-        scope.launch {
-            val now = SystemClock.uptimeMillis()
-            if ((pending?.deadlineMs ?: 0) > now) return@launch
-            val command = when (direction) {
-                TrackSwipeDirection.PREVIOUS -> Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM
-                TrackSwipeDirection.NEXT -> Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM
-            }
-            if (!target.isCommandAvailable(command) || !target.isCommandAvailable(Player.COMMAND_GET_TIMELINE)) return@launch
-            val destination = when (direction) {
-                TrackSwipeDirection.PREVIOUS -> target.previousMediaItemIndex
-                TrackSwipeDirection.NEXT -> target.nextMediaItemIndex
-            }
-            if (destination == C.INDEX_UNSET || destination == target.currentMediaItemIndex) return@launch
-            pending = Skip(direction, destination, target.getMediaItemAt(destination).mediaId, now + 1_400)
-            when (direction) {
-                TrackSwipeDirection.PREVIOUS -> target.seekToPreviousMediaItem()
-                TrackSwipeDirection.NEXT -> target.seekToNextMediaItem()
-            }
+    fun skip(direction: TrackSwipeDirection, expected: TrackSwipeNeighbors? = null): Boolean {
+        val target = player ?: return false
+        val now = SystemClock.uptimeMillis()
+        if ((pending?.deadlineMs ?: 0) > now) return false
+        val current = readNeighbors() ?: return false
+        if (expected != null && current != expected) return false
+        val destination = current.adjacent(direction) ?: return false
+        // The preview is already in place for a cover swipe. Only the non-cover fallback needs an entrance animation.
+        pending = Skip(direction, destination.index, destination.item.mediaId, now + 1_400, animate = expected == null)
+        when (direction) {
+            TrackSwipeDirection.PREVIOUS -> target.seekToPreviousMediaItem()
+            TrackSwipeDirection.NEXT -> target.seekToNextMediaItem()
+        }
+        return true
+    }
+
+    private fun readNeighbors(): TrackSwipeNeighbors? {
+        val target = player ?: return null
+        if (!target.isCommandAvailable(Player.COMMAND_GET_TIMELINE) || target.mediaItemCount == 0) return null
+        val current = target.currentMediaItemIndex
+        fun entry(command: Int, index: Int) = if (target.isCommandAvailable(command) &&
+            index != C.INDEX_UNSET && index != current
+        ) TrackSwipeEntry(index, target.getMediaItemAt(index)) else null
+        return TrackSwipeNeighbors(
+            timelineRevision,
+            trackOccurrence,
+            current,
+            entry(Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM, target.previousMediaItemIndex),
+            entry(Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM, target.nextMediaItemIndex),
+        )
+    }
+
+    override fun onEvents(player: Player, events: Player.Events) {
+        if (events.contains(Player.EVENT_TIMELINE_CHANGED)) timelineRevision++
+        if (events.containsAny(
+                Player.EVENT_TIMELINE_CHANGED, Player.EVENT_MEDIA_ITEM_TRANSITION, Player.EVENT_REPEAT_MODE_CHANGED,
+                Player.EVENT_SHUFFLE_MODE_ENABLED_CHANGED, Player.EVENT_AVAILABLE_COMMANDS_CHANGED,
+            )
+        ) {
+            neighbors = readNeighbors()
         }
     }
 
     override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+        trackOccurrence++
         val skip = pending ?: return
         pending = null
-        if (player?.currentMediaItemIndex == skip.index && mediaItem?.mediaId == skip.mediaId &&
+        if (skip.animate && player?.currentMediaItemIndex == skip.index && mediaItem?.mediaId == skip.mediaId &&
             SystemClock.uptimeMillis() <= skip.deadlineMs
         ) {
             transition = Transition(skip.direction, ++sequence)
@@ -93,8 +128,7 @@ internal class NowPlayingTrackSwipe(
 
 @Composable
 internal fun rememberNowPlayingTrackSwipe(player: Player?): NowPlayingTrackSwipe {
-    val scope = rememberCoroutineScope { Dispatchers.Main.immediate }
-    val swipe = remember(player, scope) { NowPlayingTrackSwipe(player, scope) }
+    val swipe = remember(player) { NowPlayingTrackSwipe(player) }
     DisposableEffect(player, swipe) {
         player?.addListener(swipe)
         onDispose { player?.removeListener(swipe) }

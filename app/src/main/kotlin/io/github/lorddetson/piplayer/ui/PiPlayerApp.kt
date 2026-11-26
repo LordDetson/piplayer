@@ -143,6 +143,11 @@ import io.github.lorddetson.piplayer.ui.player.PreviousButton
 import io.github.lorddetson.piplayer.ui.player.RepeatButton
 import io.github.lorddetson.piplayer.ui.player.ShuffleButton
 import io.github.lorddetson.piplayer.ui.player.SleepTimerButton
+import io.github.lorddetson.piplayer.ui.player.SleepTimerSheet
+import io.github.lorddetson.piplayer.ui.player.performPlaybackGesture
+import io.github.lorddetson.piplayer.settings.UiGestureAction
+import io.github.lorddetson.piplayer.settings.UiGestureActionId
+import io.github.lorddetson.piplayer.ui.customization.LocalUiGestureActionHandler
 import io.github.lorddetson.piplayer.ui.player.StopAfterCurrentButton
 import io.github.lorddetson.piplayer.ui.settings.FoldersScreen
 import io.github.lorddetson.piplayer.ui.settings.SettingsScreen
@@ -190,6 +195,9 @@ data object NowPlayingRoute : NavKey
 /** The queue screen (docs/playback.md §9.2), opened from Now Playing. */
 @Serializable
 data object QueueRoute : NavKey
+
+@Serializable
+private data object QueueFromCoverRoute : NavKey
 
 /**
  * The details of a song of the library by its file ID, or of a file opened from another app by its URI (docs/library.md
@@ -240,6 +248,10 @@ private val FROM_THE_SIDE = NavDisplay.transitionSpec {
     EnterTransition.None togetherWith slideOutHorizontally(targetOffsetX = { it })
 } + NavDisplay.predictivePopTransitionSpec {
     EnterTransition.None togetherWith slideOutHorizontally(targetOffsetX = { it })
+}
+
+private val FROM_QUEUE_PREVIEW = FROM_THE_SIDE + NavDisplay.transitionSpec {
+    EnterTransition.None togetherWith ExitTransition.None
 }
 
 /**
@@ -317,6 +329,10 @@ fun PiPlayerApp(
     val covers = rememberCoverActions(snackbar)
     val favorites = remember(context) { FavoriteChoices(context) }
     val favoriteActions = rememberFavoriteActions(favorites, snackbar)
+    val currentFavorite = currentSongId?.let { id ->
+        val checked by remember(id) { favorites.favoriteFlow(id) }.collectAsStateWithLifecycle(false)
+        FavoriteState(checked) { favoriteActions.setById(id, !checked) }
+    }
     val resources = LocalResources.current
     val messageScope = rememberCoroutineScope()
     val favoriteBatch = remember(favoriteActions) {
@@ -378,36 +394,90 @@ fun PiPlayerApp(
         playingLinks = currentSongId?.let { linksOf(context, it) }
     }
     val extraControls = rememberExtraControls(viewModel, player)
+    var timerOpen by rememberSaveable { mutableStateOf(false) }
+    val openTimer = { timerOpen = true }
+    val openQueue = {
+        if (backStack.lastOrNull() != QueueRoute && backStack.lastOrNull() != QueueFromCoverRoute) {
+            backStack.add(QueueRoute)
+        }
+    }
+    val artworkRevision by viewModel.coverChanges.collectAsStateWithLifecycle()
+    val queueContent: @Composable () -> Unit = {
+        QueueScreen(
+            player = player,
+            actions = QueueActions(
+                remove = { entry -> viewModel.removeFromQueue(entry.row, entry.mediaId, entry.title) },
+                move = { entry, from, to -> viewModel.moveInQueue(from, to, entry.mediaId) },
+            ),
+            snackbar = snackbar,
+            onBack = { close() },
+            menu = menu,
+            selectionActions = QueueSelectionActions(
+                addToQueue = viewModel::addToQueue,
+                removeAll = viewModel::removeFromQueue,
+                addToPlaylist = playlists.addSelected,
+                favorites = favoriteBatch,
+            ),
+            restored = viewModel.restored.collectAsStateWithLifecycle().value,
+        )
+    }
+    val openCatalogSettings: () -> Unit = { open(SettingsRoute) }
+    val openCatalogQueue: () -> Unit = { open(QueueRoute) }
+    val previous: () -> Unit = {
+        player?.takeIf { it.isCommandAvailable(Player.COMMAND_SEEK_TO_PREVIOUS) }?.seekToPrevious()
+    }
+    val next: () -> Unit = {
+        player?.takeIf { it.isCommandAvailable(Player.COMMAND_SEEK_TO_NEXT) }?.seekToNext()
+    }
+    fun playbackClick(action: UiGestureActionId): () -> Unit = { performPlaybackGesture(UiGestureAction(action), player) }
+    val playPause = playbackClick(UiGestureActionId.PLAY_PAUSE)
+    val shuffle = playbackClick(UiGestureActionId.TOGGLE_SHUFFLE)
+    val repeat = playbackClick(UiGestureActionId.CYCLE_REPEAT)
+    val stopAfter: () -> Unit = { extraControls.setStopAfterCurrent(!extraControls.extras.stopAfterCurrent) }
     val canvasCatalog = buildList {
         BottomDestination.entries.forEach { add(bottomNavigationComponent(it, backStack.firstOrNull(), switchTo)) }
-        add(UiCanvasComponent("library:settings", R.string.settings_open, customizableIcon = true) {
-            IconButton(onClick = { open(SettingsRoute) }) {
+        add(UiCanvasComponent("library:settings", R.string.settings_open, customizableIcon = true, onClick = openCatalogSettings) {
+            IconButton(onClick = openCatalogSettings) {
                 UiControlIcon(painterResource(R.drawable.ic_settings), stringResource(R.string.settings_open))
             }
         })
-        add(UiCanvasComponent("now:queue", R.string.queue_open, customizableIcon = true) {
-            IconButton(onClick = { open(QueueRoute) }) {
+        add(UiCanvasComponent("now:queue", R.string.queue_open, customizableIcon = true, onClick = openCatalogQueue) {
+            IconButton(onClick = openCatalogQueue) {
                 UiControlIcon(painterResource(R.drawable.ic_queue), stringResource(R.string.queue_open))
             }
         })
-        add(UiCanvasComponent("now:previous", R.string.player_previous, customizableIcon = true) { PreviousButton(player) })
-        add(UiCanvasComponent("now:play_pause", R.string.player_element_play_pause, customizableIcon = true) { PlayPauseButton(player) })
-        add(UiCanvasComponent("now:next", R.string.player_next, customizableIcon = true) { NextButton(player) })
-        add(UiCanvasComponent("now:shuffle", R.string.player_shuffle, customizableIcon = true) { ShuffleButton(player) })
-        add(UiCanvasComponent("now:repeat", R.string.player_repeat, customizableIcon = true) { RepeatButton(player) })
-        add(UiCanvasComponent("now:timer", R.string.player_sleep_timer, width = 96.dp, customizableIcon = true, alignableText = true) {
-            SleepTimerButton(extraControls, Modifier)
+        add(UiCanvasComponent("now:previous", R.string.player_previous, customizableIcon = true, onClick = previous) {
+            PreviousButton(player, onClick = previous)
         })
-        add(UiCanvasComponent("now:stop_after", R.string.player_stop_after_current, customizableIcon = true) {
-            StopAfterCurrentButton(extraControls, Modifier)
+        add(UiCanvasComponent("now:play_pause", R.string.player_element_play_pause, customizableIcon = true, onClick = playPause) {
+            PlayPauseButton(player, onClick = playPause)
+        })
+        add(UiCanvasComponent("now:next", R.string.player_next, customizableIcon = true, onClick = next) {
+            NextButton(player, onClick = next)
+        })
+        add(UiCanvasComponent("now:shuffle", R.string.player_shuffle, customizableIcon = true, onClick = shuffle) {
+            ShuffleButton(player, onClick = shuffle)
+        })
+        add(UiCanvasComponent("now:repeat", R.string.player_repeat, customizableIcon = true, onClick = repeat) {
+            RepeatButton(player, onClick = repeat)
+        })
+        add(UiCanvasComponent(
+            "now:timer", R.string.player_sleep_timer, width = 96.dp, customizableIcon = true, alignableText = true, onClick = openTimer,
+        ) {
+            SleepTimerButton(extraControls, Modifier, openTimer)
+        })
+        add(UiCanvasComponent("now:stop_after", R.string.player_stop_after_current, customizableIcon = true, onClick = stopAfter) {
+            StopAfterCurrentButton(extraControls, Modifier, stopAfter)
         })
         extraControls.openEqualizer?.let { equalizer ->
-            add(UiCanvasComponent("now:equalizer", R.string.player_equalizer, customizableIcon = true) {
+            add(UiCanvasComponent("now:equalizer", R.string.player_equalizer, customizableIcon = true, onClick = equalizer) {
                 EqualizerButton(equalizer, Modifier)
             })
         }
     }
-    AppCanvasColumn(canvasCatalog) {
+    AppCanvasColumn(canvasCatalog, { gesture ->
+        performPlaybackGesture(gesture, player, openQueue, currentFavorite?.onToggle, openTimer)
+    }) {
         NavDisplay(
             backStack = backStack,
             onBack = { close() },
@@ -458,25 +528,8 @@ fun PiPlayerApp(
                 entry<SmartListRoute>(metadata = FROM_THE_SIDE) { route ->
                     ListKind.of(route.kind)?.takeIf { it.smart }?.let { SmartListPage(it, host, onBack = { close() }) }
                 }
-                entry<QueueRoute>(metadata = FROM_THE_SIDE) {
-                    QueueScreen(
-                        player = player,
-                        actions = QueueActions(
-                            remove = { entry -> viewModel.removeFromQueue(entry.row, entry.mediaId, entry.title) },
-                            move = { entry, from, to -> viewModel.moveInQueue(from, to, entry.mediaId) },
-                        ),
-                        snackbar = snackbar,
-                        onBack = { close() },
-                        menu = menu,
-                        selectionActions = QueueSelectionActions(
-                            addToQueue = viewModel::addToQueue,
-                            removeAll = viewModel::removeFromQueue,
-                            addToPlaylist = playlists.addSelected,
-                            favorites = favoriteBatch,
-                        ),
-                        restored = viewModel.restored.collectAsStateWithLifecycle().value,
-                    )
-                }
+                entry<QueueRoute>(metadata = FROM_THE_SIDE) { queueContent() }
+                entry<QueueFromCoverRoute>(metadata = FROM_QUEUE_PREVIEW) { queueContent() }
                 entry<TrackDetailsRoute>(metadata = FROM_THE_SIDE) { route ->
                     TrackDetailsScreen(route.fileId, route.uri, snackbar, onBack = { close() }, onTagHistory = { open(TagHistoryRoute(it)) })
                 }
@@ -536,12 +589,15 @@ fun PiPlayerApp(
                                 { openLatest { latest -> latest.artists.firstOrNull()?.let { ArtistRoute(it.key) } } }
                             },
                             onOpenAlbum = links?.albumKey?.let { { openLatest { latest -> latest.albumKey?.let(::AlbumRoute) } } },
-                            onOpenQueue = { if (backStack.lastOrNull() != QueueRoute) backStack.add(QueueRoute) },
-                            coverName = coverName,
-                            favorite = currentSongId?.let { id ->
-                                val checked by remember(id) { favorites.favoriteFlow(id) }.collectAsStateWithLifecycle(false)
-                                FavoriteState(checked) { favoriteActions.setById(id, !checked) }
+                            onOpenQueue = openQueue,
+                            onSwipeOpenQueue = {
+                                if (backStack.lastOrNull() == NowPlayingRoute) backStack.add(QueueFromCoverRoute)
                             },
+                            onOpenSleepTimer = openTimer,
+                            previewArtwork = viewModel::previewArtwork,
+                            artworkRevision = artworkRevision,
+                            coverName = coverName,
+                            favorite = currentFavorite,
                             more = currentMediaId?.let { mediaId ->
                                 { closeMenu ->
                                     if (pendingFileId != null) {
@@ -578,13 +634,18 @@ fun PiPlayerApp(
             if (!onboarding.showing) PiPlayerBottomBar(backStack.firstOrNull(), switchTo, snackbar)
         }
     }
+    if (timerOpen) SleepTimerSheet(extraControls) { timerOpen = false }
     if (CrashReports.promptEnabled) CrashPrompt(CrashReports.of(LocalContext.current))
     BatchNotificationExplanation(batchNotifications)
 }
 
 @Composable
-private fun AppCanvasColumn(catalog: List<UiCanvasComponent>, content: @Composable ColumnScope.() -> Unit) {
-    CompositionLocalProvider(LocalUiCatalog provides catalog) {
+private fun AppCanvasColumn(
+    catalog: List<UiCanvasComponent>,
+    gestureHandler: (UiGestureAction) -> Boolean,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    CompositionLocalProvider(LocalUiCatalog provides catalog, LocalUiGestureActionHandler provides gestureHandler) {
         Column(Modifier.fillMaxSize(), content = content)
     }
 }

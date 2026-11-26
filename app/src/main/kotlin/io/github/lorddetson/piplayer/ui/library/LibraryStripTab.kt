@@ -39,6 +39,8 @@ import io.github.lorddetson.piplayer.ui.customization.PanelItemMenu
 import io.github.lorddetson.piplayer.ui.customization.PanelMenuPage
 import io.github.lorddetson.piplayer.ui.customization.PanelRestoreButton
 import io.github.lorddetson.piplayer.ui.customization.StockUiSlot
+import io.github.lorddetson.piplayer.ui.customization.stockHoldUsesNative
+import io.github.lorddetson.piplayer.ui.customization.uiGestureRuntimeForStock
 import io.github.lorddetson.piplayer.ui.customization.UiControlColor
 import io.github.lorddetson.piplayer.ui.customization.UiControlTextAlign
 import io.github.lorddetson.piplayer.ui.customization.fillAlignedTextWidth
@@ -60,9 +62,12 @@ internal fun LibraryStripTab(
 ) {
     var menu by remember { mutableStateOf<PanelMenuPage?>(null) }
     val openMenu = { menu = PanelMenuPage.ACTIONS }
-    StockUiSlot("tab:$id") {
+    val componentId = "tab:$id"
+    val hold = openMenu.takeIf { canCustomize }
+    val useNativeHold = stockHoldUsesNative(componentId, uiGestureRuntimeForStock(componentId))
+    StockUiSlot(componentId, onClick = onClick, onHold = hold, externalHold = true) {
         val row = if (vertical) Modifier.fillMaxWidth().heightIn(min = 48.dp) else Modifier.heightIn(min = 48.dp)
-        LibraryTabFace(id, selected, onClick, row, onLongClick = openMenu.takeIf { canCustomize })
+        LibraryTabFace(id, selected, onClick, row, onLongClick = hold.takeIf { useNativeHold })
         PanelItemMenu(menu, { menu = it }, PanelItemKind.TAB, id, layout.visible,
             layout.order.filter(layout.hidden::contains), { builtInTabsById.getValue(it).labelResource },
             onMove, onHide.takeIf { layout.visible.size > 1 }, onRestore, onLabelDisplay = onLabelDisplay)
@@ -145,8 +150,11 @@ internal fun LibraryToolbarButton(
 ) {
     var menu by remember { mutableStateOf<PanelMenuPage?>(null) }
     val openMenu = { menu = PanelMenuPage.ACTIONS }
-    StockUiSlot("library:" + button.id) {
-        LibraryToolbarButtonFace(button, onClick, onLongClick = openMenu.takeIf { canCustomize })
+    val componentId = "library:" + button.id
+    val hold = openMenu.takeIf { canCustomize }
+    val useNativeHold = stockHoldUsesNative(componentId, uiGestureRuntimeForStock(componentId))
+    StockUiSlot(componentId, onClick = onClick, onHold = hold, externalHold = true) {
+        LibraryToolbarButtonFace(button, onClick, onLongClick = hold.takeIf { useNativeHold })
         PanelItemMenu(menu, { menu = it }, PanelItemKind.BUTTON, button.id, visible, hidden,
             { LibraryButton.byId.getValue(it).labelResource }, onMove, onHide, onRestore)
     }

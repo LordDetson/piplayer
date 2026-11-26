@@ -29,6 +29,7 @@ import io.github.lorddetson.piplayer.playback.PlaybackSessionCallback
 import io.github.lorddetson.piplayer.playback.QueueRequest
 import io.github.lorddetson.piplayer.playback.writeTagsWithPlaybackPaused
 import io.github.lorddetson.piplayer.library.lists.ListKind
+import io.github.lorddetson.piplayer.library.details.TrackDetailsSources
 import io.github.lorddetson.piplayer.library.lists.SongQuery
 import io.github.lorddetson.piplayer.library.lists.SongSort
 import io.github.lorddetson.piplayer.settings.ListName
@@ -100,6 +101,21 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     private var coverFromStream = false
     private var decoding: Job? = null
     private val covers = AppCovers.loader(application)
+    internal val coverChanges = AppCovers.changes(application)
+
+    /** Uses the same cover resolver and size as the current track, so a swipe does not resolve its destination twice. */
+    internal suspend fun previewArtwork(item: MediaItem): ImageBitmap? {
+        val fileId = QueueIds.fileId(item.mediaId)
+        val resolved = fileId?.let { covers.load(CoverRequest.Track(it), coverSizePx) }
+        val metadata = item.mediaMetadata.artworkData
+        val image = resolved ?: when {
+            metadata != null -> withContext(Dispatchers.Default) { Covers.decode(metadata, coverSizePx) }
+            fileId == null && Uri.parse(item.mediaId).scheme in setOf("content", "file") ->
+                TrackDetailsSources.opened(getApplication<Application>()).picture(item.mediaId, coverSizePx)
+            else -> null
+        }
+        return image?.asImageBitmap()
+    }
 
     private val listener = object : Player.Listener {
         override fun onMediaMetadataChanged(mediaMetadata: MediaMetadata) = showCover()
@@ -387,7 +403,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     init {
         // A change of own covers, a decision or online lookups loads the current song's cover again (docs/library.md §13.3),
         // keeping the old one on screen meanwhile.
-        viewModelScope.launch { AppCovers.changes(application).drop(1).collect { showCover(reload = true) } }
+        viewModelScope.launch { coverChanges.drop(1).collect { showCover(reload = true) } }
     }
 
     /**

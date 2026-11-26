@@ -60,6 +60,8 @@ import io.github.lorddetson.piplayer.ui.customization.UiControlIcon
 import io.github.lorddetson.piplayer.ui.customization.customizeOnHold
 import io.github.lorddetson.piplayer.ui.customization.isStockUiSlotMasked
 import io.github.lorddetson.piplayer.ui.customization.recordStockUiSlot
+import io.github.lorddetson.piplayer.ui.customization.stockHoldUsesNative
+import io.github.lorddetson.piplayer.ui.customization.uiGestureTarget
 import kotlinx.coroutines.launch
 
 object BottomBarTags {
@@ -118,7 +120,7 @@ internal fun bottomNavigationComponent(
     onSelect: (NavKey) -> Unit,
     tag: String? = null,
 ): UiCanvasComponent = UiCanvasComponent("nav:${item.id}", item.labelResource, width = 96.dp, height = 60.dp,
-    customizableIcon = true, alignableText = true, labelDisplay = true) {
+    customizableIcon = true, alignableText = true, labelDisplay = true, onClick = { onSelect(item.route) }, stockContext = true) {
     val selected = item.route == current
     val color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
     val display = uiLabelDisplay("nav:${item.id}")
@@ -156,15 +158,18 @@ private fun RowScope.BottomBarItem(
     val display = uiLabelDisplay(componentId)
     val label = stringResource(item.labelResource)
     val masked = isStockUiSlotMasked(componentId)
+    val click = { onSelect(item.route) }
+    val openMenu: (() -> Unit)? = if (canCustomize) { { menu = PanelMenuPage.ACTIONS } } else null
     val itemModifier = if (masked) {
         Modifier.graphicsLayer { alpha = 0f }.clearAndSetSemantics { hideFromAccessibility() }
     } else {
-        val hold = if (canCustomize) Modifier.customizeOnHold { menu = PanelMenuPage.ACTIONS } else Modifier
-        hold.testTag(item.tag).semantics { if (display == UiLabelDisplay.ICON_ONLY) contentDescription = label }
+        val hold = if (openMenu != null && stockHoldUsesNative(componentId)) Modifier.customizeOnHold(onHold = openMenu) else Modifier
+        Modifier.uiGestureTarget(componentId, onClick = click, onHold = openMenu)
+            .then(hold).testTag(item.tag).semantics { if (display == UiLabelDisplay.ICON_ONLY) contentDescription = label }
     }
     NavigationBarItem(
         selected = item.route == current,
-        onClick = { onSelect(item.route) },
+        onClick = click,
         enabled = !masked,
         icon = {
             Box {

@@ -67,6 +67,7 @@ internal fun LibraryTabEditor(
     scope: CoroutineScope,
     onDismiss: () -> Unit,
     onSaveFailed: suspend () -> Unit,
+    canChangeVisibility: (String, Boolean) -> Boolean,
 ) {
     val latestLayout by rememberUpdatedState(layout)
     var shown by remember { mutableStateOf(layout.order) }
@@ -142,7 +143,8 @@ internal fun LibraryTabEditor(
                                     checked = visible,
                                     enabled = canHide,
                                     onCheckedChange = { show ->
-                                        scope.launch {
+                                        if (!canChangeVisibility(id, show)) onDismiss()
+                                        else scope.launch {
                                             if (settings.setVisible(id, show) != LibraryTabWrite.STORED) onSaveFailed()
                                         }
                                     },

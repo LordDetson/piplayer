@@ -24,10 +24,20 @@ import io.github.lorddetson.piplayer.TestFiles
 import io.github.lorddetson.piplayer.settings.AppearanceSettings
 import io.github.lorddetson.piplayer.settings.MiniPlayerElement
 import io.github.lorddetson.piplayer.settings.ThemeMode
+import io.github.lorddetson.piplayer.settings.UiBuiltInGesture
+import io.github.lorddetson.piplayer.settings.UiCanvasSettings
+import io.github.lorddetson.piplayer.settings.UiGestureAction
+import io.github.lorddetson.piplayer.settings.UiGestureActionId
+import io.github.lorddetson.piplayer.settings.UiGestureEnvironment
+import io.github.lorddetson.piplayer.settings.UiGestureProfile
+import io.github.lorddetson.piplayer.settings.UiSurface
+import io.github.lorddetson.piplayer.settings.UiSurfaceGestures
 import io.github.lorddetson.piplayer.settings.miniPlayerPanels
+import io.github.lorddetson.piplayer.ui.customization.stockGesture
 import io.github.lorddetson.piplayer.ui.player.TestPlayer.Call
 import io.github.lorddetson.piplayer.ui.player.TestPlayer.TestSong
 import io.github.lorddetson.piplayer.ui.theme.PiPlayerTheme
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.Rule
@@ -59,6 +69,38 @@ class MiniPlayerTest {
 
     private fun hasClickLabel(label: String) =
         SemanticsMatcher("click label \"$label\"") { it.config.getOrNull(SemanticsActions.OnClick)?.label == label }
+
+    @Test
+    fun holdingStockTrackTitleKeepsTheTrackDetailsContext() =
+        withStockPlayerTheme(context, "mini_player_panel_", "ui_canvas_") {
+            show(listOf(halo), cover = true)
+            compose.onNodeWithText("Halo", useUnmergedTree = true).performTouchInput { longClick() }
+            compose.onNodeWithTag("ui_edit_gestures").assertIsDisplayed()
+            compose.onNodeWithTag("mini_element_hide").assertIsDisplayed()
+            assertThat(opened).isFalse()
+        }
+
+    @Test
+    fun legacyHideProtectsAnAlternateOnANestedStockTitle() =
+        withStockPlayerTheme(context, "mini_player_panel_", "ui_canvas_") {
+            val surface = UiSurface.MINI_PLAYER
+            val cover = "mini:cover"
+            val title = "mini:title"
+            val contextAction = UiGestureAction(UiGestureActionId.CONTEXT_MENU, targetId = cover)
+            val original = stockGesture(cover, UiBuiltInGesture.LONG_PRESS, contextAction)
+            val replacement = stockGesture(title, UiBuiltInGesture.SWIPE_UP, contextAction)
+            val profile = UiGestureProfile().editSurface(surface, UiSurfaceGestures().unbind(original.slot).assign(replacement))
+            assertThat(runBlocking {
+                UiCanvasSettings(context).saveGestures(ThemeMode.SYSTEM.stored, surface, null, profile,
+                    UiGestureEnvironment(setOf(cover, title), emptyList(), listOf(original)))
+            }).isTrue()
+            show(listOf(halo), cover = true)
+            compose.onNodeWithText("Halo", useUnmergedTree = true).performTouchInput { longClick() }
+            compose.onNodeWithTag("mini_element_hide").performClick()
+            compose.onNodeWithText(text(R.string.gesture_blocked_title)).assertIsDisplayed()
+            assertThat(runBlocking { miniPlayerPanels.forContext(context).state.first().panel.hidden })
+                .doesNotContain(MiniPlayerElement.TRACK_INFO)
+        }
 
     @Test
     fun editorKeepsMiniPlayerTitleArtistAndAlbumIndependent() =

@@ -19,12 +19,15 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
@@ -67,6 +70,13 @@ import io.github.lorddetson.piplayer.settings.UiCanvasItem
 import io.github.lorddetson.piplayer.settings.UiCanvasLayout
 import io.github.lorddetson.piplayer.settings.UiCanvasSettings
 import io.github.lorddetson.piplayer.settings.UiCanvasState
+import io.github.lorddetson.piplayer.settings.UiBuiltInGesture
+import io.github.lorddetson.piplayer.settings.UiGestureAction
+import io.github.lorddetson.piplayer.settings.UiGestureActionId
+import io.github.lorddetson.piplayer.settings.UiGestureBinding
+import io.github.lorddetson.piplayer.settings.UiGestureEnvironment
+import io.github.lorddetson.piplayer.settings.UiGestureProblem
+import io.github.lorddetson.piplayer.settings.UiGestureProfile
 import io.github.lorddetson.piplayer.settings.UiLabelDisplay
 import io.github.lorddetson.piplayer.settings.UiPlacementMode
 import io.github.lorddetson.piplayer.settings.UiResizeEdge
@@ -88,11 +98,15 @@ internal data class UiCanvasComponent(
     val preserveGestures: Boolean = false,
     val scaleBlock: Boolean = false,
     val addable: Boolean = true,
+    val onClick: (() -> Unit)? = null,
+    val stockContext: Boolean = false,
     val content: @Composable () -> Unit,
 )
 
 internal val LocalUiCatalog = staticCompositionLocalOf<List<UiCanvasComponent>> { emptyList() }
 internal val LocalUiEditEntry = staticCompositionLocalOf<((String) -> Unit)?> { null }
+internal val LocalUiGestureEditEntry = staticCompositionLocalOf<((String) -> Unit)?> { null }
+internal val LocalUiGestureHideGuard = staticCompositionLocalOf<((String) -> Boolean)?> { null }
 internal val LocalLibraryWorkspaceEntry = staticCompositionLocalOf<((String) -> Unit)?> { null }
 
 private data class EditSession(
@@ -114,8 +128,11 @@ internal fun EditableUiPanel(
     onSaveFailed: suspend () -> Unit = {},
     onAppliedIds: (List<String>?) -> Unit = {},
     legacyStockIds: Set<String> = emptySet(),
+    legacyVisibilityGroups: Map<String, Set<String>> = emptyMap(),
     hiddenByParent: Set<String> = emptySet(),
+    gestureHiddenByParent: Set<String> = hiddenByParent,
     viewModeModifier: Modifier = Modifier,
+    stockGestures: List<UiGestureBinding> = emptyList(),
     canvasChrome: @Composable () -> Unit = {},
     stock: @Composable () -> Unit,
 ) {
@@ -125,6 +142,10 @@ internal fun EditableUiPanel(
     val scope = rememberCoroutineScope()
     val active = record?.takeIf { it.themeId == themeId }
     val persisted = active?.layouts?.panels?.get(surface)
+    val storedProfile = active?.layouts?.gestures ?: UiGestureProfile()
+    var savedProfile by remember(themeId, surface) { mutableStateOf<UiGestureProfile?>(null) }
+    val profile = savedProfile ?: storedProfile
+    LaunchedEffect(storedProfile, savedProfile) { if (savedProfile == storedProfile) savedProfile = null }
     val catalog = (components + LocalUiCatalog.current).distinctBy(UiCanvasComponent::id).associateBy(UiCanvasComponent::id)
     val stockIds = initialRows.flatten().distinct()
     val geometry = remember(themeId, surface) { StockUiGeometry() }
@@ -135,6 +156,11 @@ internal fun EditableUiPanel(
     var picked by remember(themeId, surface) { mutableStateOf<Set<String>?>(null) }
     var gestureBase by remember(themeId, surface) { mutableStateOf<UiCanvasLayout?>(null) }
     var blocked by remember(themeId, surface) { mutableStateOf(false) }
+    var gestureEditor by remember(themeId, surface) { mutableStateOf<String?>(null) }
+    var gestureDraft by remember(themeId, surface) { mutableStateOf<UiGestureProfile?>(null) }
+    var rejectedGeometry by remember(themeId, surface) { mutableStateOf<String?>(null) }
+    val owner = LocalUiGestureRuntime.current?.owner ?: remember { UiGestureContactOwner() }
+    val registry = LocalUiGesturePanelRegistry.current ?: remember { UiGesturePanelRegistry() }
     val appliedCallback by rememberUpdatedState(onAppliedIds)
     LaunchedEffect(themeId, active != null, persisted, stockIds) {
         if (active != null) appliedCallback(persisted?.let { saved ->
@@ -142,7 +168,7 @@ internal fun EditableUiPanel(
             saved.hiddenStock?.let { hidden -> (stockIds.filterNot(hidden::contains) + changed).distinct() } ?: changed
         })
     }
-    BackHandler(session != null) { if (!saving) { session = null; inspecting = false } }
+    BackHandler(session != null) { if (!saving) { session = null; inspecting = false; gestureEditor = null } }
 
     BoxWithConstraints(Modifier.fillMaxWidth()) {
         if (maxWidth <= 0.dp || height <= 0.dp) {
@@ -166,24 +192,125 @@ internal fun EditableUiPanel(
             selected = id.takeIf { sought -> initial.items.any { it.id == sought } }
             picked = null
             gestureBase = null
+            gestureDraft = null
             blocked = false
         }
+        val enterGestures: ((String) -> Unit)? = start?.let { begin ->
+            { id ->
+                if (session == null) begin(id)
+                gestureEditor = id
+            }
+        }
+        val currentGestureEntry by rememberUpdatedState(enterGestures)
+        val runtime = remember(themeId, surface, owner) {
+            UiGestureRuntime(surface, owner, { currentGestureEntry?.invoke(it) }, scope)
+        }
+        DisposableEffect(registry, runtime) {
+            registry.panels[surface] = runtime
+            onDispose {
+                runtime.dispose()
+                if (registry.panels[surface] === runtime) registry.panels.remove(surface)
+            }
+        }
         val draft = session
-        val layout = draft?.draft ?: persisted
+        val requestedLayout = draft?.draft ?: persisted
+        val desiredProfile = gestureDraft.takeIf { draft != null } ?: profile
+        val declaredContexts = components.filter(UiCanvasComponent::stockContext).map {
+            stockGesture(it.id, UiBuiltInGesture.LONG_PRESS, UiGestureAction(UiGestureActionId.CONTEXT_MENU, targetId = it.id))
+        }
+        fun environment(
+            candidate: UiCanvasLayout?,
+            editing: Boolean = false,
+            extraHidden: Set<String> = emptySet(),
+        ): UiGestureEnvironment {
+            val overrideItems = candidate?.items.orEmpty().map(UiCanvasItem::id).toSet()
+            val mountedLegacy = legacyStockIds.filterTo(mutableSetOf()) { it in runtime.mounts && it !in candidate?.hiddenStock.orEmpty() }
+            val available = when {
+                editing -> overrideItems + mountedLegacy
+                candidate == null -> stockIds.filterTo(mutableSetOf()) { it in runtime.mounts } + mountedLegacy
+                candidate.hiddenStock != null -> stockIds.filterTo(mutableSetOf()) {
+                    it !in candidate.hiddenStock && it in runtime.mounts
+                } + overrideItems + mountedLegacy
+                else -> overrideItems
+            }
+            return UiGestureEnvironment(
+                (available intersect catalog.keys) - gestureHiddenByParent - extraHidden,
+                candidate?.groups.orEmpty(),
+                (stockGestures + declaredContexts + runtime.registeredStock).distinctBy(UiGestureBinding::slot),
+            )
+        }
+        val requestedEnvironment = environment(requestedLayout, editing = draft != null)
+        val invalidRequested = profile.validate(surface, requestedEnvironment) as? UiGestureProblem.MissingActions
+        // Keep malformed imports editable while showing the component whose stock gesture they displaced.
+        val projectStock = draft == null && persisted != null && invalidRequested != null &&
+            requestedEnvironment.stock.any { binding ->
+                binding.action in invalidRequested.actions && !requestedEnvironment.reaches(binding.slot.target) &&
+                    binding.slot.target.members.any { it in stockIds || it in legacyStockIds }
+            }
+        val layout = requestedLayout.takeUnless { projectStock }
+        val gestureEnvironment = if (projectStock) environment(null) else requestedEnvironment
+        val effectiveProfile = if (projectStock) profile.copy(surfaces = profile.surfaces - surface)
+            else desiredProfile.safeForDisplay(surface, gestureEnvironment)
         val workspaceEntry = if (surface == UiSurface.LIBRARY_WORKSPACE) start else LocalLibraryWorkspaceEntry.current
         val inheritedLabels = LocalUiLabelDisplays.current
         val labels = if (surface == UiSurface.LIBRARY) {
             inheritedLabels.filterKeys { !it.startsWith("tab:") } + layout?.labelDisplays.orEmpty()
         } else inheritedLabels + layout?.labelDisplays.orEmpty()
+        SideEffect {
+            runtime.environment = gestureEnvironment
+            runtime.profile = effectiveProfile
+            runtime.userProfile = desiredProfile
+            runtime.enabled = draft == null
+            runtime.catalog = catalog
+            runtime.nestedContainers = legacyStockIds
+        }
+        val hideGuard: (String) -> Boolean = { id ->
+            val detached = persisted?.items.orEmpty().map(UiCanvasItem::id).toSet()
+            val removed = setOf(id) + (legacyVisibilityGroups[id].orEmpty() - detached)
+            val candidate = environment(layout, editing = draft != null, extraHidden = removed)
+            val problem = desiredProfile.prune(surface, candidate).validate(surface, candidate, previous = profile)
+            (problem == null).also { if (!it) rejectedGeometry = id }
+        }
+        SideEffect { runtime.hide = hideGuard }
         CompositionLocalProvider(
             LocalUiEditEntry provides start,
+            LocalUiGestureEditEntry provides enterGestures,
+            LocalUiGestureHideGuard provides hideGuard,
+            LocalUiGestureRuntime provides runtime,
+            LocalUiGesturePanelRegistry provides registry,
+            LocalUiGestureEditing provides (draft != null),
             LocalLibraryWorkspaceEntry provides workspaceEntry,
             LocalUiLabelDisplays provides labels,
         ) {
-            val anchored = draft?.anchored ?: (persisted?.hiddenStock != null)
-            fun mutate(update: (UiCanvasLayout) -> UiCanvasLayout) {
+            catalog.values.filter { it.onClick != null }.forEach { component ->
+                key(component.id) { registerUiGestureActions(component.id, click = component.onClick) }
+            }
+            val anchored = draft?.anchored ?: (layout?.hiddenStock != null)
+            fun mutate(validateFor: String? = null, update: (UiCanvasLayout) -> UiCanvasLayout) {
                 if (!saving) session = session?.let {
                     val updated = update(it.draft)
+                    if (validateFor != null) {
+                        val candidate = environment(updated, editing = true)
+                        val remaining = desiredProfile.prune(surface, candidate)
+                        val hidden = it.draft.items.map(UiCanvasItem::id).toSet() - candidate.components
+                        val blockedChild = if (surface == UiSurface.LIBRARY_WORKSPACE) {
+                            registry.panels.values.firstOrNull { child ->
+                                child !== runtime && hidden.isNotEmpty() && child.userProfile.surfaces[child.surface] != null &&
+                                    child.environment.let { environment ->
+                                        val visible = environment.copy(components = environment.components.filterTo(mutableSetOf()) {
+                                            workspaceSlotFor(it) !in hidden
+                                        })
+                                        child.userProfile.prune(child.surface, visible)
+                                            .validate(child.surface, visible, previous = child.userProfile) != null
+                                    }
+                            }
+                        } else null
+                        if (blockedChild != null || remaining.validate(surface, candidate, previous = profile) != null) {
+                            rejectedGeometry = validateFor
+                            return@let it
+                        }
+                        if (remaining != desiredProfile) gestureDraft = remaining
+                    }
                     if (updated == it.draft) it else it.copy(draft = updated, reset = false)
                 }
             }
@@ -217,6 +344,7 @@ internal fun EditableUiPanel(
             val selectedItem = layout?.items?.firstOrNull { it.id == selected }
             val selectedComponent = catalog[selected]
             val stockChanges = when {
+                projectStock -> null
                 draft?.reset == true -> null
                 draft?.anchored == true -> draft.draft.stockOverrides(draft.initial, draft.previousOverrides, stockIds.toSet() + legacyStockIds)
                 else -> persisted
@@ -229,7 +357,8 @@ internal fun EditableUiPanel(
             Box(if (draft == null) viewModeModifier else Modifier) {
                 if (layout == null || anchored) {
                     val masked = stockChanges?.hiddenStock.orEmpty() + stockChanges?.items.orEmpty().map(UiCanvasItem::id)
-                    CompositionLocalProvider(LocalStockUiSlots provides StockUiSlots(geometry, masked)) {
+                    CompositionLocalProvider(LocalStockUiSlots provides
+                        StockUiSlots(geometry, masked, runtime, stockChanges?.hiddenStock.orEmpty())) {
                         Box(Modifier.fillMaxWidth().onGloballyPositioned { geometry.frame = it.boundsInRoot() }) { stock() }
                     }
                 } else {
@@ -270,13 +399,13 @@ internal fun EditableUiPanel(
                             if (selection == null) picked = selected?.let(layout::members).orEmpty()
                             else {
                                 if (selection.size >= 2) {
-                                    mutate { it.group(selection) }
+                                    mutate(selected ?: selection.first()) { it.group(selection) }
                                     selected = selected?.takeIf(selection::contains) ?: selection.first()
                                 }
                                 picked = null
                             }
                         },
-                        onUngroup = { id -> mutate { it.ungroup(id) } },
+                        onUngroup = { id -> mutate(id) { it.ungroup(id) } },
                         onSnap = { mutate { it.copy(snapping = !it.snapping) } },
                         onPlacement = { mode ->
                             mutate { it.withPlacement(mode) }
@@ -285,24 +414,37 @@ internal fun EditableUiPanel(
                         onRaise = { id -> mutate { it.raise(id) } },
                         onLower = { id -> mutate { it.lower(id) } },
                         onHide = { id ->
-                            mutate { it.hide(id) }
-                            selected = null
+                            mutate(id) { it.hide(id) }
+                            if (session?.draft?.items?.none { it.id == id } == true) selected = null
                         },
                         onInspect = { inspecting = true },
+                        onGestures = { selected?.let { gestureEditor = it } },
                         onReset = {
                             val initial = if (anchored) geometry.snapshot(stockIds) else defaultCanvas(initialRows, catalog, canvasWidth, height)
                             session = EditSession(initial, initial, anchored, previousOverrides = null, reset = true)
                             selected = null
                         },
-                        onCancel = { session = null; inspecting = false },
+                        onCancel = { session = null; inspecting = false; gestureEditor = null },
                         onDone = {
-                            if (draft.draft == draft.initial && !draft.reset) session = null
+                            val changedLayout = draft.draft != draft.initial || draft.reset
+                            if (!changedLayout && desiredProfile == profile) session = null
                             else if (themeId != null && !saving) scope.launch {
-                                saving = true
-                                val changes = if (anchored) stockChanges else draft.draft
-                                if (settings.save(themeId, surface, changes.takeUnless { draft.reset })) session = null
-                                else onSaveFailed()
-                                saving = false
+                                val changes = if (!changedLayout) persisted else (if (anchored) stockChanges else draft.draft)
+                                    .takeUnless { draft.reset }
+                                val candidate = environment(changes)
+                                val pending = desiredProfile.prune(surface, candidate)
+                                if (pending.validate(surface, candidate, previous = profile) != null) {
+                                    rejectedGeometry = selected ?: stockIds.firstOrNull()
+                                } else {
+                                    saving = true
+                                    val saved = if (pending.isEmpty && profile.isEmpty) settings.save(themeId, surface, changes)
+                                    else settings.saveGestures(themeId, surface, changes, pending, candidate, expected = profile)
+                                    if (saved) {
+                                        savedProfile = pending
+                                        session = null
+                                    } else onSaveFailed()
+                                    saving = false
+                                }
                             }
                         },
                     )
@@ -314,6 +456,35 @@ internal fun EditableUiPanel(
                         Text(stringResource(R.string.ui_edit_mode))
                     }
                 }
+                if (draft == null && enterGestures != null &&
+                    invalidRequested?.actions?.any { it.id == UiGestureActionId.CONTEXT_MENU } == true &&
+                    effectiveProfile.resolve(surface, gestureEnvironment).none { it.action.id == UiGestureActionId.CONTEXT_MENU }
+                ) {
+                    val recovery = gestureEnvironment.components.firstOrNull()
+                    if (recovery != null) TextButton(
+                        onClick = { enterGestures(recovery) },
+                        modifier = Modifier.align(Alignment.CenterEnd).testTag("gesture_recovery"),
+                    ) { Text(stringResource(R.string.ui_gestures)) }
+                }
+            }
+            gestureEditor?.let { id ->
+                UiGestureEditor(id, surface, catalog, gestureEnvironment, desiredProfile, profile, runtime,
+                    onApply = { gestureDraft = it; gestureEditor = null }, onDismiss = { gestureEditor = null })
+            }
+            rejectedGeometry?.let { id ->
+                AlertDialog(
+                    onDismissRequest = { rejectedGeometry = null },
+                    title = { Text(stringResource(R.string.gesture_blocked_title)) },
+                    text = { Text(stringResource(R.string.gesture_blocked_geometry)) },
+                    confirmButton = {
+                        TextButton(onClick = { rejectedGeometry = null; enterGestures?.invoke(id) }) {
+                            Text(stringResource(R.string.ui_gestures))
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { rejectedGeometry = null }) { Text(stringResource(R.string.ui_edit_cancel)) }
+                    },
+                )
             }
             if (inspecting && draft != null && selectedItem != null && selectedComponent != null) {
                 key(selectedItem.id) {
@@ -382,13 +553,21 @@ private fun UiCanvas(
                 val itemHeight = height * bounds.height.toFraction()
                 val background = item.style.background?.let { Color(it or 0xff000000.toInt()) } ?: Color.Transparent
                 val editEntry = LocalUiEditEntry.current
+                val gestures = LocalUiGestureEditEntry.current
                 val workspaceEntry = LocalLibraryWorkspaceEntry.current
                 val workspaceSlot = workspaceSlotFor(item.id)
+                val runtime = LocalUiGestureRuntime.current
+                val ancestors = LocalUiGestureAncestors.current
                 var menu by remember { mutableStateOf(false) }
                 val componentLabel = stringResource(component.label)
-                val activation = if (!editing && editEntry != null && !component.preserveGestures) {
-                    Modifier.customizeOnHold { menu = true }
-                } else Modifier
+                val openMenu: (() -> Unit)? = { menu = true }.takeIf { !editing && editEntry != null && !component.preserveGestures }
+                val activation = Modifier.uiGestureTarget(
+                    item.id, onClick = component.onClick.takeUnless { editing }, onHold = openMenu,
+                    preserveMovement = component.preserveGestures,
+                ).then(
+                    if (openMenu != null && stockHoldUsesNative(item.id)) Modifier.customizeOnHold(onHold = openMenu)
+                    else Modifier,
+                )
                 val motion = if (!editing) Modifier.uiControlMotion(item.style.motion) else Modifier
                 Box(
                     Modifier.absoluteOffset(width * bounds.x.toFraction(), height * bounds.y.toFraction())
@@ -409,7 +588,10 @@ private fun UiCanvas(
                             end = minOf(padding.end.dp, itemWidth / 2),
                             bottom = minOf(padding.bottom.dp, itemHeight / 2),
                         )
-                        CompositionLocalProvider(LocalUiControlStyle provides item.style) {
+                        CompositionLocalProvider(
+                            LocalUiControlStyle provides item.style,
+                            LocalUiGestureAncestors provides (ancestors + listOfNotNull(runtime?.let { it to item.id })),
+                        ) {
                             CanvasComponentContents(component,
                                 contentFrame.then(if (editing) Modifier.clearAndSetSemantics {} else Modifier),
                                 stockGeometry?.slots?.get(item.id))
@@ -432,6 +614,11 @@ private fun UiCanvas(
                                 text = { Text(stringResource(R.string.ui_edit_mode)) },
                                 onClick = { menu = false; editEntry(item.id) },
                                 modifier = Modifier.testTag("ui_edit_mode"),
+                            )
+                            if (gestures != null) DropdownMenuItem(
+                                text = { Text(stringResource(R.string.ui_gestures)) },
+                                onClick = { menu = false; gestures(item.id) },
+                                modifier = Modifier.testTag("ui_edit_gestures"),
                             )
                             if (workspaceEntry != null && workspaceSlot != null && editEntry !== workspaceEntry) {
                                 DropdownMenuItem(

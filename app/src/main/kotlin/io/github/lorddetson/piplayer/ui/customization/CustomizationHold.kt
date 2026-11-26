@@ -20,11 +20,12 @@ import io.github.lorddetson.piplayer.R
 internal fun Modifier.customizeOnHold(onHold: () -> Unit): Modifier {
     val label = stringResource(R.string.player_element_customize)
     val haptic = LocalHapticFeedback.current
+    val owner = LocalUiGestureRuntime.current?.owner
     val open by rememberUpdatedState {
         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
         onHold()
     }
-    return semantics { onLongClick(label) { open(); true } }.pointerInput(Unit) {
+    return semantics { onLongClick(label) { open(); true } }.pointerInput(owner) {
         awaitEachGesture {
             val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
             val held = withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis) {
@@ -35,7 +36,7 @@ internal fun Modifier.customizeOnHold(onHold: () -> Unit): Modifier {
                 }
                 false
             } ?: true
-            if (held) {
+            if (held && owner?.suppressNativeHold(down) != true) {
                 open()
                 do {
                     val changes = awaitPointerEvent(PointerEventPass.Initial).changes

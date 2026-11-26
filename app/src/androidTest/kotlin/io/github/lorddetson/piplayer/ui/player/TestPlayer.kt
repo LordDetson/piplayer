@@ -29,6 +29,7 @@ class TestPlayer(songs: List<TestSong>, playing: Boolean = false) : SimpleBasePl
         val durationMs: Long = C.TIME_UNSET,
         val artwork: ByteArray? = null,
         val format: Format? = null,
+        val mediaId: String? = null,
     )
 
     sealed interface Call {
@@ -58,6 +59,8 @@ class TestPlayer(songs: List<TestSong>, playing: Boolean = false) : SimpleBasePl
         current = current.buildUpon().apply(change).build()
         invalidateState()
     }
+
+    fun replaceQueue(songs: List<TestSong>) = update { setPlaylist(songs.mapIndexed(::itemData)) }
 
     override fun handleSetPlayWhenReady(playWhenReady: Boolean): ListenableFuture<*> {
         calls += Call.PlayWhenReady(playWhenReady)
@@ -95,7 +98,7 @@ class TestPlayer(songs: List<TestSong>, playing: Boolean = false) : SimpleBasePl
             Tracks(listOf(Tracks.Group(TrackGroup(format), false, intArrayOf(C.FORMAT_HANDLED), booleanArrayOf(true))))
         } ?: Tracks.EMPTY
         return MediaItemData.Builder(/* uid= */ index)
-            .setMediaItem(MediaItem.Builder().setMediaId("$index").setMediaMetadata(metadata).build())
+            .setMediaItem(MediaItem.Builder().setMediaId(song.mediaId ?: "$index").setMediaMetadata(metadata).build())
             .setTracks(tracks)
             .setIsSeekable(true)
             .setDurationUs(if (song.durationMs == C.TIME_UNSET) C.TIME_UNSET else song.durationMs * 1_000)

@@ -39,16 +39,16 @@ import io.github.lorddetson.piplayer.covers.PlaceholderColors
 /** Play or pause, labelled with what a tap does; [large] on Now Playing. */
 @OptIn(UnstableApi::class)
 @Composable
-fun PlayPauseButton(player: Player?, modifier: Modifier = Modifier, large: Boolean = false) {
+fun PlayPauseButton(player: Player?, modifier: Modifier = Modifier, large: Boolean = false, onClick: (() -> Unit)? = null) {
     val state = rememberPlayPauseState(player)
     val label = stringResource(if (state.showPlay) R.string.player_play else R.string.player_pause)
     val icon = painterResource(if (state.showPlay) R.drawable.ic_player_play else R.drawable.ic_player_pause)
     if (large) {
-        FilledIconButton(onClick = state::onClick, enabled = state.isEnabled, modifier = modifier.size(72.dp)) {
+        FilledIconButton(onClick = onClick ?: state::onClick, enabled = state.isEnabled, modifier = modifier.size(72.dp)) {
             UiControlIcon(icon, contentDescription = label, modifier = Modifier.size(36.dp))
         }
     } else {
-        IconButton(onClick = state::onClick, enabled = state.isEnabled, modifier = modifier) {
+        IconButton(onClick = onClick ?: state::onClick, enabled = state.isEnabled, modifier = modifier) {
             UiControlIcon(icon, contentDescription = label)
         }
     }
@@ -57,18 +57,18 @@ fun PlayPauseButton(player: Player?, modifier: Modifier = Modifier, large: Boole
 /** Back to the start of the song after its first seconds, otherwise to the previous song (§3.6). */
 @OptIn(UnstableApi::class)
 @Composable
-fun PreviousButton(player: Player?, modifier: Modifier = Modifier) {
+fun PreviousButton(player: Player?, modifier: Modifier = Modifier, onClick: (() -> Unit)? = null) {
     val state = rememberPreviousState(player)
-    IconButton(onClick = state::onClick, enabled = state.isEnabled, modifier = modifier.size(56.dp)) {
+    IconButton(onClick = onClick ?: state::onClick, enabled = state.isEnabled, modifier = modifier.size(56.dp)) {
         UiControlIcon(painterResource(R.drawable.ic_player_previous), stringResource(R.string.player_previous), Modifier.size(36.dp))
     }
 }
 
 @OptIn(UnstableApi::class)
 @Composable
-fun NextButton(player: Player?, modifier: Modifier = Modifier) {
+fun NextButton(player: Player?, modifier: Modifier = Modifier, onClick: (() -> Unit)? = null) {
     val state = rememberNextState(player)
-    IconButton(onClick = state::onClick, enabled = state.isEnabled, modifier = modifier.size(56.dp)) {
+    IconButton(onClick = onClick ?: state::onClick, enabled = state.isEnabled, modifier = modifier.size(56.dp)) {
         UiControlIcon(painterResource(R.drawable.ic_player_next), stringResource(R.string.player_next), Modifier.size(36.dp))
     }
 }
@@ -76,12 +76,12 @@ fun NextButton(player: Player?, modifier: Modifier = Modifier) {
 /** A toggle that states "On" or "Off" rather than "checked". */
 @OptIn(UnstableApi::class)
 @Composable
-fun ShuffleButton(player: Player?, modifier: Modifier = Modifier) {
+fun ShuffleButton(player: Player?, modifier: Modifier = Modifier, onClick: (() -> Unit)? = null) {
     val state = rememberShuffleState(player)
     val mode = stringResource(if (state.shuffleOn) R.string.player_state_on else R.string.player_state_off)
     IconToggleButton(
         checked = state.shuffleOn,
-        onCheckedChange = { state.onClick() },
+        onCheckedChange = { if (onClick == null) state.onClick() else onClick() },
         enabled = state.isEnabled,
         modifier = modifier.semantics { stateDescription = mode },
     ) {
@@ -92,7 +92,7 @@ fun ShuffleButton(player: Player?, modifier: Modifier = Modifier) {
 /** Goes off, all, one and round again, as the notification's button does (§3.6). */
 @OptIn(UnstableApi::class)
 @Composable
-fun RepeatButton(player: Player?, modifier: Modifier = Modifier) {
+fun RepeatButton(player: Player?, modifier: Modifier = Modifier, onClick: (() -> Unit)? = null) {
     val state = rememberRepeatState(player)
     val (icon, mode) = when (state.repeatModeState) {
         Player.REPEAT_MODE_ALL -> R.drawable.ic_player_repeat to R.string.player_repeat_state_all
@@ -102,7 +102,7 @@ fun RepeatButton(player: Player?, modifier: Modifier = Modifier) {
     val modeText = stringResource(mode)
     val action = stringResource(R.string.player_change_repeat_mode)
     IconButton(
-        onClick = state::onClick,
+        onClick = onClick ?: state::onClick,
         enabled = state.isEnabled,
         // A label for the button's own click action.
         modifier = modifier.semantics {
@@ -123,17 +123,22 @@ fun RepeatButton(player: Player?, modifier: Modifier = Modifier) {
  * album's name, when there is one (docs/library.md §13.4), otherwise neutral.
  */
 @Composable
-fun CoverImage(cover: ImageBitmap?, modifier: Modifier = Modifier, noteSize: Dp = 24.dp, placeholderName: String? = null) {
+fun CoverImage(
+    cover: ImageBitmap?,
+    modifier: Modifier = Modifier,
+    noteSize: Dp = 24.dp,
+    placeholderName: String? = null,
+    tagged: Boolean = true,
+) {
+    val artwork = if (tagged) modifier.testTag(if (cover == null) PlayerTags.COVER_PLACEHOLDER else PlayerTags.COVER) else modifier
     if (cover != null) {
-        Image(cover, contentDescription = null, modifier = modifier.testTag(PlayerTags.COVER), contentScale = ContentScale.Crop)
+        Image(cover, contentDescription = null, modifier = artwork, contentScale = ContentScale.Crop)
     } else {
         val colors = placeholderName?.let { name ->
             PlaceholderColors.of(name, dark = MaterialTheme.colorScheme.surface.luminance() < 0.5f)
         }
         Box(
-            modifier
-                .background(colors?.let { Color(it.background) } ?: MaterialTheme.colorScheme.surfaceVariant)
-                .testTag(PlayerTags.COVER_PLACEHOLDER),
+            artwork.background(colors?.let { Color(it.background) } ?: MaterialTheme.colorScheme.surfaceVariant),
             contentAlignment = Alignment.Center,
         ) {
             UiControlIcon(

@@ -141,6 +141,7 @@ import io.github.lorddetson.piplayer.ui.customization.LocalUiControlStyle
 import io.github.lorddetson.piplayer.ui.customization.LocalUiLabelDisplays
 import io.github.lorddetson.piplayer.ui.customization.LocalStockUiSlots
 import io.github.lorddetson.piplayer.ui.customization.isStockUiSlotMasked
+import io.github.lorddetson.piplayer.ui.customization.uiGestureRuntimeForStock
 import io.github.lorddetson.piplayer.ui.customization.UiCanvasComponent
 import io.github.lorddetson.piplayer.ui.customization.UiControlColor
 import io.github.lorddetson.piplayer.ui.customization.UiControlTextAlign
@@ -286,32 +287,41 @@ internal fun LibraryScreen(host: LibraryHost, chrome: LibraryWorkspaceChrome? = 
 
     val sorts = remember(app) { ListSorts(app) }
     val playlistGrid = remember(sorts) { sorts.grid(ListName.PLAYLISTS) }
+    var sortMenuOpen by remember(tab) { mutableStateOf(false) }
+    val changeSortMenu: (Boolean) -> Unit = { sortMenuOpen = it }
+    val openSort: () -> Unit = { sortMenuOpen = true }
     val sortControl: @Composable (LibrarySortAnchor) -> Unit = { anchor ->
         when (tab) {
             LibraryTab.SONGS -> SortButton(
                 ListName.SONGS, songs.order.collectAsStateWithLifecycle().value, songs::setOrder,
                 grid = songs.grid.collectAsStateWithLifecycle().value, onGrid = songs::setGrid, anchor = anchor,
+                expanded = sortMenuOpen, onExpandedChange = changeSortMenu,
             )
             LibraryTab.ALBUMS -> SortButton(
                 ListName.ALBUMS, albums.order.collectAsStateWithLifecycle().value, albums::setOrder,
                 grid = albums.grid.collectAsStateWithLifecycle().value, onGrid = albums::setGrid, anchor = anchor,
+                expanded = sortMenuOpen, onExpandedChange = changeSortMenu,
             )
             LibraryTab.ARTISTS -> SortButton(
                 ListName.ARTISTS, artists.order.collectAsStateWithLifecycle().value, artists::setOrder,
                 grid = artists.grid.collectAsStateWithLifecycle().value, onGrid = artists::setGrid, anchor = anchor,
+                expanded = sortMenuOpen, onExpandedChange = changeSortMenu,
             )
             LibraryTab.FOLDERS -> SortButton(
                 ListName.FOLDERS, folders.order.collectAsStateWithLifecycle().value, folders::setOrder,
                 grid = folders.grid.collectAsStateWithLifecycle().value, onGrid = folders::setGrid, anchor = anchor,
+                expanded = sortMenuOpen, onExpandedChange = changeSortMenu,
             )
             LibraryTab.PLAYLISTS -> SortButton(
                 ListName.PLAYLISTS, ListOrder(ListName.PLAYLISTS.defaultField), {},
                 grid = playlistGrid.collectAsStateWithLifecycle(initialValue = false).value,
                 onGrid = { grid -> tabEditScope.launch { sorts.setGrid(ListName.PLAYLISTS, grid) } }, anchor = anchor,
+                expanded = sortMenuOpen, onExpandedChange = changeSortMenu,
             )
             LibraryTab.GENRES -> SortButton(
                 ListName.GENRES, genres.order.collectAsStateWithLifecycle().value, genres::setOrder,
                 grid = genres.grid.collectAsStateWithLifecycle().value, onGrid = genres::setGrid, anchor = anchor,
+                expanded = sortMenuOpen, onExpandedChange = changeSortMenu,
             )
         }
     }
@@ -343,17 +353,22 @@ internal fun LibraryScreen(host: LibraryHost, chrome: LibraryWorkspaceChrome? = 
             }
         })
         for ((id, entry) in builtInTabsById) {
-            add(UiCanvasComponent("tab:$id", entry.labelResource, width = 112.dp, alignableText = true, labelDisplay = true) {
-                LibraryTabFace(id, id == activeId, { selectTab(id) }, Modifier.fillMaxSize(), horizontalPadding = 4.dp)
+            val select = { selectTab(id) }
+            add(UiCanvasComponent("tab:$id", entry.labelResource, width = 112.dp, alignableText = true, labelDisplay = true,
+                onClick = select, stockContext = true) {
+                LibraryTabFace(id, id == activeId, select, Modifier.fillMaxSize(), horizontalPadding = 4.dp)
             })
         }
         for (button in LibraryButton.entries) {
-            add(UiCanvasComponent("library:${button.id}", button.labelResource, customizableIcon = true) {
-                when (button) {
-                    LibraryButton.SEARCH -> LibraryToolbarButtonFace(button, { setSearching(!searching) }, Modifier.fillMaxSize())
-                    LibraryButton.SORT -> sortControl { open -> LibraryToolbarButtonFace(button, open, Modifier.fillMaxSize()) }
-                    LibraryButton.SETTINGS -> LibraryToolbarButtonFace(button, onOpenSettings, Modifier.fillMaxSize())
-                }
+            val click: () -> Unit = when (button) {
+                LibraryButton.SEARCH -> { { setSearching(!searching) } }
+                LibraryButton.SETTINGS -> onOpenSettings
+                LibraryButton.SORT -> openSort
+            }
+            val id = "library:${button.id}"
+            add(UiCanvasComponent(id, button.labelResource, customizableIcon = true, onClick = click, stockContext = true) {
+                if (button == LibraryButton.SORT) sortControl { LibraryToolbarButtonFace(button, openSort, Modifier.fillMaxSize()) }
+                else LibraryToolbarButtonFace(button, click, Modifier.fillMaxSize())
             })
         }
     }
@@ -456,12 +471,14 @@ internal fun LibraryScreen(host: LibraryHost, chrome: LibraryWorkspaceChrome? = 
             }
         }
         if (editingTabs && themeId != null) {
+            val gestures = uiGestureRuntimeForStock("tab:songs")
             LibraryTabEditor(
                 layout = tabLayout,
                 settings = tabsSettings,
                 scope = tabEditScope,
                 onDismiss = { editingTabs = false },
                 onSaveFailed = { host.snackbar.showSnackbar(tabSaveFailed) },
+                canChangeVisibility = { id, visible -> visible || gestures?.hide?.invoke("tab:$id") != false },
             )
         }
     }
@@ -478,6 +495,10 @@ internal fun LibraryScreen(host: LibraryHost, chrome: LibraryWorkspaceChrome? = 
             hiddenByParent = canvasComponents.map { it.id }.filterTo(mutableSetOf()) {
                 ("workspace:tabs" in outerHidden && it.startsWith("tab:")) ||
                     ("workspace:toolbar" in outerHidden && it.startsWith("library:"))
+            },
+            gestureHiddenByParent = canvasComponents.map { it.id }.filterTo(mutableSetOf()) {
+                ("workspace:tabs" in owner?.hidden.orEmpty() && it.startsWith("tab:")) ||
+                    ("workspace:toolbar" in owner?.hidden.orEmpty() && it.startsWith("library:"))
             },
             onAppliedIds = {
                 appliedCanvasIds = it
@@ -504,6 +525,9 @@ internal fun LibraryScreen(host: LibraryHost, chrome: LibraryWorkspaceChrome? = 
                 StockUiSlot("workspace:tabs", owner = owner, content = strip)
             }
         }
+        val sortInLayout = (appliedCanvasIds?.contains("library:${LibraryButton.SORT.id}")
+            ?: (LibraryButton.SORT.id in visibleButtons)) && "workspace:toolbar" !in owner?.hidden.orEmpty()
+        if (sortMenuOpen && !sortInLayout) sortControl {}
     }
     CompositionLocalProvider(LocalUiLabelDisplays provides headerLabels) {
         LibraryWorkspace(
@@ -1106,17 +1130,22 @@ internal fun SortButton(
     grid: Boolean? = null,
     onGrid: (Boolean) -> Unit = {},
     anchor: LibrarySortAnchor? = null,
+    expanded: Boolean? = null,
+    onExpandedChange: ((Boolean) -> Unit)? = null,
 ) {
-    var open by remember { mutableStateOf(false) }
+    var localOpen by remember { mutableStateOf(false) }
+    fun setOpen(open: Boolean) {
+        if (onExpandedChange != null) onExpandedChange(open) else localOpen = open
+    }
     Box {
         if (anchor != null) {
-            anchor { open = true }
+            anchor { setOpen(true) }
         } else {
-            IconButton(onClick = { open = true }) {
+            IconButton(onClick = { setOpen(true) }) {
                 Icon(painterResource(R.drawable.ic_sort), stringResource(R.string.library_sort))
             }
         }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+        DropdownMenu(expanded = expanded ?: localOpen, onDismissRequest = { setOpen(false) }) {
             if (list.fields.size > 1) {
                 for (field in list.fields) {
                     val label = when {
@@ -1128,7 +1157,7 @@ internal fun SortButton(
                         text = { Text(stringResource(label)) },
                         leadingIcon = { RadioButton(selected = order.field == field, onClick = null) },
                         onClick = {
-                            open = false
+                            setOpen(false)
                             onOrder(order.copy(field = field))
                         },
                     )
@@ -1140,7 +1169,7 @@ internal fun SortButton(
                 leadingIcon = { Checkbox(checked = order.reversed, onCheckedChange = null) },
                 modifier = Modifier.checkbox(order.reversed),
                 onClick = {
-                    open = false
+                    setOpen(false)
                     onOrder(order.copy(reversed = !order.reversed))
                 },
             )
@@ -1150,7 +1179,7 @@ internal fun SortButton(
                     leadingIcon = { Checkbox(checked = grid, onCheckedChange = null) },
                     modifier = Modifier.checkbox(grid),
                     onClick = {
-                        open = false
+                    setOpen(false)
                         onGrid(!grid)
                     },
                 )

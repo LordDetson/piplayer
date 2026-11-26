@@ -2,6 +2,9 @@ package io.github.lorddetson.piplayer.ui.player
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -46,11 +49,19 @@ import io.github.lorddetson.piplayer.TestFiles
 import io.github.lorddetson.piplayer.settings.NowPlayingLayout
 import io.github.lorddetson.piplayer.settings.AppearanceSettings
 import io.github.lorddetson.piplayer.settings.ThemeMode
+import io.github.lorddetson.piplayer.settings.SettingsFiles
+import io.github.lorddetson.piplayer.settings.UiBuiltInGesture
 import io.github.lorddetson.piplayer.settings.UiCanvasBounds
 import io.github.lorddetson.piplayer.settings.UiCanvasItem
 import io.github.lorddetson.piplayer.settings.UiCanvasLayout
 import io.github.lorddetson.piplayer.settings.UiCanvasSettings
+import io.github.lorddetson.piplayer.settings.UiGestureAction
+import io.github.lorddetson.piplayer.settings.UiGestureActionId
+import io.github.lorddetson.piplayer.settings.UiGestureProfile
 import io.github.lorddetson.piplayer.settings.UiSurface
+import io.github.lorddetson.piplayer.settings.UiSurfaceGestures
+import io.github.lorddetson.piplayer.settings.UiThemeCanvases
+import io.github.lorddetson.piplayer.ui.customization.stockGesture
 import io.github.lorddetson.piplayer.ui.player.TestPlayer.Call
 import io.github.lorddetson.piplayer.ui.player.TestPlayer.TestSong
 import io.github.lorddetson.piplayer.ui.theme.PiPlayerTheme
@@ -90,12 +101,13 @@ class NowPlayingTest {
         cover: Boolean = false,
         layout: NowPlayingLayout = NowPlayingLayout.STANDARD,
         onOpenQueue: (() -> Unit)? = null,
+        more: (@Composable (() -> Unit) -> Unit)? = null,
     ): TestPlayer {
         val player = compose.runOnUiThread { TestPlayer(songs, playing).also { it.positionMs = positionMs } }
         val image = if (cover) TestImages.cover() else null
         compose.setContent {
             PiPlayerTheme {
-                NowPlaying(player, image, onClose = { closed = true }, onOpenQueue = onOpenQueue, layout = layout)
+                NowPlaying(player, image, onClose = { closed = true }, onOpenQueue = onOpenQueue, layout = layout, more = more)
             }
         }
         return player
@@ -103,6 +115,54 @@ class NowPlayingTest {
 
     private fun hasClickLabel(label: String) =
         SemanticsMatcher("click label \"$label\"") { it.config.getOrNull(SemanticsActions.OnClick)?.label == label }
+
+    @Test
+    fun stockTrackTitleStillOpensItsContextMenuOnHold() = checkStockContext("Halo")
+
+    @Test
+    fun stockAudioFormatStillOpensItsContextMenuOnHold() = checkStockContext("FLAC")
+
+    private fun checkStockContext(label: String) =
+        withStockPlayerTheme(context, "now_playing_panel_", "ui_canvas_") {
+            show(cover = true, layout = NowPlayingLayout.EXPANDED)
+            compose.onNodeWithText(label).performTouchInput { longClick() }
+            compose.onNodeWithTag("ui_edit_mode").assertIsDisplayed()
+        }
+
+    @Test
+    fun theVisibleMoreButtonStillOpensItsTrackMenu() =
+        withStockPlayerTheme(context, "now_playing_panel_", "ui_canvas_") {
+            show(cover = true, layout = NowPlayingLayout.EXPANDED, more = { close ->
+                DropdownMenuItem(text = { Text("Track menu fixture") }, onClick = close)
+            })
+            compose.onNodeWithTag(PlayerTags.MORE).performClick()
+            compose.onNodeWithText("Track menu fixture").assertIsDisplayed()
+        }
+
+    @Test
+    fun aReboundGestureOpensTheTrackMenuWithItsOriginalButtonHidden() =
+        withStockPlayerTheme(context, "now_playing_panel_", "ui_canvas_") {
+            val route = UiSurface.NOW_PLAYING
+            val more = "now:more"
+            val binding = stockGesture(
+                NOW_PLAYING_COVER_ID, UiBuiltInGesture.SWIPE_UP, UiGestureAction(UiGestureActionId.STOCK_CLICK, targetId = more),
+            )
+            val profile = UiGestureProfile().editSurface(route, UiSurfaceGestures().assign(binding))
+            val layout = UiCanvasLayout(emptyList(), hiddenStock = setOf(more))
+            runBlocking {
+                SettingsFiles.edit(SettingsFiles.settings(context)) {
+                    UiCanvasSettings.store(it, ThemeMode.SYSTEM.stored, UiThemeCanvases(mapOf(route to layout), profile))
+                }
+            }
+            show(cover = true, layout = NowPlayingLayout.EXPANDED, more = { close ->
+                DropdownMenuItem(text = { Text("Track menu fixture") }, onClick = close)
+            })
+            compose.onNodeWithTag(PlayerTags.MORE).assertDoesNotExist()
+            compose.onNodeWithTag(PlayerTags.COVER, useUnmergedTree = true).performTouchInput {
+                swipe(Offset(center.x, height * 0.9f), Offset(center.x, height * 0.1f))
+            }
+            compose.onNodeWithText("Track menu fixture").assertIsDisplayed()
+        }
 
     @Test
     fun swipingTheCoverChangesTracksInBothDirectionsWithoutRestartingTheCurrentOne() =

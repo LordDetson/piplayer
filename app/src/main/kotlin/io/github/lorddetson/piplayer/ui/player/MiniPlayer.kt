@@ -73,7 +73,6 @@ import io.github.lorddetson.piplayer.ui.customization.UiCanvasComponent
 import io.github.lorddetson.piplayer.ui.customization.UiControlColor
 import io.github.lorddetson.piplayer.ui.customization.UiControlTextAlign
 import io.github.lorddetson.piplayer.ui.customization.fillAlignedTextWidth
-import io.github.lorddetson.piplayer.ui.customization.customizeOnHold
 import kotlinx.coroutines.launch
 
 /**
@@ -96,6 +95,8 @@ fun MiniPlayer(
     val item = rememberCurrentItemState(player)
     if (player == null || item.mediaItem == null) return
     val metadata = item.mediaMetadata
+    val playPause = rememberPlayPauseState(player)
+    val togglePlayback: () -> Unit = { if (playPause.isEnabled) playPause.onClick() }
     val unknownArtist = stringResource(R.string.songs_unknown_artist)
     val app = LocalContext.current.applicationContext
     val settings = remember(app) { miniPlayerPanels.forContext(app) }
@@ -119,7 +120,7 @@ fun MiniPlayer(
             for (field in TrackField.entries) {
                 if (!split && field == TrackField.ALBUM) continue
                 val value = field.value(metadata, unknownArtist) ?: continue
-                if (split) StockUiSlot(field.miniPlayerId) { MiniTrackFieldText(field, value) }
+                if (split) StockUiSlot(field.miniPlayerId, onClick = onOpen) { MiniTrackFieldText(field, value) }
                 else MiniTrackFieldText(field, value)
             }
         }
@@ -127,23 +128,26 @@ fun MiniPlayer(
     val openLabel = stringResource(R.string.player_open_now_playing)
     val openTrack = Modifier.clickable(onClickLabel = openLabel, role = Role.Button, onClick = onOpen)
     val components = listOf(
-        UiCanvasComponent(MiniPlayerElement.COVER.canvasId, R.string.player_element_cover) {
+        UiCanvasComponent(MiniPlayerElement.COVER.canvasId, R.string.player_element_cover, onClick = onOpen, stockContext = true) {
             artwork(Modifier.fillMaxSize().then(openTrack))
         },
         UiCanvasComponent(MiniPlayerElement.TRACK_INFO.canvasId, R.string.player_element_track,
-            fillWidth = true, alignableText = true, addable = false) {
+            fillWidth = true, alignableText = true, addable = false, onClick = onOpen, stockContext = true) {
             details(openTrack, false)
         },
-        UiCanvasComponent(MiniPlayerElement.PLAY_PAUSE.canvasId, R.string.player_element_play_pause, customizableIcon = true) {
+        UiCanvasComponent(MiniPlayerElement.PLAY_PAUSE.canvasId, R.string.player_element_play_pause, customizableIcon = true,
+            onClick = togglePlayback, stockContext = true) {
             PlayPauseButton(player, Modifier.fillMaxSize())
         },
-        UiCanvasComponent(MiniPlayerElement.PROGRESS.canvasId, R.string.player_position, height = 8.dp, fillWidth = true) {
+        UiCanvasComponent(MiniPlayerElement.PROGRESS.canvasId, R.string.player_position, height = 8.dp, fillWidth = true,
+            stockContext = true) {
             Box(Modifier.fillMaxSize().testTag("mini_player_progress"), contentAlignment = Alignment.Center) {
                 ProgressLine(player, item.durationMs)
             }
         },
     ) + TrackField.entries.map { field ->
-        UiCanvasComponent(field.miniPlayerId, field.label, height = 24.dp, fillWidth = true, alignableText = true) {
+        UiCanvasComponent(field.miniPlayerId, field.label, height = 24.dp, fillWidth = true, alignableText = true,
+            onClick = onOpen) {
             field.value(metadata, unknownArtist)?.let { value ->
                 Box(Modifier.fillMaxSize().then(openTrack), contentAlignment = Alignment.CenterStart) {
                     MiniTrackFieldText(field, value)
@@ -184,6 +188,7 @@ fun MiniPlayer(
                 height = 104.dp,
                 onSaveFailed = { snackbar?.showSnackbar(saveFailed) },
                 legacyStockIds = setOf(MiniPlayerElement.TRACK_INFO.canvasId),
+                legacyVisibilityGroups = mapOf(MiniPlayerElement.TRACK_INFO.canvasId to TrackField.entries.map(TrackField::miniPlayerId).toSet()),
                 canvasChrome = {
                     IconButton(onClick = onOpen) {
                         Icon(painterResource(R.drawable.ic_player_collapse), openLabel, Modifier.rotate(180f))
@@ -203,7 +208,8 @@ fun MiniPlayer(
                     ) {
                         for (element in panel.visible) {
                             val width = if (element == MiniPlayerElement.TRACK_INFO) Modifier.weight(1f) else Modifier
-                            MiniPlayerItem(element, theme, panel, hidden, ::edit, ::restore, width) { press ->
+                            val click = if (element == MiniPlayerElement.PLAY_PAUSE) togglePlayback else onOpen
+                            MiniPlayerItem(element, theme, panel, hidden, ::edit, ::restore, width, onClick = click) { press ->
                                 when (element) {
                                     MiniPlayerElement.COVER -> artwork(press.size(48.dp))
                                     MiniPlayerElement.TRACK_INFO -> details(press, true)
@@ -256,12 +262,14 @@ private fun MiniPlayerItem(
     edit: ((MiniPlayerPanel) -> MiniPlayerPanel) -> Unit,
     restore: (String) -> Unit,
     modifier: Modifier = Modifier,
+    onClick: (() -> Unit)? = null,
     content: @Composable (Modifier) -> Unit,
 ) {
     key(theme, element) {
         var menu by remember { mutableStateOf<PanelMenuPage?>(null) }
-        StockUiSlot(element.canvasId, modifier) {
-            content(if (theme == null) Modifier else Modifier.customizeOnHold { menu = PanelMenuPage.ACTIONS })
+        val openMenu: (() -> Unit)? = if (theme == null) null else { { menu = PanelMenuPage.ACTIONS } }
+        StockUiSlot(element.canvasId, modifier, onClick = onClick, onHold = openMenu) {
+            content(Modifier)
             if (menu != null) {
                 val progress = element == MiniPlayerElement.PROGRESS
                 PanelItemMenu(

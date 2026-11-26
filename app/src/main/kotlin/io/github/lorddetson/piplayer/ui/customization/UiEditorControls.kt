@@ -42,6 +42,7 @@ internal fun UiEditorControls(
     onLower: (String) -> Unit,
     onHide: (String) -> Unit,
     onInspect: () -> Unit,
+    onGestures: () -> Unit,
     onReset: () -> Unit,
     onCancel: () -> Unit,
     onDone: () -> Unit,
@@ -66,6 +67,7 @@ internal fun UiEditorControls(
             dialog = EditorDialog.LAYERS
         },
         UiEditorAction(R.drawable.ic_settings, R.string.ui_edit_properties, "ui_edit_inspect", hasSelection, onClick = onInspect),
+        UiEditorAction(R.drawable.ic_drag_handle, R.string.ui_gestures, "ui_edit_gestures", hasSelection, onClick = onGestures),
         UiEditorAction(R.drawable.ic_ui_edit_hide, R.string.ui_edit_hide, "ui_edit_hide", hasSelection) { selectedId?.let(onHide) },
         UiEditorAction(R.drawable.ic_ui_edit_snap, R.string.ui_edit_snap, "ui_edit_snap", !saving, layout.snapping, onSnap),
         UiEditorAction(R.drawable.ic_more, R.string.ui_edit_options, "ui_edit_options", !saving) { dialog = EditorDialog.OPTIONS },

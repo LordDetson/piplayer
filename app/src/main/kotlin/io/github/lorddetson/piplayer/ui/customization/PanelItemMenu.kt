@@ -53,25 +53,27 @@ internal fun PanelItemMenu(
     moveOptions: @Composable () -> Unit = {},
 ) {
     val enterEdit = LocalUiEditEntry.current
+    val enterGestures = LocalUiGestureEditEntry.current
+    val canHide = LocalUiGestureHideGuard.current
     val workspace = LocalLibraryWorkspaceEntry.current
+    val componentId = componentId(kind, id)
+    val runtime = uiGestureRuntimeForStock(componentId)
     DropdownMenu(expanded = page != null, onDismissRequest = { setPage(null) }) {
         when (page) {
             PanelMenuPage.ACTIONS -> {
-                val prefix = when (kind) {
-                    PanelItemKind.TAB -> "tab"
-                    PanelItemKind.BUTTON -> "library"
-                    PanelItemKind.PLAYER -> "now"
-                    PanelItemKind.MINI_PLAYER -> "mini"
-                    PanelItemKind.BOTTOM_NAVIGATION -> "nav"
-                }
                 if (enterEdit != null && enterEdit !== workspace) {
                     DropdownMenuItem(
                         text = { Text(stringResource(R.string.ui_edit_mode)) },
-                        onClick = { setPage(null); enterEdit(prefix + ":" + id) },
+                        onClick = { setPage(null); enterEdit(componentId) },
                         modifier = Modifier.testTag("ui_edit_mode"),
                     )
                 }
-                val workspaceSlot = workspaceSlotFor(prefix + ":" + id)
+                if (enterGestures != null || runtime != null) DropdownMenuItem(
+                    text = { Text(stringResource(R.string.ui_gestures)) },
+                    onClick = { setPage(null); if (runtime != null) runtime.openEditor(componentId) else enterGestures?.invoke(componentId) },
+                    modifier = Modifier.testTag("ui_edit_gestures"),
+                )
+                val workspaceSlot = workspaceSlotFor(componentId)
                 if (workspace != null && workspaceSlot != null) {
                     DropdownMenuItem(
                         text = { Text(stringResource(R.string.ui_edit_library_workspace)) },
@@ -101,7 +103,7 @@ internal fun PanelItemMenu(
                         text = { Text(stringResource(kind.hide)) },
                         onClick = {
                             setPage(null)
-                            onHide()
+                            if ((runtime?.hide?.invoke(componentId) ?: canHide?.invoke(componentId)) != false) onHide()
                         },
                         modifier = Modifier.testTag("${kind.tag}_hide"),
                     )
@@ -147,6 +149,17 @@ internal fun PanelItemMenu(
             null -> Unit
         }
     }
+}
+
+private fun componentId(kind: PanelItemKind, id: String): String {
+    val prefix = when (kind) {
+        PanelItemKind.TAB -> "tab"
+        PanelItemKind.BUTTON -> "library"
+        PanelItemKind.PLAYER -> "now"
+        PanelItemKind.MINI_PLAYER -> "mini"
+        PanelItemKind.BOTTOM_NAVIGATION -> "nav"
+    }
+    return "$prefix:$id"
 }
 
 @Composable

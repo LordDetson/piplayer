@@ -24,7 +24,6 @@ import io.github.lorddetson.piplayer.ui.customization.PanelItemMenu
 import io.github.lorddetson.piplayer.ui.customization.PanelMenuPage
 import io.github.lorddetson.piplayer.ui.customization.PanelRestoreButton
 import io.github.lorddetson.piplayer.ui.customization.StockUiSlot
-import io.github.lorddetson.piplayer.ui.customization.customizeOnHold
 import kotlinx.coroutines.launch
 
 internal class NowPlayingCustomization(
@@ -72,12 +71,14 @@ internal fun PlayerElement(
     editor: NowPlayingCustomization,
     element: NowPlayingElement,
     modifier: Modifier = Modifier,
+    onClick: (() -> Unit)? = null,
     content: @Composable (Modifier) -> Unit,
 ) {
     key(editor.themeId, element) {
         var menu by remember { mutableStateOf<PanelMenuPage?>(null) }
-        StockUiSlot(element.canvasId, modifier) {
-            content(if (editor.themeId == null) Modifier else Modifier.customizeOnHold { menu = PanelMenuPage.ACTIONS })
+        val openMenu: (() -> Unit)? = if (editor.themeId == null) null else { { menu = PanelMenuPage.ACTIONS } }
+        StockUiSlot(element.canvasId, modifier, onClick = onClick, onHold = openMenu) {
+            content(Modifier)
             if (menu != null) {
                 val visible = NowPlayingRow.entries.filter(element::fits).flatMap(editor::shown).map { it.id }
                 val rows = editor.destinations(element)

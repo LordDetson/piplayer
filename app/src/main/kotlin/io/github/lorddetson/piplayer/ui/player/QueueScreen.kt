@@ -5,6 +5,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -40,6 +41,7 @@ import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.hideFromAccessibility
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
@@ -131,7 +133,7 @@ fun QueueScreen(
     LaunchedEffect(queue.entries) { shownState.value = queue.entries }
     val latestEntries by rememberUpdatedState(queue.entries)
     var dragFrom by remember { mutableStateOf<Int?>(null) }
-    val list = rememberLazyListState()
+    val list = rememberLazyListState(queue.currentPlace)
     val reorder = rememberReorderableLazyListState(list) { from, to ->
         shownState.value = shownState.value.toMutableList().apply { add(to.index, removeAt(from.index)) }
     }
@@ -139,7 +141,7 @@ fun QueueScreen(
     LaunchedEffect(queue.entries) {
         if (!scrolled && queue.entries.isNotEmpty()) {
             scrolled = true
-            list.scrollToItem(queue.entries.indexOfFirst { it.row == queue.current }.coerceAtLeast(0))
+            list.scrollToItem(queue.currentPlace)
         }
     }
     Scaffold(
@@ -147,12 +149,7 @@ fun QueueScreen(
         topBar = {
             if (selected != null && selectionActions != null) {
                 QueueSelectionBar(selected, selectionModel, queue.entries, menu, selectionActions)
-            } else TopAppBar(
-                title = { Text(stringResource(R.string.queue_open), modifier = Modifier.semantics { heading() }) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) { Icon(painterResource(R.drawable.ic_back), stringResource(R.string.library_back)) }
-                },
-            )
+            } else QueueTopBar(onBack)
         },
         snackbarHost = { SnackbarHost(snackbar) },
     ) { padding ->
@@ -195,8 +192,51 @@ fun QueueScreen(
     }
 }
 
+/** A visual copy of the live queue during the cover drag. Rows and controls only become interactive upon navigation. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun QueuePreview(player: Player, modifier: Modifier) {
+    val queue = rememberQueue(player)
+    Scaffold(
+        modifier = modifier.semantics { hideFromAccessibility() },
+        topBar = { QueueTopBar(onBack = null) },
+    ) { padding ->
+        LazyColumn(
+            Modifier.padding(padding).fillMaxSize(),
+            state = rememberLazyListState(queue.currentPlace),
+            userScrollEnabled = false,
+        ) {
+            itemsIndexed(queue.entries, key = { _, entry -> entry.key }) { _, entry ->
+                QueueEntryContent(
+                    entry, playing = entry.row == queue.current,
+                    leading = { Icon(painterResource(R.drawable.ic_drag_handle), null, Modifier.minimumInteractiveComponentSize()) },
+                    trailing = { Icon(painterResource(R.drawable.ic_more), null, Modifier.minimumInteractiveComponentSize()) },
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun QueueTopBar(onBack: (() -> Unit)?) {
+    TopAppBar(
+        title = { Text(stringResource(R.string.queue_open), modifier = Modifier.semantics { heading() }) },
+        navigationIcon = {
+            val icon = painterResource(R.drawable.ic_back)
+            if (onBack == null) {
+                Box(Modifier.size(48.dp), contentAlignment = androidx.compose.ui.Alignment.Center) { Icon(icon, null) }
+            } else {
+                IconButton(onClick = onBack) { Icon(icon, stringResource(R.string.library_back)) }
+            }
+        },
+    )
+}
+
 /** The queue of [player] in its play order and the current entry's row, kept up to date. */
-private class ShownQueue(val entries: List<QueueEntry>, val current: Int)
+private class ShownQueue(val entries: List<QueueEntry>, val current: Int) {
+    val currentPlace = entries.indexOfFirst { it.row == current }.coerceAtLeast(0)
+}
 
 @Composable
 private fun rememberQueue(player: Player?): ShownQueue {
@@ -267,7 +307,6 @@ private fun QueueRow(
     LaunchedEffect(dismiss.currentValue) {
         if (dismiss.currentValue != SwipeToDismissBoxValue.Settled) onRemove()
     }
-    val artist = entry.artist ?: stringResource(R.string.songs_unknown_artist)
     val playingText = stringResource(R.string.song_playing)
     val moveUp = stringResource(R.string.queue_move_up)
     val moveDown = stringResource(R.string.queue_move_down)
@@ -277,20 +316,9 @@ private fun QueueRow(
         // Rows do not move or go while selected (docs/library.md §20.2, 3).
         gesturesEnabled = !selecting,
     ) {
-        ListItem(
-            headlineContent = {
-                Text(
-                    entry.title,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    color = if (playing) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                    fontWeight = if (playing) FontWeight.Bold else null,
-                )
-            },
-            supportingContent = {
-                Text("$artist · ${formatDuration(entry.durationMs)}", maxLines = 1, overflow = TextOverflow.Ellipsis)
-            },
-            leadingContent = {
+        QueueEntryContent(
+            entry, playing,
+            leading = {
                 if (selecting) {
                     SelectionCheck(row)
                 } else {
@@ -302,9 +330,8 @@ private fun QueueRow(
                     )
                 }
             },
-            trailingContent = if (selecting) null else ({ RowMenu(entry, onRemove, menu) }),
-            tonalElevation = if (dragging) 4.dp else 0.dp,
-            shadowElevation = if (dragging) 4.dp else 0.dp,
+            trailing = if (selecting) null else ({ RowMenu(entry, onRemove, menu) }),
+            dragging = dragging,
             modifier = Modifier
                 .testTag(QueueTags.ROW)
                 .selectableRow(
@@ -319,6 +346,37 @@ private fun QueueRow(
                 .semantics { if (playing && !selecting) stateDescription = playingText },
         )
     }
+}
+
+@Composable
+private fun QueueEntryContent(
+    entry: QueueEntry,
+    playing: Boolean,
+    modifier: Modifier = Modifier,
+    dragging: Boolean = false,
+    leading: @Composable () -> Unit,
+    trailing: (@Composable () -> Unit)?,
+) {
+    val artist = entry.artist ?: stringResource(R.string.songs_unknown_artist)
+    ListItem(
+        modifier = modifier,
+        headlineContent = {
+            Text(
+                entry.title,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                color = if (playing) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                fontWeight = if (playing) FontWeight.Bold else null,
+            )
+        },
+        supportingContent = {
+            Text("$artist · ${formatDuration(entry.durationMs)}", maxLines = 1, overflow = TextOverflow.Ellipsis)
+        },
+        leadingContent = leading,
+        trailingContent = trailing,
+        tonalElevation = if (dragging) 4.dp else 0.dp,
+        shadowElevation = if (dragging) 4.dp else 0.dp,
+    )
 }
 
 /** A row's menu: the track menu of its song (or "Details" of an opened file), then "Remove from queue" (§9.1). */

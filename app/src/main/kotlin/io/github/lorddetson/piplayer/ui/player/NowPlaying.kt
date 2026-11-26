@@ -24,7 +24,6 @@ import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -34,6 +33,8 @@ import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.clickable
 import androidx.compose.material3.minimumInteractiveComponentSize
@@ -47,9 +48,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalResources
@@ -65,8 +66,10 @@ import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Dp
 import androidx.media3.common.C
 import androidx.media3.common.Format
+import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.common.Tracks
@@ -75,17 +78,27 @@ import io.github.lorddetson.piplayer.R
 import io.github.lorddetson.piplayer.settings.NowPlayingElement
 import io.github.lorddetson.piplayer.settings.NowPlayingLayout
 import io.github.lorddetson.piplayer.settings.NowPlayingRow
+import io.github.lorddetson.piplayer.settings.UiBuiltInGesture
+import io.github.lorddetson.piplayer.settings.UiGestureAction
+import io.github.lorddetson.piplayer.settings.UiGestureActionId
 import io.github.lorddetson.piplayer.settings.UiSurface
 import io.github.lorddetson.piplayer.ui.customization.EditableUiPanel
+import io.github.lorddetson.piplayer.ui.customization.LocalUiGestureActionHandler
+import io.github.lorddetson.piplayer.ui.customization.LocalUiGestureEditing
+import io.github.lorddetson.piplayer.ui.customization.LocalUiGestureMotion
 import io.github.lorddetson.piplayer.ui.customization.StockUiSlot
 import io.github.lorddetson.piplayer.ui.customization.UiCanvasComponent
 import io.github.lorddetson.piplayer.ui.customization.UiControlColor
 import io.github.lorddetson.piplayer.ui.customization.UiControlTextAlign
+import io.github.lorddetson.piplayer.ui.customization.UiGestureMotion
 import io.github.lorddetson.piplayer.ui.customization.fillAlignedTextWidth
 import io.github.lorddetson.piplayer.ui.customization.UiControlIcon
 import io.github.lorddetson.piplayer.ui.customization.isStockUiSlotMasked
+import io.github.lorddetson.piplayer.ui.customization.stockGestureRetained
+import io.github.lorddetson.piplayer.ui.customization.stockMotionDelegated
 import io.github.lorddetson.piplayer.ui.details.PlayingBadge
 import io.github.lorddetson.piplayer.ui.identification.IdentifyButton
+import io.github.lorddetson.piplayer.ui.identification.IdentifyTarget
 import io.github.lorddetson.piplayer.ui.identification.LocalIdentify
 
 /**
@@ -111,12 +124,32 @@ fun NowPlaying(
     layout: NowPlayingLayout = NowPlayingLayout.STANDARD,
     onPanelSaveFailed: suspend () -> Unit = {},
     moodBackground: Boolean = true,
+    onSwipeOpenQueue: (() -> Unit)? = onOpenQueue,
+    onOpenSleepTimer: (() -> Unit)? = null,
+    previewArtwork: (suspend (MediaItem) -> ImageBitmap?)? = null,
+    artworkRevision: Any? = null,
 ) {
     val item = rememberCurrentItemState(player)
     val metadata = item.mediaMetadata
     val moodBackdrop = rememberMoodBackdrop(item.mediaItem, moodBackground)
     val swipe = rememberNowPlayingTrackSwipe(player)
     val swipeMotion = rememberTrackSwipeMotion(swipe)
+    val coverMotion = rememberCoverGestureMotion(swipe, onSwipeOpenQueue)
+    val neighbors = swipe.neighbors
+    val shownCover = coverMotion.displayedArtwork(cover, artworkRevision)
+    val previousArt = rememberNearbyArtwork(neighbors?.previous, artworkRevision, previewArtwork)
+    val distinctNext = neighbors?.next?.takeUnless { it == neighbors.previous }
+    val nextArt = rememberNearbyArtwork(distinctNext, artworkRevision, previewArtwork)
+    val nearby = remember(neighbors, previousArt, nextArt) {
+        buildMap {
+            neighbors?.previous?.let { put(it, previousArt) }
+            distinctNext?.let { put(it, nextArt) }
+        }
+    }
+    SideEffect {
+        coverMotion.updateArtwork(cover, coverName, nearby, artworkRevision)
+        coverMotion.rejectStalePreview(neighbors)
+    }
     val protectedTouch = Modifier.guardTrackSwipe(swipe)
     val format = rememberAudioFormat(player)
     val unknownArtist = stringResource(R.string.songs_unknown_artist)
@@ -124,7 +157,11 @@ fun NowPlaying(
     var controlsRevealed by rememberSaveable(layout) { mutableStateOf(false) }
     val minimal = layout == NowPlayingLayout.MINIMAL
     val expanded = layout == NowPlayingLayout.EXPANDED
-    val canIdentify = LocalIdentify.current != null && !player?.currentMediaItem?.mediaId.isNullOrBlank()
+    val identify = LocalIdentify.current
+    val canIdentify = identify != null && !item.mediaItem?.mediaId.isNullOrBlank()
+    var timerOpen by rememberSaveable { mutableStateOf(false) }
+    val openTimer = onOpenSleepTimer ?: { timerOpen = true }
+    var gestureMenuOpen by remember { mutableStateOf(false) }
     val available = NowPlayingElement.entries.filter { element ->
         when (element) {
             NowPlayingElement.IDENTIFY -> canIdentify
@@ -152,10 +189,29 @@ fun NowPlaying(
             NowPlayingElement.PLAY_PAUSE -> PlayPauseButton(player, press, large = true)
             NowPlayingElement.NEXT -> NextButton(player, press)
             NowPlayingElement.REPEAT -> RepeatButton(player, press)
-            NowPlayingElement.TIMER -> SleepTimerButton(controls, press)
+            NowPlayingElement.TIMER -> SleepTimerButton(controls, press, openTimer)
             NowPlayingElement.STOP_AFTER -> StopAfterCurrentButton(controls, press)
             NowPlayingElement.EQUALIZER -> controls.openEqualizer?.let { EqualizerButton(it, press) }
             else -> error("Expected a playback action")
+        }
+    }
+    val stockClick: (NowPlayingElement) -> (() -> Unit)? = { element ->
+        when (element) {
+            NowPlayingElement.IDENTIFY -> identify?.let { open ->
+                { player?.currentMediaItem?.mediaId?.takeIf(String::isNotBlank)?.let { open(IdentifyTarget.ofMediaId(it)) } }
+            }
+            NowPlayingElement.FAVORITE -> favorite?.onToggle
+            NowPlayingElement.QUEUE -> onOpenQueue
+            NowPlayingElement.MORE -> more?.let { { gestureMenuOpen = true } }
+            NowPlayingElement.PREVIOUS -> player?.let { { if (it.isCommandAvailable(Player.COMMAND_SEEK_TO_PREVIOUS)) it.seekToPrevious() } }
+            NowPlayingElement.NEXT -> player?.let { { if (it.isCommandAvailable(Player.COMMAND_SEEK_TO_NEXT)) it.seekToNext() } }
+            NowPlayingElement.PLAY_PAUSE -> player?.let { { performPlaybackGesture(UiGestureAction(UiGestureActionId.PLAY_PAUSE), it) } }
+            NowPlayingElement.SHUFFLE -> player?.let { { performPlaybackGesture(UiGestureAction(UiGestureActionId.TOGGLE_SHUFFLE), it) } }
+            NowPlayingElement.REPEAT -> player?.let { { performPlaybackGesture(UiGestureAction(UiGestureActionId.CYCLE_REPEAT), it) } }
+            NowPlayingElement.TIMER -> openTimer
+            NowPlayingElement.STOP_AFTER -> { { controls.setStopAfterCurrent(!controls.extras.stopAfterCurrent) } }
+            NowPlayingElement.EQUALIZER -> controls.openEqualizer
+            else -> null
         }
     }
     val body: @Composable (NowPlayingElement, Modifier, TextAlign, Boolean) -> Unit = { element, press, textAlign, split ->
@@ -175,7 +231,10 @@ fun NowPlaying(
         val size = if (expanded) Modifier.size(104.dp) else {
             Modifier.widthIn(max = if (minimal) 320.dp else 480.dp).fillMaxWidth().aspectRatio(1f)
         }
-        CoverImage(cover, size.then(press).then(swipeMotion).clip(RoundedCornerShape(12.dp)), if (expanded) 36.dp else 96.dp, coverName)
+        NowPlayingCover(
+            shownCover, coverName, size.then(press), if (expanded) 36.dp else 96.dp,
+            swipe, coverMotion, swipeMotion, nearby, onSwipeOpenQueue != null,
+        )
     }
     val collapse: @Composable () -> Unit = {
         IconButton(onClick = onClose, modifier = protectedTouch) {
@@ -209,11 +268,13 @@ fun NowPlaying(
             fillWidth = element in fullWidthElements, customizableIcon = !trackContent,
             alignableText = element in fullWidthElements || element == NowPlayingElement.TIMER,
             addable = element != NowPlayingElement.TRACK_INFO && element != NowPlayingElement.FORMAT,
+            onClick = stockClick(element),
+            stockContext = true,
         ) {
             when {
-                element == NowPlayingElement.COVER -> CoverImage(
-                    cover, Modifier.fillMaxSize().then(swipeMotion).clip(RoundedCornerShape(12.dp)),
-                    if (expanded) 36.dp else 72.dp, coverName,
+                element == NowPlayingElement.COVER -> NowPlayingCover(
+                    shownCover, coverName, Modifier.fillMaxSize(), if (expanded) 36.dp else 72.dp,
+                    swipe, coverMotion, swipeMotion, nearby, onSwipeOpenQueue != null,
                 )
                 trackContent -> body(element, Modifier, TextAlign.Center, false)
                 else -> action(element, Modifier.fillMaxSize())
@@ -222,7 +283,8 @@ fun NowPlaying(
     }
     val trackComponents = TrackField.entries.map { field ->
         UiCanvasComponent(field.nowPlayingId, field.label,
-            height = if (field == TrackField.TITLE) 36.dp else 24.dp, fillWidth = true, alignableText = true) {
+            height = if (field == TrackField.TITLE) 36.dp else 24.dp, fillWidth = true, alignableText = true,
+            onClick = field.openAction(onOpenArtist, onOpenAlbum)) {
             field.value(metadata, unknownArtist)?.let { value ->
                 TrackFieldText(field, value, onOpenArtist, onOpenAlbum, TextAlign.Center, swipeMotion)
             }
@@ -237,24 +299,82 @@ fun NowPlaying(
     val badgeComponent = UiCanvasComponent(PLAYING_BADGE_ID, R.string.player_metadata_badge, width = 72.dp, height = 48.dp) {
         PlayingBadge(player)
     }
-    BoxWithConstraints(modifier.fillMaxSize().then(moodBackdrop).windowInsetsPadding(contentInsets)) {
-        EditableUiPanel(
-            surface = UiSurface.NOW_PLAYING,
-            themeId = editor.themeId,
-            components = standardComponents + trackComponents + audioComponents + badgeComponent,
-            initialRows = initialRows.map { row -> row.flatMap { it.stockCanvasIds() } },
-            height = (maxHeight - 144.dp).coerceAtLeast(96.dp),
-            onSaveFailed = onPanelSaveFailed,
-            legacyStockIds = setOf(NowPlayingElement.TRACK_INFO.canvasId, NowPlayingElement.FORMAT.canvasId),
-            viewModeModifier = if (player == null) Modifier else Modifier.nowPlayingTrackSwipe(swipe),
-            canvasChrome = { Row(Modifier.fillMaxWidth().semantics { paneTitle = pane }) { collapse() } },
-        ) {
-            StockNowPlaying(
-                editor, pane, layout, controlsRevealed, { controlsRevealed = !controlsRevealed }, collapse,
-                top, content, transport, extras, compactPair, artwork, body, action,
-            )
+    val inheritedActions = LocalUiGestureActionHandler.current
+    val dispatched = remember(coverMotion) {
+        UiGestureMotion(
+            coverMotion::preview,
+            coverMotion::commit,
+            coverMotion::ownsTransform,
+            start = coverMotion::start,
+            finish = coverMotion::finish,
+        )
+    }
+    CompositionLocalProvider(
+        LocalUiGestureMotion provides dispatched,
+        LocalUiGestureActionHandler provides { gesture ->
+            performPlaybackGesture(gesture, player, onOpenQueue, favorite?.onToggle, openTimer) ||
+                inheritedActions?.invoke(gesture) == true
+        },
+    ) {
+        Box(modifier.fillMaxSize().then(moodBackdrop)) {
+            BoxWithConstraints(Modifier.fillMaxSize().windowInsetsPadding(contentInsets)) {
+                EditableUiPanel(
+                    surface = UiSurface.NOW_PLAYING,
+                    themeId = editor.themeId,
+                    components = standardComponents + trackComponents + audioComponents + badgeComponent,
+                    initialRows = initialRows.map { row -> row.flatMap { it.stockCanvasIds() } },
+                    height = (maxHeight - 144.dp).coerceAtLeast(96.dp),
+                    onSaveFailed = onPanelSaveFailed,
+                    legacyStockIds = setOf(NowPlayingElement.TRACK_INFO.canvasId, NowPlayingElement.FORMAT.canvasId),
+                    legacyVisibilityGroups = listOf(NowPlayingElement.TRACK_INFO, NowPlayingElement.FORMAT)
+                        .associate { it.canvasId to it.stockCanvasIds().toSet() },
+                    viewModeModifier = if (player == null) Modifier else Modifier.nowPlayingTrackSwipe(swipe),
+                    stockGestures = listOf(previousCoverGesture, nextCoverGesture) +
+                        listOfNotNull(queueCoverGesture.takeIf { onSwipeOpenQueue != null }),
+                    canvasChrome = { Row(Modifier.fillMaxWidth().semantics { paneTitle = pane }) { collapse() } },
+                ) {
+                    StockNowPlaying(
+                        editor, pane, layout, controlsRevealed, { controlsRevealed = !controlsRevealed }, collapse,
+                        top, content, transport, extras, compactPair, artwork, body, action, stockClick,
+                    )
+                }
+            }
+            if (player != null && coverMotion.showQueue) {
+                QueuePreview(player, Modifier.fillMaxSize().graphicsLayer { translationY = -(1f - coverMotion.progress) * size.height })
+            }
+            if (more != null && gestureMenuOpen) {
+                Box(Modifier.align(Alignment.TopEnd).windowInsetsPadding(contentInsets).padding(top = 8.dp)) {
+                    Box(Modifier.size(48.dp)) {
+                        DropdownMenu(expanded = true, onDismissRequest = { gestureMenuOpen = false }) {
+                            more { gestureMenuOpen = false }
+                        }
+                    }
+                }
+            }
         }
     }
+    if (timerOpen) SleepTimerSheet(controls) { timerOpen = false }
+}
+
+@Composable
+private fun NowPlayingCover(
+    cover: ImageBitmap?,
+    name: String?,
+    modifier: Modifier,
+    noteSize: Dp,
+    swipe: NowPlayingTrackSwipe,
+    motion: CoverGestureMotion,
+    fallback: Modifier,
+    nearby: Map<TrackSwipeEntry, ImageBitmap?>,
+    queueAvailable: Boolean,
+) {
+    val editable = LocalUiGestureEditing.current
+    val delegated = stockMotionDelegated(NOW_PLAYING_COVER_ID)
+    val left = stockGestureRetained(NOW_PLAYING_COVER_ID, UiBuiltInGesture.SWIPE_LEFT) && !delegated
+    val right = stockGestureRetained(NOW_PLAYING_COVER_ID, UiBuiltInGesture.SWIPE_RIGHT) && !delegated
+    val down = stockGestureRetained(NOW_PLAYING_COVER_ID, UiBuiltInGesture.SWIPE_DOWN) && !delegated && queueAvailable
+    val input = if (editable) Modifier else Modifier.coverGestureInput(swipe, motion, left, right, down)
+    SwipeCoverArtwork(cover, name, noteSize, motion, modifier.then(input), fallback, nearby)
 }
 
 internal val NowPlayingElement.canvasId: String get() = "now:$id"
@@ -284,11 +404,12 @@ private fun StockNowPlaying(
     artwork: @Composable (Modifier) -> Unit,
     body: @Composable (NowPlayingElement, Modifier, TextAlign, Boolean) -> Unit,
     action: @Composable (NowPlayingElement, Modifier) -> Unit,
+    stockClick: (NowPlayingElement) -> (() -> Unit)?,
 ) {
     val minimal = layout == NowPlayingLayout.MINIMAL
     val expanded = layout == NowPlayingLayout.EXPANDED
     val button: @Composable (NowPlayingElement) -> Unit = { element ->
-        PlayerElement(editor, element) { press -> action(element, press) }
+        PlayerElement(editor, element, onClick = stockClick(element)) { press -> action(element, press) }
     }
     Column(
         Modifier
@@ -366,7 +487,10 @@ private fun StockNowPlaying(
 }
 
 @Composable
-private fun TrackMenuButton(entries: @Composable (close: () -> Unit) -> Unit, modifier: Modifier) {
+private fun TrackMenuButton(
+    entries: @Composable (close: () -> Unit) -> Unit,
+    modifier: Modifier,
+) {
     var open by remember { mutableStateOf(false) }
     Box {
         IconButton(onClick = { open = true }, modifier = modifier.testTag(PlayerTags.MORE)) {
@@ -394,11 +518,17 @@ private fun TrackHeading(
     ) {
         for (field in TrackField.entries) {
             val value = field.value(metadata, unknownArtist) ?: continue
-            if (split) StockUiSlot(field.nowPlayingId) {
+            if (split) StockUiSlot(field.nowPlayingId, onClick = field.openAction(onOpenArtist, onOpenAlbum)) {
                 TrackFieldText(field, value, onOpenArtist, onOpenAlbum, textAlign, titleMotion)
             } else TrackFieldText(field, value, onOpenArtist, onOpenAlbum, textAlign, titleMotion)
         }
     }
+}
+
+private fun TrackField.openAction(artist: (() -> Unit)?, album: (() -> Unit)?): (() -> Unit)? = when (this) {
+    TrackField.ARTIST -> artist
+    TrackField.ALBUM -> album
+    TrackField.TITLE -> null
 }
 
 @Composable
