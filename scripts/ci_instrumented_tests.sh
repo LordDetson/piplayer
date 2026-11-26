@@ -15,7 +15,9 @@ status=0
 gradle() {
   local label="$1"
   shift
-  ./gradlew "$ABI_ARG" "$@"
+  # Connected tests package the app bundle's signed APK set with this runner's debug key.
+  # The APK set's Gradle cache key does not include the certificate of an ephemeral debug key.
+  ./gradlew "$ABI_ARG" --no-build-cache "$@"
   local code=$?
   echo "::notice title=Gradle ${label}::exit code ${code}"
   return "$code"
