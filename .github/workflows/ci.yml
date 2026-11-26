@@ -51,12 +51,19 @@ jobs:
 
       # Instrumented tests run on emulators locally; CI at least compiles them. Compiling does not need the
       # downloaded fingerprint recordings, which only the androidTest asset merge asks for.
-      - name: Build debug and release (R8), unit tests, lint
+      - name: Build debug, unit tests and lint
+        id: debug_checks
         run: >-
           ./gradlew assembleDebug testDebugUnitTest lintDebug
           :app:compileDebugAndroidTestKotlin :nativelib:compileDebugAndroidTestKotlin
-          :app:assembleRelease :macrobenchmark:assembleBenchmark
-          --continue --stacktrace
+          --max-workers=2 --continue --stacktrace
+
+      # Keep the app's debug and release Kotlin compilations out of the same Gradle invocation.
+      - name: Build release (R8) and benchmark
+        if: ${{ !cancelled() && (steps.debug_checks.outcome == 'success' || steps.debug_checks.outcome == 'failure') }}
+        run: >-
+          ./gradlew :app:assembleRelease :macrobenchmark:assembleBenchmark
+          --max-workers=2 --continue --stacktrace
 
       # The build exports the database schemas; a schema that differs from the committed one is a version without its
       # migration (docs/library.md §3.1).

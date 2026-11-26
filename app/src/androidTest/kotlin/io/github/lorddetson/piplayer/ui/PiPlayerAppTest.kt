@@ -339,7 +339,8 @@ class PiPlayerAppTest {
             val button = "ui_component_$borrowedQueue"
             compose.waitUntilExactlyOneExists(hasTestTag(button), timeoutMillis = 5_000)
             compose.onNodeWithTag(button).performTouchInput {
-                swipe(Offset(center.x, height * 0.8f), Offset(center.x, -height * 0.8f))
+                // The anchored item's height scales with the stock bar and its window insets.
+                swipe(center, center - Offset(0f, 64.dp.toPx()))
             }
             compose.waitUntilExactlyOneExists(hasTestTag(QueueTags.LIST), timeoutMillis = 5_000)
         }
