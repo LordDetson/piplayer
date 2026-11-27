@@ -5,6 +5,7 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.stringPreferencesKey
+import io.github.lorddetson.piplayer.settings.librarytabs.CustomTabsSettings
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.Serializable
@@ -338,7 +339,9 @@ internal class UiCanvasSettings(private val file: DataStore<Preferences>) {
         val saved = SettingsFiles.edit(file) { preferences ->
             if (AppearanceSettings.panelThemeId(preferences) == themeId) {
                 val updated = change(layoutsOf(preferences))
-                if (updated?.isValid == true) {
+                if (updated?.isValid == true &&
+                    CustomTabsSettings.definitionsOf(preferences).keys.containsAll(updated.referencedCustomTabIds())
+                ) {
                     store(preferences, themeId, updated)
                     applied = true
                 }
@@ -351,6 +354,8 @@ internal class UiCanvasSettings(private val file: DataStore<Preferences>) {
         copy(panels = if (layout == null) panels - surface else panels + (surface to layout))
 
     companion object {
+        private const val CANVAS_PREFIX = "ui_canvas_"
+
         fun layoutsOf(preferences: Preferences): UiThemeCanvases =
             savedLayouts(preferences, AppearanceSettings.panelThemeId(preferences))
 
@@ -372,6 +377,8 @@ internal class UiCanvasSettings(private val file: DataStore<Preferences>) {
             else preferences[key(themeId)] = Json.encodeToString(canvases)
         }
 
-        fun key(themeId: String) = stringPreferencesKey("ui_canvas_$themeId")
+        fun key(themeId: String) = stringPreferencesKey("$CANVAS_PREFIX$themeId")
+
+        fun themeForKey(key: String): String? = key.takeIf { it.startsWith(CANVAS_PREFIX) }?.removePrefix(CANVAS_PREFIX)
     }
 }

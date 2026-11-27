@@ -1,5 +1,8 @@
 package io.github.lorddetson.piplayer.settings.configuration
 
+import io.github.lorddetson.piplayer.library.customtabs.CustomTabDefinition
+import io.github.lorddetson.piplayer.library.customtabs.CustomTabDefinitionDocument
+import io.github.lorddetson.piplayer.library.customtabs.isCustomTabId
 import io.github.lorddetson.piplayer.library.values.LegacyEncodings
 import io.github.lorddetson.piplayer.nativelib.taglib.Id3v1WritePolicy
 import io.github.lorddetson.piplayer.settings.AppLanguage
@@ -23,6 +26,7 @@ import java.nio.ByteBuffer
 import java.nio.charset.CharacterCodingException
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
@@ -42,7 +46,8 @@ internal class ConfigurationTooLargeException : IllegalArgumentException()
 
 internal object ConfigurationCodec {
     const val MAX_BYTES = 4 * 1024 * 1024
-    private const val VERSION = 1
+    private const val BASE_VERSION = 1
+    private const val CUSTOM_TABS_VERSION = 2
     private const val BUILT_IN = "built_in"
 
     private val languages = mapOf(AppLanguage.SYSTEM to "system", AppLanguage.ENGLISH to "en", AppLanguage.RUSSIAN to "ru")
@@ -75,7 +80,9 @@ internal object ConfigurationCodec {
 
     fun encode(patch: ConfigurationPatch): ByteArray {
         val document = orderedObject {
-            add("version", VERSION)
+            val hasCustomTabs = patch.library.customTabs.isNotEmpty() || patch.library.customTabOrder != null ||
+                patch.appearance.referencedCustomTabIds().isNotEmpty()
+            add("version", if (hasCustomTabs) CUSTOM_TABS_VERSION else BASE_VERSION)
             add("language", patch.language?.let(languages::getValue))
             addObject("library", libraryJson(patch.library))
             addObject("tagWriting", orderedObject {
@@ -109,8 +116,8 @@ internal object ConfigurationCodec {
             val text = Charsets.UTF_8.newDecoder().decode(ByteBuffer.wrap(bytes, 0, length)).toString()
             val document = ConfigurationJsonReader(text).read()
             val version = document["version"]?.documentInt() ?: return ConfigurationRead.Invalid
-            if (version != VERSION) return ConfigurationRead.UnsupportedVersion
-            ConfigurationRead.Loaded(readPatch(document))
+            if (version !in BASE_VERSION..CUSTOM_TABS_VERSION) return ConfigurationRead.UnsupportedVersion
+            ConfigurationRead.Loaded(readPatch(document, allowCustomTabs = version >= CUSTOM_TABS_VERSION))
         } catch (_: CharacterCodingException) {
             ConfigurationRead.Invalid
         } catch (_: IllegalArgumentException) {
@@ -134,13 +141,14 @@ internal object ConfigurationCodec {
         return length
     }
 
-    private fun readPatch(value: JsonElement): ConfigurationPatch {
+    private fun readPatch(value: JsonElement, allowCustomTabs: Boolean): ConfigurationPatch {
         val root = value.documentObject("version", "language", "library", "tagWriting", "sleepTimer", "appearance")
         val writing = root["tagWriting"]?.documentObject("id3v1", "cover").orEmpty()
         val timer = root["sleepTimer"]?.documentObject("hours", "minutes", "finishTrack").orEmpty()
-        return ConfigurationPatch(
+        val library = root["library"]?.let { readLibrary(it, allowCustomTabs) } ?: LibraryPatch()
+        val patch = ConfigurationPatch(
             language = root["language"]?.let { languages.knownId(it.documentString()) },
-            library = root["library"]?.let(::readLibrary) ?: LibraryPatch(),
+            library = library,
             tagWriting = TagWritingPatch(
                 id3v1 = writing["id3v1"]?.let { id3v1Policies.knownId(it.documentString()) },
                 cover = writing["cover"]?.let { coverPresets.knownId(it.documentString()) },
@@ -150,8 +158,11 @@ internal object ConfigurationCodec {
                 minutes = timer["minutes"]?.documentInt()?.also { require(it in 0..59) },
                 finishTrack = timer["finishTrack"]?.documentBoolean(),
             ),
-            appearance = root["appearance"]?.let(::readAppearance) ?: AppearancePatch(),
+            appearance = root["appearance"]?.let { readAppearance(it, library.customTabs.keys.takeIf { allowCustomTabs }) }
+                ?: AppearancePatch(),
         )
+        require(allowCustomTabs || patch.appearance.referencedCustomTabIds().isEmpty())
+        return patch
     }
 
     private fun libraryJson(patch: LibraryPatch): JsonObject = orderedObject {
@@ -166,10 +177,20 @@ internal object ConfigurationCodec {
                 add("grid", change.grid)
             })
         })
+        addObject("customTabs", orderedObject {
+            for ((id, tab) in patch.customTabs) {
+                require(id == tab.id && tab.isValid)
+                put(id, customTabJson(tab))
+            }
+        })
+        patch.customTabOrder?.let { put("customTabOrder", JsonArray(it.map(::JsonPrimitive))) }
     }
 
-    private fun readLibrary(value: JsonElement): LibraryPatch {
-        val fields = value.documentObject("showSystemSounds", "showRecordings", "minLengthSeconds", "legacyEncodingId", "lists")
+    private fun readLibrary(value: JsonElement, allowCustomTabs: Boolean): LibraryPatch {
+        val fields = value.documentObject(
+            "showSystemSounds", "showRecordings", "minLengthSeconds", "legacyEncodingId", "lists", "customTabs", "customTabOrder",
+        )
+        require(allowCustomTabs || "customTabs" !in fields && "customTabOrder" !in fields)
         return LibraryPatch(
             showSystemSounds = fields["showSystemSounds"]?.documentBoolean(),
             showRecordings = fields["showRecordings"]?.documentBoolean(),
@@ -185,8 +206,21 @@ internal object ConfigurationCodec {
                     grid = list["grid"]?.documentBoolean()?.also { require(name.offersGrid) },
                 )
             },
+            customTabs = fields["customTabs"]?.asObject().orEmpty().mapEntries(::checkedCustomTabId) { id, entry ->
+                entry.readUnit(CustomTabDefinitionDocument.serializer()).toDefinition(id) ?: errorShape()
+            },
+            customTabOrder = fields["customTabOrder"]?.let { value ->
+                val order = (value as? JsonArray ?: errorShape()).map { checkedCustomTabId(it.documentString()) }
+                require(order.size == order.toSet().size)
+                order
+            },
         )
     }
+
+    fun customTabJson(tab: CustomTabDefinition): JsonElement =
+        writeUnit(CustomTabDefinitionDocument.serializer(), CustomTabDefinitionDocument.from(tab))
+
+    private fun checkedCustomTabId(id: String): String = id.also { require(isCustomTabId(it)) }
 
     fun appearanceJson(patch: AppearancePatch): JsonObject = orderedObject {
         add("builtInTheme", patch.builtInTheme?.stored)
@@ -214,7 +248,7 @@ internal object ConfigurationCodec {
         })
     }
 
-    private fun readAppearance(value: JsonElement): AppearancePatch {
+    private fun readAppearance(value: JsonElement, definedTabs: Set<String>?): AppearancePatch {
         val options = value.documentObject("builtInTheme", "activeTheme", "nowPlayingMoodBackground", "builtInOverrides", "savedThemes")
         return AppearancePatch(
             builtInTheme = options["builtInTheme"]?.let { themeModes.knownId(it.documentString()) },
@@ -223,13 +257,13 @@ internal object ConfigurationCodec {
             },
             nowPlayingMoodBackground = options["nowPlayingMoodBackground"]?.documentBoolean(),
             builtInOverrides = options["builtInOverrides"]?.asObject().orEmpty()
-                .mapEntries(themeModes::knownId) { _, layout -> readLayout(layout) },
+                .mapEntries(themeModes::knownId) { _, layout -> readLayout(layout, definedTabs) },
             savedThemes = options["savedThemes"]?.asObject().orEmpty()
-                .mapEntries(::checkedThemeId) { _, theme -> readSavedTheme(theme) },
+                .mapEntries(::checkedThemeId) { _, theme -> readSavedTheme(theme, definedTabs) },
         )
     }
 
-    private fun readSavedTheme(value: JsonElement): SavedThemePatch {
+    private fun readSavedTheme(value: JsonElement, definedTabs: Set<String>?): SavedThemePatch {
         val fields = value.documentObject("name", "base", "palette", "font", "layout")
         return SavedThemePatch(
             name = fields["name"]?.documentString()?.also { require(validConfigurationThemeName(it)) },
@@ -239,7 +273,7 @@ internal object ConfigurationCodec {
                 if (id == "system") ThemeFontSelection.System
                 else ThemeFontSelection.BuiltIn(id).also { require(CustomThemesSettings.isValidFont(it)) }
             },
-            layout = fields["layout"]?.let(::readLayout) ?: ThemeLayoutPatch(),
+            layout = fields["layout"]?.let { readLayout(it, definedTabs) } ?: ThemeLayoutPatch(),
         )
     }
 
@@ -257,11 +291,15 @@ internal object ConfigurationCodec {
         addExplicit("gestures", patch.gestures) { writeUnit(UiGestureProfile.serializer(), it) }
     }
 
-    private fun readLayout(value: JsonElement): ThemeLayoutPatch {
+    private fun readLayout(value: JsonElement, definedTabs: Set<String>?): ThemeLayoutPatch {
         val fields = value.documentObject("presentation", "library", "player", "miniPlayer", "navigation", "canvases", "gestures")
         return ThemeLayoutPatch(
             presentation = fields["presentation"].explicit { presentations.knownId(it.documentString()) },
-            library = fields["library"].explicit { it.readUnit(LibraryPanelDocument.serializer()).toLayout() ?: errorShape() },
+            library = fields["library"].explicit {
+                val panel = it.readUnit(LibraryPanelDocument.serializer())
+                val mentioned = definedTabs?.plus(panel.referencedCustomTabIds()).orEmpty()
+                panel.toLayout(mentioned) ?: errorShape()
+            },
             player = fields["player"].explicit { it.readUnit(NowPlayingPanelDocument.serializer()).toPanel() ?: errorShape() },
             miniPlayer = fields["miniPlayer"].explicit { it.readUnit(MiniPlayerPanelDocument.serializer()).toPanel() ?: errorShape() },
             navigation = fields["navigation"].explicit { it.readUnit(BottomNavigationDocument.serializer()).toLayout() ?: errorShape() },

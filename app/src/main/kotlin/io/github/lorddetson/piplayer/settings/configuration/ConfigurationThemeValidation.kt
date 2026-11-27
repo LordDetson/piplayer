@@ -1,5 +1,6 @@
 package io.github.lorddetson.piplayer.settings.configuration
 
+import io.github.lorddetson.piplayer.library.customtabs.isCustomTabId
 import io.github.lorddetson.piplayer.settings.BottomDestination
 import io.github.lorddetson.piplayer.settings.BottomNavigationLayout
 import io.github.lorddetson.piplayer.settings.MiniPlayerElement
@@ -30,7 +31,7 @@ import io.github.lorddetson.piplayer.ui.player.queueCoverGesture
 private val workspaceBlocks = setOf(
     "workspace:toolbar", "workspace:tabs", "workspace:content", "workspace:mini_player", "workspace:navigation",
 )
-private val libraryTabIds = BuiltInLibraryTab.ids.mapTo(mutableSetOf()) { "tab:$it" }
+private val stockTabComponents = BuiltInLibraryTab.ids.mapTo(mutableSetOf()) { "tab:$it" }
 private val libraryButtonIds = LibraryButton.ids.mapTo(mutableSetOf()) { "library:$it" }
 private val navigationIds = BottomDestination.entries.mapTo(mutableSetOf()) { "nav:${it.id}" }
 private val nowPlayingIds = NowPlayingElement.entries.mapTo(mutableSetOf(), NowPlayingElement::canvasId)
@@ -61,6 +62,7 @@ internal fun validateConfigurationLayout(
     for (surface in UiSurface.entries) {
         val source = when (surface) {
             UiSurface.LIBRARY -> {
+                val libraryTabIds = library.tabs.order.mapTo(mutableSetOf()) { "tab:$it" }
                 val tabs = library.tabs.visible.map { "tab:$it" }
                 val buttons = library.buttons.visible.map { "library:$it" }
                 SurfaceComponents(libraryTabIds + libraryButtonIds + "library:title", (tabs + buttons).toSet() + "library:title",
@@ -97,7 +99,16 @@ internal fun validateConfigurationLayout(
         ) return false
 
         val profile = canvases.gestures.surfaces[surface] ?: continue
-        val visible = effectiveComponents(source.native, layout).filterTo(mutableSetOf()) { id ->
+        val hiddenCustomTabs = if (surface == UiSurface.LIBRARY) {
+            library.tabs.hidden.filter(::isCustomTabId).mapTo(mutableSetOf()) { "tab:$it" }
+        } else emptySet()
+        val mounted = effectiveComponents(source.native, layout) - hiddenCustomTabs
+        val absoluteLibrary = surface == UiSurface.LIBRARY && layout != null && layout.hiddenStock == null
+        val footerTabs = if (absoluteLibrary) {
+            val placed = mounted.filter { it.startsWith("tab:") }.map { it.removePrefix("tab:") }
+            library.tabs.absoluteFooterTabs(placed).map { "tab:$it" }
+        } else emptyList()
+        val visible = (mounted + footerTabs).filterTo(mutableSetOf()) { id ->
             when (surface) {
                 UiSurface.LIBRARY -> id !in source.catalog || workspaceSlotFor(id) in workspace
                 UiSurface.MINI_PLAYER -> "workspace:mini_player" in workspace
@@ -106,17 +117,22 @@ internal fun validateConfigurationLayout(
             }
         }
         val clicks = source.clicks + globalClicks
+        // Keep saved gestures on optional footer tabs even when the current layout does not show them.
+        val dormantFooter = stockTabComponents.takeIf { absoluteLibrary && mounted.none(it::contains) }.orEmpty()
+        val inactiveFooter = dormantFooter - visible
         val stock = clicks.map { component ->
             stockGesture(component, UiBuiltInGesture.TAP, UiGestureAction(UiGestureActionId.STOCK_CLICK, targetId = component))
         } + known.map { component ->
             stockGesture(component, UiBuiltInGesture.LONG_PRESS, UiGestureAction(UiGestureActionId.CONTEXT_MENU, targetId = component))
         } + if (surface == UiSurface.NOW_PLAYING) listOf(previousCoverGesture, nextCoverGesture, queueCoverGesture) else emptyList()
-        val environment = UiGestureEnvironment(visible, layout?.groups.orEmpty(), stock)
+        val activeStock = stock.filterNot { binding -> binding.slot.target.members.any(inactiveFooter::contains) }
+        val environment = UiGestureEnvironment(visible, layout?.groups.orEmpty(), activeStock)
+        val references = environment.copy(components = visible + hiddenCustomTabs + dormantFooter)
         if (profile.unbound.any { !known.containsAll(it.target.members) }) return false
         if (profile.bindings.any { binding ->
                 val target = binding.action.targetId
-                !environment.reaches(binding.slot.target) ||
-                    binding.timelines.any { !environment.reaches(it.target) } ||
+                !references.reaches(binding.slot.target) ||
+                    binding.timelines.any { !references.reaches(it.target) } ||
                     target != null && (target !in known || binding.action.id == UiGestureActionId.STOCK_CLICK && target !in clicks)
             }
         ) return false

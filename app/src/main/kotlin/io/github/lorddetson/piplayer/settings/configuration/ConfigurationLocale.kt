@@ -5,6 +5,7 @@ import android.util.AtomicFile
 import io.github.lorddetson.piplayer.settings.AppLanguage
 import io.github.lorddetson.piplayer.settings.AppLanguageChange
 import java.io.File
+import java.io.FileNotFoundException
 import java.io.IOException
 import java.util.UUID
 import kotlinx.serialization.Serializable
@@ -33,12 +34,15 @@ internal data class ConfigurationLocaleJournal(
     val after: String?,
 )
 
+@Synchronized
 internal fun configurationInstallation(context: Context): String {
     val marker = AtomicFile(File(context.noBackupFilesDir, "configuration-locale-installation"))
-    if (marker.baseFile.isFile) {
-        val stored = marker.readFully().decodeToString()
-        if (runCatching { UUID.fromString(stored).toString() == stored }.getOrDefault(false)) return stored
+    val stored = try {
+        marker.readFully().decodeToString()
+    } catch (_: FileNotFoundException) {
+        null
     }
+    if (stored != null && runCatching { UUID.fromString(stored).toString() == stored }.getOrDefault(false)) return stored
     val identity = UUID.randomUUID().toString()
     val output = marker.startWrite()
     try {

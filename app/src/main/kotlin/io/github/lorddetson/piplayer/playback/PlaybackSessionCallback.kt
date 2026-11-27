@@ -425,9 +425,6 @@ class PlaybackSessionCallback(
         return QueueRequest.parse(id) != null || QueueIds.fileId(id) != null || TreeNode.parse(id) != null
     }
 
-    /** The songs that library items name, with their track references and the library ID they were read under. */
-    private class ResolvedSongs(val songs: List<Song>, val tracks: List<TrackRef>, val libraryId: String?, val counts: List<Int>)
-
     /** Reads the songs of [mediaItems] (§10.3); blocks, so call it on the expansion thread. */
     private fun resolveSongs(mediaItems: List<MediaItem>): ResolvedSongs {
         val perItem = mediaItems.map { item -> tree.songsToAdd(item).orEmpty() }
@@ -437,6 +434,15 @@ class PlaybackSessionCallback(
         val libraryId = libraryIdNow(refs)
         val tracks = songs.map { song -> refs.lookup { it.refOf(song.id) } ?: TrackRef(song.id, null, null, null, null) }
         return ResolvedSongs(songs, tracks, libraryId, perItem.map { it.size })
+    }
+
+    private fun resolveSnapshot(mediaItems: List<MediaItem>): ResolvedSongs? {
+        val ids = mediaItems.map { item ->
+            if (item.localConfiguration != null) return null
+            snapshotSongId(item.mediaId) ?: return null
+        }
+        val refs by lazy(trackRefs)
+        return resolveSongSnapshot(ids, tree::snapshotSongs, { libraryIdNow(refs) }, { songs -> tracksOf(refs, songs) })
     }
 
     /** A controller's add of library items: Media3 puts them in, and [inserting] journals them (§10.3). */
@@ -464,14 +470,9 @@ class PlaybackSessionCallback(
     /** A controller's set of library items other than one list: a queue of added entries (§10.3). */
     private fun setLibrarySongs(token: Int, mediaItems: List<MediaItem>, startIndex: Int, startPositionMs: Long): ListenableFuture<MediaItemsWithStartPosition> =
         expansion.submit<MediaItemsWithStartPosition> {
-            val resolved = resolveSongs(mediaItems)
+            val resolved = resolveSnapshot(mediaItems) ?: resolveSongs(mediaItems)
             if (token != restoreGeneration.get()) throw UnsupportedOperationException("The set was superseded")
-            // The item to start at stands for its first song.
-            val start = if (startIndex in mediaItems.indices) {
-                resolved.counts.take(startIndex).sum().coerceAtMost(resolved.songs.lastIndex)
-            } else {
-                C.INDEX_UNSET
-            }
+            val start = resolved.startIndex(startIndex) ?: C.INDEX_UNSET
             val state = QueueEditing.added(resolved.libraryId, resolved.tracks)
             mainHandler.post {
                 if (token == restoreGeneration.get()) {

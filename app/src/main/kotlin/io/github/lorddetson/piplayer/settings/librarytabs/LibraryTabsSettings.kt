@@ -5,6 +5,7 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.stringPreferencesKey
+import io.github.lorddetson.piplayer.library.customtabs.isCustomTabId
 import io.github.lorddetson.piplayer.settings.AppearanceSettings
 import io.github.lorddetson.piplayer.settings.builtInThemeLayout
 import io.github.lorddetson.piplayer.settings.SettingsFiles
@@ -31,6 +32,13 @@ internal enum class BuiltInLibraryTab(val id: String) {
 
 internal data class LibraryTabLayout(val order: List<String>, val hidden: Set<String>) {
     val visible: List<String> = order.filterNot(hidden::contains)
+
+    /** Old absolute layouts show new tabs separately without moving the saved components. */
+    fun absoluteFooterTabs(placedTabs: Collection<String>): List<String> {
+        val unplacedCustom = visible.filter { isCustomTabId(it) && it !in placedTabs }
+        if (unplacedCustom.isNotEmpty() || placedTabs.isNotEmpty()) return unplacedCustom
+        return listOfNotNull(visible.firstOrNull { it in BuiltInLibraryTab.ids })
+    }
 
     /** Activity state from earlier versions used the built-in enum's uppercase names. */
     fun selectedTab(savedId: String?): String {
@@ -136,26 +144,41 @@ internal class LibraryTabsSettings(private val file: DataStore<Preferences>) {
     }
 
     companion object {
+        private const val PANEL_PREFIX = "library_panel_"
+
         fun panelOf(preferences: Preferences): LibraryPanelState {
             val themeId = AppearanceSettings.panelThemeId(preferences)
             return LibraryPanelState(themeId, panelOf(preferences, themeId))
         }
 
-        fun panelOf(preferences: Preferences, themeId: String): LibraryPanelLayout =
-            savedPanel(preferences, themeId) ?: builtInThemeLayout(themeId)?.library ?: LibraryPanelLayout()
+        fun panelOf(preferences: Preferences, themeId: String): LibraryPanelLayout {
+            val known = CustomTabsSettings.definitionsOf(preferences).keys
+            savedPanelDocument(preferences, themeId)?.toLayout(known)?.let { return it }
+            val fallback = builtInThemeLayout(themeId)?.library ?: LibraryPanelLayout()
+            val tabs = fallback.tabs
+            return fallback.copy(tabs = LibraryTabLayout.fromStored(tabs.order, tabs.hidden, BuiltInLibraryTab.ids + known))
+        }
 
-        fun savedPanel(preferences: Preferences, themeId: String): LibraryPanelLayout? = try {
-            preferences[panelKey(themeId)]?.let { Json.decodeFromString<LibraryPanelDocument>(it).toLayout() }
+        fun savedPanel(preferences: Preferences, themeId: String): LibraryPanelLayout? =
+            savedPanelDocument(preferences, themeId)?.toLayout(CustomTabsSettings.definitionsOf(preferences).keys)
+
+        fun savedPanelDocument(preferences: Preferences, themeId: String): LibraryPanelDocument? = try {
+            preferences[panelKey(themeId)]?.let { Json.decodeFromString<LibraryPanelDocument>(it) }
         } catch (_: SerializationException) {
             null
         }
+
+        fun panelReferences(preferences: Preferences, themeId: String, id: String): Boolean =
+            savedPanelDocument(preferences, themeId)?.referencesTab(id) == true
 
         fun storePanel(preferences: MutablePreferences, themeId: String, layout: LibraryPanelLayout?) {
             if (layout == null) preferences.remove(panelKey(themeId))
             else preferences[panelKey(themeId)] = Json.encodeToString(LibraryPanelDocument.from(layout))
         }
 
-        fun panelKey(themeId: String) = stringPreferencesKey("library_panel_$themeId")
+        fun panelKey(themeId: String) = stringPreferencesKey("$PANEL_PREFIX$themeId")
+
+        fun themeForKey(key: String): String? = key.takeIf { it.startsWith(PANEL_PREFIX) }?.removePrefix(PANEL_PREFIX)
 
         private fun List<String>.moved(from: Int, to: Int): List<String> = toMutableList().apply { add(to, removeAt(from)) }
     }

@@ -1,5 +1,6 @@
 package io.github.lorddetson.piplayer.settings
 
+import io.github.lorddetson.piplayer.library.customtabs.isCustomTabId
 import io.github.lorddetson.piplayer.settings.librarytabs.LibraryPanelDocument
 import io.github.lorddetson.piplayer.settings.librarytabs.LibraryPanelLayout
 import java.io.IOException
@@ -51,21 +52,26 @@ internal object ThemePackageCodec {
 
     fun encode(theme: ThemePackage): ByteArray {
         require(validName(theme.name) && theme.palette.hasValidColors)
-        val panel = theme.panel?.let(LibraryPanelDocument::from)
-        require(panel == null || panel.toLayout() == theme.panel)
+        val defaultPanel = LibraryPanelLayout()
+        val projection = theme.canvases?.withoutCustomTabs(theme.panel ?: defaultPanel, ::isCustomTabId)
+        val stockPanel = projection?.panel?.takeUnless { theme.panel == null && it == defaultPanel }
+            ?: theme.panel?.withoutTabs(::isCustomTabId)
+        val stockCanvases = projection?.canvases
+        val panel = stockPanel?.let(LibraryPanelDocument::from)
+        require(panel == null || panel.toLayout() == stockPanel)
         val player = theme.player?.let(NowPlayingPanelDocument::from)
         require(player == null || player.toPanel() == theme.player)
         val miniPlayer = theme.miniPlayer?.let(MiniPlayerPanelDocument::from)
         require(miniPlayer == null || miniPlayer.toPanel() == theme.miniPlayer)
         val navigation = theme.navigation?.let(BottomNavigationDocument::from)
         require(navigation == null || navigation.toLayout() == theme.navigation)
-        require(theme.canvases?.isValid != false)
+        require(stockCanvases?.isValid != false)
         val version = when {
-            theme.canvases?.gestures?.isEmpty == false -> GESTURE_VERSION
-            theme.canvases?.hasWorkspaceOptions == true -> WORKSPACE_VERSION
-            theme.canvases?.panels?.values?.any(UiCanvasLayout::hasAdvancedOptions) == true -> ADVANCED_CANVAS_VERSION
-            theme.canvases?.panels?.values?.any { it.hiddenStock != null } == true -> ANCHORED_CANVAS_VERSION
-            theme.canvases != null -> CANVAS_VERSION
+            stockCanvases?.gestures?.isEmpty == false -> GESTURE_VERSION
+            stockCanvases?.hasWorkspaceOptions == true -> WORKSPACE_VERSION
+            stockCanvases?.panels?.values?.any(UiCanvasLayout::hasAdvancedOptions) == true -> ADVANCED_CANVAS_VERSION
+            stockCanvases?.panels?.values?.any { it.hiddenStock != null } == true -> ANCHORED_CANVAS_VERSION
+            stockCanvases != null -> CANVAS_VERSION
             navigation != null -> NAVIGATION_VERSION
             miniPlayer != null -> MINI_PLAYER_VERSION
             player != null -> PLAYER_VERSION
@@ -73,7 +79,7 @@ internal object ThemePackageCodec {
             else -> PALETTE_VERSION
         }
         return Json.encodeToString(
-            Document(version, theme.name, theme.base.stored, theme.palette, theme.layout?.stored, panel, player, miniPlayer, navigation, theme.canvases),
+            Document(version, theme.name, theme.base.stored, theme.palette, theme.layout?.stored, panel, player, miniPlayer, navigation, stockCanvases),
         ).encodeToByteArray().also { require(it.size <= MAX_BYTES) }
     }
 
@@ -119,6 +125,7 @@ internal object ThemePackageCodec {
             val canvases = if ("canvases" in parsed) {
                 document.canvases?.takeIf(UiThemeCanvases::isValid) ?: return ThemePackageRead.Invalid
             } else null
+            if (canvases?.referencedCustomTabIds()?.isNotEmpty() == true) return ThemePackageRead.Invalid
             val hasAnchors = canvases?.panels?.values?.any { it.hiddenStock != null } == true
             val hasAdvancedOptions = canvases?.panels?.values?.any(UiCanvasLayout::hasAdvancedOptions) == true
             if (version < ADVANCED_CANVAS_VERSION && (version == ANCHORED_CANVAS_VERSION) != hasAnchors) return ThemePackageRead.Invalid

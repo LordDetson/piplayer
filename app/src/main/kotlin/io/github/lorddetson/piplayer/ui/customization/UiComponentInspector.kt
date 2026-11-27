@@ -87,7 +87,7 @@ internal fun UiComponentInspector(
     val validColors = foreground.validColor() && background.validColor()
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(stringResource(component.label)) },
+        title = { Text(component.name()) },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(stringResource(R.string.ui_edit_padding), style = MaterialTheme.typography.titleSmall)

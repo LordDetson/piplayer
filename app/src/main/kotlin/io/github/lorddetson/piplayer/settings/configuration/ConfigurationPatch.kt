@@ -1,5 +1,6 @@
 package io.github.lorddetson.piplayer.settings.configuration
 
+import io.github.lorddetson.piplayer.library.customtabs.CustomTabDefinition
 import io.github.lorddetson.piplayer.nativelib.taglib.Id3v1WritePolicy
 import io.github.lorddetson.piplayer.settings.AppLanguage
 import io.github.lorddetson.piplayer.settings.BottomNavigationLayout
@@ -29,6 +30,8 @@ internal data class LibraryPatch(
     val minLengthSeconds: Int? = null,
     val legacyEncodingId: String? = null,
     val lists: Map<ListName, ListPatch> = emptyMap(),
+    val customTabs: Map<String, CustomTabDefinition> = emptyMap(),
+    val customTabOrder: List<String>? = null,
 )
 
 internal data class ListPatch(val field: String? = null, val reversed: Boolean? = null, val grid: Boolean? = null)

@@ -440,14 +440,14 @@ private fun TransformSlider(label: Int, value: Float, range: ClosedFloatingPoint
 
 @Composable
 private fun targetLabel(target: UiGestureTarget, catalog: Map<String, UiCanvasComponent>): String {
-    val values = target.members.map { id -> catalog[id]?.let { stringResource(it.label) } ?: id }
+    val values = target.members.map { id -> catalog[id]?.name() ?: id }
     return if (target.isGroup) stringResource(R.string.gesture_group, values.joinToString()) else values.single()
 }
 
 @Composable
 internal fun gestureActionLabel(action: UiGestureAction, catalog: Map<String, UiCanvasComponent>): String {
     val id = action.targetId
-    val label = catalog[id]?.let { stringResource(it.label) } ?: id ?: ""
+    val label = catalog[id]?.name() ?: id.orEmpty()
     return when (action.id) {
         UiGestureActionId.STOCK_CLICK -> stringResource(R.string.gesture_stock_click, label)
         UiGestureActionId.CONTEXT_MENU -> stringResource(R.string.gesture_context_menu, label)

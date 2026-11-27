@@ -1,5 +1,6 @@
 package io.github.lorddetson.piplayer.settings.configuration
 
+import io.github.lorddetson.piplayer.library.customtabs.isCustomTabId
 import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.Preferences
 import io.github.lorddetson.piplayer.settings.AppearanceSettings
@@ -16,7 +17,9 @@ import io.github.lorddetson.piplayer.settings.UiCanvasSettings
 import io.github.lorddetson.piplayer.settings.UiGestureProfile
 import io.github.lorddetson.piplayer.settings.bottomNavigationLayouts
 import io.github.lorddetson.piplayer.settings.librarytabs.LibraryPanelDocument
+import io.github.lorddetson.piplayer.settings.librarytabs.CustomTabsSettings
 import io.github.lorddetson.piplayer.settings.librarytabs.LibraryTabsSettings
+import io.github.lorddetson.piplayer.settings.referencedCustomTabIds
 import io.github.lorddetson.piplayer.settings.miniPlayerPanels
 import io.github.lorddetson.piplayer.settings.nowPlayingPanels
 
@@ -116,6 +119,9 @@ internal object ConfigurationThemes {
 
     fun isValid(preferences: Preferences, themeId: String): Boolean {
         val canvases = UiCanvasSettings.validatedLayouts(preferences, themeId) ?: return false
+        val tabIds = CustomTabsSettings.definitionsOf(preferences).keys
+        val storedTabs = LibraryTabsSettings.savedPanelDocument(preferences, themeId)?.referencedCustomTabIds().orEmpty()
+        if (!tabIds.containsAll(storedTabs) || !tabIds.containsAll(canvases.referencedCustomTabIds())) return false
         return validateConfigurationLayout(
             canvases = canvases,
             library = LibraryTabsSettings.panelOf(preferences, themeId),
@@ -123,6 +129,14 @@ internal object ConfigurationThemes {
             miniPlayer = miniPlayerPanels.panelOf(preferences, themeId),
             navigation = bottomNavigationLayouts.panelOf(preferences, themeId),
         )
+    }
+
+    fun referencesAnyTab(preferences: Preferences, ids: Set<String>): Boolean {
+        val themeIds = ThemeMode.entries.map(ThemeMode::stored) + CustomThemesSettings.storedThemes(preferences).keys
+        return themeIds.any { themeId ->
+            LibraryTabsSettings.savedPanelDocument(preferences, themeId)?.referencedCustomTabIds()?.any { it in ids } == true ||
+                UiCanvasSettings.savedLayouts(preferences, themeId).referencedCustomTabIds().any { it in ids }
+        }
     }
 
     fun layoutKeys(themeId: String): List<Preferences.Key<String>> = listOf(
@@ -164,7 +178,13 @@ internal object ConfigurationThemes {
     }
 
     private fun mergeLayout(preferences: MutablePreferences, themeId: String, change: ThemeLayoutPatch): Boolean {
-        if (change.library?.value?.let { LibraryPanelDocument.from(it).toLayout() != it } == true ||
+        if (change.library?.value?.let { panel ->
+                val document = LibraryPanelDocument.from(panel)
+                val mentioned = panel.tabs.order.filter(::isCustomTabId)
+                val available = CustomTabsSettings.definitionsOf(preferences).keys
+                !available.containsAll(mentioned) || document.toLayout(mentioned) != panel ||
+                    document.toLayout(available) == null
+            } == true ||
             change.player?.value?.let {
                 it.rows.size != NowPlayingRow.entries.size ||
                     NowPlayingPanelDocument.from(it).toPanel() != it

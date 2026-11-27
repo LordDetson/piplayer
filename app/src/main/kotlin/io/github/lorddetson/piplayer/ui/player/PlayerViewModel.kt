@@ -10,6 +10,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.media3.common.MediaItem
+import androidx.media3.common.C
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
@@ -202,6 +203,17 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
         val item = requestItem(row, song, list)
         connection.whenConnected {
             setMediaItem(item)
+            prepare()
+            play()
+        }
+    }
+
+    /** Plays the exact rows shown by a custom tab, including repeated file IDs. */
+    fun playSnapshot(ids: List<Long>, row: Int) {
+        if (row !in ids.indices) return
+        val items = ids.map { MediaItem.Builder().setMediaId(it.toString()).build() }
+        connection.whenConnected {
+            setMediaItems(items, row, C.TIME_UNSET)
             prepare()
             play()
         }

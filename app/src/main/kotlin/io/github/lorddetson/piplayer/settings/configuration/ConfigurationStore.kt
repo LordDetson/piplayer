@@ -11,6 +11,7 @@ import io.github.lorddetson.piplayer.settings.AppLanguageChange
 import io.github.lorddetson.piplayer.settings.AppLanguageSettings
 import io.github.lorddetson.piplayer.settings.LibrarySettings
 import io.github.lorddetson.piplayer.settings.SettingsFiles
+import io.github.lorddetson.piplayer.settings.librarytabs.CustomTabsSettings
 import io.github.lorddetson.piplayer.ui.player.TimerChoiceStore
 import java.io.IOException
 import java.io.InputStream
@@ -86,8 +87,10 @@ internal class ConfigurationStore(
         TimerChoiceStore.awaitWrites()
         val current = file.data.first()
         if (current[JOURNAL] != null) throw IOException("An unfinished configuration change needs recovery")
-        ConfigurationCodec.encode(generalConfiguration(current).copy(
+        val settings = generalConfiguration(current)
+        ConfigurationCodec.encode(settings.copy(
             language = locale.selected(locale.read()),
+            library = settings.library.withStoredTabs(current),
             appearance = ConfigurationThemes.snapshot(current),
         ))
     }
@@ -109,6 +112,7 @@ internal class ConfigurationStore(
             val after = before.toMutablePreferences()
             val changes = mergeGeneralConfiguration(patch, before, after)?.toMutableList()
                 ?: return@io ConfigurationPreviewResult.Invalid
+            changes += mergeCustomTabs(patch.library, before, after) ?: return@io ConfigurationPreviewResult.Invalid
             val themes = if (patch.appearance != AppearancePatch()) {
                 if (!ConfigurationThemes.apply(patch.appearance, after)) return@io ConfigurationPreviewResult.Invalid
                 changes += appearanceChanges(before, after)
@@ -237,6 +241,8 @@ internal class ConfigurationStore(
         val next = current.toMutablePreferences()
         transaction.preferences.forEach { it.write(next, undo) }
         if (transaction.themes?.matches(current, next, undo) == false) stale()
+        val removedTabs = CustomTabsSettings.definitionsOf(current).keys - CustomTabsSettings.definitionsOf(next).keys
+        if (removedTabs.isNotEmpty() && ConfigurationThemes.referencesAnyTab(next, removedTabs)) stale()
         val valid = ConfigurationThemes.isValidAfterChange(current, next) { id ->
             undo && transaction.themes?.restoresLegacyState(next, id) == true
         }

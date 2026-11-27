@@ -336,6 +336,19 @@ interface LibraryDao {
     @Query("SELECT * FROM display_genre")
     suspend fun allDisplayGenres(): List<DisplayGenreEntity>
 
+    @Query(
+        "SELECT d.file_id AS fileId, d.year, " +
+            "(SELECT json_group_array(name) FROM display_artist WHERE file_id = d.file_id) AS artists, " +
+            "(SELECT json_group_array(name) FROM display_genre WHERE file_id = d.file_id) AS genres, " +
+            "t.file_id IS NOT NULL AS tagsRead, t.composers AS tagComposers, e.composer AS indexComposer, " +
+            "m.value AS manualTags FROM track_display d JOIN audio_file f ON f.id = d.file_id " +
+            "LEFT JOIN track t ON t.file_id = f.id AND t.start_ms = 0 AND f.tag_pass_at IS NOT NULL " +
+            "LEFT JOIN media_index_entry e ON e.file_id = f.id " +
+            "LEFT JOIN decided_mirror m ON m.file_id = f.id AND m.field = 'manual_tags' " +
+            "WHERE d.file_id IN (SELECT value FROM json_each(:ids))",
+    )
+    suspend fun customTabTags(ids: String): List<CustomTabTagRow>
+
     @RawQuery
     suspend fun genreGroups(query: RoomRawQuery): List<GenreGroupRow>
 
@@ -655,6 +668,17 @@ data class OutlineRow(
 )
 
 /** A song of a list, with what the list groups it by. */
+data class CustomTabTagRow(
+    val fileId: Long,
+    val year: Int?,
+    val artists: String?,
+    val genres: String?,
+    val tagsRead: Boolean,
+    val tagComposers: String?,
+    val indexComposer: String?,
+    val manualTags: String?,
+)
+
 data class ListSongRow(
     val fileId: Long,
     val mediaStoreId: Long,

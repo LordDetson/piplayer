@@ -165,6 +165,7 @@ fun SongsContent(
     onOpenLibrarySettings: (() -> Unit)? = null,
     selection: SongSelection? = null,
     grid: Boolean = false,
+    songKey: (Int, Song) -> Long = { _, song -> song.id },
     gridHeader: LazyGridScope.() -> Unit = {},
     header: LazyListScope.() -> Unit = {},
 ) {
@@ -228,7 +229,7 @@ fun SongsContent(
                         }
                     }
                     if (discRows == null) {
-                        itemsIndexed(state.songs, key = { _, song -> song.id }) { row, song ->
+                        itemsIndexed(state.songs, key = songKey) { row, song ->
                             SongRow(song, playing = song.id == currentSongId, menu = menu, selection = selection, onClick = { onSongClick(row, song) })
                         }
                     } else {
@@ -251,7 +252,7 @@ fun SongsContent(
                         Text(emptyText ?: stringResource(R.string.songs_empty), style = MaterialTheme.typography.bodyLarge,
                             modifier = Modifier.padding(16.dp))
                     }
-                    itemsIndexed(state.songs, key = { _, song -> song.id }) { row, song ->
+                    itemsIndexed(state.songs, key = songKey) { row, song ->
                         SongTile(song, song.id == currentSongId, menu, selection) { onSongClick(row, song) }
                     }
                 }

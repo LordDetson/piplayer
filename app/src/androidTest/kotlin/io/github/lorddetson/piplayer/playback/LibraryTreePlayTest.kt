@@ -277,6 +277,31 @@ class LibraryTreePlayTest {
         assertThat(queueRequests.last()!!.library).isNull()
     }
 
+    @Test
+    fun aSongSnapshotKeepsRepeatedOccurrencesAndSkipsMissingRows() {
+        val files = items("songs").associate { item ->
+            item.mediaMetadata.title.toString() to requireNotNull(QueueRequest.parse(item.mediaId)).startSongId
+        }
+        val alpha = files.getValue("Alpha")
+        val golf = files.getValue("Golf")
+        val items = listOf(golf, Long.MAX_VALUE, alpha, golf).map {
+            MediaItem.Builder().setMediaId(it.toString()).build()
+        }
+
+        assertThatThrownBy {
+            onMain { callback.onSetMediaItems(session, otherApp, items, 3, 1_000) }.get(10, TimeUnit.SECONDS)
+        }.hasCauseInstanceOf(UnsupportedOperationException::class.java)
+
+        val set = onMain { callback.onSetMediaItems(session, piPlayer, items, 3, 1_000) }.get(30, TimeUnit.SECONDS)
+
+        assertThat(set.titles()).containsExactly("Golf", "Alpha", "Golf")
+        assertThat(set.startIndex).isEqualTo(2)
+        assertThat(set.startPositionMs).isEqualTo(1_000)
+        assertThat(set.mediaItems.map { QueueIds.addedNumber(it.mediaId) }).containsExactly(1L, 2L, 3L)
+        PlaybackTesting.eventually("the snapshot queue is reported") { queueRequests.lastOrNull()?.edits?.added?.size == 3 }
+        assertThat(queueRequests.last()!!.edits.added.map { it.track.fileId }).containsExactly(golf, alpha, golf)
+    }
+
     private fun controller(packageName: String, uid: Int, trusted: Boolean, hints: Bundle = Bundle.EMPTY) =
         MediaSession.ControllerInfo.createTestOnlyControllerInfo(
             packageName,

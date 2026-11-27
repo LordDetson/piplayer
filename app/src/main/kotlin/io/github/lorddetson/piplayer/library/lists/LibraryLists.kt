@@ -3,13 +3,19 @@ package io.github.lorddetson.piplayer.library.lists
 import android.content.ContentUris
 import android.provider.MediaStore
 import androidx.room3.RoomRawQuery
+import androidx.room3.withReadTransaction
 import io.github.lorddetson.piplayer.library.db.AlbumGroupRow
 import io.github.lorddetson.piplayer.library.db.ArtistGroupRow
 import io.github.lorddetson.piplayer.library.db.FolderKey
 import io.github.lorddetson.piplayer.library.db.LibraryDatabase
 import io.github.lorddetson.piplayer.library.db.ListSongRow
+import io.github.lorddetson.piplayer.library.db.TrackEntity
+import io.github.lorddetson.piplayer.library.customtabs.DisplayedTabTags
+import io.github.lorddetson.piplayer.library.customtabs.TabTagRuleSet
 import io.github.lorddetson.piplayer.library.search.SearchTerms
 import io.github.lorddetson.piplayer.library.values.TextForms
+import io.github.lorddetson.piplayer.library.values.ManualTagValues
+import io.github.lorddetson.piplayer.library.values.MergedValues
 import io.github.lorddetson.piplayer.library.songs.Song
 import io.github.lorddetson.piplayer.library.sort.SortKey
 import io.github.lorddetson.piplayer.library.sort.SortKeys
@@ -19,6 +25,7 @@ import io.github.lorddetson.piplayer.settings.HiddenFiles
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.Json
 
 /**
  * A song list without its songs (docs/playback.md §10.5): row i is the file [ids] i in the list's order, with its
@@ -140,6 +147,49 @@ class LibraryLists(
     fun songs(query: SongQuery, limit: Int? = null): List<Song> {
         val section = sectionOf(query.sort)
         return rows(query, limit).map { row -> song(row, section(row.sectionKey, row.sectionNumber)) }
+    }
+
+    /** Uses the ordinary visibility, search and sort for a playlist's resolved files. */
+    internal fun visibleSongs(ids: Collection<Long>, query: SongQuery): List<Song> {
+        if (ids.isEmpty()) return emptyList()
+        val sql = Sql(hidden).where("f.id IN (SELECT value FROM json_each(?))", ids.joinToString(",", "[", "]"))
+        sql.search("d.search_text", query.search)
+        val section = sectionOf(query.sort)
+        return run(sql.songs(query.sort, orderOf(query.sort, query.reversed), limit = null))
+            .map { row -> song(row, section(row.sectionKey, row.sectionNumber)) }
+    }
+
+    internal fun songsMatchingRules(query: SongQuery, rules: TabTagRuleSet): List<Song> {
+        val sql = Sql(hidden).apply { search("d.search_text", query.search) }
+        val section = sectionOf(query.sort)
+        val (songs, tagRows) = runBlocking {
+            database.withReadTransaction {
+                val rows = dao.listSongs(sql.songs(query.sort, orderOf(query.sort, query.reversed), limit = null))
+                val tags = if (rows.isEmpty()) emptyList() else {
+                    dao.customTabTags(rows.joinToString(",", "[", "]") { it.fileId.toString() })
+                }
+                rows.map { row -> song(row, section(row.sectionKey, row.sectionNumber)) } to tags
+            }
+        }
+        if (songs.isEmpty()) return emptyList()
+        val byId = songs.associateBy(Song::id)
+        val matched = tagRows.mapNotNullTo(HashSet()) { row ->
+            val song = byId.getValue(row.fileId)
+            val tags = DisplayedTabTags(
+                title = song.title,
+                artists = listOfNotNull(song.artist) + row.artists?.let { Json.decodeFromString<List<String>>(it) }.orEmpty(),
+                album = song.album,
+                genres = row.genres?.let { Json.decodeFromString<List<String>>(it) }.orEmpty(),
+                composers = MergedValues.composers(
+                    ManualTagValues.decode(row.manualTags),
+                    TrackEntity.composersOf(row.tagComposers).takeIf { row.tagsRead },
+                    row.indexComposer,
+                ),
+                year = row.year,
+            )
+            row.fileId.takeIf { rules.matches(tags) }
+        }
+        return songs.filter { it.id in matched }
     }
 
     /**

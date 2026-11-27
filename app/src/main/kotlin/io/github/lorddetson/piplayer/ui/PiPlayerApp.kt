@@ -374,6 +374,7 @@ fun PiPlayerApp(
         currentSongId = currentSongId,
         menu = menu,
         play = viewModel::play,
+        playSnapshot = viewModel::playSnapshot,
         shuffle = viewModel::shuffle,
         addToQueue = viewModel::addToQueue,
         openNowPlaying = { if (backStack.lastOrNull() != NowPlayingRoute) backStack.add(NowPlayingRoute) },

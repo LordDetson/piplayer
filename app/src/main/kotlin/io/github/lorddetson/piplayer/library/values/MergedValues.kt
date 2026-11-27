@@ -141,11 +141,8 @@ object MergedValues {
         val cover = embeddedCover || decided[DecidedField.COVER]?.value != null
         val localProperties = ManualTagValues.decode(decided[DecidedField.MANUAL_TAGS]?.value)
         val localTags by lazy(LazyThreadSafetyMode.NONE) { TrackTags.from(localProperties) }
-        val composersForSearch = if ("COMPOSER" in localProperties) {
-            localTags.composers.joinToString(" ")
-        } else {
-            tagValues?.composers?.joinToString(" ") ?: indexValues?.composer.present()
-        }
+        val composersForSearch = composers(localProperties, tagValues?.composers, indexValues?.composer)
+            .joinToString(" ").ifEmpty { null }
         // Each text normalized once: the title and file name for this file, the others for the batch (TextForms).
         // The genres lists group by (docs/library.md §19.1): the tags' once read, else the index's split as the tags are.
         val genres = when {
@@ -219,6 +216,17 @@ object MergedValues {
             missingInfoDecision = overrides.missingInfo,
             albumGroup = ownAlbumKey?.let { AlbumGroupFacts(release, decidedRelease, volume, forms.albumPlace(relativePath)) },
         )
+    }
+
+    /** A local clear wins over disk tags. Only unread files take the index's composer. */
+    internal fun composers(
+        localProperties: Map<String, List<String>>,
+        tagComposers: List<String>?,
+        indexComposer: String?,
+    ): List<String> = when {
+        "COMPOSER" in localProperties -> TrackTags.from(mapOf("COMPOSER" to localProperties.getValue("COMPOSER"))).composers
+        tagComposers != null -> tagComposers
+        else -> listOfNotNull(indexComposer.present())
     }
 
     /**

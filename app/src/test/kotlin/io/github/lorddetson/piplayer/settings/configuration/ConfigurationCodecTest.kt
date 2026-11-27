@@ -171,8 +171,8 @@ class ConfigurationCodecTest {
 
     @Test
     fun `input is bounded and read outcomes are distinct`() {
-        assertThat(read("{\"version\":2,\"future\":true}")).isEqualTo(ConfigurationRead.UnsupportedVersion)
-        assertThat(read("{\"version\":\"2\"}")).isEqualTo(ConfigurationRead.Invalid)
+        assertThat(read("{\"version\":3,\"future\":true}")).isEqualTo(ConfigurationRead.UnsupportedVersion)
+        assertThat(read("{\"version\":\"3\"}")).isEqualTo(ConfigurationRead.Invalid)
         assertThat(read("{}")).isEqualTo(ConfigurationRead.Invalid)
         assertThat(read("{\"version\":1}{}")).isEqualTo(ConfigurationRead.Invalid)
         assertThat(ConfigurationCodec.decode(byteArrayOf(-64, -81).inputStream())).isEqualTo(ConfigurationRead.Invalid)

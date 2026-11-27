@@ -211,6 +211,9 @@ class LibraryTree(context: Context, private val artwork: TreeArtwork = TreeArtwo
         }
     }
 
+    /** Read a controller's plain song IDs together, under the same lock as a tree lookup. */
+    internal fun snapshotSongs(ids: List<Long>): Map<Long, Song> = synchronized(lock) { SongList.songsById(app, ids) }
+
     /** The children of [node] before paging: its entries, or the buckets they split into. */
     private fun listing(node: TreeNode): Listing? {
         if (node == TreeNode.Root) {

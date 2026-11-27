@@ -138,6 +138,8 @@ data class TrackEntity(
 
         private fun String?.values(): List<String> = this?.split(SEPARATOR).orEmpty()
 
+        internal fun composersOf(values: String?): List<String> = values.values()
+
         /** What the display needs of [row]'s tags. */
         fun tagsOf(row: ReadFileRow) = TrackTags(
             title = row.title,

@@ -2,6 +2,8 @@ package io.github.lorddetson.piplayer.settings
 
 import io.github.lorddetson.piplayer.settings.librarytabs.LibraryButtonLayout
 import io.github.lorddetson.piplayer.settings.librarytabs.LibraryPanelLayout
+import io.github.lorddetson.piplayer.settings.librarytabs.BuiltInLibraryTab
+import io.github.lorddetson.piplayer.settings.librarytabs.LibraryTabLayout
 import java.io.IOException
 import java.io.InputStream
 import org.assertj.core.api.Assertions.assertThat
@@ -9,6 +11,51 @@ import org.assertj.core.api.Assertions.assertThatIllegalArgumentException
 import org.junit.jupiter.api.Test
 
 class ThemePackageCodecTest {
+    @Test
+    fun `standalone package projects dynamic tabs and restores a displaced stock action`() {
+        val custom = "custom-ecba143b-16d4-47d5-85d4-f27c6f9042de"
+        val component = "tab:$custom"
+        val songs = "tab:songs"
+        val stock = UiGestureSlot(UiGestureTarget.component(songs), UiGesture.builtIn(UiBuiltInGesture.TAP))
+        val context = UiGestureSlot(UiGestureTarget.component(songs), UiGesture.builtIn(UiBuiltInGesture.LONG_PRESS))
+        val replacement = UiGestureBinding(
+            UiGestureSlot(UiGestureTarget.component(component), UiGesture.builtIn(UiBuiltInGesture.SWIPE_UP)),
+            UiGestureAction(UiGestureActionId.STOCK_CLICK, targetId = songs),
+        )
+        val secondReplacement = UiGestureBinding(stock, UiGestureAction(UiGestureActionId.CONTEXT_MENU, targetId = songs))
+        val theme = ThemePackage("Example", ThemeMode.SYSTEM,
+            panel = LibraryPanelLayout(LibraryTabLayout(listOf(custom) + BuiltInLibraryTab.ids, BuiltInLibraryTab.ids.toSet())),
+            canvases = UiThemeCanvases(
+                panels = mapOf(UiSurface.LIBRARY to UiCanvasLayout(emptyList(), hiddenStock = emptySet(),
+                    labelDisplays = mapOf(component to UiLabelDisplay.TEXT_ONLY))),
+                gestures = UiGestureProfile().editSurface(UiSurface.LIBRARY,
+                    UiSurfaceGestures(listOf(replacement, secondReplacement), setOf(context))),
+            ),
+        )
+
+        val bytes = ThemePackageCodec.encode(theme)
+        assertThat(bytes.decodeToString()).doesNotContain(custom)
+        val decoded = ThemePackageCodec.decode(bytes.inputStream()) as ThemePackageRead.Loaded
+        assertThat(decoded.theme.panel?.tabs?.visible).containsExactly("songs")
+        assertThat(decoded.theme.canvases?.gestures?.surfaces?.get(UiSurface.LIBRARY)).isNull()
+    }
+
+    @Test
+    fun `projection of a floating custom-only tab retains the floating stock layout`() {
+        val custom = "tab:custom-ecba143b-16d4-47d5-85d4-f27c6f9042de"
+        val tab = UiCanvasItem(custom, UiCanvasBounds(0, 0, 300, 400))
+        val toolbar = UiCanvasItem("library:search", UiCanvasBounds(400, 0, 200, 400))
+        val canvas = UiCanvasLayout(listOf(tab, toolbar))
+        val theme = ThemePackage("Example", ThemeMode.SYSTEM,
+            canvases = UiThemeCanvases(mapOf(UiSurface.LIBRARY to canvas)),
+        )
+
+        val decoded = ThemePackageCodec.decode(ThemePackageCodec.encode(theme).inputStream()) as ThemePackageRead.Loaded
+        val layout = requireNotNull(decoded.theme.canvases?.panels?.get(UiSurface.LIBRARY))
+        assertThat(layout.hiddenStock).isNull()
+        assertThat(layout.items).containsExactly(UiCanvasItem("tab:songs", tab.bounds), toolbar)
+    }
+
     @Test
     fun `a version one file uses stable ids and parses Unicode names and optional overrides`() {
         val expected = ThemePackage(

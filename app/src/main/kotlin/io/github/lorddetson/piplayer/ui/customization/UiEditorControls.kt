@@ -85,7 +85,7 @@ internal fun UiEditorControls(
             Column(Modifier.verticalScroll(rememberScrollState())) {
                 when (active) {
                     EditorDialog.ADD -> available.forEach { item ->
-                        DropdownMenuItem(text = { Text(stringResource(item.label)) }, onClick = {
+                        DropdownMenuItem(text = { Text(item.name()) }, onClick = {
                             if (onAdd(item)) dialog = null else noSpace = true
                         }, modifier = Modifier.testTag("ui_add_" + item.id))
                     }
@@ -96,7 +96,7 @@ internal fun UiEditorControls(
                         }
                         layout.items.asReversed().forEach { item ->
                             catalog[item.id]?.let { component ->
-                                DropdownMenuItem(text = { Text(stringResource(component.label)) }, onClick = {
+                                DropdownMenuItem(text = { Text(component.name()) }, onClick = {
                                     onSelect(item.id)
                                     dialog = null
                                 }, modifier = Modifier.testTag("ui_layer_" + item.id))

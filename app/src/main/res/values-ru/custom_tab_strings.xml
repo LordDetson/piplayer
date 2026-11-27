@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="custom_tab_create">Создать вкладку</string>
+    <string name="custom_tab_edit">Редактировать вкладку</string>
+    <string name="custom_tab_open">Открыть вкладку</string>
+    <string name="custom_tab_delete">Удалить вкладку</string>
+    <string name="custom_tab_delete_confirm">Удалить вкладку «%1$s»?</string>
+    <string name="custom_tab_actions">Действия для вкладки «%1$s»</string>
+    <string name="custom_tab_name">Название вкладки</string>
+    <string name="custom_tab_source_playlist">Плейлист</string>
+    <string name="custom_tab_source_folder">Папка</string>
+    <string name="custom_tab_source_smart">Умный список</string>
+    <string name="custom_tab_source_rules">Правила по тегам</string>
+    <string name="custom_tab_choose">Выбрать источник</string>
+    <string name="custom_tab_no_sources">Нет доступных источников</string>
+    <string name="custom_tab_folder_label">%1$s · %2$s</string>
+    <string name="custom_tab_match_all">Все правила</string>
+    <string name="custom_tab_match_any">Любое правило</string>
+    <string name="custom_tab_rule_add">Добавить правило</string>
+    <string name="custom_tab_rule_remove">Удалить правило</string>
+    <string name="custom_tab_rule_contains">Содержит</string>
+    <string name="custom_tab_rule_exact">Совпадает</string>
+    <string name="custom_tab_rule_value">Значение</string>
+    <string name="custom_tab_year_from">С года</string>
+    <string name="custom_tab_year_through">По год</string>
+    <string name="custom_tab_empty">В этой вкладке нет треков</string>
+    <string name="custom_tab_unbound_playlist">Выберите плейлист на этом устройстве для источника «%1$s».</string>
+    <string name="custom_tab_unbound_folder">Выберите папку на этом устройстве для источника «%1$s».</string>
+    <string name="custom_tab_missing_playlist">Плейлист недоступен.</string>
+    <string name="custom_tab_missing_folder">Папка недоступна.</string>
+    <string name="custom_tab_read_failed">Не удалось загрузить вкладку</string>
+    <string name="custom_tab_write_failed">Не удалось сохранить вкладку</string>
+    <string name="custom_tab_sort_position">Порядок плейлиста</string>
+    <string name="custom_tab_retry">Повторить</string>
+</resources>

@@ -1,6 +1,7 @@
 package io.github.lorddetson.piplayer.ui.library
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -10,6 +11,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
@@ -38,6 +41,7 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import io.github.lorddetson.piplayer.R
+import io.github.lorddetson.piplayer.library.customtabs.CustomTabRecord
 import io.github.lorddetson.piplayer.settings.librarytabs.BuiltInLibraryTab
 import io.github.lorddetson.piplayer.settings.librarytabs.LibraryTabLayout
 import io.github.lorddetson.piplayer.settings.librarytabs.LibraryTabWrite
@@ -68,6 +72,11 @@ internal fun LibraryTabEditor(
     onDismiss: () -> Unit,
     onSaveFailed: suspend () -> Unit,
     canChangeVisibility: (String, Boolean) -> Boolean,
+    customTabs: Map<String, CustomTabRecord>,
+    onCreate: () -> Unit,
+    onOpen: (String) -> Unit,
+    onEdit: (CustomTabRecord) -> Unit,
+    onDelete: (CustomTabRecord) -> Unit,
 ) {
     val latestLayout by rememberUpdatedState(layout)
     var shown by remember { mutableStateOf(layout.order) }
@@ -107,6 +116,9 @@ internal fun LibraryTabEditor(
                     style = MaterialTheme.typography.titleLarge,
                     modifier = Modifier.weight(1f).semantics { heading() },
                 )
+                IconButton(onClick = onCreate, modifier = Modifier.testTag("custom_tab_create")) {
+                    Icon(painterResource(R.drawable.ic_add), stringResource(R.string.custom_tab_create))
+                }
                 IconButton(onClick = onDismiss) {
                     Icon(painterResource(R.drawable.ic_close), stringResource(R.string.library_tabs_close))
                 }
@@ -114,9 +126,10 @@ internal fun LibraryTabEditor(
             val moveUp = stringResource(R.string.library_tabs_move_up)
             val moveDown = stringResource(R.string.library_tabs_move_down)
             LazyColumn(Modifier.fillMaxWidth().heightIn(max = 400.dp), state = list) {
-                itemsIndexed(shown, key = { _, id -> id }) { index, id ->
+                itemsIndexed(shown.filter { it in layout.order }, key = { _, id -> id }) { index, id ->
                     ReorderableItem(reorder, key = id) { movingRow ->
-                        val label = stringResource(builtInTabsById.getValue(id).labelResource)
+                        val custom = customTabs[id]
+                        val label = custom?.definition?.name ?: stringResource(builtInTabsById.getValue(id).labelResource)
                         val switchLabel = stringResource(R.string.library_tabs_show, label)
                         val visible = id !in layout.hidden
                         val canHide = !visible || layout.visible.size > 1
@@ -139,17 +152,22 @@ internal fun LibraryTabEditor(
                                 )
                             },
                             trailingContent = {
-                                Switch(
-                                    checked = visible,
-                                    enabled = canHide,
-                                    onCheckedChange = { show ->
-                                        if (!canChangeVisibility(id, show)) onDismiss()
-                                        else scope.launch {
-                                            if (settings.setVisible(id, show) != LibraryTabWrite.STORED) onSaveFailed()
-                                        }
-                                    },
-                                    modifier = Modifier.semantics { contentDescription = switchLabel },
-                                )
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Switch(
+                                        checked = visible,
+                                        enabled = canHide,
+                                        onCheckedChange = { show ->
+                                            if (!canChangeVisibility(id, show)) onDismiss()
+                                            else scope.launch {
+                                                if (settings.setVisible(id, show) != LibraryTabWrite.STORED) onSaveFailed()
+                                            }
+                                        },
+                                        modifier = Modifier.semantics { contentDescription = switchLabel },
+                                    )
+                                    if (custom != null) {
+                                        CustomTabEditorMenu(custom, visible, onOpen, onEdit, onDelete)
+                                    }
+                                }
                             },
                             tonalElevation = if (movingRow) 4.dp else 0.dp,
                             shadowElevation = if (movingRow) 4.dp else 0.dp,
@@ -167,4 +185,50 @@ internal fun LibraryTabEditor(
             }
         }
     }
+}
+
+@Composable
+private fun CustomTabEditorMenu(
+    tab: CustomTabRecord,
+    visible: Boolean,
+    onOpen: (String) -> Unit,
+    onEdit: (CustomTabRecord) -> Unit,
+    onDelete: (CustomTabRecord) -> Unit,
+) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        IconButton(
+            onClick = { open = true },
+            modifier = Modifier.testTag("custom_tab_actions_${tab.definition.id}"),
+        ) {
+            Icon(painterResource(R.drawable.ic_more_vert), stringResource(R.string.custom_tab_actions, tab.definition.name))
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            if (visible) DropdownMenuItem(
+                text = { Text(stringResource(R.string.custom_tab_open)) },
+                onClick = { open = false; onOpen(tab.definition.id) },
+                modifier = Modifier.testTag("custom_tab_open"),
+            )
+            CustomTabMenuItems(tab, onEdit, onDelete) { open = false }
+        }
+    }
+}
+
+@Composable
+internal fun CustomTabMenuItems(
+    tab: CustomTabRecord,
+    onEdit: (CustomTabRecord) -> Unit,
+    onDelete: (CustomTabRecord) -> Unit,
+    dismiss: () -> Unit,
+) {
+    DropdownMenuItem(
+        text = { Text(stringResource(R.string.custom_tab_edit)) },
+        onClick = { dismiss(); onEdit(tab) },
+        modifier = Modifier.testTag("custom_tab_edit"),
+    )
+    DropdownMenuItem(
+        text = { Text(stringResource(R.string.custom_tab_delete)) },
+        onClick = { dismiss(); onDelete(tab) },
+        modifier = Modifier.testTag("custom_tab_delete"),
+    )
 }

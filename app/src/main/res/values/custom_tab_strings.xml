@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="custom_tab_create">Create tab</string>
+    <string name="custom_tab_edit">Edit tab</string>
+    <string name="custom_tab_open">Open tab</string>
+    <string name="custom_tab_delete">Delete tab</string>
+    <string name="custom_tab_delete_confirm">Delete the tab “%1$s”?</string>
+    <string name="custom_tab_actions">Actions for %1$s</string>
+    <string name="custom_tab_name">Tab name</string>
+    <string name="custom_tab_source_playlist">Playlist</string>
+    <string name="custom_tab_source_folder">Folder</string>
+    <string name="custom_tab_source_smart">Smart list</string>
+    <string name="custom_tab_source_rules">Tag rules</string>
+    <string name="custom_tab_choose">Choose source</string>
+    <string name="custom_tab_no_sources">No sources are available</string>
+    <string name="custom_tab_folder_label">%1$s · %2$s</string>
+    <string name="custom_tab_match_all">Match all rules</string>
+    <string name="custom_tab_match_any">Match any rule</string>
+    <string name="custom_tab_rule_add">Add rule</string>
+    <string name="custom_tab_rule_remove">Remove rule</string>
+    <string name="custom_tab_rule_contains">Contains</string>
+    <string name="custom_tab_rule_exact">Equals</string>
+    <string name="custom_tab_rule_value">Value</string>
+    <string name="custom_tab_year_from">From year</string>
+    <string name="custom_tab_year_through">Through year</string>
+    <string name="custom_tab_empty">This tab has no tracks</string>
+    <string name="custom_tab_unbound_playlist">Choose a playlist on this device for “%1$s”.</string>
+    <string name="custom_tab_unbound_folder">Choose a folder on this device for “%1$s”.</string>
+    <string name="custom_tab_missing_playlist">The playlist is unavailable.</string>
+    <string name="custom_tab_missing_folder">The folder is unavailable.</string>
+    <string name="custom_tab_read_failed">Could not load this tab</string>
+    <string name="custom_tab_write_failed">Could not save this tab</string>
+    <string name="custom_tab_sort_position">Playlist order</string>
+    <string name="custom_tab_retry">Retry</string>
+</resources>

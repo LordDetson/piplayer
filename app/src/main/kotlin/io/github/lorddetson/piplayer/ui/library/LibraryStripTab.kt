@@ -59,6 +59,8 @@ internal fun LibraryStripTab(
     onRestore: (String) -> Unit,
     vertical: Boolean = false,
     onLabelDisplay: ((UiLabelDisplay) -> Unit)? = null,
+    nameOf: (String) -> String? = { null },
+    extraActions: @Composable (dismiss: () -> Unit) -> Unit = {},
 ) {
     var menu by remember { mutableStateOf<PanelMenuPage?>(null) }
     val openMenu = { menu = PanelMenuPage.ACTIONS }
@@ -67,10 +69,11 @@ internal fun LibraryStripTab(
     val useNativeHold = stockHoldUsesNative(componentId, uiGestureRuntimeForStock(componentId))
     StockUiSlot(componentId, onClick = onClick, onHold = hold, externalHold = true) {
         val row = if (vertical) Modifier.fillMaxWidth().heightIn(min = 48.dp) else Modifier.heightIn(min = 48.dp)
-        LibraryTabFace(id, selected, onClick, row, onLongClick = hold.takeIf { useNativeHold })
+        LibraryTabFace(id, selected, onClick, row, onLongClick = hold.takeIf { useNativeHold }, customName = nameOf(id))
         PanelItemMenu(menu, { menu = it }, PanelItemKind.TAB, id, layout.visible,
             layout.order.filter(layout.hidden::contains), { builtInTabsById.getValue(it).labelResource },
-            onMove, onHide.takeIf { layout.visible.size > 1 }, onRestore, onLabelDisplay = onLabelDisplay)
+            onMove, onHide.takeIf { layout.visible.size > 1 }, onRestore, onLabelDisplay = onLabelDisplay,
+            dynamicLabel = nameOf, extraActions = extraActions)
     }
 }
 
@@ -83,9 +86,10 @@ internal fun LibraryTabFace(
     modifier: Modifier = Modifier.heightIn(min = 48.dp),
     onLongClick: (() -> Unit)? = null,
     horizontalPadding: Dp = 16.dp,
+    customName: String? = null,
 ) {
-    val tab = builtInTabsById.getValue(id)
-    val label = stringResource(tab.labelResource)
+    val tab = builtInTabsById[id]
+    val label = customName ?: stringResource(checkNotNull(tab).labelResource)
     val display = uiLabelDisplay("tab:$id")
     val color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
     Box(
@@ -102,7 +106,7 @@ internal fun LibraryTabFace(
     ) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
             if (display != UiLabelDisplay.TEXT_ONLY) {
-                UiControlIcon(painterResource(tab.icon), null, Modifier.size(18.dp), tint = color)
+                UiControlIcon(painterResource(tab?.icon ?: R.drawable.ic_library), null, Modifier.size(18.dp), tint = color)
             }
             if (display != UiLabelDisplay.ICON_ONLY) {
                 Text(label, style = MaterialTheme.typography.titleSmall, color = UiControlColor(color),

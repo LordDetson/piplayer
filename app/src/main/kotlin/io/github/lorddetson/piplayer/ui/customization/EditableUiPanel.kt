@@ -100,8 +100,13 @@ internal data class UiCanvasComponent(
     val addable: Boolean = true,
     val onClick: (() -> Unit)? = null,
     val stockContext: Boolean = false,
+    val dynamicLabel: String? = null,
+    val menuActions: @Composable (dismiss: () -> Unit) -> Unit = {},
     val content: @Composable () -> Unit,
-)
+) {
+    @Composable
+    fun name(): String = dynamicLabel ?: stringResource(label)
+}
 
 internal val LocalUiCatalog = staticCompositionLocalOf<List<UiCanvasComponent>> { emptyList() }
 internal val LocalUiEditEntry = staticCompositionLocalOf<((String) -> Unit)?> { null }
@@ -134,6 +139,9 @@ internal fun EditableUiPanel(
     viewModeModifier: Modifier = Modifier,
     stockGestures: List<UiGestureBinding> = emptyList(),
     canvasChrome: @Composable () -> Unit = {},
+    absoluteStockIds: Set<String> = emptySet(),
+    optionalAbsoluteStockIds: Set<String> = emptySet(),
+    absoluteFooter: @Composable (placedIds: Set<String>) -> Unit = {},
     stock: @Composable () -> Unit,
 ) {
     val application = LocalContext.current.applicationContext
@@ -231,12 +239,18 @@ internal fun EditableUiPanel(
                 candidate.hiddenStock != null -> stockIds.filterTo(mutableSetOf()) {
                     it !in candidate.hiddenStock && it in runtime.mounts
                 } + overrideItems + mountedLegacy
-                else -> overrideItems
+                else -> overrideItems + (absoluteStockIds intersect runtime.mounts.keys)
             }
+            val reachable = (available intersect catalog.keys) - gestureHiddenByParent
+            // Optional footer controls can disappear when another tab takes their place.
+            val inactiveFooter = if (draft == null && candidate != null && candidate.hiddenStock == null &&
+                overrideItems.none(optionalAbsoluteStockIds::contains)
+            ) optionalAbsoluteStockIds - reachable else emptySet()
+            val stock = (stockGestures + declaredContexts + runtime.registeredStock).distinctBy(UiGestureBinding::slot)
             return UiGestureEnvironment(
-                (available intersect catalog.keys) - gestureHiddenByParent - extraHidden,
+                reachable - extraHidden,
                 candidate?.groups.orEmpty(),
-                (stockGestures + declaredContexts + runtime.registeredStock).distinctBy(UiGestureBinding::slot),
+                stock.filterNot { binding -> binding.slot.target.members.any(inactiveFooter::contains) },
             )
         }
         val requestedEnvironment = environment(requestedLayout, editing = draft != null)
@@ -370,6 +384,7 @@ internal fun EditableUiPanel(
                             select = ::select, onStart = ::beginTransform, transform = ::transform, onEnd = ::endTransform,
                             hiddenByParent = hiddenByParent,
                         )
+                        if (draft == null) absoluteFooter(layout.items.mapTo(mutableSetOf(), UiCanvasItem::id))
                     }
                 }
                 if (anchored && layout != null && drawingWidth > 0.dp && drawingHeight > 0.dp) {
@@ -559,7 +574,7 @@ private fun UiCanvas(
                 val runtime = LocalUiGestureRuntime.current
                 val ancestors = LocalUiGestureAncestors.current
                 var menu by remember { mutableStateOf(false) }
-                val componentLabel = stringResource(component.label)
+                val componentLabel = component.name()
                 val openMenu: (() -> Unit)? = { menu = true }.takeIf { !editing && editEntry != null && !component.preserveGestures }
                 val activation = Modifier.uiGestureTarget(
                     item.id, onClick = component.onClick.takeUnless { editing }, onHold = openMenu,
@@ -610,6 +625,7 @@ private fun UiCanvas(
                             .testTag("ui_component_" + item.id))
                     } else if (editEntry != null) {
                         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                            component.menuActions { menu = false }
                             DropdownMenuItem(
                                 text = { Text(stringResource(R.string.ui_edit_mode)) },
                                 onClick = { menu = false; editEntry(item.id) },

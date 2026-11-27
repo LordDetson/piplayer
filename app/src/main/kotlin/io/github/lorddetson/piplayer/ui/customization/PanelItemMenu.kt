@@ -50,6 +50,8 @@ internal fun PanelItemMenu(
     onRestore: (String) -> Unit,
     canMove: Boolean = visible.size > 1,
     onLabelDisplay: ((UiLabelDisplay) -> Unit)? = null,
+    dynamicLabel: ((String) -> String?) = { null },
+    extraActions: @Composable (dismiss: () -> Unit) -> Unit = {},
     moveOptions: @Composable () -> Unit = {},
 ) {
     val enterEdit = LocalUiEditEntry.current
@@ -61,6 +63,7 @@ internal fun PanelItemMenu(
     DropdownMenu(expanded = page != null, onDismissRequest = { setPage(null) }) {
         when (page) {
             PanelMenuPage.ACTIONS -> {
+                extraActions { setPage(null) }
                 if (enterEdit != null && enterEdit !== workspace) {
                     DropdownMenuItem(
                         text = { Text(stringResource(R.string.ui_edit_mode)) },
@@ -132,7 +135,7 @@ internal fun PanelItemMenu(
                         val direction = if (index < visible.indexOf(id)) R.string.library_tab_move_before
                         else R.string.library_tab_move_after
                         DropdownMenuItem(
-                            text = { Text(stringResource(direction, stringResource(label(target)))) },
+                            text = { Text(stringResource(direction, dynamicLabel(target) ?: stringResource(label(target)))) },
                             onClick = {
                                 setPage(null)
                                 onMove(target)
@@ -142,7 +145,7 @@ internal fun PanelItemMenu(
                     }
                 }
             }
-            PanelMenuPage.ADD -> RestoreItems(kind, hidden, label) {
+            PanelMenuPage.ADD -> RestoreItems(kind, hidden, label, dynamicLabel) {
                 setPage(null)
                 onRestore(it)
             }
@@ -163,10 +166,16 @@ private fun componentId(kind: PanelItemKind, id: String): String {
 }
 
 @Composable
-private fun RestoreItems(kind: PanelItemKind, hidden: List<String>, label: (String) -> Int, restore: (String) -> Unit) {
+private fun RestoreItems(
+    kind: PanelItemKind,
+    hidden: List<String>,
+    label: (String) -> Int,
+    dynamicLabel: (String) -> String? = { null },
+    restore: (String) -> Unit,
+) {
     for (target in hidden) {
         DropdownMenuItem(
-            text = { Text(stringResource(label(target))) },
+            text = { Text(dynamicLabel(target) ?: stringResource(label(target))) },
             onClick = { restore(target) },
             modifier = Modifier.testTag("${kind.tag}_restore_$target"),
         )

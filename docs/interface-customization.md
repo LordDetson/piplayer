@@ -45,11 +45,29 @@ are managed separately. System and bundled theme fonts are portable. A custom fo
 that imported it. Import preserves a local font when the theme's font is omitted and uses the system font for a
 new theme without a font setting. The separate single-theme package continues to support versions 1 through 10.
 
-The complete version 1 document can be up to 4 MiB. Settings checks this limit before opening the file picker
+The complete configuration document can be up to 4 MiB. Settings checks this limit before opening the file picker
 for export.
 
 Settings shows an undo action after applying a configuration. Undo restores the imported values to their
 previous state and checks for intervening edits to those values before writing.
+
+### Custom library tabs
+
+A custom tab has a stable ID, a name and one source. A source can be a user playlist, a folder, a built-in
+smart collection or a rule set matching all or any of its tag conditions. The available tag fields are
+title, artist, album, genre, composer and year. Folder sources show the songs directly in the chosen folder.
+Tab definitions are shared across themes. Each theme keeps its own tab order and visibility.
+
+Configuration version 2 adds `library.customTabs` and `library.customTabOrder`. A definition uses a
+`custom-<uuid>` key. A playlist or folder definition carries a source reference and a display hint. Its
+actual playlist or folder binding belongs to the installation where the user chose it. On a new installation
+the tab keeps its name and place and offers to choose a source. Smart collections and rules can resolve
+against the receiving library. An omitted tab stays as it was, and a configuration never changes the
+playlist or files behind a tab.
+
+PiPlayer still reads configuration version 1. The standalone theme package keeps its existing format and
+carries the built-in components of a layout. Use the full PiPlayer configuration to move custom tabs and
+their layout entries together.
 
 ## Rendering model
 

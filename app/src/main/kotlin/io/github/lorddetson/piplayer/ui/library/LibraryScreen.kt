@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.background
 import android.app.Application
+import android.os.Bundle
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -92,6 +93,8 @@ import androidx.media3.common.Player
 import io.github.lorddetson.piplayer.R
 import io.github.lorddetson.piplayer.debug.DebugEntry
 import io.github.lorddetson.piplayer.library.db.FolderKey
+import io.github.lorddetson.piplayer.library.customtabs.CustomTabRecord
+import io.github.lorddetson.piplayer.library.customtabs.CustomTabTemplateSource
 import io.github.lorddetson.piplayer.library.lists.AlbumCredit
 import io.github.lorddetson.piplayer.library.lists.AlbumGroup
 import io.github.lorddetson.piplayer.library.lists.ArtistGroup
@@ -112,10 +115,11 @@ import io.github.lorddetson.piplayer.settings.UiTabDirection
 import io.github.lorddetson.piplayer.settings.librarytabs.BuiltInLibraryTab as LibraryTab
 import io.github.lorddetson.piplayer.settings.librarytabs.LibraryButton
 import io.github.lorddetson.piplayer.settings.librarytabs.LibraryPanelLayout
-import io.github.lorddetson.piplayer.settings.librarytabs.LibraryPanelState
 import io.github.lorddetson.piplayer.settings.librarytabs.LibraryTabLayout
 import io.github.lorddetson.piplayer.settings.librarytabs.LibraryTabWrite
 import io.github.lorddetson.piplayer.settings.librarytabs.LibraryTabsSettings
+import io.github.lorddetson.piplayer.settings.librarytabs.CustomTabsSettings
+import io.github.lorddetson.piplayer.settings.librarytabs.CustomTabsState
 import io.github.lorddetson.piplayer.ui.songs.AudioAccess
 import io.github.lorddetson.piplayer.ui.songs.NoMusic
 import io.github.lorddetson.piplayer.ui.songs.PermissionCard
@@ -142,6 +146,7 @@ import io.github.lorddetson.piplayer.ui.customization.LocalUiLabelDisplays
 import io.github.lorddetson.piplayer.ui.customization.LocalStockUiSlots
 import io.github.lorddetson.piplayer.ui.customization.isStockUiSlotMasked
 import io.github.lorddetson.piplayer.ui.customization.uiGestureRuntimeForStock
+import io.github.lorddetson.piplayer.ui.customization.UiGestureRuntime
 import io.github.lorddetson.piplayer.ui.customization.UiCanvasComponent
 import io.github.lorddetson.piplayer.ui.customization.UiControlColor
 import io.github.lorddetson.piplayer.ui.customization.UiControlTextAlign
@@ -150,6 +155,7 @@ import io.github.lorddetson.piplayer.ui.fix.BatchActions
 import io.github.lorddetson.piplayer.identification.entry.BatchRequest
 import io.github.lorddetson.piplayer.ui.playlists.PlaylistActions
 import io.github.lorddetson.piplayer.ui.playlists.PlaylistsContent
+import io.github.lorddetson.piplayer.ui.playlists.smartListOrder
 
 object LibraryTags {
     const val TABS = "library_tabs"
@@ -198,6 +204,7 @@ class LibraryHost(
     val favoriteBatch: SelectionFavorites? = null,
     /** "Identify" over many songs (TI §1): null where the app cannot start batches, which leaves its entries out. */
     val batch: BatchActions? = null,
+    val playSnapshot: (ids: List<Long>, row: Int) -> Unit = { _, _ -> },
 )
 
 /**
@@ -210,9 +217,13 @@ class LibraryHost(
 internal fun LibraryScreen(host: LibraryHost, chrome: LibraryWorkspaceChrome? = null, onOpenSettings: () -> Unit) {
     val app = LocalContext.current.applicationContext as Application
     val access = rememberAudioAccess()
-    var tabName by rememberSaveable { mutableStateOf(LibraryTab.SONGS.id) }
+    var tabName by rememberSaveable { mutableStateOf<String?>(null) }
     val tabsSettings = remember(app) { LibraryTabsSettings(app) }
-    val storedPanel by tabsSettings.panel.collectAsStateWithLifecycle<LibraryPanelState?>(initialValue = null)
+    val customSettings = remember(app) { CustomTabsSettings(app) }
+    val tabState by customSettings.state.collectAsStateWithLifecycle<CustomTabsState?>(initialValue = null)
+    val storedPanel = tabState?.panel
+    val customTabs = remember(tabState?.tabs) { tabState?.tabs.orEmpty().associateBy { it.definition.id } }
+    val requestedId = tabName ?: tabState?.selectedId?.takeIf(customTabs::containsKey) ?: LibraryTab.SONGS.id
     val themeId = storedPanel?.themeId
     val canvasSettings = remember(app) { UiCanvasSettings(app) }
     val canvasSettingsState by canvasSettings.state.collectAsStateWithLifecycle<UiCanvasState?>(initialValue = null)
@@ -223,16 +234,45 @@ internal fun LibraryScreen(host: LibraryHost, chrome: LibraryWorkspaceChrome? = 
     val tabLayout = panel.tabs
     var appliedCanvasIds by remember(themeId) { mutableStateOf<List<String>?>(null) }
     var canvasLoaded by remember(themeId) { mutableStateOf(false) }
-    val placedTabs = appliedCanvasIds?.mapNotNull { component ->
+    val visibleCustomIds = tabLayout.visible.filter(customTabs::containsKey)
+    fun appliedTabId(component: String): String? {
         val id = component.removePrefix("tab:")
-        id.takeIf { component != id && it in builtInTabsById }
+        return id.takeIf { component != id && it in tabLayout.order && (it !in customTabs || it in visibleCustomIds) }
     }
-    val activeId = if (placedTabs == null) tabLayout.selectedTab(tabName) else {
-        val requested = LibraryTabLayout.DEFAULT.selectedTab(tabName)
-        requested.takeIf { placedTabs.isEmpty() || it in placedTabs } ?: placedTabs.first()
+    val placedTabs = appliedCanvasIds?.mapNotNull(::appliedTabId)
+    val reachableTabs = placedTabs?.let { placed ->
+        val additional = if (storedHeader != null && storedHeader.hiddenStock == null) {
+            tabLayout.absoluteFooterTabs(placed)
+        } else {
+            visibleCustomIds.filterNot { id -> "tab:$id" in storedHeader?.hiddenStock.orEmpty() }
+        }
+        (placed + additional).distinct()
     }
-    val tab = builtInTabsById.getValue(activeId)
+    val activeId = if (reachableTabs.isNullOrEmpty()) tabLayout.selectedTab(requestedId) else {
+        val requested = LibraryTabLayout.fromStored(
+            reachableTabs, emptySet(), tabLayout.order,
+        ).selectedTab(requestedId)
+        requested.takeIf(reachableTabs::contains) ?: reachableTabs.first()
+    }
+    val tab = builtInTabsById[activeId]
+    val custom = customTabs[activeId]
     var editingTabs by rememberSaveable(themeId) { mutableStateOf(false) }
+    var editorGestureRuntime by remember(themeId) { mutableStateOf<UiGestureRuntime?>(null) }
+    var customDialog by remember { mutableStateOf<CustomTabDialog?>(null) }
+    fun createCustomTab() {
+        editingTabs = false
+        customDialog = CustomTabDialog.Create
+    }
+    fun editCustomTab(record: CustomTabRecord) {
+        editingTabs = false
+        customDialog = CustomTabDialog.Edit(record)
+    }
+    fun deleteCustomTab(record: CustomTabRecord) {
+        // The store removes its selection with the definition. Keep the removed ID long enough to select a visible fallback.
+        if (record.definition.id == activeId) tabName = activeId
+        editingTabs = false
+        customDialog = CustomTabDialog.Delete(record)
+    }
     val tabEditScope = rememberCoroutineScope()
     val tabSaveFailed = stringResource(R.string.library_tabs_save_failed)
     fun writeTabs(change: suspend LibraryTabsSettings.() -> LibraryTabWrite) {
@@ -257,14 +297,17 @@ internal fun LibraryScreen(host: LibraryHost, chrome: LibraryWorkspaceChrome? = 
             folderSongs?.endSelection()
         }
         tabName = id
+        if (id in customTabs || tabState?.selectedId in customTabs) {
+            tabEditScope.launch { customSettings.setSelected(id) }
+        }
     }
-    LaunchedEffect(storedPanel, canvasLoaded, activeId, tabName) {
-        if (storedPanel != null && canvasLoaded && tabName != activeId) {
-            if (LibraryTabLayout.DEFAULT.selectedTab(tabName) != activeId) {
+    LaunchedEffect(storedPanel, canvasLoaded, activeId, requestedId) {
+        if (storedPanel != null && canvasLoaded && requestedId != activeId) {
+            if (tabLayout.selectedTab(requestedId) != activeId || requestedId in customTabs) {
                 songs.endSelection()
                 folderSongs?.endSelection()
             }
-            tabName = activeId
+            selectTab(activeId)
         }
     }
     val selecting = when (tab) {
@@ -287,7 +330,22 @@ internal fun LibraryScreen(host: LibraryHost, chrome: LibraryWorkspaceChrome? = 
 
     val sorts = remember(app) { ListSorts(app) }
     val playlistGrid = remember(sorts) { sorts.grid(ListName.PLAYLISTS) }
-    var sortMenuOpen by remember(tab) { mutableStateOf(false) }
+    val customSource = custom?.definition?.source
+    val customSortName = when (customSource) {
+        is CustomTabTemplateSource.Collection -> smartListOrder(customSource.kind)
+        is CustomTabTemplateSource.Folder -> ListName.FOLDERS
+        else -> ListName.SONGS
+    }
+    val storedCustomOrder = key(customSortName) {
+        remember(sorts, customSortName) { sorts.order(customSortName) }
+            .collectAsStateWithLifecycle(initialValue = ListOrder(customSortName.defaultField)).value
+    }
+    var playlistSorts by rememberSaveable { mutableStateOf(Bundle()) }
+    val playlistSort = playlistSorts.getBundle(activeId)
+    val customOrder = if (customSource is CustomTabTemplateSource.Playlist) {
+        ListOrder(playlistSort?.getString("field") ?: "position", playlistSort?.getBoolean("reversed") ?: false)
+    } else storedCustomOrder
+    var sortMenuOpen by remember(activeId) { mutableStateOf(false) }
     val changeSortMenu: (Boolean) -> Unit = { sortMenuOpen = it }
     val openSort: () -> Unit = { sortMenuOpen = true }
     val sortControl: @Composable (LibrarySortAnchor) -> Unit = { anchor ->
@@ -323,6 +381,23 @@ internal fun LibraryScreen(host: LibraryHost, chrome: LibraryWorkspaceChrome? = 
                 grid = genres.grid.collectAsStateWithLifecycle().value, onGrid = genres::setGrid, anchor = anchor,
                 expanded = sortMenuOpen, onExpandedChange = changeSortMenu,
             )
+            null -> SortButton(
+                customSortName, customOrder,
+                onOrder = { order ->
+                    if (customSource is CustomTabTemplateSource.Playlist) {
+                        val choice = Bundle().apply {
+                            putString("field", order.field)
+                            putBoolean("reversed", order.reversed)
+                        }
+                        playlistSorts = Bundle(playlistSorts).apply { putBundle(activeId, choice) }
+                    } else {
+                        tabEditScope.launch { sorts.set(customSortName, order) }
+                    }
+                },
+                anchor = anchor, expanded = sortMenuOpen, onExpandedChange = changeSortMenu,
+                fields = if (customSource is CustomTabTemplateSource.Playlist) listOf("position") + ListName.SONGS.fields
+                    else customSortName.fields,
+            )
         }
     }
     val buttons = panel.buttons
@@ -352,11 +427,22 @@ internal fun LibraryScreen(host: LibraryHost, chrome: LibraryWorkspaceChrome? = 
                     style = MaterialTheme.typography.titleLarge, maxLines = 1)
             }
         })
-        for ((id, entry) in builtInTabsById) {
+        for (id in tabLayout.order) {
+            val entry = builtInTabsById[id]
+            val record = customTabs[id]
             val select = { selectTab(id) }
-            add(UiCanvasComponent("tab:$id", entry.labelResource, width = 112.dp, alignableText = true, labelDisplay = true,
-                onClick = select, stockContext = true) {
-                LibraryTabFace(id, id == activeId, select, Modifier.fillMaxSize(), horizontalPadding = 4.dp)
+            add(UiCanvasComponent(
+                "tab:$id", entry?.labelResource ?: R.string.custom_tab_edit, width = 112.dp,
+                alignableText = true, labelDisplay = true, onClick = select, stockContext = true,
+                dynamicLabel = record?.definition?.name,
+                menuActions = { dismiss ->
+                    if (record != null) {
+                        CustomTabMenuItems(record, ::editCustomTab, ::deleteCustomTab, dismiss)
+                    }
+                },
+            ) {
+                LibraryTabFace(id, id == activeId, select, Modifier.fillMaxSize(), horizontalPadding = 4.dp,
+                    customName = record?.definition?.name)
             })
         }
         for (button in LibraryButton.entries) {
@@ -408,23 +494,19 @@ internal fun LibraryScreen(host: LibraryHost, chrome: LibraryWorkspaceChrome? = 
             },
         )
     }
-    val strip: @Composable () -> Unit = {
+    val tabStrip: @Composable (LibraryTabLayout, List<String>) -> Unit = { stripLayout, ids ->
         val vertical = LocalUiControlStyle.current.tabDirection == UiTabDirection.VERTICAL
         val floating = LocalStockUiSlots.current == null
-        val stripLayout = if (floating && !placedTabs.isNullOrEmpty()) {
-            LibraryTabLayout.fromStored(placedTabs, tabLayout.order.toSet() - placedTabs.toSet())
-        } else tabLayout
-        val stockSelection = stripLayout.selectedTab(activeId)
-        val stockSelectedIndex = stripLayout.visible.indexOf(stockSelection)
-        val selectedOnStrip = stockSelection == activeId && !isStockUiSlotMasked("tab:$activeId")
+        val stockSelectedIndex = ids.indexOf(activeId)
+        val selectedOnStrip = stockSelectedIndex >= 0 && !isStockUiSlotMasked("tab:$activeId")
         val tabItems: @Composable () -> Unit = {
-            stripLayout.visible.forEach { id ->
+            ids.forEach { id ->
                 key(themeId, id) {
                     val style = if (floating) headerStyles["tab:$id"] ?: LocalUiControlStyle.current else LocalUiControlStyle.current
                     CompositionLocalProvider(LocalUiControlStyle provides style) {
                         LibraryStripTab(
                             id = id,
-                            selected = selectedOnStrip && id == stockSelection,
+                            selected = selectedOnStrip && id == activeId,
                             layout = stripLayout,
                             canCustomize = themeId != null,
                             onClick = { selectTab(id) },
@@ -432,6 +514,10 @@ internal fun LibraryScreen(host: LibraryHost, chrome: LibraryWorkspaceChrome? = 
                             onHide = { writeTabs { setVisible(id, false, themeId) } },
                             onRestore = { target -> writeTabs { setVisible(target, true, themeId) } },
                             vertical = vertical,
+                            nameOf = { customTabs[it]?.definition?.name },
+                            extraActions = { dismiss ->
+                                customTabs[id]?.let { CustomTabMenuItems(it, ::editCustomTab, ::deleteCustomTab, dismiss) }
+                            },
                             onLabelDisplay = themeId?.let { theme ->
                                 { display ->
                                     tabEditScope.launch {
@@ -447,12 +533,14 @@ internal fun LibraryScreen(host: LibraryHost, chrome: LibraryWorkspaceChrome? = 
             }
         }
         Row(verticalAlignment = if (vertical) Alignment.Top else Alignment.CenterVertically) {
-            if (vertical) {
+            if (ids.isEmpty()) {
+                Box(Modifier.weight(1f))
+            } else if (vertical) {
                 Column(Modifier.weight(1f).heightIn(max = 288.dp).verticalScroll(rememberScrollState())
                     .testTag(LibraryTags.TABS)) { tabItems() }
             } else {
                 PrimaryScrollableTabRow(
-                    selectedTabIndex = stockSelectedIndex,
+                    selectedTabIndex = stockSelectedIndex.coerceAtLeast(0),
                     modifier = Modifier.weight(1f).testTag(LibraryTags.TABS),
                     edgePadding = 8.dp,
                     indicator = {
@@ -466,21 +554,33 @@ internal fun LibraryScreen(host: LibraryHost, chrome: LibraryWorkspaceChrome? = 
                 ) { tabItems() }
             }
             if (hiddenButtons.isNotEmpty()) key(themeId) { RestoreLibraryButtons(hiddenButtons, restoreButton) }
-            IconButton(onClick = { editingTabs = true }, enabled = themeId != null) {
+            val gestures = uiGestureRuntimeForStock("tab:songs")
+            IconButton(onClick = { editorGestureRuntime = gestures; editingTabs = true }, enabled = themeId != null) {
                 Icon(painterResource(R.drawable.ic_more_vert), stringResource(R.string.library_tabs_manage))
             }
         }
-        if (editingTabs && themeId != null) {
-            val gestures = uiGestureRuntimeForStock("tab:songs")
-            LibraryTabEditor(
-                layout = tabLayout,
-                settings = tabsSettings,
-                scope = tabEditScope,
-                onDismiss = { editingTabs = false },
-                onSaveFailed = { host.snackbar.showSnackbar(tabSaveFailed) },
-                canChangeVisibility = { id, visible -> visible || gestures?.hide?.invoke("tab:$id") != false },
-            )
-        }
+    }
+    val strip: @Composable () -> Unit = {
+        val floating = LocalStockUiSlots.current == null
+        val stripLayout = if (floating && !reachableTabs.isNullOrEmpty()) {
+            LibraryTabLayout.fromStored(reachableTabs, tabLayout.order.toSet() - reachableTabs.toSet(), tabLayout.order)
+        } else tabLayout
+        tabStrip(stripLayout, stripLayout.visible)
+    }
+    if (editingTabs && themeId != null) {
+        LibraryTabEditor(
+            layout = tabLayout,
+            settings = tabsSettings,
+            scope = tabEditScope,
+            onDismiss = { editingTabs = false },
+            onSaveFailed = { host.snackbar.showSnackbar(tabSaveFailed) },
+            canChangeVisibility = { id, visible -> visible || editorGestureRuntime?.hide?.invoke("tab:$id") != false },
+            customTabs = customTabs,
+            onCreate = ::createCustomTab,
+            onOpen = { id -> selectTab(id); editingTabs = false },
+            onEdit = ::editCustomTab,
+            onDelete = ::deleteCustomTab,
+        )
     }
     val header: @Composable (StockUiSlots?) -> Unit = { owner ->
         val outerHidden = owner?.masked.orEmpty()
@@ -494,11 +594,13 @@ internal fun LibraryScreen(host: LibraryHost, chrome: LibraryWorkspaceChrome? = 
             onSaveFailed = { host.snackbar.showSnackbar(tabSaveFailed) },
             hiddenByParent = canvasComponents.map { it.id }.filterTo(mutableSetOf()) {
                 ("workspace:tabs" in outerHidden && it.startsWith("tab:")) ||
-                    ("workspace:toolbar" in outerHidden && it.startsWith("library:"))
+                    ("workspace:toolbar" in outerHidden && it.startsWith("library:")) ||
+                    (it.removePrefix("tab:") in customTabs && it.removePrefix("tab:") in tabLayout.hidden)
             },
             gestureHiddenByParent = canvasComponents.map { it.id }.filterTo(mutableSetOf()) {
                 ("workspace:tabs" in owner?.hidden.orEmpty() && it.startsWith("tab:")) ||
-                    ("workspace:toolbar" in owner?.hidden.orEmpty() && it.startsWith("library:"))
+                    ("workspace:toolbar" in owner?.hidden.orEmpty() && it.startsWith("library:")) ||
+                    (it.removePrefix("tab:") in customTabs && it.removePrefix("tab:") in tabLayout.hidden)
             },
             onAppliedIds = {
                 appliedCanvasIds = it
@@ -517,6 +619,13 @@ internal fun LibraryScreen(host: LibraryHost, chrome: LibraryWorkspaceChrome? = 
                         onSearching = ::setSearching,
                         customActions = closeSearch,
                     )
+                }
+            },
+            absoluteStockIds = tabLayout.visible.mapTo(mutableSetOf()) { "tab:$it" },
+            optionalAbsoluteStockIds = LibraryTab.ids.mapTo(mutableSetOf()) { "tab:$it" },
+            absoluteFooter = { placed ->
+                if ("workspace:tabs" !in outerHidden) {
+                    tabStrip(tabLayout, tabLayout.absoluteFooterTabs(placed.mapNotNull(::appliedTabId)))
                 }
             },
         ) {
@@ -572,9 +681,21 @@ internal fun LibraryScreen(host: LibraryHost, chrome: LibraryWorkspaceChrome? = 
                     sections = { list -> list.map { it.section } },
                     tiles = { list -> genreTiles(list, host) },
                 ) { list -> genreItems(list, host) }
+                null -> if (custom != null) {
+                    key(custom.definition.id, custom.resolvedSource, custom.playlistCreatedAt) {
+                        CustomTabContent(custom, customOrder, search, access, host, modifier) {
+                            customDialog = CustomTabDialog.Rebind(custom)
+                        }
+                    }
+                }
             }
         }
     }
+    CustomTabDialogs(
+        customDialog, customSettings, access.granted, host.snackbar,
+        onDismiss = { customDialog = null },
+        onCreated = { tabName = null },
+    )
 }
 
 private fun LazyListScope.genreItems(genres: List<GenreGroup>, host: LibraryHost) {
@@ -1114,6 +1235,7 @@ private val SORT_LABELS = mapOf(
     "songs" to R.string.sort_songs,
     "track" to R.string.sort_track,
     "file" to R.string.sort_file_name,
+    "position" to R.string.custom_tab_sort_position,
 )
 
 /**
@@ -1132,6 +1254,7 @@ internal fun SortButton(
     anchor: LibrarySortAnchor? = null,
     expanded: Boolean? = null,
     onExpandedChange: ((Boolean) -> Unit)? = null,
+    fields: List<String> = list.fields,
 ) {
     var localOpen by remember { mutableStateOf(false) }
     fun setOpen(open: Boolean) {
@@ -1146,8 +1269,8 @@ internal fun SortButton(
             }
         }
         DropdownMenu(expanded = expanded ?: localOpen, onDismissRequest = { setOpen(false) }) {
-            if (list.fields.size > 1) {
-                for (field in list.fields) {
+            if (fields.size > 1) {
+                for (field in fields) {
                     val label = when {
                         field == "year" && list == ListName.ARTIST_PAGE -> R.string.sort_album_year
                         field == "year" -> R.string.sort_year
