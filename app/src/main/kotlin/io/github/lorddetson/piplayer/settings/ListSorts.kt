@@ -57,7 +57,7 @@ class ListSorts(context: Context) {
 
     /** Whether [list] shows as a grid (docs/library.md §11.3); a list by default. */
     fun grid(list: ListName): Flow<Boolean> =
-        file.data.map { list.offersGrid && it[gridKey(list)] == true }.distinctUntilChanged()
+        file.data.map { gridOf(it, list) }.distinctUntilChanged()
 
     suspend fun setGrid(list: ListName, grid: Boolean) {
         if (!list.offersGrid) return
@@ -86,6 +86,8 @@ class ListSorts(context: Context) {
 
         internal fun reversedKey(list: ListName) = booleanPreferencesKey("sort_${list.id}_reversed")
 
-        private fun gridKey(list: ListName) = booleanPreferencesKey("grid_${list.id}")
+        internal fun gridOf(preferences: Preferences, list: ListName) = list.offersGrid && preferences[gridKey(list)] == true
+
+        internal fun gridKey(list: ListName) = booleanPreferencesKey("grid_${list.id}")
     }
 }

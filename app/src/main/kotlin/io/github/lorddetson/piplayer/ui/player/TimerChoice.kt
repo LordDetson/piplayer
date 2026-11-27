@@ -1,6 +1,7 @@
 package io.github.lorddetson.piplayer.ui.player
 
 import android.content.Context
+import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
@@ -9,6 +10,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -31,19 +34,25 @@ class TimerChoiceStore(context: Context) {
     private val file = SettingsFiles.settings(context)
 
     fun read(): TimerChoice = runBlocking {
-        // After the writes started so far.
-        lastWrite?.join()
-        val preferences = file.data.first()
-        TimerChoice(
-            hours = (preferences[HOURS] ?: TimerChoice.DEFAULT.hours).coerceIn(0, 23),
-            minutes = (preferences[MINUTES] ?: TimerChoice.DEFAULT.minutes).coerceIn(0, 59),
-            finishTrack = preferences[FINISH_TRACK] ?: TimerChoice.DEFAULT.finishTrack,
-        )
+        awaitWrites()
+        choiceOf(file.data.first())
+    }
+
+    /** Follows imports and Undo without interrupting the sheet's immediate interaction while a save is queued. */
+    internal suspend fun observe(show: (TimerChoice) -> Unit) {
+        lastWrite.collectLatest { observedWrite ->
+            observedWrite?.join()
+            file.data.collect { preferences ->
+                synchronized(Companion) {
+                    if (lastWrite.value === observedWrite) show(choiceOf(preferences))
+                }
+            }
+        }
     }
 
     fun save(choice: TimerChoice) = synchronized(Companion) {
-        val previous = lastWrite
-        lastWrite = scope.launch {
+        val previous = lastWrite.value
+        lastWrite.value = scope.launch {
             previous?.join()
             SettingsFiles.edit(file) {
                 it[HOURS] = choice.hours
@@ -57,15 +66,26 @@ class TimerChoiceStore(context: Context) {
         // Writes outlive a screen that closes right after a change; each waits for the one asked for before it.
         private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-        @Volatile
-        private var lastWrite: Job? = null
-        private val HOURS = intPreferencesKey("sleep_timer_hours")
-        private val MINUTES = intPreferencesKey("sleep_timer_minutes")
-        private val FINISH_TRACK = booleanPreferencesKey("sleep_timer_finish_track")
+        private val lastWrite = MutableStateFlow<Job?>(null)
+        internal val HOURS = intPreferencesKey("sleep_timer_hours")
+        internal val MINUTES = intPreferencesKey("sleep_timer_minutes")
+        internal val FINISH_TRACK = booleanPreferencesKey("sleep_timer_finish_track")
+
+        internal fun choiceOf(preferences: Preferences) = TimerChoice(
+            hours = (preferences[HOURS] ?: TimerChoice.DEFAULT.hours).coerceIn(0, 23),
+            minutes = (preferences[MINUTES] ?: TimerChoice.DEFAULT.minutes).coerceIn(0, 59),
+            finishTrack = preferences[FINISH_TRACK] ?: TimerChoice.DEFAULT.finishTrack,
+        )
+
+        internal suspend fun awaitWrites() {
+            // Wait for the saves requested before this read.
+            lastWrite.value?.join()
+        }
 
         /** Forgets the choice, so that a test starts from the first one. */
         fun clearForTests(context: Context) {
             runBlocking {
+                awaitWrites()
                 SettingsFiles.settings(context).edit {
                     it.remove(HOURS)
                     it.remove(MINUTES)

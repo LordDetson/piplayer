@@ -3,6 +3,7 @@ package io.github.lorddetson.piplayer.settings
 import android.content.Context
 import android.content.res.Resources
 import androidx.datastore.preferences.core.MutablePreferences
+import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.stringPreferencesKey
 import io.github.lorddetson.piplayer.library.values.LegacyEncoding
 import io.github.lorddetson.piplayer.library.values.LegacyEncodings
@@ -51,7 +52,7 @@ class LibrarySettings(context: Context) {
     }
 
     private suspend fun update(change: (MutablePreferences) -> Unit) {
-        SettingsFiles.edit(file, change)?.let { latest = HiddenFiles.from(it) }
+        SettingsFiles.edit(file, change)?.let(::rememberHiddenFiles)
     }
 
     companion object {
@@ -61,6 +62,10 @@ class LibrarySettings(context: Context) {
         @Volatile
         var latest: HiddenFiles? = null
             private set
+
+        internal fun rememberHiddenFiles(preferences: Preferences) {
+            latest = HiddenFiles.from(preferences)
+        }
     }
 }
 

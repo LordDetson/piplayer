@@ -136,8 +136,8 @@ class AppearanceSettings internal constructor(private val file: DataStore<Prefer
     }
 
     internal companion object {
-        private val THEME = stringPreferencesKey("theme_mode")
-        private val MOOD_BACKGROUND = booleanPreferencesKey("now_playing_mood_background")
+        val THEME = stringPreferencesKey("theme_mode")
+        val MOOD_BACKGROUND = booleanPreferencesKey("now_playing_mood_background")
 
         fun builtInTheme(preferences: Preferences): ThemeMode = ThemeMode.fromStored(preferences[THEME])
 
@@ -146,12 +146,16 @@ class AppearanceSettings internal constructor(private val file: DataStore<Prefer
 
         fun themeLayoutKey(themeId: String) = stringPreferencesKey("now_playing_presentation_$themeId")
 
+        fun savedPresentation(preferences: Preferences, themeId: String): NowPlayingLayout? {
+            val stored = preferences[themeLayoutKey(themeId)]
+            return NowPlayingLayout.entries.firstOrNull { it.stored == stored }
+        }
+
         private fun appearanceOf(preferences: Preferences): Appearance {
             val custom = CustomThemesSettings.selectedTheme(preferences)
             val mode = custom?.base ?: builtInTheme(preferences)
             val themeId = custom?.id ?: mode.stored
-            val stored = preferences[themeLayoutKey(themeId)]
-            val layout = NowPlayingLayout.entries.firstOrNull { it.stored == stored }
+            val layout = savedPresentation(preferences, themeId)
                 ?: builtInThemeLayout(themeId)?.presentation ?: NowPlayingLayout.STANDARD
             return Appearance(
                 theme = mode,

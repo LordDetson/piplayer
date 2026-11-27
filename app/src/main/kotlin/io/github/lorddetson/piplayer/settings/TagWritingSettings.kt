@@ -18,12 +18,7 @@ internal data class TagWritingOptions(
 internal class TagWritingSettings(private val file: DataStore<Preferences>) {
     constructor(context: Context) : this(SettingsFiles.settings(context))
 
-    val options: Flow<TagWritingOptions> = file.data.map { preferences ->
-        TagWritingOptions(
-            Id3v1WritePolicy.entries.find { it.name == preferences[ID3V1] } ?: Id3v1WritePolicy.UPDATE_IF_PRESENT,
-            TagCoverPreset.entries.find { it.name == preferences[COVER] } ?: TagCoverPreset.COMPATIBLE,
-        )
-    }.distinctUntilChanged()
+    val options: Flow<TagWritingOptions> = file.data.map(::optionsOf).distinctUntilChanged()
 
     suspend fun setId3v1(policy: Id3v1WritePolicy) {
         SettingsFiles.edit(file) { it[ID3V1] = policy.name }
@@ -33,8 +28,13 @@ internal class TagWritingSettings(private val file: DataStore<Preferences>) {
         SettingsFiles.edit(file) { it[COVER] = preset.name }
     }
 
-    private companion object {
+    companion object {
         val ID3V1 = stringPreferencesKey("id3v1_write_policy")
         val COVER = stringPreferencesKey("embedded_cover_preset")
+
+        fun optionsOf(preferences: Preferences) = TagWritingOptions(
+            Id3v1WritePolicy.entries.find { it.name == preferences[ID3V1] } ?: Id3v1WritePolicy.UPDATE_IF_PRESENT,
+            TagCoverPreset.entries.find { it.name == preferences[COVER] } ?: TagCoverPreset.COMPATIBLE,
+        )
     }
 }

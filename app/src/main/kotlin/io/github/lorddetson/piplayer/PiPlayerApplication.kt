@@ -22,6 +22,7 @@ import io.github.lorddetson.piplayer.settings.DataStoreOnlineGate
 import io.github.lorddetson.piplayer.settings.AppLanguageSettings
 import io.github.lorddetson.piplayer.settings.IdentificationSettings
 import io.github.lorddetson.piplayer.settings.SettingsFiles
+import io.github.lorddetson.piplayer.settings.configuration.ConfigurationStore
 import io.github.lorddetson.piplayer.tagging.write.BatchTagWriter
 import io.github.lorddetson.piplayer.userdata.TagWriteJournal
 import io.github.lorddetson.piplayer.userdata.UserData
@@ -30,6 +31,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
 
 /** Tells the tag pass when the app shows (docs/library.md §5.5). */
@@ -113,7 +115,9 @@ class PiPlayerApplication : Application() {
         // How earlier processes ended is read in the main process only, and off its main thread: it takes binder calls
         // and disk reads.
         if (ProcessRole.current(this) == ProcessRole.MAIN) {
+            runBlocking(Dispatchers.IO) { ConfigurationStore(this@PiPlayerApplication).recover() }
             AppLanguageSettings.migrateLegacy(this)
+            refreshLegacyLanguageResources()
             thread(name = "crash-reports", priority = Thread.MIN_PRIORITY) { crashReports.refresh() }
             registerActivityLifecycleCallbacks(PassGateActivities)
             // Starts reading the online-lookup choice, off the main thread, so that it is known before the first lookup.

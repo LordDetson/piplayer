@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="configuration_settings">Конфигурация PiPlayer</string>
+    <string name="configuration_scope">Перенос языка приложения, настроек библиотеки и записи тегов, параметров таймера сна, тем, раскладок и жестов. Файлы импортированных шрифтов остаются на этом устройстве.</string>
+    <string name="configuration_export">Экспортировать конфигурацию</string>
+    <string name="configuration_import">Импортировать конфигурацию</string>
+    <string name="configuration_working">Обработка конфигурации…</string>
+    <string name="configuration_preview">Проверка изменений конфигурации</string>
+    <string name="configuration_apply">Применить изменения</string>
+    <string name="configuration_close">Закрыть</string>
+    <string name="configuration_undo">Отменить импорт конфигурации</string>
+    <string name="configuration_before">Сейчас: %1$s</string>
+    <string name="configuration_after">Из файла: %1$s</string>
+    <string name="configuration_on">Включено</string>
+    <string name="configuration_off">Выключено</string>
+    <string name="configuration_none">Нет</string>
+    <string name="configuration_no_changes">Конфигурация совпадает с текущими настройками.</string>
+    <string name="configuration_picker_unavailable">Не удалось открыть окно выбора файлов.</string>
+    <string name="configuration_invalid">В файле есть недопустимые настройки PiPlayer.</string>
+    <string name="configuration_version">Эта версия формата конфигурации PiPlayer не поддерживается.</string>
+    <string name="configuration_too_large">Файл конфигурации слишком большой.</string>
+    <string name="configuration_unreadable">Не удалось прочитать файл конфигурации.</string>
+    <string name="configuration_export_failed">Не удалось сохранить файл конфигурации.</string>
+    <string name="configuration_write_failed">Не удалось сохранить изменения конфигурации.</string>
+    <string name="configuration_stale">Настройки изменились после открытия или применения этой конфигурации.</string>
+    <string name="configuration_exported">Конфигурация экспортирована.</string>
+    <string name="configuration_applied">Конфигурация применена.</string>
+    <string name="configuration_restored">Предыдущая конфигурация восстановлена.</string>
+    <string name="configuration_export_too_large">Конфигурация слишком большая для экспорта.</string>
+    <string name="configuration_export_interrupted">Экспорт прерван. Запустите экспорт ещё раз.</string>
+    <string name="configuration_not_set">Не задано</string>
+    <string name="configuration_show_details">Показать остальные изменения</string>
+    <string name="configuration_hide_details">Скрыть подробности</string>
+    <string name="configuration_previous_details">Предыдущие изменения</string>
+    <string name="configuration_next_details">Следующие изменения</string>
+    <string name="configuration_device_controls">Эквалайзер и другие функции, зависящие от устройства, доступны при его поддержке.</string>
+    <string name="configuration_active_theme">Активная тема</string>
+    <string name="configuration_builtin_theme">Встроенная тема</string>
+    <string name="configuration_theme_name">Название</string>
+    <string name="configuration_theme_base">Базовая тема</string>
+    <string name="configuration_theme_setting">%1$s · %2$s</string>
+    <string name="configuration_theme_identity">%1$s (%2$s)</string>
+</resources>

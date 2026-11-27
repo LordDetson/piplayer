@@ -351,11 +351,20 @@ internal class UiCanvasSettings(private val file: DataStore<Preferences>) {
         copy(panels = if (layout == null) panels - surface else panels + (surface to layout))
 
     companion object {
-        fun layoutsOf(preferences: Preferences): UiThemeCanvases = try {
-            val stored = preferences[key(AppearanceSettings.panelThemeId(preferences))]
-            stored?.let { Json.decodeFromString<UiThemeCanvases>(it) }?.takeIf(UiThemeCanvases::isValid) ?: UiThemeCanvases()
-        } catch (_: SerializationException) {
-            UiThemeCanvases()
+        fun layoutsOf(preferences: Preferences): UiThemeCanvases =
+            savedLayouts(preferences, AppearanceSettings.panelThemeId(preferences))
+
+        fun savedLayouts(preferences: Preferences, themeId: String): UiThemeCanvases =
+            validatedLayouts(preferences, themeId) ?: UiThemeCanvases()
+
+        /** Null identifies an invalid stored unit, distinct from a theme without overrides. */
+        fun validatedLayouts(preferences: Preferences, themeId: String): UiThemeCanvases? {
+            val stored = preferences[key(themeId)] ?: return UiThemeCanvases()
+            return try {
+                Json.decodeFromString<UiThemeCanvases>(stored).takeIf(UiThemeCanvases::isValid)
+            } catch (_: SerializationException) {
+                null
+            }
         }
 
         fun store(preferences: MutablePreferences, themeId: String, canvases: UiThemeCanvases) {
@@ -363,6 +372,6 @@ internal class UiCanvasSettings(private val file: DataStore<Preferences>) {
             else preferences[key(themeId)] = Json.encodeToString(canvases)
         }
 
-        private fun key(themeId: String) = stringPreferencesKey("ui_canvas_$themeId")
+        fun key(themeId: String) = stringPreferencesKey("ui_canvas_$themeId")
     }
 }

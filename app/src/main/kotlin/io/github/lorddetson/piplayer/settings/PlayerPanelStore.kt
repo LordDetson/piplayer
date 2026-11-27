@@ -23,19 +23,24 @@ internal class PlayerPanelStore<P>(
 
     fun stateOf(preferences: Preferences): PlayerPanelState<P> {
         val theme = AppearanceSettings.panelThemeId(preferences)
-        val panel = try {
-            preferences[key(theme)]?.let(decode)
-        } catch (_: SerializationException) {
-            null
-        }
-        return PlayerPanelState(theme, panel ?: defaultForTheme(theme) ?: default)
+        return PlayerPanelState(theme, panelOf(preferences, theme))
     }
 
-    fun storePanel(preferences: MutablePreferences, theme: String, panel: P) {
-        preferences[key(theme)] = encode(panel)
+    fun panelOf(preferences: Preferences, theme: String): P =
+        savedPanel(preferences, theme) ?: defaultForTheme(theme) ?: default
+
+    fun savedPanel(preferences: Preferences, theme: String): P? = try {
+        preferences[key(theme)]?.let(decode)
+    } catch (_: SerializationException) {
+        null
     }
 
-    private fun key(theme: String) = stringPreferencesKey(prefix + theme)
+    fun storePanel(preferences: MutablePreferences, theme: String, panel: P?) {
+        if (panel == null) preferences.remove(key(theme))
+        else preferences[key(theme)] = encode(panel)
+    }
+
+    fun key(theme: String) = stringPreferencesKey(prefix + theme)
 
     inner class Settings internal constructor(private val file: DataStore<Preferences>) {
         val state = file.data.map(::stateOf).distinctUntilChanged()

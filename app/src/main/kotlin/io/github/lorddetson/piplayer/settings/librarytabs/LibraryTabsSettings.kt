@@ -138,9 +138,11 @@ internal class LibraryTabsSettings(private val file: DataStore<Preferences>) {
     companion object {
         fun panelOf(preferences: Preferences): LibraryPanelState {
             val themeId = AppearanceSettings.panelThemeId(preferences)
-            val layout = savedPanel(preferences, themeId) ?: builtInThemeLayout(themeId)?.library ?: LibraryPanelLayout()
-            return LibraryPanelState(themeId, layout)
+            return LibraryPanelState(themeId, panelOf(preferences, themeId))
         }
+
+        fun panelOf(preferences: Preferences, themeId: String): LibraryPanelLayout =
+            savedPanel(preferences, themeId) ?: builtInThemeLayout(themeId)?.library ?: LibraryPanelLayout()
 
         fun savedPanel(preferences: Preferences, themeId: String): LibraryPanelLayout? = try {
             preferences[panelKey(themeId)]?.let { Json.decodeFromString<LibraryPanelDocument>(it).toLayout() }
@@ -148,11 +150,12 @@ internal class LibraryTabsSettings(private val file: DataStore<Preferences>) {
             null
         }
 
-        fun storePanel(preferences: MutablePreferences, themeId: String, layout: LibraryPanelLayout) {
-            preferences[panelKey(themeId)] = Json.encodeToString(LibraryPanelDocument.from(layout))
+        fun storePanel(preferences: MutablePreferences, themeId: String, layout: LibraryPanelLayout?) {
+            if (layout == null) preferences.remove(panelKey(themeId))
+            else preferences[panelKey(themeId)] = Json.encodeToString(LibraryPanelDocument.from(layout))
         }
 
-        private fun panelKey(themeId: String) = stringPreferencesKey("library_panel_$themeId")
+        fun panelKey(themeId: String) = stringPreferencesKey("library_panel_$themeId")
 
         private fun List<String>.moved(from: Int, to: Int): List<String> = toMutableList().apply { add(to, removeAt(from)) }
     }

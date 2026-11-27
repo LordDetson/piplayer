@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="configuration_settings">PiPlayer configuration</string>
+    <string name="configuration_scope">Transfer the app language, library and tag-writing settings, sleep timer defaults, themes, layouts, and gestures. Imported font files stay on this device.</string>
+    <string name="configuration_export">Export configuration</string>
+    <string name="configuration_import">Import configuration</string>
+    <string name="configuration_working">Working with configuration…</string>
+    <string name="configuration_preview">Review configuration changes</string>
+    <string name="configuration_apply">Apply changes</string>
+    <string name="configuration_close">Close</string>
+    <string name="configuration_undo">Undo configuration import</string>
+    <string name="configuration_before">Current: %1$s</string>
+    <string name="configuration_after">Import: %1$s</string>
+    <string name="configuration_on">On</string>
+    <string name="configuration_off">Off</string>
+    <string name="configuration_none">None</string>
+    <string name="configuration_no_changes">This configuration matches your current settings.</string>
+    <string name="configuration_picker_unavailable">The file picker could not be opened.</string>
+    <string name="configuration_invalid">This file contains an invalid PiPlayer configuration.</string>
+    <string name="configuration_version">This version of the PiPlayer configuration format is unsupported.</string>
+    <string name="configuration_too_large">This configuration file is too large.</string>
+    <string name="configuration_unreadable">The configuration file could not be read.</string>
+    <string name="configuration_export_failed">The configuration file could not be saved.</string>
+    <string name="configuration_write_failed">The configuration changes could not be saved.</string>
+    <string name="configuration_stale">Settings have changed since you opened or applied this configuration.</string>
+    <string name="configuration_exported">Configuration exported.</string>
+    <string name="configuration_applied">Configuration applied.</string>
+    <string name="configuration_restored">Previous configuration restored.</string>
+    <string name="configuration_export_too_large">This configuration is too large to export.</string>
+    <string name="configuration_export_interrupted">Export was interrupted. Start the export again.</string>
+    <string name="configuration_not_set">Not set</string>
+    <string name="configuration_show_details">Show more changes</string>
+    <string name="configuration_hide_details">Hide details</string>
+    <string name="configuration_previous_details">Previous details</string>
+    <string name="configuration_next_details">Next details</string>
+    <string name="configuration_device_controls">Controls such as the equalizer are available on devices that support them.</string>
+    <string name="configuration_active_theme">Active theme</string>
+    <string name="configuration_builtin_theme">Built-in theme</string>
+    <string name="configuration_theme_name">Name</string>
+    <string name="configuration_theme_base">Base theme</string>
+    <string name="configuration_theme_setting">%1$s · %2$s</string>
+    <string name="configuration_theme_identity">%1$s (%2$s)</string>
+</resources>

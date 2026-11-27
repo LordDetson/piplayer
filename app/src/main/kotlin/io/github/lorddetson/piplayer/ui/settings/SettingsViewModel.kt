@@ -34,6 +34,11 @@ import io.github.lorddetson.piplayer.settings.ThemeApplyUndo
 import io.github.lorddetson.piplayer.settings.ThemePackageCodec
 import io.github.lorddetson.piplayer.settings.ThemePackageRead
 import io.github.lorddetson.piplayer.settings.ThemeUndoResult
+import io.github.lorddetson.piplayer.settings.configuration.ConfigurationPreviewResult
+import io.github.lorddetson.piplayer.settings.configuration.ConfigurationStore
+import io.github.lorddetson.piplayer.settings.configuration.ConfigurationTooLargeException
+import io.github.lorddetson.piplayer.settings.configuration.ConfigurationUndo
+import io.github.lorddetson.piplayer.settings.configuration.ConfigurationWriteResult
 import io.github.lorddetson.piplayer.tagging.write.TagCoverPreset
 import java.io.IOException
 import kotlinx.coroutines.flow.Flow
@@ -198,6 +203,174 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         if (themePackage.value == ThemePackageState.Working) return
         themePackage.value = ThemePackageState.Working
         viewModelScope.launch { themePackage.value = work() }
+    }
+
+    private val configurationStore = ConfigurationStore(application)
+    private val configurationDocuments = application.contentResolver
+    private val configuration = MutableStateFlow<ConfigurationSettingsState>(ConfigurationSettingsState.Idle)
+    private var stagedConfigurationExport: ByteArray? = null
+    private val lastConfigurationImport = MutableStateFlow<ConfigurationUndo?>(null)
+    private val recreateForConfiguration = MutableStateFlow(false)
+    internal val configurationRecreation: StateFlow<Boolean> = recreateForConfiguration
+    internal val configurationState: StateFlow<ConfigurationSettingsState> = configuration
+    internal val configurationUndo: StateFlow<ConfigurationUndo?> = lastConfigurationImport
+
+    internal fun configurationPickerUnavailable() {
+        stagedConfigurationExport = null
+        configuration.value = ConfigurationSettingsState.Notice(R.string.configuration_picker_unavailable)
+    }
+
+    internal fun beginConfigurationImportPicker(): Boolean {
+        if (!configuration.value.canStart) return false
+        configuration.value = ConfigurationSettingsState.PickingImport
+        return true
+    }
+
+    internal fun openConfiguration(uri: Uri?) {
+        val state = configuration.value
+        // The Activity Result registry can restore a pending picker result into a fresh ViewModel.
+        if (state != ConfigurationSettingsState.PickingImport && state != ConfigurationSettingsState.Idle) return
+        if (uri == null) {
+            configuration.value = ConfigurationSettingsState.Idle
+            return
+        }
+        workWithConfiguration {
+            val result = withConfigurationDocument<ConfigurationPreviewResult>(ConfigurationPreviewResult.Unreadable) {
+                configurationDocuments.openInputStream(uri)?.use { configurationStore.preview(it) }
+                    ?: ConfigurationPreviewResult.Unreadable
+            }
+            configuration.value = when (result) {
+                is ConfigurationPreviewResult.Ready -> ConfigurationSettingsState.Preview(result.preview)
+                ConfigurationPreviewResult.Invalid -> ConfigurationSettingsState.Notice(R.string.configuration_invalid)
+                ConfigurationPreviewResult.UnsupportedVersion -> ConfigurationSettingsState.Notice(R.string.configuration_version)
+                ConfigurationPreviewResult.TooLarge -> ConfigurationSettingsState.Notice(R.string.configuration_too_large)
+                ConfigurationPreviewResult.Unreadable -> ConfigurationSettingsState.Notice(R.string.configuration_unreadable)
+            }
+        }
+    }
+
+    internal fun prepareConfigurationExport() {
+        if (!configuration.value.canStart) return
+        workWithConfiguration {
+            try {
+                stagedConfigurationExport = withConfigurationDocument<ByteArray?>(null, configurationStore::export)
+                configuration.value = if (stagedConfigurationExport != null) ConfigurationSettingsState.ExportReady
+                else ConfigurationSettingsState.Notice(R.string.configuration_export_failed)
+            } catch (_: ConfigurationTooLargeException) {
+                configuration.value = ConfigurationSettingsState.Notice(R.string.configuration_export_too_large)
+            }
+        }
+    }
+
+    internal fun beginConfigurationExportPicker(): Boolean {
+        if (configuration.value != ConfigurationSettingsState.ExportReady) return false
+        configuration.value = ConfigurationSettingsState.PickingExport
+        return true
+    }
+
+    internal fun finishConfigurationExport(uri: Uri?) {
+        val state = configuration.value
+        if (state != ConfigurationSettingsState.PickingExport && state != ConfigurationSettingsState.Idle) return
+        val bytes = stagedConfigurationExport
+        stagedConfigurationExport = null
+        if (uri == null) {
+            configuration.value = ConfigurationSettingsState.Idle
+            return
+        }
+        if (bytes == null) {
+            configuration.value = ConfigurationSettingsState.Notice(R.string.configuration_export_interrupted)
+            return
+        }
+        workWithConfiguration {
+            val written = withConfigurationDocument(false) {
+                configurationDocuments.openOutputStream(uri, "wt")?.use { it.write(bytes) } != null
+            }
+            configuration.value = if (written) {
+                ConfigurationSettingsState.Notice(R.string.configuration_exported, error = false)
+            } else {
+                ConfigurationSettingsState.Notice(R.string.configuration_export_failed)
+            }
+        }
+    }
+
+    internal fun cancelConfigurationPreview() {
+        if (configuration.value is ConfigurationSettingsState.Preview) configuration.value = ConfigurationSettingsState.Idle
+    }
+
+    internal fun applyConfiguration() {
+        val preview = (configuration.value as? ConfigurationSettingsState.Preview)?.configuration ?: return
+        workWithConfiguration {
+            publishConfigurationResult(configurationStore.apply(preview))
+        }
+    }
+
+    internal fun undoConfiguration() {
+        if (!configuration.value.canStart) return
+        val undo = lastConfigurationImport.value ?: return
+        workWithConfiguration {
+            val result = configurationStore.undo(undo)
+            if (result != ConfigurationWriteResult.WriteFailed) lastConfigurationImport.value = null
+            publishConfigurationResult(result)
+        }
+    }
+
+    private fun workWithConfiguration(work: suspend () -> Unit) {
+        if (configuration.value == ConfigurationSettingsState.Working) return
+        configuration.value = ConfigurationSettingsState.Working
+        viewModelScope.launch { work() }
+    }
+
+    private fun publishConfigurationResult(result: ConfigurationWriteResult) {
+        when (result) {
+            is ConfigurationWriteResult.Applied -> {
+                lastConfigurationImport.value = result.undo
+                configuration.value = ConfigurationSettingsState.Notice(R.string.configuration_applied, error = false)
+                refreshConfigurationLanguage(result.languageChange)
+            }
+            is ConfigurationWriteResult.Restored -> {
+                configuration.value = ConfigurationSettingsState.Notice(R.string.configuration_restored, error = false)
+                refreshConfigurationLanguage(result.languageChange)
+            }
+            ConfigurationWriteResult.NoChanges -> {
+                configuration.value = ConfigurationSettingsState.Notice(R.string.configuration_no_changes, error = false)
+            }
+            ConfigurationWriteResult.Stale -> configuration.value = ConfigurationSettingsState.Notice(R.string.configuration_stale)
+            ConfigurationWriteResult.Invalid -> configuration.value = ConfigurationSettingsState.Notice(R.string.configuration_invalid)
+            ConfigurationWriteResult.WriteFailed -> {
+                configuration.value = ConfigurationSettingsState.Notice(R.string.configuration_write_failed)
+            }
+        }
+    }
+
+    private fun refreshConfigurationLanguage(change: AppLanguageChange) {
+        refreshLanguage()
+        if (change == AppLanguageChange.RECREATE) {
+            getApplication<PiPlayerApplication>().applyLegacyLanguage()
+            recreateForConfiguration.value = true
+        }
+    }
+
+    internal fun takeConfigurationRecreation(): Boolean = recreateForConfiguration.compareAndSet(true, false)
+
+    private suspend fun <T> withConfigurationDocument(fallback: T, work: suspend () -> T): T = withContext(Dispatchers.IO) {
+        try {
+            work()
+        } catch (_: IOException) {
+            fallback
+        } catch (_: SecurityException) {
+            fallback
+        } catch (size: ConfigurationTooLargeException) {
+            throw size
+        } catch (_: IllegalArgumentException) {
+            fallback
+        } catch (_: UnsupportedOperationException) {
+            fallback
+        }
+    }
+
+    override fun onCleared() {
+        stagedConfigurationExport = null
+        super.onCleared()
     }
 
     fun setTheme(mode: ThemeMode) {

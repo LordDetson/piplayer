@@ -79,26 +79,28 @@ internal class CustomThemesSettings(private val file: DataStore<Preferences>) {
     }
 
     companion object {
-        private val THEMES = stringPreferencesKey("custom_themes")
-        private val SELECTED = stringPreferencesKey("selected_custom_theme_id")
+        val THEMES = stringPreferencesKey("custom_themes")
+        val SELECTED = stringPreferencesKey("selected_custom_theme_id")
         private val ID = Regex("[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}")
         private val BUILT_IN_FONTS = setOf("inter", "pt_serif", "ibm_plex_mono")
         private val FONT_EXTENSIONS = setOf("ttf", "otf")
         private val JSON = Json { ignoreUnknownKeys = true }
 
         fun stateOf(preferences: Preferences): CustomThemesState {
-            val themes = preferences.storedThemes().mapNotNull { (id, entry) -> themeOf(id, entry) }
+            val themes = storedThemes(preferences).mapNotNull { (id, entry) -> themeOf(id, entry) }
             val selected = preferences[SELECTED]?.takeIf { id -> themes.any { it.id == id } }
             return CustomThemesState(themes, selected)
         }
 
         fun selectedTheme(preferences: Preferences): CustomTheme? {
             val id = preferences[SELECTED] ?: return null
-            return themeOf(id, preferences.storedThemes()[id])
+            return themeOf(id, storedThemes(preferences)[id])
         }
 
-        fun isValid(theme: CustomTheme): Boolean = ID.matches(theme.id) && theme.name.isNotBlank() &&
-            theme.palette.hasValidColors && validFont(theme.font)
+        fun isValid(theme: CustomTheme): Boolean = isValidId(theme.id) && theme.name.isNotBlank() &&
+            theme.palette.hasValidColors && isValidFont(theme.font)
+
+        fun isValidId(id: String): Boolean = ID.matches(id)
 
         /** Stores a validated theme inside the caller's appearance transaction. */
         fun storeTheme(
@@ -107,18 +109,11 @@ internal class CustomThemesSettings(private val file: DataStore<Preferences>) {
             select: Boolean,
             replaceExisting: Boolean = true,
         ): Boolean {
-            val themes = preferences.storedThemes()
+            val themes = storedThemes(preferences)
             if (!replaceExisting && theme.id in themes) return false
 
-            val old = themes[theme.id] as? JsonObject
-            val entry = JsonObject(old.orEmpty() + mapOf(
-                "name" to JsonPrimitive(theme.name),
-                "base" to JsonPrimitive(theme.base.stored),
-                "palette" to JSON.encodeToJsonElement(theme.palette),
-                "font" to JSON.encodeToJsonElement(theme.font),
-            ))
             // Keep entries this version could not interpret until the user edits that specific theme.
-            preferences[THEMES] = JsonObject(themes + (theme.id to entry)).toString()
+            storeThemeEntries(preferences, themes + (theme.id to themeEntry(themes[theme.id], theme)))
             if (select) preferences[SELECTED] = theme.id
             return true
         }
@@ -127,24 +122,37 @@ internal class CustomThemesSettings(private val file: DataStore<Preferences>) {
             if (id == null) {
                 preferences.remove(SELECTED)
             } else {
-                if (themeOf(id, preferences.storedThemes()[id]) == null) return false
+                if (themeOf(id, storedThemes(preferences)[id]) == null) return false
                 preferences[SELECTED] = id
             }
             return true
         }
 
-        private fun Preferences.storedThemes(): Map<String, JsonElement> = try {
-            (get(THEMES)?.let(JSON::parseToJsonElement) as? JsonObject).orEmpty()
+        fun storedThemes(preferences: Preferences): Map<String, JsonElement> = try {
+            (preferences[THEMES]?.let(JSON::parseToJsonElement) as? JsonObject).orEmpty()
         } catch (_: SerializationException) {
             emptyMap()
         }
 
+        fun storeThemeEntries(preferences: MutablePreferences, entries: Map<String, JsonElement>) {
+            if (entries.isEmpty()) preferences.remove(THEMES)
+            else preferences[THEMES] = JsonObject(entries).toString()
+        }
+
+        fun themeEntry(previous: JsonElement?, theme: CustomTheme): JsonObject =
+            JsonObject((previous as? JsonObject).orEmpty() + mapOf(
+                "name" to JsonPrimitive(theme.name),
+                "base" to JsonPrimitive(theme.base.stored),
+                "palette" to JSON.encodeToJsonElement(theme.palette),
+                "font" to JSON.encodeToJsonElement(theme.font),
+            ))
+
         private fun themeOf(id: String, element: JsonElement?): CustomTheme? {
             val entry = element as? JsonObject ?: return null
             val name = entry.string("name")?.takeIf(String::isNotBlank) ?: return null
-            if (!ID.matches(id)) return null
+            if (!isValidId(id)) return null
             val palette = decode<ThemePalette>(entry["palette"])?.takeIf { it.hasValidColors } ?: ThemePalette()
-            val font = decode<ThemeFontSelection>(entry["font"])?.takeIf(::validFont) ?: ThemeFontSelection.System
+            val font = decode<ThemeFontSelection>(entry["font"])?.takeIf(::isValidFont) ?: ThemeFontSelection.System
             return CustomTheme(name, ThemeMode.fromStored(entry.string("base")), palette, font, id)
         }
 
@@ -156,7 +164,7 @@ internal class CustomThemesSettings(private val file: DataStore<Preferences>) {
             null
         }
 
-        private fun validFont(font: ThemeFontSelection): Boolean = when (font) {
+        fun isValidFont(font: ThemeFontSelection): Boolean = when (font) {
             ThemeFontSelection.System -> true
             is ThemeFontSelection.BuiltIn -> font.id in BUILT_IN_FONTS
             is ThemeFontSelection.Imported -> font.displayName.isNotBlank() &&

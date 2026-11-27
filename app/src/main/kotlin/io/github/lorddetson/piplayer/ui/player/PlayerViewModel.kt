@@ -168,6 +168,10 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     /** The sleep timer sheet's last choice, kept in the app's settings (§6.2). */
     val timerChoice: StateFlow<TimerChoice> = mutableTimerChoice.asStateFlow()
 
+    init {
+        viewModelScope.launch { timerChoices.observe { mutableTimerChoice.value = it } }
+    }
+
     fun saveTimerChoice(choice: TimerChoice) {
         mutableTimerChoice.value = choice
         timerChoices.save(choice)

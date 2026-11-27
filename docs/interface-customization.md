@@ -14,6 +14,43 @@ and animation keyframes (PIM-111). The app's editor remains the ordinary way to 
 PIM-112 tracks a portable configuration file for general app settings, including a preview and tests for migration
 and application on a clean install.
 
+### Portable configuration
+
+In Settings, export a configuration to a JSON document or open one to review the changes before applying it.
+The configuration contains the app language, library filters and legacy tag encoding preference, list sorting and
+display modes, tag writing preferences, sleep timer defaults, and appearance. Appearance includes the eight
+built-in themes' saved overrides, all saved custom themes, the active selection, and the last selected built-in
+theme. Layouts carry component positions, styles, gestures, recorded paths and animation keyframes.
+
+Version 1 uses stable identifiers for built-in choices and UUIDs for custom themes. An omitted field keeps its
+current value. A theme or list entry changes only the fields that it specifies. An included panel, a canvas for a
+single surface, and a gesture profile each replace that complete value. Arrays within those values preserve their
+order. A JSON `null` clears a layout override or an inherited palette color. The importer validates the result with
+the settings already on the device, including the gestures available on each affected panel.
+Some actions, such as opening the equalizer, require a device that provides that capability.
+
+The following file sets the minimum track duration to zero.
+
+```json
+{
+  "version": 1,
+  "library": {
+    "minLengthSeconds": 0
+  }
+}
+```
+
+The configuration covers preferences. Music, playlists, playback state, permissions and online service consents
+are managed separately. System and bundled theme fonts are portable. A custom font file remains on the device
+that imported it. Import preserves a local font when the theme's font is omitted and uses the system font for a
+new theme without a font setting. The separate single-theme package continues to support versions 1 through 10.
+
+The complete version 1 document can be up to 4 MiB. Settings checks this limit before opening the file picker
+for export.
+
+Settings shows an undo action after applying a configuration. Undo restores the imported values to their
+previous state and checks for intervening edits to those values before writing.
+
 ## Rendering model
 
 PiPlayer renders its own Compose components. The appearance model selects app-defined component identifiers, their

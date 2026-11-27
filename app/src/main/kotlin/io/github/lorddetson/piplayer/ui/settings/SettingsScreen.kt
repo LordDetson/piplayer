@@ -182,6 +182,7 @@ fun SettingsScreen(
                 Modifier.testTag("now_playing_mood_background"),
             )
             ThemePackageSettings(appearance.customTheme, viewModel)
+            ConfigurationSettings(viewModel)
             SectionTitle(stringResource(R.string.settings_about))
             onOpenDemo?.let {
                 TextRow(stringResource(R.string.demo_start), stringResource(R.string.demo_start_summary), it)
@@ -243,13 +244,13 @@ private fun <T> ChoiceSetting(
     )
 }
 
-private fun Id3v1WritePolicy.label(): Int = when (this) {
+internal fun Id3v1WritePolicy.label(): Int = when (this) {
     Id3v1WritePolicy.UPDATE_IF_PRESENT -> R.string.tag_writing_id3v1_update
     Id3v1WritePolicy.REMOVE -> R.string.tag_writing_id3v1_remove
     Id3v1WritePolicy.LEAVE_UNTOUCHED -> R.string.tag_writing_id3v1_keep
 }
 
-private fun TagCoverPreset.label(): Int = when (this) {
+internal fun TagCoverPreset.label(): Int = when (this) {
     TagCoverPreset.COMPATIBLE -> R.string.tag_writing_cover_compatible
     TagCoverPreset.CAR_STEREO -> R.string.tag_writing_cover_car_stereo
     TagCoverPreset.ORIGINAL -> R.string.tag_writing_cover_original
